@@ -375,6 +375,7 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     const log = vi.fn();
     const updateCmd = vi.fn(async () => ({
       packageName: "@tingrudeng/trae-beta-runtime",
+      previousVersion: "0.1.0-beta.2",
       installedVersion: "0.1.0-beta.3",
       performedCommand: "npm install -g @tingrudeng/trae-beta-runtime@latest",
       stdout: "updated",
@@ -400,13 +401,16 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
       defaultBranch: "latest",
     });
     expect(log).toHaveBeenCalledWith(expect.stringContaining("Package: @tingrudeng/trae-beta-runtime"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("Previous version: 0.1.0-beta.2"));
     expect(log).toHaveBeenCalledWith(expect.stringContaining("Installed version: 0.1.0-beta.3"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("updated"));
   });
 
   it("runs package self-update for update with JSON output when --json is passed", async () => {
     const log = vi.fn();
     const updateCmd = vi.fn(async () => ({
       packageName: "@tingrudeng/trae-beta-runtime",
+      previousVersion: "0.1.0-beta.2",
       installedVersion: "0.1.0-beta.3",
       performedCommand: "npm install -g @tingrudeng/trae-beta-runtime@latest",
       stdout: "updated",

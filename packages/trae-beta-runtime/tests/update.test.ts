@@ -13,11 +13,11 @@ describe("@tingrudeng/trae-beta-runtime update", () => {
     }
   });
 
-  it("runs a global npm install to update the package and reports the new version", async () => {
+  it("runs a global npm install to update the package and reports the verified version", async () => {
     process.env.npm_package_version = "0.1.0-beta.3";
-    const execFile = vi.fn(async (cmd: string, args: string[]) => {
+    const execFile = vi.fn(async (_cmd: string, args: string[]) => {
       if (args[0] === "install") {
-        return { stdout: "updated", stderr: "" };
+        return { stdout: "changed 1 package in 2s", stderr: "" };
       }
       if (args[0] === "list") {
         return {
@@ -36,9 +36,10 @@ describe("@tingrudeng/trae-beta-runtime update", () => {
 
     expect(result).toEqual({
       packageName: "@tingrudeng/trae-beta-runtime",
+      previousVersion: "0.1.0-beta.3",
       installedVersion: "0.1.0-beta.5",
       performedCommand: "npm install -g @tingrudeng/trae-beta-runtime@latest",
-      stdout: "updated",
+      stdout: "changed 1 package in 2s",
       stderr: "",
       message: "Updated the global ForgeFlow Trae beta runtime package. Restart long-running gateway/worker processes to use the new version.",
     });
@@ -52,11 +53,12 @@ describe("@tingrudeng/trae-beta-runtime update", () => {
       "-g",
       "@tingrudeng/trae-beta-runtime",
       "--json",
+      "--depth=0",
     ]);
   });
 
   it("supports updating to an explicit dist-tag", async () => {
-    const execFile = vi.fn(async (cmd: string, args: string[]) => {
+    const execFile = vi.fn(async (_cmd: string, args: string[]) => {
       if (args[0] === "install") {
         return { stdout: "", stderr: "" };
       }
@@ -85,9 +87,9 @@ describe("@tingrudeng/trae-beta-runtime update", () => {
     ]);
   });
 
-  it("supports an explicit installed version override for global cli output", async () => {
+  it("supports an explicit installed version override for previous-version reporting", async () => {
     delete process.env.npm_package_version;
-    const execFile = vi.fn(async (cmd: string, args: string[]) => {
+    const execFile = vi.fn(async (_cmd: string, args: string[]) => {
       if (args[0] === "install") {
         return { stdout: "", stderr: "" };
       }
@@ -105,10 +107,11 @@ describe("@tingrudeng/trae-beta-runtime update", () => {
     });
 
     const result = await updateLocalCheckout({
-      installedVersion: "0.1.0-beta.14",
+      installedVersion: "0.1.0-beta.13",
       execFile,
     });
 
+    expect(result.previousVersion).toBe("0.1.0-beta.13");
     expect(result.installedVersion).toBe("0.1.0-beta.14");
   });
 
@@ -122,9 +125,9 @@ describe("@tingrudeng/trae-beta-runtime update", () => {
     );
   });
 
-  it("falls back to pre-update version when npm list fails", async () => {
+  it("fails when npm list cannot verify the installed version after update", async () => {
     process.env.npm_package_version = "0.1.0-beta.3";
-    const execFile = vi.fn(async (cmd: string, args: string[]) => {
+    const execFile = vi.fn(async (_cmd: string, args: string[]) => {
       if (args[0] === "install") {
         return { stdout: "updated", stderr: "" };
       }
@@ -134,8 +137,27 @@ describe("@tingrudeng/trae-beta-runtime update", () => {
       return { stdout: "", stderr: "" };
     });
 
-    const result = await updateLocalCheckout({ execFile });
+    await expect(updateLocalCheckout({ execFile })).rejects.toThrow(
+      "Failed to update @tingrudeng/trae-beta-runtime: npm list failed",
+    );
+  });
 
-    expect(result.installedVersion).toBe("0.1.0-beta.3");
+  it("fails when npm list returns no installed version", async () => {
+    const execFile = vi.fn(async (_cmd: string, args: string[]) => {
+      if (args[0] === "install") {
+        return { stdout: "updated", stderr: "" };
+      }
+      if (args[0] === "list") {
+        return {
+          stdout: JSON.stringify({ dependencies: {} }),
+          stderr: "",
+        };
+      }
+      return { stdout: "", stderr: "" };
+    });
+
+    await expect(updateLocalCheckout({ execFile })).rejects.toThrow(
+      "Failed to update @tingrudeng/trae-beta-runtime: updated package but could not verify the installed version via npm list -g @tingrudeng/trae-beta-runtime --json --depth=0",
+    );
   });
 });

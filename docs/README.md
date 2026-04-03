@@ -62,9 +62,9 @@
 当前项目使用入口：
 
 1. `../README.md`
-2. `codex-control-usage.md`
-3. `../skills/worker-review-orchestrator/SKILL.md`
-4. `../packages/trae-beta-runtime/README.md`
+2. `../scripts/start-control-plane.sh`
+3. `../packages/trae-beta-runtime/README.md`
+4. 如果需要维护已延期的 control-layer 能力，再看 `codex-control-usage.md`
 5. 再回到 `../scripts/`、`../packages/` 和实际命令验证
 
 业务仓接入或模板调整：
@@ -114,7 +114,8 @@ Trae MCP fallback 维护：
 - Phase 1 运行时合并到 TypeScript 已完成；当前主链入口仍在 `scripts/*.js`，但 `worker-daemon`、`review-decision`、`dispatcher-state`、`dispatcher-server` 已桥接到 `apps/dispatcher/dist` 的 TypeScript foundation。
 - Phase 2 持久化主线已切到 SQLite：dispatcher 默认写 `.forgeflow-dispatcher/runtime-state.db`，显式 `--persistence-backend json` 或 `RUNTIME_STATE_BACKEND=json` 才回退到 JSON。
 - dispatcher HTTP 面支持可选 token 认证：设置 `DISPATCHER_API_TOKEN` 后，除 `/health` 外接口需携带 `Authorization: Bearer <token>`。
-- `codex` / `gemini` 的 `worker daemon` 链路仍可用，但当前迭代策略是 Trae-first，相关扩展暂缓投入（deferred）。
+- 控制中枢当前推荐入口是 `../scripts/start-control-plane.sh`，只负责拉起 Trae-first 的常驻 dispatcher 控制面。
+- `codex` / `gemini` 的 `worker daemon` 链路仍可用，但当前迭代策略是 Trae-first，相关扩展暂缓投入（deferred），不属于推荐启动路径。
 - Trae 的首选无人值守路径是 `automation gateway` + `automation worker`。
 - Trae MCP worker 已降级为 deprecated/fallback 接入。
 - review memory 已进入主线的 dispatch 注入路径，但仍不是完整知识库系统。

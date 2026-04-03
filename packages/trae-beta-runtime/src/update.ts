@@ -14,6 +14,7 @@ export interface UpdateOptions {
 
 export interface UpdateResult {
   packageName: string;
+  previousVersion: string | null;
   installedVersion: string | null;
   performedCommand: string;
   stdout: string;
@@ -39,17 +40,13 @@ function resolveInstalledVersion(override?: string | null): string | null {
   }
 }
 
-async function getGlobalInstalledVersion(
-  packageName: string,
-  execFile: (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>,
-): Promise<string | null> {
+function parseInstalledVersionFromNpmList(packageName: string, output: string): string | null {
   try {
-    const result = await execFile("npm", ["list", "-g", packageName, "--json"]);
-    const output = JSON.parse(result.stdout) as {
-      dependencies?: Record<string, { version?: string }>;
+    const parsed = JSON.parse(output) as {
+      dependencies?: Record<string, { version?: unknown }>;
     };
-    const dep = output.dependencies?.[packageName];
-    return dep?.version ?? null;
+    const version = parsed.dependencies?.[packageName]?.version;
+    return typeof version === "string" && version.trim() ? version : null;
   } catch {
     return null;
   }
@@ -57,7 +54,7 @@ async function getGlobalInstalledVersion(
 
 export async function updateLocalCheckout(options: UpdateOptions = {}): Promise<UpdateResult> {
   const packageName = "@tingrudeng/trae-beta-runtime";
-  const installedVersion = resolveInstalledVersion(options.installedVersion);
+  const previousVersion = resolveInstalledVersion(options.installedVersion);
   const distTag = String(options.defaultBranch || "latest").trim() || "latest";
   const packageSpecifier = `${packageName}@${distTag}`;
   const args = ["install", "-g", packageSpecifier];
@@ -66,10 +63,17 @@ export async function updateLocalCheckout(options: UpdateOptions = {}): Promise<
 
   try {
     const result = await execFile("npm", args);
-    const actualVersion = await getGlobalInstalledVersion(packageName, execFile);
+    const verifyResult = await execFile("npm", ["list", "-g", packageName, "--json", "--depth=0"]);
+    const installedVersion = parseInstalledVersionFromNpmList(packageName, String(verifyResult.stdout || ""));
+
+    if (!installedVersion) {
+      throw new Error(`updated package but could not verify the installed version via npm list -g ${packageName} --json --depth=0`);
+    }
+
     return {
       packageName,
-      installedVersion: actualVersion ?? installedVersion,
+      previousVersion,
+      installedVersion,
       performedCommand,
       stdout: String(result.stdout || "").trim(),
       stderr: String(result.stderr || "").trim(),

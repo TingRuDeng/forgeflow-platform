@@ -94,7 +94,7 @@
 
 当前迭代策略：Trae-first。优先收敛 Trae 无人值守链路稳定性，`codex/gemini` 多机链路能力扩展暂缓投入（deferred）。
 
-- 控制平面机器：从 `scripts/run-codex-control-flow.js` 进入中控启动
+- 控制平面机器：从 `scripts/start-control-plane.sh` 启动常驻 dispatcher 控制面
 - 控制层会话：按需安装 `worker-review-orchestrator` skill
 - 控制层机器：按需安装 `@tingrudeng/worker-review-orchestrator-cli`
 - 远程 Trae 机器：按需安装 `@tingrudeng/trae-beta-runtime`
@@ -115,7 +115,7 @@
 2. 把 `.orchestrator` 发布到 dispatcher
 3. 在各机器上启动 `run-worker-daemon.js`
 
-推荐由 `scripts/run-codex-control-flow.js --dispatcher-url ...` 串起 dispatch 与发布。
+当前不建议把它当作新的接入起点；控制中枢优先只启动 dispatcher，让 Trae runtime 先稳定收口。
 
 #### Dispatcher HTTP 认证（可选）
 
@@ -143,18 +143,20 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
   http://127.0.0.1:8787/api/dashboard/snapshot
 ```
 
-控制层最小启动示例：
+控制平面最小启动示例：
 
 ```bash
-node /abs/path/to/forgeflow-platform/scripts/run-codex-control-flow.js \
-  --repo owner/business-repo \
-  --ref main \
-  --repo-dir /abs/path/to/business-repo \
-  --request-summary "补充接入文档并增加 API 冒烟测试" \
-  --task-type feature \
-  --planner-provider manual \
-  --planner-json-file /tmp/planner-output.json \
-  --dispatcher-url http://127.0.0.1:8787
+cd /abs/path/to/forgeflow-platform
+./scripts/start-control-plane.sh
+```
+
+如果需要绕过一键入口，也可以直接起 dispatcher：
+
+```bash
+node /abs/path/to/forgeflow-platform/scripts/run-dispatcher-server.js \
+  --host 0.0.0.0 \
+  --port 8787 \
+  --state-dir .forgeflow-dispatcher
 ```
 
 如果控制层需要标准 review/dispatch skill，可安装：
@@ -172,9 +174,7 @@ npm install -g @tingrudeng/worker-review-orchestrator-cli
 npm install -g @tingrudeng/trae-beta-runtime
 forgeflow-trae-beta init
 forgeflow-trae-beta doctor
-forgeflow-trae-beta start launch
-forgeflow-trae-beta start gateway
-forgeflow-trae-beta start worker
+forgeflow-trae-beta start all
 ```
 
 补充：`forgeflow-trae-beta start all` / `restart all` 会在返回成功前依次等待：
@@ -201,7 +201,7 @@ forgeflow-trae-beta start worker
 - 还没有自动清理旧 worktree 的完整生命周期治理
 - 没有多实例协调
 - `blocked + rework -> continuation` 已进入主线协议，并完成远程 Trae smoke 验证；当前 continuation 链路依赖更新后的 packaged runtime。
-- 一个最小的远程机器运行时包已进入 beta 安装路径，位于 `packages/trae-beta-runtime/`；当前 npm 包版本为 `@tingrudeng/trae-beta-runtime@0.1.0-beta.37`，用于包装启动与直接包自更新命令。
+- 一个最小的远程机器运行时包已进入 beta 安装路径，位于 `packages/trae-beta-runtime/`；当前 npm 包版本为 `@tingrudeng/trae-beta-runtime@0.1.0-beta.38`，用于包装启动与直接包自更新命令。
 
 补充：
 
@@ -234,9 +234,7 @@ node scripts/run-trae-automation-worker.js \
 npm install -g @tingrudeng/trae-beta-runtime
 forgeflow-trae-beta init
 forgeflow-trae-beta doctor
-forgeflow-trae-beta start launch
-forgeflow-trae-beta start gateway
-forgeflow-trae-beta start worker
+forgeflow-trae-beta start all
 ```
 
 `forgeflow-trae-beta update` 会直接对已安装包执行自更新，不是推荐式卸载重装流程。

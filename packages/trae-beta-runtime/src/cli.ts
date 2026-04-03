@@ -354,8 +354,12 @@ function formatStopResultHuman(result: ReturnType<typeof stopManagedProcesses>):
 function formatUpdateResultHuman(result: Awaited<ReturnType<typeof updateLocalCheckout>>): string {
   const lines: string[] = [];
   lines.push(`Package: ${result.packageName}`);
+  lines.push(`Previous version: ${result.previousVersion}`);
   lines.push(`Installed version: ${result.installedVersion}`);
   lines.push(`Command: ${result.performedCommand}`);
+  if (result.stdout) {
+    lines.push(result.stdout);
+  }
   if (result.message) {
     lines.push(result.message);
   }
