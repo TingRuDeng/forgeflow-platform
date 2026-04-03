@@ -1,0 +1,852 @@
+name: ai-dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_summary:
+        description: "Short natural-language request for the control plane"
+        required: true
+        type: string
+      task_type:
+        description: "Task type"
+        required: true
+        default: feature
+        type: choice
+        options:
+          - feature
+          - fix
+          - refactor
+      planner_output_json:
+        description: "Optional structured planner JSON. When provided, dispatch uses it instead of heuristic routing."
+        required: false
+        type: string
+      planner_provider:
+        description: "Planner provider. manual means use planner_output_json or fallback routing."
+        required: true
+        default: manual
+        type: choice
+        options:
+          - manual
+          - codex
+          - gemini
+
+jobs:
+  dispatch:
+    runs-on: [self-hosted, forgeflow]
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify project contract exists
+        run: |
+          test -f .orchestrator/project.yaml
+
+      - name: Print dispatch request
+        run: |
+          echo "request_summary=${{ inputs.request_summary }}"
+          echo "task_type=${{ inputs.task_type }}"
+          echo "planner_provider=${{ inputs.planner_provider }}"
+
+      - name: Prepare planner prompt
+        env:
+          REQUEST_SUMMARY: ${{ inputs.request_summary }}
+          TASK_TYPE: ${{ inputs.task_type }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const yamlText = fs.readFileSync(".orchestrator/project.yaml", "utf8");
+          const requestSummary = process.env.REQUEST_SUMMARY ?? "";
+          const taskType = process.env.TASK_TYPE ?? "feature";
+
+          function parseScalar(value) {
+            if (value === "true") return true;
+            if (value === "false") return false;
+            return value;
+          }
+
+          function parseProjectContractYaml(text) {
+            const parsed = {
+              project: { key: "", repo: "", default_branch: "main" },
+              routing: { codex: [], gemini: [] },
+              commands: {},
+              worktree: {
+                root_dir: ".worktrees",
+                branch_template: "ai/{pool}/{task_id}-{slug}",
+                sync_from_default_branch: true,
+              },
+              providers: {
+                enabled: ["codex", "gemini"],
+                capacity: {},
+              },
+            };
+
+            let section = "";
+            let subsection = "";
+
+            for (const rawLine of text.split(/\r?\n/)) {
+              const line = rawLine.replace(/\t/g, "    ");
+              const trimmed = line.trim();
+              if (!trimmed || trimmed.startsWith("#")) continue;
+
+              if (!line.startsWith(" ")) {
+                section = trimmed.replace(/:$/, "");
+                subsection = "";
+                continue;
+              }
+
+              if (line.startsWith("    - ")) {
+                const item = trimmed.slice(2).trim();
+                if (section === "routing" && (subsection === "codex" || subsection === "gemini")) {
+                  parsed.routing[subsection].push(item);
+                }
+                if (section === "providers" && subsection === "enabled" && (item === "codex" || item === "gemini")) {
+                  parsed.providers.enabled.push(item);
+                }
+                continue;
+              }
+
+              if (line.startsWith("  ") && !line.startsWith("    ")) {
+                if (trimmed.endsWith(":")) {
+                  subsection = trimmed.slice(0, -1);
+                  continue;
+                }
+
+                const [rawKey, ...rest] = trimmed.split(":");
+                const key = rawKey.trim();
+                const value = parseScalar(rest.join(":").trim());
+
+                if (section === "project") {
+                  if (key === "key" && value) parsed.project.key = value;
+                  if (key === "repo" && value) parsed.project.repo = value;
+                  if (key === "default_branch" && value) parsed.project.default_branch = value;
+                }
+                if (section === "commands" && typeof value === "string" && value.length > 0) {
+                  parsed.commands[key] = value;
+                }
+              }
+            }
+
+            return parsed;
+          }
+
+          function buildPlannerPromptMarkdown(input, projectConfig) {
+            const enabledPools = projectConfig.providers.enabled.join(", ") || "(none)";
+            const commandLines = Object.entries(projectConfig.commands).map(
+              ([name, command]) => `- ${name}: \`${command}\``,
+            );
+
+            return [
+              "# Planner Request",
+              "",
+              "请作为总调度 AI，把下面的需求拆成结构化任务 JSON。",
+              "",
+              "## Request",
+              `- Summary: ${input.requestSummary}`,
+              `- Task Type: ${input.taskType}`,
+              `- Repo: ${projectConfig.project.repo}`,
+              `- Default Branch: ${projectConfig.project.default_branch}`,
+              "",
+              "## Available Pools",
+              `- ${enabledPools}`,
+              "",
+              "## Routing Boundaries",
+              `- codex: ${projectConfig.routing.codex.join(", ") || "(none)"}`,
+              `- gemini: ${projectConfig.routing.gemini.join(", ") || "(none)"}`,
+              "",
+              "## Verification Commands",
+              ...(commandLines.length > 0 ? commandLines : ["- (none)"]),
+              "",
+              "## Output Contract",
+              "只返回 JSON，不要加解释。格式如下：",
+              "```json",
+              JSON.stringify(
+                {
+                  tasks: [
+                    {
+                      title: "前端页面与交互实现",
+                      pool: "gemini",
+                      allowedPaths: ["docs/**", "README.md"],
+                      verification: {
+                        mode: "run",
+                      },
+                    },
+                    {
+                      title: "后端接口与测试实现",
+                      pool: "codex",
+                      allowedPaths: ["src/**", "plugins/**"],
+                      verification: {
+                        mode: "run",
+                      },
+                    },
+                  ],
+                },
+                null,
+                2,
+              ),
+              "```",
+              "",
+              "要求：",
+              "- 只使用已启用的 pool。",
+              "- allowedPaths 必须落在仓库契约允许的边界内。",
+              "- 如果一个需求只需要一个任务，就只输出一个任务。",
+              "- 优先按真实语义拆分，不要只按关键词机械路由。",
+              "",
+            ].join("\n");
+          }
+
+          const projectConfig = parseProjectContractYaml(yamlText);
+          const plannerPromptMarkdown = buildPlannerPromptMarkdown(
+            { requestSummary, taskType },
+            projectConfig,
+          );
+
+          fs.mkdirSync(".orchestrator", { recursive: true });
+          fs.writeFileSync(".orchestrator/planner-prompt.md", `${plannerPromptMarkdown}\n`);
+          fs.writeFileSync(".orchestrator/planner-output.raw.txt", "");
+          NODE
+
+      - name: Generate planner output with Codex
+        if: ${{ inputs.planner_provider == 'codex' && inputs.planner_output_json == '' }}
+        run: |
+          codex exec -m GPT-5.4 "$(cat .orchestrator/planner-prompt.md)" > .orchestrator/planner-output.raw.txt
+
+      - name: Generate planner output with Gemini
+        if: ${{ inputs.planner_provider == 'gemini' && inputs.planner_output_json == '' }}
+        run: |
+          gemini -m gemini-2.5-pro -p "$(cat .orchestrator/planner-prompt.md)" > .orchestrator/planner-output.raw.txt
+
+      - name: Build dispatch artifacts
+        env:
+          REQUEST_SUMMARY: ${{ inputs.request_summary }}
+          TASK_TYPE: ${{ inputs.task_type }}
+          PLANNER_OUTPUT_JSON: ${{ inputs.planner_output_json }}
+          PLANNER_PROVIDER: ${{ inputs.planner_provider }}
+          GITHUB_STEP_SUMMARY_FILE: ${{ github.step_summary }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const yamlText = fs.readFileSync(".orchestrator/project.yaml", "utf8");
+          const agentsInstructions = fs.existsSync("AGENTS.md")
+            ? fs.readFileSync("AGENTS.md", "utf8")
+            : "# AGENTS\n- Stay inside the assigned task scope.";
+          const geminiInstructions = fs.existsSync("GEMINI.md")
+            ? fs.readFileSync("GEMINI.md", "utf8")
+            : "";
+          const requestSummary = process.env.REQUEST_SUMMARY ?? "";
+          const taskType = process.env.TASK_TYPE ?? "feature";
+          const plannerOutputJson = (process.env.PLANNER_OUTPUT_JSON ?? "").trim();
+          const plannerProvider = (process.env.PLANNER_PROVIDER ?? "manual").trim();
+          const plannerRawOutput = fs.existsSync(".orchestrator/planner-output.raw.txt")
+            ? fs.readFileSync(".orchestrator/planner-output.raw.txt", "utf8")
+            : "";
+
+          const frontendKeywords = [
+            "frontend",
+            "vue",
+            "ui",
+            "page",
+            "component",
+            "screen",
+            "readme",
+            "docs",
+            "documentation",
+            "前端",
+            "页面",
+            "组件",
+            "文档",
+            "说明",
+            "接入",
+          ];
+          const backendKeywords = [
+            "backend",
+            "api",
+            "auth",
+            "token",
+            "database",
+            "service",
+            "后端",
+            "接口",
+            "鉴权",
+            "认证",
+            "数据库",
+            "服务",
+            "测试",
+          ];
+
+          function parseScalar(value) {
+            if (value === "true") return true;
+            if (value === "false") return false;
+            return value;
+          }
+
+          function slugify(value) {
+            return value
+              .normalize("NFKC")
+              .toLowerCase()
+              .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
+              .replace(/^-+|-+$/g, "");
+          }
+
+          function parseProjectContractYaml(text) {
+            const parsed = {
+              project: { key: "", repo: "", default_branch: "main" },
+              routing: { codex: [], gemini: [] },
+              commands: {},
+              worktree: {
+                root_dir: ".worktrees",
+                branch_template: "ai/{pool}/{task_id}-{slug}",
+                sync_from_default_branch: true,
+              },
+              providers: {
+                enabled: ["codex", "gemini"],
+                capacity: {},
+              },
+            };
+
+            let section = "";
+            let subsection = "";
+
+            for (const rawLine of text.split(/\r?\n/)) {
+              const line = rawLine.replace(/\t/g, "    ");
+              const trimmed = line.trim();
+              if (!trimmed || trimmed.startsWith("#")) continue;
+
+              if (!line.startsWith(" ")) {
+                section = trimmed.replace(/:$/, "");
+                subsection = "";
+                continue;
+              }
+
+              if (line.startsWith("    - ")) {
+                const item = trimmed.slice(2).trim();
+                if (section === "routing" && (subsection === "codex" || subsection === "gemini")) {
+                  parsed.routing[subsection].push(item);
+                }
+                if (section === "providers" && subsection === "enabled" && (item === "codex" || item === "gemini")) {
+                  parsed.providers.enabled.push(item);
+                }
+                continue;
+              }
+
+              if (line.startsWith("  ") && !line.startsWith("    ")) {
+                if (trimmed.endsWith(":")) {
+                  subsection = trimmed.slice(0, -1);
+                  continue;
+                }
+
+                const [rawKey, ...rest] = trimmed.split(":");
+                const key = rawKey.trim();
+                const value = parseScalar(rest.join(":").trim());
+
+                if (section === "project") {
+                  if (key === "key") parsed.project.key = value || parsed.project.key;
+                  if (key === "repo") parsed.project.repo = value || parsed.project.repo;
+                  if (key === "default_branch") {
+                    parsed.project.default_branch = value || parsed.project.default_branch;
+                  }
+                }
+                if (section === "commands" && typeof value === "string" && value.length > 0) {
+                  parsed.commands[key] = value;
+                }
+                continue;
+              }
+
+              if (line.startsWith("    ")) {
+                const [rawKey, ...rest] = trimmed.split(":");
+                const key = rawKey.trim();
+                const value = parseScalar(rest.join(":").trim());
+
+                if (section === "worktree") {
+                  if (key === "root_dir") parsed.worktree.root_dir = value || parsed.worktree.root_dir;
+                  if (key === "branch_template") {
+                    parsed.worktree.branch_template = value || parsed.worktree.branch_template;
+                  }
+                  if (key === "sync_from_default_branch") {
+                    parsed.worktree.sync_from_default_branch = value;
+                  }
+                }
+
+                if (section === "providers" && subsection === "capacity") {
+                  if ((key === "codex" || key === "gemini") && typeof value === "string") {
+                    const parsedValue = Number(value);
+                    if (Number.isFinite(parsedValue) && parsedValue > 0) {
+                      parsed.providers.capacity[key] = parsedValue;
+                    }
+                  }
+                }
+              }
+            }
+
+            return parsed;
+          }
+
+          function hasKeyword(summary, keywords) {
+            const normalized = summary.toLowerCase();
+            return keywords.some((keyword) => normalized.includes(keyword));
+          }
+
+          function buildBranchName(template, pool, taskId, title) {
+            return template
+              .replace("{pool}", pool)
+              .replace("{task_id}", taskId)
+              .replace("{slug}", slugify(title));
+          }
+
+          function parsePlannerOutputJson(jsonText) {
+            const parsed = JSON.parse(jsonText);
+            if (!Array.isArray(parsed.tasks)) {
+              throw new Error("planner output must contain a tasks array");
+            }
+
+            return {
+              tasks: parsed.tasks.map((task, index) => {
+                if (typeof task?.title !== "string" || task.title.length === 0) {
+                  throw new Error(`planner task ${index + 1} is missing title`);
+                }
+                if (task.pool !== "codex" && task.pool !== "gemini") {
+                  throw new Error(`planner task ${index + 1} has invalid pool`);
+                }
+                if (!Array.isArray(task.allowedPaths) || task.allowedPaths.some((path) => typeof path !== "string")) {
+                  throw new Error(`planner task ${index + 1} has invalid allowedPaths`);
+                }
+                if (task?.verification?.mode !== "run" && task?.verification?.mode !== "review") {
+                  throw new Error(`planner task ${index + 1} has invalid verification mode`);
+                }
+
+                return {
+                  title: task.title,
+                  pool: task.pool,
+                  allowedPaths: [...task.allowedPaths],
+                  verification: {
+                    mode: task.verification.mode,
+                  },
+                };
+              }),
+            };
+          }
+
+          function extractPlannerOutputJson(rawOutput) {
+            const trimmed = rawOutput.trim();
+            if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+              return trimmed;
+            }
+
+            const fencedMatch = trimmed.match(/```json\s*([\s\S]*?)\s*```/i);
+            if (fencedMatch?.[1]) {
+              return fencedMatch[1].trim();
+            }
+
+            const genericFenceMatch = trimmed.match(/```\s*([\s\S]*?)\s*```/);
+            if (genericFenceMatch?.[1]) {
+              const candidate = genericFenceMatch[1].trim();
+              if (candidate.startsWith("{") && candidate.endsWith("}")) {
+                return candidate;
+              }
+            }
+
+            throw new Error("unable to extract planner JSON from model output");
+          }
+
+          function buildPlannerPromptMarkdown(input, projectConfig) {
+            const enabledPools = projectConfig.providers.enabled.join(", ") || "(none)";
+            const commandLines = Object.entries(projectConfig.commands).map(
+              ([name, command]) => `- ${name}: \`${command}\``,
+            );
+
+            return [
+              "# Planner Request",
+              "",
+              "请作为总调度 AI，把下面的需求拆成结构化任务 JSON。",
+              "",
+              "## Request",
+              `- Summary: ${input.requestSummary}`,
+              `- Task Type: ${input.taskType}`,
+              `- Repo: ${projectConfig.project.repo}`,
+              `- Default Branch: ${projectConfig.project.default_branch}`,
+              "",
+              "## Available Pools",
+              `- ${enabledPools}`,
+              "",
+              "## Routing Boundaries",
+              `- codex: ${projectConfig.routing.codex.join(", ") || "(none)"}`,
+              `- gemini: ${projectConfig.routing.gemini.join(", ") || "(none)"}`,
+              "",
+              "## Verification Commands",
+              ...(commandLines.length > 0 ? commandLines : ["- (none)"]),
+              "",
+              "## Output Contract",
+              "只返回 JSON，不要加解释。格式如下：",
+              "```json",
+              JSON.stringify(
+                {
+                  tasks: [
+                    {
+                      title: "前端页面与交互实现",
+                      pool: "gemini",
+                      allowedPaths: ["docs/**", "README.md"],
+                      verification: {
+                        mode: "run",
+                      },
+                    },
+                    {
+                      title: "后端接口与测试实现",
+                      pool: "codex",
+                      allowedPaths: ["src/**", "plugins/**"],
+                      verification: {
+                        mode: "run",
+                      },
+                    },
+                  ],
+                },
+                null,
+                2,
+              ),
+              "```",
+              "",
+              "要求：",
+              "- 只使用已启用的 pool。",
+              "- allowedPaths 必须落在仓库契约允许的边界内。",
+              "- 如果一个需求只需要一个任务，就只输出一个任务。",
+              "- 优先按真实语义拆分，不要只按关键词机械路由。",
+              "",
+            ].join("\n");
+          }
+
+          function buildTaskLedger(plan, projectConfig) {
+            return {
+              requestSummary: plan.requestSummary,
+              taskType: plan.taskType,
+              repo: projectConfig.project.repo,
+              defaultBranch: projectConfig.project.default_branch,
+              generatedAt: new Date().toISOString(),
+              tasks: plan.tasks.map((task) => ({
+                ...task,
+                status: "planned",
+                attempts: 0,
+              })),
+            };
+          }
+
+          function buildDispatchRecord(plan, projectConfig) {
+            const ledger = buildTaskLedger(plan, projectConfig);
+            const events = [];
+
+            const readyTasks = ledger.tasks.map((task) => {
+              events.push({
+                taskId: task.id,
+                type: "created",
+                at: ledger.generatedAt,
+                payload: {
+                  status: task.status,
+                },
+              });
+              events.push({
+                taskId: task.id,
+                type: "status_changed",
+                at: ledger.generatedAt,
+                payload: {
+                  from: task.status,
+                  to: "ready",
+                },
+              });
+
+              return {
+                ...task,
+                status: "ready",
+              };
+            });
+
+            return {
+              ledger: {
+                ...ledger,
+                tasks: readyTasks,
+              },
+              events,
+            };
+          }
+
+          function buildWorkerRegistry(projectConfig, generatedAt) {
+            const uniquePools = [...new Set(projectConfig.providers.enabled)];
+            return uniquePools.flatMap((pool) => {
+              const capacity = projectConfig.providers.capacity[pool] ?? 1;
+              return Array.from({ length: capacity }, (_, index) => ({
+                id: `${pool}-worker-${index + 1}`,
+                pool,
+                status: "idle",
+                lastHeartbeatAt: generatedAt,
+              }));
+            });
+          }
+
+          function buildAssignmentRecord(plan, projectConfig) {
+            const readyRecord = buildDispatchRecord(plan, projectConfig);
+            const workers = buildWorkerRegistry(projectConfig, readyRecord.ledger.generatedAt);
+            const events = [...readyRecord.events];
+            const assignments = [];
+
+            const assignedTasks = readyRecord.ledger.tasks.map((task) => {
+              const worker = workers.find((candidate) => candidate.pool === task.pool && candidate.status === "idle");
+              if (!worker) {
+                assignments.push({
+                  taskId: task.id,
+                  workerId: "",
+                  pool: task.pool,
+                  status: "pending",
+                });
+                return task;
+              }
+
+              worker.status = "busy";
+              worker.currentTaskId = task.id;
+              assignments.push({
+                taskId: task.id,
+                workerId: worker.id,
+                pool: task.pool,
+                status: "assigned",
+              });
+              events.push({
+                taskId: task.id,
+                type: "status_changed",
+                at: readyRecord.ledger.generatedAt,
+                payload: {
+                  from: task.status,
+                  to: "assigned",
+                },
+              });
+
+              return {
+                ...task,
+                status: "assigned",
+                assignedWorkerId: worker.id,
+              };
+            });
+
+            return {
+              ledger: {
+                ...readyRecord.ledger,
+                tasks: assignedTasks,
+              },
+              workers,
+              assignments,
+              events,
+            };
+          }
+
+          function buildWorkerPrompt(task, agentsText, geminiText) {
+            const basePrompt = [
+              `你是 ${task.pool}-worker。`,
+              `你的任务：${task.title}`,
+              `只允许修改这些路径：${task.allowedPaths.join(", ") || "(none)"}`,
+              "完成前必须运行任务要求里的验证命令。",
+              "如果超出范围或信息不足，直接返回阻塞点，不要自行扩展任务。",
+              "",
+              agentsText.trim(),
+            ];
+
+            if (task.pool === "gemini" && geminiText.trim()) {
+              basePrompt.push("", geminiText.trim());
+            }
+
+            return `${basePrompt.join("\n")}\n`;
+          }
+
+          function buildContextMarkdown(task, assignment, projectConfig) {
+            const commandLines = Object.entries(projectConfig.commands).map(
+              ([name, command]) => `- ${name}: \`${command}\``,
+            );
+
+            return [
+              "# Assignment Context",
+              "",
+              "## Task",
+              `- Task ID: ${task.id}`,
+              `- Title: ${task.title}`,
+              `- Pool: ${task.pool}`,
+              `- Worker: ${assignment.workerId || "(unassigned)"}`,
+              `- Repo: ${projectConfig.project.repo}`,
+              `- Default Branch: ${projectConfig.project.default_branch}`,
+              "",
+              "## Paths",
+              ...task.allowedPaths.map((path) => `- ${path}`),
+              "",
+              "## Commands",
+              ...(commandLines.length > 0 ? commandLines : ["- (none)"]),
+              "",
+            ].join("\n");
+          }
+
+          function buildAssignmentPackages(record, projectConfig, agentsText, geminiText) {
+            return record.assignments
+              .filter((assignment) => assignment.status === "assigned")
+              .map((assignment) => {
+                const task = record.ledger.tasks.find((candidate) => candidate.id === assignment.taskId);
+                if (!task) {
+                  throw new Error(`task not found for assignment: ${assignment.taskId}`);
+                }
+
+                return {
+                  taskId: task.id,
+                  assignment: {
+                    ...assignment,
+                    branchName: task.branchName,
+                    allowedPaths: task.allowedPaths,
+                    commands: projectConfig.commands,
+                    repo: projectConfig.project.repo,
+                    defaultBranch: projectConfig.project.default_branch,
+                  },
+                  workerPrompt: buildWorkerPrompt(task, agentsText, geminiText),
+                  contextMarkdown: buildContextMarkdown(task, assignment, projectConfig),
+                };
+              });
+          }
+
+          function renderDispatchSummaryMarkdown(plan, ledger) {
+            const poolLines = plan.suggestedPools.map((pool) => `- ${pool}`).join("\n");
+            const taskSections = ledger.tasks
+              .map((task) =>
+                [
+                  `### ${task.id} - ${task.title}`,
+                  `- Pool: ${task.pool}`,
+                  `- Status: ${task.status}`,
+                  task.assignedWorkerId ? `- Assigned Worker: ${task.assignedWorkerId}` : undefined,
+                  `- Branch: \`${task.branchName}\``,
+                  `- Allowed Paths: ${task.allowedPaths.join(", ") || "(none)"}`,
+                  `- Verification: ${task.verification.mode}`,
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              )
+              .join("\n\n");
+
+            return [
+              "# Dispatch Summary",
+              "",
+              "## Request",
+              `- Summary: ${plan.requestSummary}`,
+              `- Task Type: ${plan.taskType}`,
+              `- Repo: ${ledger.repo}`,
+              `- Default Branch: ${ledger.defaultBranch}`,
+              `- Generated At: ${ledger.generatedAt}`,
+              "",
+              "## Suggested Pools",
+              poolLines || "- (none)",
+              "",
+              "## Tasks",
+              taskSections || "_No tasks generated._",
+              "",
+            ].join("\n");
+          }
+
+          const projectConfig = parseProjectContractYaml(yamlText);
+          const effectivePlannerOutputJson = plannerOutputJson
+            || (plannerRawOutput.trim().length > 0 ? extractPlannerOutputJson(plannerRawOutput) : "");
+          const drafts = effectivePlannerOutputJson
+            ? parsePlannerOutputJson(effectivePlannerOutputJson).tasks
+            : (() => {
+                const wantsFrontend = hasKeyword(requestSummary, frontendKeywords);
+                const wantsBackend = hasKeyword(requestSummary, backendKeywords);
+                const fallbackDrafts = [];
+
+                if (wantsFrontend) {
+                  fallbackDrafts.push({
+                    title: `Frontend: ${requestSummary}`,
+                    pool: "gemini",
+                    allowedPaths: projectConfig.routing.gemini,
+                    verification: { mode: "run" },
+                  });
+                }
+
+                if (wantsBackend || !wantsFrontend) {
+                  fallbackDrafts.push({
+                    title: `Backend: ${requestSummary}`,
+                    pool: "codex",
+                    allowedPaths: projectConfig.routing.codex,
+                    verification: { mode: "run" },
+                  });
+                }
+
+                return fallbackDrafts;
+              })();
+
+          const tasks = drafts.map((draft, index) => {
+            const taskId = `task-${index + 1}`;
+            return {
+              ...draft,
+              id: taskId,
+              branchName: buildBranchName(
+                projectConfig.worktree.branch_template,
+                draft.pool,
+                taskId,
+                draft.title.toLowerCase(),
+              ),
+            };
+          });
+
+          const plan = {
+            requestSummary,
+            taskType,
+            suggestedPools: [...new Set(tasks.map((task) => task.pool))],
+            tasks,
+          };
+          const record = buildAssignmentRecord(plan, projectConfig);
+          const packages = buildAssignmentPackages(
+            record,
+            projectConfig,
+            agentsInstructions,
+            geminiInstructions,
+          );
+          const summaryMarkdown = renderDispatchSummaryMarkdown(plan, record.ledger);
+          const plannerOutputArtifact = effectivePlannerOutputJson
+            ? {
+                source: plannerProvider === "manual" && plannerOutputJson ? "manual-input" : plannerProvider,
+                ...parsePlannerOutputJson(effectivePlannerOutputJson),
+              }
+            : {
+                source: "heuristic-fallback",
+                tasks: [],
+              };
+
+          fs.mkdirSync(".orchestrator/assignments", { recursive: true });
+          fs.writeFileSync(".orchestrator/planner-output.json", `${JSON.stringify(plannerOutputArtifact, null, 2)}\n`);
+          fs.writeFileSync(".orchestrator/dispatch-plan.json", `${JSON.stringify(plan, null, 2)}\n`);
+          fs.writeFileSync(".orchestrator/task-ledger.json", `${JSON.stringify(record.ledger, null, 2)}\n`);
+          fs.writeFileSync(".orchestrator/worker-registry.json", `${JSON.stringify(record.workers, null, 2)}\n`);
+          fs.writeFileSync(".orchestrator/task-assignments.json", `${JSON.stringify(record.assignments, null, 2)}\n`);
+          fs.writeFileSync(".orchestrator/task-events.json", `${JSON.stringify(record.events, null, 2)}\n`);
+          fs.writeFileSync(".orchestrator/dispatch-summary.md", `${summaryMarkdown}\n`);
+          for (const pkg of packages) {
+            const outputDir = `.orchestrator/assignments/${pkg.taskId}`;
+            fs.mkdirSync(outputDir, { recursive: true });
+            fs.writeFileSync(
+              `${outputDir}/assignment.json`,
+              `${JSON.stringify(pkg.assignment, null, 2)}\n`,
+            );
+            fs.writeFileSync(`${outputDir}/worker-prompt.md`, pkg.workerPrompt);
+            fs.writeFileSync(`${outputDir}/context.md`, pkg.contextMarkdown);
+          }
+          if (process.env.GITHUB_STEP_SUMMARY_FILE) {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY_FILE, `${summaryMarkdown}\n`);
+          }
+          console.log(JSON.stringify(plan, null, 2));
+          NODE
+
+      - name: Upload dispatch artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dispatch-plan
+          path: |
+            .orchestrator/dispatch-plan.json
+            .orchestrator/task-ledger.json
+            .orchestrator/worker-registry.json
+            .orchestrator/task-assignments.json
+            .orchestrator/task-events.json
+            .orchestrator/dispatch-summary.md
+            .orchestrator/planner-prompt.md
+            .orchestrator/planner-output.json
+            .orchestrator/planner-output.raw.txt
+            .orchestrator/assignments/**

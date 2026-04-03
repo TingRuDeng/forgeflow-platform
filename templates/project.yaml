@@ -1,0 +1,37 @@
+project:
+  key: repo-a
+  repo: org/repo-a
+  default_branch: main
+
+routing:
+  codex:
+    - apps/api/**
+  gemini:
+    - apps/web/**
+
+commands:
+  lint: pnpm lint
+  test: pnpm test
+
+governance:
+  branch_prefix: ai
+  require_review: true
+  require_checks: true
+
+worktree:
+  root_dir: .worktrees
+  branch_template: ai/{pool}/{task_id}-{slug}
+  sync_from_default_branch: true
+
+observability:
+  enabled: true
+  retain_days: 14
+
+providers:
+  enabled:
+    - codex
+    - gemini
+  permissions:
+    codex:
+      sandbox: workspace-write
+    gemini: {}

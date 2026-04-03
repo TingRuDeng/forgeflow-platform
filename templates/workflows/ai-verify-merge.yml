@@ -1,0 +1,44 @@
+name: ai-verify-merge
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  workflow_dispatch:
+
+jobs:
+  ai-verify-merge:
+    runs-on: [self-hosted, forgeflow]
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify project contract exists
+        run: |
+          test -f .orchestrator/project.yaml
+
+      - name: Verify PR is not targeting main from main
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          test "${{ github.head_ref }}" != "${{ github.base_ref }}"
+
+      - name: Verify pull request is not draft
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          test "${{ github.event.pull_request.draft }}" = "false"
+
+      - name: Placeholder merge verification
+        run: |
+          echo "Replace this step with review-gate integration."
+          echo "Expected checks:"
+          echo "- self-test evidence present"
+          echo "- structured review completed"
+          echo "- merge gate is green"

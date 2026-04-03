@@ -1,0 +1,20 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": ".",
+    "rootDir": ".",
+    "noEmit": false,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "strict": false,
+    "noImplicitAny": false
+  },
+  "include": [
+    "./*.ts"
+  ],
+  "exclude": [
+    "lib/**",
+    "dist/**"
+  ]
+}

@@ -1,0 +1,42 @@
+name: ai-ci
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  LINT_COMMAND: "pnpm lint"
+  TEST_COMMAND: "pnpm test"
+  BUILD_COMMAND: "pnpm build"
+
+jobs:
+  ai-ci:
+    runs-on: [self-hosted, forgeflow]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run lint
+        if: ${{ env.LINT_COMMAND != '' }}
+        run: ${{ env.LINT_COMMAND }}
+
+      - name: Run tests
+        if: ${{ env.TEST_COMMAND != '' }}
+        run: ${{ env.TEST_COMMAND }}
+
+      - name: Run build
+        if: ${{ env.BUILD_COMMAND != '' }}
+        run: ${{ env.BUILD_COMMAND }}
