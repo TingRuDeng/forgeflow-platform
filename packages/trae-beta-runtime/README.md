@@ -84,15 +84,23 @@ Use `start --help` or `stop --help` to see detailed options for start/stop subco
 `packages/trae-beta-runtime/dist/runtime/worker.js`.
 The stop commands target those local script-backed processes directly, not fuzzy package names.
 
-Intended post-publish shape:
+Recommended fresh-machine setup:
 
 ```bash
 npm install -g @tingrudeng/trae-beta-runtime
-forgeflow-trae-beta init
+forgeflow-trae-beta init \
+  --project-path /abs/path/to/your-business-repo \
+  --dispatcher-url http://<control-plane-host>:8787 \
+  --worker-id trae-remote-01
 forgeflow-trae-beta doctor
-forgeflow-trae-beta start launch
-forgeflow-trae-beta start gateway
-forgeflow-trae-beta start worker
+forgeflow-trae-beta start all
+```
+
+If Trae is installed at a non-default path, add `--trae-bin "/Applications/Trae.app"` to `forgeflow-trae-beta init`.
+
+Common lifecycle commands:
+
+```bash
 forgeflow-trae-beta update
 forgeflow-trae-beta version
 forgeflow-trae-beta --version
@@ -108,10 +116,11 @@ forgeflow-trae-beta start gateway --force
 forgeflow-trae-beta start worker --force
 ```
 
-Before the first public beta publish, the intended release gate is still:
+Current release gate:
+
 - package build/test/typecheck
 - full repository test/typecheck
-- one real remote-machine smoke run using `init`, `doctor`, `start launch`, `start gateway`, and `start worker`
+- one real remote-machine smoke run using `init`, `doctor`, and `start all`
 
 ## Requirements
 
@@ -169,6 +178,6 @@ It is no longer a ForgeFlow runtime root.
 - The repository is licensed under Apache-2.0.
 - `forgeflow-trae-beta update` performs a direct self-update of the installed runtime package and reports the command it ran.
 - Current beta operating guidance:
-  - [docs/runbooks/trae-remote-beta.md](https://github.com/TingRuDeng/ForgeFlow/blob/main/docs/runbooks/trae-remote-beta.md)
+  - [docs/runbooks/trae-remote-beta.md](https://github.com/TingRuDeng/forgeflow-platform/blob/main/docs/runbooks/trae-remote-beta.md)
 - Package release steps:
-  - [packages/trae-beta-runtime/PUBLISHING.md](https://github.com/TingRuDeng/ForgeFlow/blob/main/packages/trae-beta-runtime/PUBLISHING.md)
+  - [packages/trae-beta-runtime/PUBLISHING.md](https://github.com/TingRuDeng/forgeflow-platform/blob/main/packages/trae-beta-runtime/PUBLISHING.md)

@@ -172,10 +172,15 @@ npm install -g @tingrudeng/worker-review-orchestrator-cli
 
 ```bash
 npm install -g @tingrudeng/trae-beta-runtime
-forgeflow-trae-beta init
+forgeflow-trae-beta init \
+  --project-path /abs/path/to/your-business-repo \
+  --dispatcher-url http://<control-plane-host>:8787 \
+  --worker-id trae-remote-01
 forgeflow-trae-beta doctor
 forgeflow-trae-beta start all
 ```
+
+如果 Trae 安装路径不是默认值，再补 `--trae-bin "/Applications/Trae.app"`。
 
 补充：`forgeflow-trae-beta start all` / `restart all` 会在返回成功前依次等待：
 
@@ -201,7 +206,7 @@ forgeflow-trae-beta start all
 - 还没有自动清理旧 worktree 的完整生命周期治理
 - 没有多实例协调
 - `blocked + rework -> continuation` 已进入主线协议，并完成远程 Trae smoke 验证；当前 continuation 链路依赖更新后的 packaged runtime。
-- 一个最小的远程机器运行时包已进入 beta 安装路径，位于 `packages/trae-beta-runtime/`；当前 npm 包版本为 `@tingrudeng/trae-beta-runtime@0.1.0-beta.38`，用于包装启动与直接包自更新命令。
+- 一个最小的远程机器运行时包已进入 beta 安装路径，位于 `packages/trae-beta-runtime/`；当前 npm 包版本为 `@tingrudeng/trae-beta-runtime@0.1.0-beta.39`，用于包装启动与直接包自更新命令。
 
 补充：
 
@@ -232,10 +237,15 @@ node scripts/run-trae-automation-worker.js \
 
 ```bash
 npm install -g @tingrudeng/trae-beta-runtime
-forgeflow-trae-beta init
+forgeflow-trae-beta init \
+  --project-path /abs/path/to/your-business-repo \
+  --dispatcher-url http://<control-plane-host>:8787 \
+  --worker-id trae-remote-01
 forgeflow-trae-beta doctor
 forgeflow-trae-beta start all
 ```
+
+如果 Trae 安装路径不是默认值，再补 `--trae-bin "/Applications/Trae.app"`。
 
 `forgeflow-trae-beta update` 会直接对已安装包执行自更新，不是推荐式卸载重装流程。
 
