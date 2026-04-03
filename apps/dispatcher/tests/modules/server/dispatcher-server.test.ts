@@ -844,7 +844,7 @@ describe("dispatcher server", () => {
     });
   });
 
-  it("dashboard html uses safe DOM rendering primitives", async () => {
+  it("dashboard html redirects to the standalone console app", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);
 
@@ -856,8 +856,8 @@ describe("dispatcher server", () => {
 
     expect(dashboardResponse.status).toBe(200);
     expect(dashboardResponse.text).not.toContain(".innerHTML");
-    expect(dashboardResponse.text).toContain("document.createElement(");
-    expect(dashboardResponse.text).toContain(".textContent");
+    expect(dashboardResponse.text).toContain("ForgeFlow Console Redirect");
+    expect(dashboardResponse.text).toContain("window.location.href = 'http://localhost:8788';");
   });
 
   it("disables and enables workers via API", async () => {
@@ -938,7 +938,7 @@ describe("dispatcher server", () => {
     });
   });
 
-  it("dashboard includes worker action buttons", async () => {
+  it("dashboard includes a fallback link to the standalone console app", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);
 
@@ -962,9 +962,7 @@ describe("dispatcher server", () => {
     });
 
     expect(dashboardResponse.status).toBe(200);
-    expect(dashboardResponse.text).toContain("handleWorkerAction");
-    expect(dashboardResponse.text).toContain("禁用");
-    expect(dashboardResponse.text).toContain("启用");
+    expect(dashboardResponse.text).toContain('Redirecting to <a href="http://localhost:8788">ForgeFlow Console</a>...');
   });
 
   describe("auth middleware", () => {
