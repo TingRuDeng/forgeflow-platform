@@ -1,0 +1,15 @@
+{
+  "name": "@forgeflow/task-decomposer",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@forgeflow/task-schema": "workspace:*"
+  }
+}

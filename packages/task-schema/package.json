@@ -1,0 +1,16 @@
+{
+  "name": "@forgeflow/task-schema",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@forgeflow/result-contracts": "workspace:*",
+    "zod": "^3.24.2"
+  }
+}

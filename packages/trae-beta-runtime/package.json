@@ -1,0 +1,57 @@
+{
+  "name": "@tingrudeng/trae-beta-runtime",
+  "description": "Self-contained remote Trae beta runtime CLI for ForgeFlow launch, gateway, and worker orchestration.",
+  "version": "0.1.0-beta.39",
+  "private": false,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TingRuDeng/ForgeFlow.git",
+    "directory": "packages/trae-beta-runtime"
+  },
+  "homepage": "https://github.com/TingRuDeng/ForgeFlow/tree/main/packages/trae-beta-runtime",
+  "bugs": {
+    "url": "https://github.com/TingRuDeng/ForgeFlow/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "forgeflow-trae-beta": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "PUBLISHING.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "default": "./dist/cli.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "forgeflow",
+    "trae",
+    "automation",
+    "runtime",
+    "beta"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ./scripts/verify-build.mjs",
+    "prepack": "pnpm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@forgeflow/mcp-scheduler",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/server.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  }
+}

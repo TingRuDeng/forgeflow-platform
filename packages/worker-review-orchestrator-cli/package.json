@@ -1,0 +1,56 @@
+{
+  "name": "@tingrudeng/worker-review-orchestrator-cli",
+  "version": "0.1.0-beta.9",
+  "private": false,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TingRuDeng/ForgeFlow.git",
+    "directory": "packages/worker-review-orchestrator-cli"
+  },
+  "homepage": "https://github.com/TingRuDeng/ForgeFlow/tree/main/packages/worker-review-orchestrator-cli",
+  "bugs": {
+    "url": "https://github.com/TingRuDeng/ForgeFlow/issues"
+  },
+  "type": "module",
+  "description": "ForgeFlow control-layer CLI for dispatching tasks, watching execution, and submitting review decisions.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "forgeflow-review-orchestrator": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "default": "./dist/cli.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "PUBLISHING.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "forgeflow",
+    "dispatcher",
+    "orchestrator",
+    "review",
+    "cli"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  }
+}
