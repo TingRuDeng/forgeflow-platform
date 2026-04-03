@@ -92,6 +92,8 @@
 
 在当前主线路径里，推荐把“控制层启动”、“control-layer skill 安装”和“远程 Trae npm 包安装”分开看：
 
+当前迭代策略：Trae-first。优先收敛 Trae 无人值守链路稳定性，`codex/gemini` 多机链路能力扩展暂缓投入（deferred）。
+
 - 控制平面机器：从 `scripts/run-codex-control-flow.js` 进入中控启动
 - 控制层会话：按需安装 `worker-review-orchestrator` skill
 - 控制层机器：按需安装 `@tingrudeng/worker-review-orchestrator-cli`
@@ -105,9 +107,9 @@
 - 生成 `.orchestrator`
 - 用 `scripts/run-dispatch-assignments.js` 顺序执行 `assigned` 任务
 
-### 4.2 `codex` / `gemini` 多机主链路
+### 4.2 `codex` / `gemini` 多机链路（deferred）
 
-这是当前通用执行主线：
+该链路当前仍可用，但在本阶段不作为优先推进范围：
 
 1. 启动 `dispatcher server`
 2. 把 `.orchestrator` 发布到 dispatcher

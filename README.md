@@ -1,6 +1,6 @@
 # ForgeFlow
 
-ForgeFlow 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都只是 worker 接入方式。
+ForgeFlow 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都只是 worker 接入方式。当前迭代优先级为 **Trae-first**：先收敛 Trae 无人值守链路稳定性，再扩展 `codex/gemini` worker 主线能力。
 
 ## 当前主线
 
@@ -9,7 +9,7 @@ ForgeFlow 是多智能体协作开发的控制平面仓库。当前主线以 `di
 - Phase 1 运行时合并到 TypeScript 已完成：`worker-daemon`、`review-decision`、`dispatcher-state`、`dispatcher-server` 主链现在都通过 `scripts/*.js` 入口桥接到 `apps/dispatcher/dist` 下的 TypeScript foundation。
 - Phase 2 持久化切换主线已完成：dispatcher 默认真相源现在是 `.forgeflow-dispatcher/runtime-state.db`，基于 `node:sqlite` 落盘；只有显式传 `--persistence-backend json`（或设置 `RUNTIME_STATE_BACKEND=json`）时才回退到 JSON。
 - `scripts/*.js` 仍然是当前 live 入口与本地启动方式；它们现在主要承担 CLI、bootstrap、薄适配层与剩余脚本 glue，而不再单独承载整条 dispatcher 主链实现。
-- `dispatcher server` + `worker daemon` 是 `codex` / `gemini` 多机执行主链路。
+- `dispatcher server` + `worker daemon` 的 `codex` / `gemini` 链路仍可用，但当前迭代按 Trae-first 策略暂缓投入（deferred）。
 - `.orchestrator` assignment package、本地执行脚本、结果回写与 review 决策链路仍然可用。
 - review memory 已有文件存储契约，并会在 dispatcher 创建 dispatch 时按 repo/scope/worker 条件注入上下文。
 - Trae 的首选无人值守路径是 `Trae automation gateway` + `Trae automation worker`。
@@ -34,7 +34,7 @@ ForgeFlow 是多智能体协作开发的控制平面仓库。当前主线以 `di
 - 总控与 dispatch：`scripts/run-codex-control-flow.js`
 - dispatcher server：`scripts/run-dispatcher-server.js`
 - `.orchestrator` 发布：`scripts/dispatch-orchestrator-to-server.js`
-- 多机 worker daemon：`scripts/run-worker-daemon.js`
+- 多机 worker daemon（`codex/gemini`，deferred）：`scripts/run-worker-daemon.js`
 - Trae automation gateway：`scripts/run-trae-automation-gateway.js`
 - Trae automation worker：`scripts/run-trae-automation-worker.js`
 - Trae MCP fallback：`scripts/run-trae-mcp-worker-server.js`
@@ -152,7 +152,7 @@ node scripts/run-dispatcher-server.js \
   --persistence-backend json
 ```
 
-启动 `codex` / `gemini` worker daemon：
+启动 `codex` / `gemini` worker daemon（可用但当前 deferred）：
 
 ```bash
 node scripts/run-worker-daemon.js \
