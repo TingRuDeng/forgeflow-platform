@@ -1,5 +1,7 @@
 # Phase 2: OpenClaw / ACP 边界
 
+> Archived: 这份文档只保留历史上下文，不代表当前主线。当前入口请看 `../README.md` 与 `../../README.md`。
+
 ## 1. OpenClaw 在 Phase 2 的目标职责
 
 OpenClaw 不替代当前 GitHub-first 主链路，它在 Phase 2 的职责应收敛为：

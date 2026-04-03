@@ -154,10 +154,6 @@ Trae MCP fallback 维护：
   - 远程 Trae beta 试运行顺序、观察点与问题记录入口。
 - `runbooks/trae-issue-template.md`
   - 远程 Trae 试运行的结构化问题记录模板。
-- `release-v1.md`
-  - 阶段性发布记录，不替代当前实现说明。
-- `phase-2-openclaw.md`
-  - 阶段性进展摘要，不替代当前实现说明。
 
 ## Non-Authoritative Material
 
@@ -170,3 +166,7 @@ Trae MCP fallback 维护：
   - 只在对应操作或演练场景下有效，不自动提升为主线规则。
 - `archive/*`
   - 历史材料保留区，不是当前开发入口。
+  - 当前已归档的过期阶段文档包括：
+    - `archive/release-v1.md`
+    - `archive/phase-2-openclaw.md`
+    - `archive/multi-repo-validation.md`
