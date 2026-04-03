@@ -7,30 +7,21 @@ export function buildDashboardHtml(): string {
     <title>ForgeFlow Console</title>
     <style>
       :root {
-        --bg-color: #f7f9fa;
-        --panel-bg: #ffffff;
-        --text-primary: #111827;
-        --text-secondary: #6b7280;
-        --border-color: #e5e7eb;
-        --accent-color: #2563eb;
+        --bg-color: #000000;
+        --panel-bg: #09090b;
+        --text-primary: #e4e4e7;
+        --text-secondary: #a1a1aa;
+        --border-color: #27272a;
+        --accent-color: #06b6d4;
         --status-success: #10b981;
         --status-warning: #f59e0b;
         --status-error: #ef4444;
-        --status-idle: #e5e7eb;
+        --status-idle: #3f3f46;
         --status-assigned: #3b82f6;
         --status-review: #8b5cf6;
         --status-busy: #f59e0b;
         --status-merged: #10b981;
-        --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --bg-color: #0f1115;
-          --panel-bg: #1f232b;
-          --text-primary: #f3f4f6;
-          --text-secondary: #9ca3af;
-          --border-color: #374151;
-        }
+        --font-sans: 'Fira Code', 'JetBrains Mono', Consolas, monospace;
       }
       body {
         margin: 0;
@@ -227,20 +218,23 @@ export function buildDashboardHtml(): string {
         display: flex;
         flex-direction: column;
         gap: 16px;
-        padding: 20px;
+        background-color: #000000;
+        padding: 16px;
+        font-family: 'Fira Code', monospace;
       }
       .event-card {
         display: flex;
         flex-direction: column;
         gap: 4px;
         font-size: 13px;
-        border-left: 2px solid var(--border-color);
-        padding-left: 12px;
+        border-left: none;
+        padding-left: 0;
+        margin-bottom: 8px;
       }
       .event-header {
         display: flex;
         justify-content: space-between;
-        color: var(--text-secondary);
+        color: #10b981;
         font-size: 12px;
       }
       .event-title {
@@ -248,18 +242,16 @@ export function buildDashboardHtml(): string {
         color: var(--text-primary);
       }
       .event-payload {
-        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-        background: rgba(0, 0, 0, 0.04);
-        padding: 8px;
-        border-radius: 6px;
+        background: transparent;
+        color: #0ea5e9;
+        padding: 4px 0 4px 16px;
+        border-left: 1px solid #3f3f46;
+        margin-left: 8px;
         margin-top: 4px;
         overflow-x: auto;
         white-space: pre-wrap;
         word-break: break-all;
-        color: var(--text-secondary);
-      }
-      @media (prefers-color-scheme: dark) {
-        .event-payload { background: rgba(255, 255, 255, 0.05); }
+        font-family: 'Fira Code', monospace;
       }
 
       /* Badges */
