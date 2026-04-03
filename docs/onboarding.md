@@ -160,7 +160,7 @@ node /abs/path/to/forgeflow-platform/scripts/run-codex-control-flow.js \
 如果控制层需要标准 review/dispatch skill，可安装：
 
 ```bash
-npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator
+npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator -g -y
 npm install -g @tingrudeng/worker-review-orchestrator-cli
 ```
 

@@ -72,7 +72,7 @@ node scripts/run-codex-control-flow.js \
 当前仓库对外提供的 control-layer skill 是 `worker-review-orchestrator`。它和控制层 CLI 是分开安装的两步路径：
 
 ```bash
-npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator
+npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator -g -y
 npm install -g @tingrudeng/worker-review-orchestrator-cli
 ```
 
@@ -119,6 +119,12 @@ node scripts/release-package.js --package trae-beta-runtime --bump prerelease --
 ```
 
 该助手默认为 dry-run 模式，只有显式传入 `--publish` 才会真正修改 `package.json` 并发布到 npm。发布命令自动带上 `--no-git-checks` 以避免 git 状态冲突。
+
+如需安装发包助手 skill：
+
+```bash
+npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill package-release -g -y
+```
 
 详细用法见 `skills/package-release/SKILL.md`。
 

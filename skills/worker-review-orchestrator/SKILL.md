@@ -379,14 +379,14 @@ Use `forgeflow-review-orchestrator` CLI from `@tingrudeng/worker-review-orchestr
 
 ### Install
 
-Install the skill and CLI as two separate steps:
+Install the skill and CLI as two separate steps. The skill install should be explicit global user-level installation:
 
 ```bash
-npx skills add https://github.com/TingRuDeng/ForgeFlow/skills --skill worker-review-orchestrator
+npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator -g -y
 npm install -g @tingrudeng/worker-review-orchestrator-cli
 ```
 
-If the npm package is not installed yet, use the repository-local fallback only when working inside a ForgeFlow checkout and after confirming the built artifact is fresh:
+If the npm package is not installed yet, use the repository-local fallback only when working inside a forgeflow-platform checkout and after confirming the built artifact is fresh:
 
 ```bash
 pnpm --filter @tingrudeng/worker-review-orchestrator-cli build

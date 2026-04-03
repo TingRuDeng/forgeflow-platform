@@ -213,7 +213,7 @@ forgeflow-review-orchestrator dispatch-task ... --target-worker-id trae-remote-f
 ### 控制层 skill
 
 ```bash
-npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator
+npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator -g -y
 npm install -g @tingrudeng/worker-review-orchestrator-cli
 ```
 

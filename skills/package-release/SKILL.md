@@ -5,6 +5,17 @@ description: Use when releasing ForgeFlow npm packages. This skill provides a sa
 
 # Package Release Helper
 
+## Install
+
+Install this skill globally at the user level:
+
+```bash
+npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill package-release -g -y
+```
+
+This skill does not ship a separate npm CLI. After installing the skill, run the repository script from a forgeflow-platform checkout.
+
+
 Use this skill when you need to release or version-bump ForgeFlow npm packages.
 
 ## Safety Semantics
@@ -24,7 +35,7 @@ This prevents accidental version bumps and ensures you can preview changes befor
 Preview what would be published without making any changes:
 
 ```bash
-node scripts/release-package.mjs --package trae-beta-runtime --bump prerelease
+node scripts/release-package.js --package trae-beta-runtime --bump prerelease
 ```
 
 This will show:
@@ -38,7 +49,7 @@ This will show:
 When you're ready to publish for real:
 
 ```bash
-node scripts/release-package.mjs --package trae-beta-runtime --bump prerelease --publish
+node scripts/release-package.js --package trae-beta-runtime --bump prerelease --publish
 ```
 
 This will:
@@ -51,7 +62,7 @@ This will:
 You can also be explicit about dry-run mode:
 
 ```bash
-node scripts/release-package.mjs --package trae-beta-runtime --bump prerelease --dry-run
+node scripts/release-package.js --package trae-beta-runtime --bump prerelease --dry-run
 ```
 
 ## Required Parameters
@@ -74,14 +85,14 @@ node scripts/release-package.mjs --package trae-beta-runtime --bump prerelease -
 
 1. **Always start with dry-run**: Preview the release first
    ```bash
-   node scripts/release-package.mjs --package <name> --bump <type>
+   node scripts/release-package.js --package <name> --bump <type>
    ```
 
 2. **Verify the output**: Check that the version bump is correct
 
 3. **Publish when ready**: Add `--publish` flag
    ```bash
-   node scripts/release-package.mjs --package <name> --bump <type> --publish
+   node scripts/release-package.js --package <name> --bump <type> --publish
    ```
 
 ## Prerelease Versioning
@@ -131,30 +142,30 @@ If any step fails (build, publish), the helper will:
 
 ```bash
 # Preview
-node scripts/release-package.mjs --package trae-beta-runtime --bump prerelease
+node scripts/release-package.js --package trae-beta-runtime --bump prerelease
 
 # Publish
-node scripts/release-package.mjs --package trae-beta-runtime --bump prerelease --publish
+node scripts/release-package.js --package trae-beta-runtime --bump prerelease --publish
 ```
 
 ### Release a patch version
 
 ```bash
 # Preview
-node scripts/release-package.mjs --package worker-review-orchestrator-cli --bump patch
+node scripts/release-package.js --package worker-review-orchestrator-cli --bump patch
 
 # Publish
-node scripts/release-package.mjs --package worker-review-orchestrator-cli --bump patch --publish
+node scripts/release-package.js --package worker-review-orchestrator-cli --bump patch --publish
 ```
 
 ### Release a minor version
 
 ```bash
 # Preview
-node scripts/release-package.mjs --package trae-beta-runtime --bump minor
+node scripts/release-package.js --package trae-beta-runtime --bump minor
 
 # Publish
-node scripts/release-package.mjs --package trae-beta-runtime --bump minor --publish
+node scripts/release-package.js --package trae-beta-runtime --bump minor --publish
 ```
 
 ## Response Pattern
