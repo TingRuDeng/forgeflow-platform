@@ -841,6 +841,12 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(waitForRemoteDebuggingReady).toHaveBeenCalledWith({ remoteDebuggingPort: 9222 });
     expect(waitForAutomationReady).toHaveBeenCalledWith({ automationUrl: "http://127.0.0.1:8790" });
     expect(waitForDispatcherHealth).toHaveBeenCalledWith({ dispatcherUrl: "http://127.0.0.1:8787" });
+    expect(log).toHaveBeenCalledWith("launch: starting...");
+    expect(log).toHaveBeenCalledWith("launch: waiting for remote debugging endpoint...");
+    expect(log).toHaveBeenCalledWith("gateway: waiting for automation gateway /ready...");
+    expect(log).toHaveBeenCalledWith("dispatcher: waiting for /health...");
+    expect(log).toHaveBeenCalledWith("worker: starting...");
+    expect(log).toHaveBeenCalledWith("all: runtime startup complete");
 
     mkdirSyncSpy.mockRestore();
   });
@@ -931,6 +937,13 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(waitForRemoteDebuggingReady).toHaveBeenCalledWith({ remoteDebuggingPort: 9222 });
     expect(waitForAutomationReady).toHaveBeenCalledWith({ automationUrl: "http://127.0.0.1:8790" });
     expect(waitForDispatcherHealth).toHaveBeenCalledWith({ dispatcherUrl: "http://127.0.0.1:8787" });
+    expect(log).toHaveBeenCalledWith("worker: stopped 0 process(es)");
+    expect(log).toHaveBeenCalledWith("gateway: stopped 0 process(es)");
+    expect(log).toHaveBeenCalledWith("launch: stopped 0 process(es)");
+    expect(log).toHaveBeenCalledWith("launch: waiting for remote debugging endpoint...");
+    expect(log).toHaveBeenCalledWith("gateway: waiting for automation gateway /ready...");
+    expect(log).toHaveBeenCalledWith("dispatcher: waiting for /health...");
+    expect(log).toHaveBeenCalledWith("all: runtime restart complete");
 
     mkdirSyncSpy.mockRestore();
   });
@@ -1038,6 +1051,39 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining("worker"));
     expect(log).toHaveBeenCalledWith(expect.stringContaining("--detach"));
     expect(log).toHaveBeenCalledWith(expect.stringContaining("--log-file"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("--debug"));
+  });
+
+  it("parses restart --help with help option", () => {
+    const parsed = parseCliArgs(["restart", "--help"]);
+
+    expect(parsed).toEqual({
+      command: "restart",
+      options: { help: true },
+    });
+  });
+
+  it("runs restart --help and prints restart help text", async () => {
+    const log = vi.fn();
+
+    await runCli(["restart", "--help"], {
+      readConfig: vi.fn(() => null),
+      initConfig: vi.fn(),
+      doctor: vi.fn(),
+      formatDoctor: vi.fn(),
+      startLaunchCmd: vi.fn(),
+      startGatewayCmd: vi.fn(),
+      startWorkerCmd: vi.fn(),
+      listProcesses: vi.fn(),
+      stopProcesses: vi.fn(),
+      updateCmd: vi.fn(),
+      log,
+    });
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("forgeflow-trae-beta restart - Restart a runtime component"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("--detach"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("--debug"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("restart all --detach --debug --log-file-dir"));
   });
 
   it("runs stop --help and prints stop help text", async () => {

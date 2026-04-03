@@ -121,8 +121,10 @@ Worker Options:
   --automation-url <url>         Automation gateway URL
   --worker-id <id>               Worker identifier
   --poll-interval-ms <ms>        Poll interval for dispatcher (default: 5000)
-  --debug                        Enable verbose debug logs for gateway/worker runtime
   --once                         Run worker once and exit
+
+Gateway/Worker/All Options:
+  --debug                        Enable verbose debug logs for gateway and worker runtime
 
 Examples:
   forgeflow-trae-beta start launch --detach
@@ -170,12 +172,13 @@ Options:
   --detach                       Run in background (detached mode) after restart
   --log-file <path>              Redirect output to log file (single service only)
   --log-file-dir <dir>           Directory for log files (for 'all' subcommand)
+  --debug                        Enable verbose debug logs for gateway and worker runtime
 
 Examples:
   forgeflow-trae-beta restart launch --log-file /tmp/launch.log
   forgeflow-trae-beta restart gateway --log-file /tmp/gateway.log
   forgeflow-trae-beta restart worker --log-file /tmp/worker.log
-  forgeflow-trae-beta restart all --detach --log-file-dir /tmp/forgeflow-logs`;
+  forgeflow-trae-beta restart all --detach --debug --log-file-dir /tmp/forgeflow-logs`;
 }
 
 function readPackageVersion() {
@@ -556,6 +559,11 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
   const configPath = typeof parsed.options.configPath === "string" ? parsed.options.configPath : undefined;
   const config = deps.readConfig({ configPath });
   const jsonOutput = parsed.options.json === true;
+  const logProgress = (message: string) => {
+    if (!jsonOutput) {
+      deps.log(message);
+    }
+  };
 
   if (parsed.command === "init") {
     const result = deps.initConfig({
@@ -743,7 +751,11 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
       const stoppedWorkerResult = deps.stopProcesses("worker");
       const stoppedGatewayResult = deps.stopProcesses("gateway");
       const stoppedLaunchResult = deps.stopLaunchCmd();
+      logProgress(`worker: stopped ${stoppedWorkerResult.stoppedPids.length} process(es)`);
+      logProgress(`gateway: stopped ${stoppedGatewayResult.stoppedPids.length} process(es)`);
+      logProgress(`launch: stopped ${stoppedLaunchResult.stoppedPids.length} process(es)`);
 
+      logProgress("launch: starting...");
       const startLaunchResult = deps.startLaunchCmd({
         traeBin,
         projectPath,
@@ -753,9 +765,13 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
         logFile: `${logFileDir}/launch.log`,
       });
       await startLaunchResult.ready;
+      logProgress(formatSpawnedCommandHuman(startLaunchResult, "launch"));
+      logProgress("launch: waiting for remote debugging endpoint...");
       await deps.waitForRemoteDebuggingReady({ remoteDebuggingPort });
+      logProgress("launch: remote debugging endpoint ready");
 
       const gatewayBind = resolveGatewayBindFromAutomationUrl(config);
+      logProgress("gateway: starting...");
       const startGatewayResult = deps.startGatewayCmd({
         host: typeof parsed.options.host === "string" ? parsed.options.host : gatewayBind.host,
         port: typeof parsed.options.port === "number" ? parsed.options.port : gatewayBind.port,
@@ -765,9 +781,15 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
         logFile: `${logFileDir}/gateway.log`,
       });
       await startGatewayResult.ready;
+      logProgress(formatSpawnedCommandHuman(startGatewayResult, "gateway"));
+      logProgress("gateway: waiting for automation gateway /ready...");
       await deps.waitForAutomationReady({ automationUrl });
+      logProgress("gateway: automation gateway ready");
+      logProgress("dispatcher: waiting for /health...");
       await deps.waitForDispatcherHealth({ dispatcherUrl });
+      logProgress("dispatcher: /health reported ok");
 
+      logProgress("worker: starting...");
       const startWorkerResult = deps.startWorkerCmd({
         repoDir: projectPath,
         dispatcherUrl,
@@ -780,6 +802,8 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
         logFile: `${logFileDir}/worker.log`,
       });
       await startWorkerResult.ready;
+      logProgress(formatSpawnedCommandHuman(startWorkerResult, "worker"));
+      logProgress("all: runtime restart complete");
 
       const results = {
         stopped: {
@@ -796,13 +820,6 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
 
       if (jsonOutput) {
         deps.log(JSON.stringify(results, null, 2));
-      } else {
-        deps.log(`worker: stopped ${stoppedWorkerResult.stoppedPids.length} process(es)`);
-        deps.log(`gateway: stopped ${stoppedGatewayResult.stoppedPids.length} process(es)`);
-        deps.log(`launch: stopped ${stoppedLaunchResult.stoppedPids.length} process(es)`);
-        deps.log(formatSpawnedCommandHuman(startLaunchResult, "launch"));
-        deps.log(formatSpawnedCommandHuman(startGatewayResult, "gateway"));
-        deps.log(formatSpawnedCommandHuman(startWorkerResult, "worker"));
       }
       return results;
     }
@@ -916,6 +933,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
 
     fs.mkdirSync(logFileDir, { recursive: true });
 
+    logProgress("launch: starting...");
     const startLaunchResult = deps.startLaunchCmd({
       traeBin,
       projectPath,
@@ -925,9 +943,13 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
       logFile: `${logFileDir}/launch.log`,
     });
     await startLaunchResult.ready;
+    logProgress(formatSpawnedCommandHuman(startLaunchResult, "launch"));
+    logProgress("launch: waiting for remote debugging endpoint...");
     await deps.waitForRemoteDebuggingReady({ remoteDebuggingPort });
+    logProgress("launch: remote debugging endpoint ready");
 
     const gatewayBind = resolveGatewayBindFromAutomationUrl(config);
+    logProgress("gateway: starting...");
     const startGatewayResult = deps.startGatewayCmd({
       host: typeof parsed.options.host === "string" ? parsed.options.host : gatewayBind.host,
       port: typeof parsed.options.port === "number" ? parsed.options.port : gatewayBind.port,
@@ -937,9 +959,15 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
       logFile: `${logFileDir}/gateway.log`,
     });
     await startGatewayResult.ready;
+    logProgress(formatSpawnedCommandHuman(startGatewayResult, "gateway"));
+    logProgress("gateway: waiting for automation gateway /ready...");
     await deps.waitForAutomationReady({ automationUrl });
+    logProgress("gateway: automation gateway ready");
+    logProgress("dispatcher: waiting for /health...");
     await deps.waitForDispatcherHealth({ dispatcherUrl });
+    logProgress("dispatcher: /health reported ok");
 
+    logProgress("worker: starting...");
     const startWorkerResult = deps.startWorkerCmd({
       repoDir:
         (typeof parsed.options.repoDir === "string" ? parsed.options.repoDir : undefined)
@@ -957,13 +985,11 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
       logFile: `${logFileDir}/worker.log`,
     });
     await startWorkerResult.ready;
+    logProgress(formatSpawnedCommandHuman(startWorkerResult, "worker"));
+    logProgress("all: runtime startup complete");
 
     if (jsonOutput) {
       deps.log(JSON.stringify({ launch: startLaunchResult, gateway: startGatewayResult, worker: startWorkerResult }, null, 2));
-    } else {
-      deps.log(formatSpawnedCommandHuman(startLaunchResult, "launch"));
-      deps.log(formatSpawnedCommandHuman(startGatewayResult, "gateway"));
-      deps.log(formatSpawnedCommandHuman(startWorkerResult, "worker"));
     }
     return {
       launch: startLaunchResult,

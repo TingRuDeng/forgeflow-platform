@@ -147,12 +147,20 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 
 ```bash
 cd /abs/path/to/forgeflow-platform
+pnpm install
 ./scripts/start-control-plane.sh
 ```
+
+说明：
+
+- 这里是从源码仓库直接启动 dispatcher，不是独立安装包形态。
+- 首次启动前需要先执行 `pnpm install`，确保 workspace devDependencies 已安装。
+- `start-control-plane.sh` / `run-dispatcher-server.js` 启动时会触发 `apps/dispatcher` build；若未安装依赖，常见错误是 `sh: tsc: command not found`。
 
 如果需要绕过一键入口，也可以直接起 dispatcher：
 
 ```bash
+pnpm install
 node /abs/path/to/forgeflow-platform/scripts/run-dispatcher-server.js \
   --host 0.0.0.0 \
   --port 8787 \
