@@ -202,10 +202,10 @@ if (!process.env.GITHUB_TOKEN || changedFiles.length === 0) {
 
 | 文件 | 行数 | 问题 |
 |------|------|------|
-| [dispatcher-state.mjs](file:///Volumes/Data/code/MyCode/ForgeFlow/scripts/lib/dispatcher-state.mjs) | 969 | 无类型，immutable 深拷贝模式 + 大量 `...state` 展开，容易出错 |
-| [dispatcher-server.mjs](file:///Volumes/Data/code/MyCode/ForgeFlow/scripts/lib/dispatcher-server.mjs) | 895 | 单文件 monolithic HTTP handler，Dashboard HTML 硬编码 289 行，Trae/Generic 路由混在一起 |
-| [trae-automation-worker.mjs](file:///Volumes/Data/code/MyCode/ForgeFlow/scripts/lib/trae-automation-worker.mjs) | 897 | 多层 try-catch 嵌套的超时恢复逻辑，超 3 层的 fallback 链 |
-| [trae-dom-driver.mjs](file:///Volumes/Data/code/MyCode/ForgeFlow/scripts/lib/trae-dom-driver.mjs) | 875 | 大量浏览器端 JS 以模板字符串形式嵌入服务端代码 |
+| `scripts/lib/dispatcher-state.mjs` | 969 | 无类型，immutable 深拷贝模式 + 大量 `...state` 展开，容易出错 |
+| `scripts/lib/dispatcher-server.mjs` | 895 | 单文件 monolithic HTTP handler，Dashboard HTML 硬编码 289 行，Trae/Generic 路由混在一起 |
+| `scripts/lib/trae-automation-worker.mjs` | 897 | 多层 try-catch 嵌套的超时恢复逻辑，超 3 层的 fallback 链 |
+| `scripts/lib/trae-dom-driver.mjs` | 875 | 大量浏览器端 JS 以模板字符串形式嵌入服务端代码 |
 
 **建议优先级**：🟡 P1（随 P0 迁入 TypeScript 时一起解决）
 
