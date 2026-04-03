@@ -1,0 +1,7 @@
+.worktrees/
+.forgeflow-dispatcher/
+.forgeflow-trae-gateway/
+.orchestrator/*
+!.orchestrator/project.yaml
+node_modules/
+dist/
