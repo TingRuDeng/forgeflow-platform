@@ -12,7 +12,7 @@
 
 ## 当前实现边界
 
-当前 ForgeFlow 已具备：
+当前 forgeflow-platform 已具备：
 
 - planner 输出 `planner_output_json`
 - `ai-dispatch` 生成 `.orchestrator` 调度产物

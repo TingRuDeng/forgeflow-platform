@@ -1,16 +1,16 @@
-# ForgeFlow 多智能体编排项目分析与借鉴
+# forgeflow-platform 多智能体编排项目分析与借鉴
 
 > 状态：研究材料，非当前主线权威文档。当前实现与入口关系请以 `AGENTS.md`、`README.md`、`docs/README.md`、`docs/contracts/*` 为准。
 
 ## 分析背景
 
-基于对 ForgeFlow 项目的全面分析，以及对 GitHub 上类似开源项目和多智能体系统最佳实践的研究，整理可借鉴的改进方向。
+基于对 forgeflow-platform 项目的全面分析，以及对 GitHub 上类似开源项目和多智能体系统最佳实践的研究，整理可借鉴的改进方向。
 
 ---
 
 ## 一、当前项目架构概览
 
-ForgeFlow 已具备清晰的模块化设计：
+forgeflow-platform 已具备清晰的模块化设计：
 - **核心调度器** (`apps/dispatcher/`)：任务状态机、Worker 管理、事件系统
 - **MCP 集成层** (`packages/`)：任务模式、结果契约、Trae Worker 服务器
 - **运行时脚本** (`scripts/`)：Dispatcher Server、Worker Daemon、自动化网关
@@ -43,7 +43,7 @@ ForgeFlow 已具备清晰的模块化设计：
 **可采纳模式**：
 ```typescript
 // 借鉴 AutoGen 的分层 Agent 接口设计
-interface ForgeFlowAgent {
+interface ForgeflowPlatformAgent {
   core: AgentCoreAPI;           // 核心能力层
   extensions: ExtensionAPI;     // 扩展层
   tools: ToolIntegrationAPI;    // 工具集成层
@@ -65,7 +65,7 @@ interface ForgeFlowAgent {
 - LangSmith 可观测性集成
 
 **可采纳模式**：
-- 为 ForgeFlow 添加任务状态持久化，支持失败恢复
+- 为 forgeflow-platform 添加任务状态持久化，支持失败恢复
 - 集成类似 LangSmith 的可观测性工具
 - 实现 Human-in-the-Loop 审查机制
 
@@ -103,7 +103,7 @@ interface ForgeFlowAgent {
 - 安全的 Tool 访问边界
 
 **可采纳模式**：
-- 统一 ForgeFlow 的 Agent 通信协议
+- 统一 forgeflow-platform 的 Agent 通信协议
 - 扩展 MCP 集成到更多 Worker 类型
 - 实现更严格的 Tool 访问控制
 
@@ -263,7 +263,7 @@ interface StructuredLog {
 
 **协议设计**：
 ```typescript
-interface ForgeFlowMessage {
+interface ForgeflowPlatformMessage {
   version: string;
   type: 'request' | 'response' | 'event';
   id: string;
@@ -330,7 +330,7 @@ interface ForgeFlowMessage {
 - 增加系统复杂度
 
 **建议**：
-借鉴其持久化和可观测性概念，而非完全采用。保持 ForgeFlow 的轻量级特性。
+借鉴其持久化和可观测性概念，而非完全采用。保持 forgeflow-platform 的轻量级特性。
 
 ### 2. MCP 协议标准化程度
 
@@ -393,7 +393,7 @@ interface ForgeFlowMessage {
 
 ## 七、总结
 
-ForgeFlow 已具备良好的架构基础，通过借鉴 AutoGen、LangGraph、CrewAI 等成熟项目的最佳实践，可以在以下方面显著提升：
+forgeflow-platform 已具备良好的架构基础，通过借鉴 AutoGen、LangGraph、CrewAI 等成熟项目的最佳实践，可以在以下方面显著提升：
 
 ### 架构层面
 - 采用分层设计，提高模块化程度

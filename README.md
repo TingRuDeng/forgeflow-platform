@@ -1,6 +1,6 @@
-# ForgeFlow
+# forgeflow-platform
 
-ForgeFlow 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都只是 worker 接入方式。当前迭代优先级为 **Trae-first**：先收敛 Trae 无人值守链路稳定性，再扩展 `codex/gemini` worker 主线能力。
+forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都只是 worker 接入方式。当前迭代优先级为 **Trae-first**：先收敛 Trae 无人值守链路稳定性，再扩展 `codex/gemini` worker 主线能力。
 
 ## 当前主线
 
@@ -72,7 +72,7 @@ node scripts/run-codex-control-flow.js \
 当前仓库对外提供的 control-layer skill 是 `worker-review-orchestrator`。它和控制层 CLI 是分开安装的两步路径：
 
 ```bash
-npx skills add https://github.com/TingRuDeng/ForgeFlow/skills --skill worker-review-orchestrator
+npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator
 npm install -g @tingrudeng/worker-review-orchestrator-cli
 ```
 
@@ -96,13 +96,19 @@ forgeflow-trae-beta start gateway
 forgeflow-trae-beta start worker
 ```
 
+补充：`forgeflow-trae-beta start all` / `restart all` 现在会在返回成功前依次等待：
+
+- Trae remote debugging endpoint（`/json/version`）可用
+- automation gateway `/ready` 可用
+- dispatcher `/health` 可用
+
 它适合远程机器上的 Trae 无人值守执行，不替代控制平面仓库本身。
 
-如果本机还没有安装控制层 CLI，可在 ForgeFlow 仓库内临时用 `node packages/worker-review-orchestrator-cli/dist/cli.js ...` 作为 fallback，但不应把仓库内 `dist` 当成默认长期入口。
+如果本机还没有安装控制层 CLI，可在 forgeflow-platform 仓库内临时用 `node packages/worker-review-orchestrator-cli/dist/cli.js ...` 作为 fallback，但不应把仓库内 `dist` 当成默认长期入口。
 
 ### 4. 发布 npm 包
 
-使用包发布助手发布 ForgeFlow npm 包：
+使用包发布助手发布 forgeflow-platform npm 包：
 
 ```bash
 # 预览发布（默认 dry-run，不会修改文件）
@@ -177,8 +183,9 @@ forgeflow-trae-beta start worker
 
 - `start gateway` 默认启用 session store，并将会话状态落在 `.forgeflow-trae-gateway/sessions.json`。
 - Trae worker 的软超时恢复依赖该会话状态；如需修改目录可显式传 `--state-dir /abs/path/to/state-dir`。
+- `forgeflow-trae-beta doctor` 现在会额外输出 dispatcher/gateway/CDP 连通性检查（标记为 optional），用于快速定位部署环境问题。
 
-脚本方式仅用于在 ForgeFlow 仓库内做开发或调试：
+脚本方式仅用于在 forgeflow-platform 仓库内做开发或调试：
 
 ```bash
 node scripts/run-trae-automation-launch.js \

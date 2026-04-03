@@ -794,6 +794,9 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
   it("creates log-file-dir before starting services for start all", async () => {
     const log = vi.fn();
     const mkdirSyncSpy = vi.spyOn(fs, "mkdirSync").mockImplementation(() => undefined);
+    const waitForRemoteDebuggingReady = vi.fn(async () => undefined);
+    const waitForAutomationReady = vi.fn(async () => undefined);
+    const waitForDispatcherHealth = vi.fn(async () => undefined);
     const startLaunchCmd = vi.fn(() => createSpawnedCommandMock({
       scriptPath: "/tmp/forgeflow/packages/trae-beta-runtime/dist/runtime/run-trae-automation-launch.js",
     }));
@@ -815,6 +818,9 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
       listProcesses: vi.fn(),
       stopProcesses: vi.fn(),
       updateCmd: vi.fn(),
+      waitForRemoteDebuggingReady,
+      waitForAutomationReady,
+      waitForDispatcherHealth,
       log,
     });
 
@@ -828,6 +834,9 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(startWorkerCmd).toHaveBeenCalledWith(expect.objectContaining({
       logFile: "/tmp/test-logs/worker.log",
     }));
+    expect(waitForRemoteDebuggingReady).toHaveBeenCalledWith({ remoteDebuggingPort: 9222 });
+    expect(waitForAutomationReady).toHaveBeenCalledWith({ automationUrl: "http://127.0.0.1:8790" });
+    expect(waitForDispatcherHealth).toHaveBeenCalledWith({ dispatcherUrl: "http://127.0.0.1:8787" });
 
     mkdirSyncSpy.mockRestore();
   });
@@ -835,6 +844,9 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
   it("creates default log-file-dir before starting services for start all when omitted", async () => {
     const log = vi.fn();
     const mkdirSyncSpy = vi.spyOn(fs, "mkdirSync").mockImplementation(() => undefined);
+    const waitForRemoteDebuggingReady = vi.fn(async () => undefined);
+    const waitForAutomationReady = vi.fn(async () => undefined);
+    const waitForDispatcherHealth = vi.fn(async () => undefined);
     const startLaunchCmd = vi.fn(() => createSpawnedCommandMock({
       scriptPath: "/tmp/forgeflow/packages/trae-beta-runtime/dist/runtime/run-trae-automation-launch.js",
     }));
@@ -856,6 +868,9 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
       listProcesses: vi.fn(),
       stopProcesses: vi.fn(),
       updateCmd: vi.fn(),
+      waitForRemoteDebuggingReady,
+      waitForAutomationReady,
+      waitForDispatcherHealth,
       log,
     });
 
@@ -866,6 +881,9 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
   it("creates log-file-dir before starting services for restart all", async () => {
     const log = vi.fn();
     const mkdirSyncSpy = vi.spyOn(fs, "mkdirSync").mockImplementation(() => undefined);
+    const waitForRemoteDebuggingReady = vi.fn(async () => undefined);
+    const waitForAutomationReady = vi.fn(async () => undefined);
+    const waitForDispatcherHealth = vi.fn(async () => undefined);
     const startLaunchCmd = vi.fn(() => createSpawnedCommandMock({
       scriptPath: "/tmp/forgeflow/packages/trae-beta-runtime/dist/runtime/run-trae-automation-launch.js",
     }));
@@ -890,6 +908,9 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
       stopProcesses,
       stopLaunchCmd,
       updateCmd: vi.fn(),
+      waitForRemoteDebuggingReady,
+      waitForAutomationReady,
+      waitForDispatcherHealth,
       log,
     });
 
@@ -903,6 +924,9 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(startWorkerCmd).toHaveBeenCalledWith(expect.objectContaining({
       logFile: "/tmp/restart-logs/worker.log",
     }));
+    expect(waitForRemoteDebuggingReady).toHaveBeenCalledWith({ remoteDebuggingPort: 9222 });
+    expect(waitForAutomationReady).toHaveBeenCalledWith({ automationUrl: "http://127.0.0.1:8790" });
+    expect(waitForDispatcherHealth).toHaveBeenCalledWith({ dispatcherUrl: "http://127.0.0.1:8787" });
 
     mkdirSyncSpy.mockRestore();
   });

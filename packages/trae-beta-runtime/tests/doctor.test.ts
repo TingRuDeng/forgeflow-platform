@@ -71,6 +71,7 @@ describe("@tingrudeng/trae-beta-runtime doctor", () => {
       },
     });
 
+    expect(result.ok).toBe(true);
     expect(result.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -80,6 +81,12 @@ describe("@tingrudeng/trae-beta-runtime doctor", () => {
         expect.objectContaining({
           name: "project-git-repo",
           ok: true,
+        }),
+        expect.objectContaining({
+          name: "dispatcher-health",
+          details: expect.objectContaining({
+            optional: true,
+          }),
         }),
       ]),
     );

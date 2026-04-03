@@ -104,7 +104,7 @@ git commit -m "feat: add worker assignment runner"
 **第 1 步：编写失败的测试**
 
 不为文档单独写测试，改用结构化检查：
-- README 必须包含 ForgeFlow 简介
+- README 必须包含 forgeflow-platform 简介
 - README 必须包含 `ai-dispatch`
 - README 必须包含 `trigger-ai-dispatch.mjs`
 - README 必须包含 `run-worker-assignment.mjs`
@@ -117,7 +117,7 @@ git commit -m "feat: add worker assignment runner"
 **第 3 步：编写最简实现**
 
 新增 `README.md`，至少写清：
-- ForgeFlow 是什么
+- forgeflow-platform 是什么
 - 当前主链路
 - planner / dispatch / assignment package / worker execution
 - 两个脚本的使用方式

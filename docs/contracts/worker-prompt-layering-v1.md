@@ -2,7 +2,7 @@
 
 ## 目标
 
-定义 ForgeFlow 中 worker 协议、任务定义、执行材料与背景信息的 5 层分层边界，避免将这些职责混在一起。
+定义 forgeflow-platform 中 worker 协议、任务定义、执行材料与背景信息的 5 层分层边界，避免将这些职责混在一起。
 
 这份文档用于约束：
 
@@ -159,7 +159,7 @@
 
 ## 推荐组合方式
 
-在 ForgeFlow 中，Trae worker 的推荐组合是：
+在 forgeflow-platform 中，Trae worker 的推荐组合是：
 
 1. **Worker 启动层固定 `repo_dir`**
    - 一台 Trae worker 绑定一个项目目录

@@ -1,10 +1,10 @@
-# ForgeFlow Architecture
+# forgeflow-platform Architecture
 
 > Verified overview of the current main path. This is not a full code catalog. Facts below were checked against the live script entrypoints under `scripts/lib/`, the dispatcher TypeScript foundations under `apps/dispatcher/src/`, and the packaged Trae runtime under `packages/trae-beta-runtime/src/`.
 
 ## 1. System Shape
 
-ForgeFlow is a control-plane repository for multi-agent development, not a single monolithic application.
+forgeflow-platform is a control-plane repository for multi-agent development, not a single monolithic application.
 
 Current active building blocks:
 

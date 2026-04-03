@@ -1,4 +1,4 @@
-# ForgeFlow 架构审查与迭代路线图
+# forgeflow-platform 架构审查与迭代路线图
 
 > 审查基线：`main` 分支 `5608917` (2026-03-31)
 > 代码规模：核心运行时 `scripts/lib/` 共 6,215 行 (.mjs)，`apps/dispatcher/` 含 TypeScript 领域层，`packages/` 下 11 个子包
@@ -8,7 +8,7 @@
 
 ## 一、项目现状总评
 
-ForgeFlow 已经从"概念验证"阶段走到了"可跑通端到端链路"的阶段。当前主线支持：
+forgeflow-platform 已经从"概念验证"阶段走到了"可跑通端到端链路"的阶段。当前主线支持：
 
 - **Dispatcher → Worker Daemon** 的 codex/gemini 多机执行闭环
 - **Trae automation gateway + worker** 的无人值守 Trae 驱动闭环

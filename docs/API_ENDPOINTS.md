@@ -1,4 +1,4 @@
-# ForgeFlow API Endpoints
+# forgeflow-platform API Endpoints
 
 > Verified HTTP surface overview for the current live runtime. This is not a field-complete contract catalog. For exact payload semantics, keep using `docs/contracts/*` and the live code.
 

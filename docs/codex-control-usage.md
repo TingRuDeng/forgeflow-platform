@@ -1,6 +1,6 @@
 # Codex Control 使用说明
 
-这份文档说明如何把 Codex 当成 ForgeFlow 的总调度来使用。
+这份文档说明如何把 Codex 当成 forgeflow-platform 的总调度来使用。
 
 ## 1. 目标
 
@@ -65,7 +65,7 @@ curl -s http://127.0.0.1:8787/api/dashboard/snapshot | jq '{workers: [.workers[]
 ```bash
 forgeflow-review-orchestrator dispatch-task \
   --dispatcher-url http://127.0.0.1:8787 \
-  --repo TingRuDeng/ForgeFlow \
+  --repo TingRuDeng/forgeflow-platform \
   --default-branch main \
   --task-id task-1 \
   --title "Update docs" \
@@ -213,7 +213,7 @@ forgeflow-review-orchestrator dispatch-task ... --target-worker-id trae-remote-f
 ### 控制层 skill
 
 ```bash
-npx skills add https://github.com/TingRuDeng/ForgeFlow/skills --skill worker-review-orchestrator
+npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator
 npm install -g @tingrudeng/worker-review-orchestrator-cli
 ```
 

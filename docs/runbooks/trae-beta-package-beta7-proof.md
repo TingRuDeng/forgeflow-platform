@@ -146,8 +146,8 @@ forgeflow-trae-beta status
 
 本次 beta.7 远程验证已经确认：
 - 公开 npm 包可直接在远程机器安装
-- 不再依赖本地 ForgeFlow checkout
+- 不再依赖本地 forgeflow-platform checkout
 - `doctor` 能正确验证 target repo 的 git worktree
 - `start launch`、`start gateway`、`start worker` 都能通过包内 `dist/runtime/*` 直接运行
 - `status` 能识别包内启动的 gateway 与 worker 进程
-- 远程 worker 可通过该公开包路径领取并执行真实 ForgeFlow 任务，再把结果回写到 dispatcher
+- 远程 worker 可通过该公开包路径领取并执行真实 forgeflow-platform 任务，再把结果回写到 dispatcher

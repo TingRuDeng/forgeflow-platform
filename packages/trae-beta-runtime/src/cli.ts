@@ -33,6 +33,9 @@ export interface CliDeps {
   stopProcesses: typeof stopManagedProcesses;
   stopLaunchCmd: typeof stopLaunch;
   updateCmd: typeof updateLocalCheckout;
+  waitForRemoteDebuggingReady: (input: { remoteDebuggingPort: number }) => Promise<void>;
+  waitForAutomationReady: (input: { automationUrl: string }) => Promise<void>;
+  waitForDispatcherHealth: (input: { dispatcherUrl: string }) => Promise<void>;
   log: (message: string) => void;
 }
 
@@ -393,6 +396,117 @@ function resolveGatewayBindFromAutomationUrl(config: TraeBetaConfig) {
   };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function withPath(baseUrl: string, pathname: string): string {
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  return new URL(pathname, normalizedBase).toString();
+}
+
+async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<{ statusCode: number; body: unknown }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        accept: "application/json",
+      },
+    });
+    const text = await response.text();
+    let body: unknown = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = text;
+    }
+
+    return {
+      statusCode: response.status,
+      body,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForReadiness(
+  label: string,
+  probe: () => Promise<void>,
+  options: {
+    maxAttempts?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+  } = {},
+): Promise<void> {
+  const maxAttempts = options.maxAttempts ?? 20;
+  let delayMs = options.initialDelayMs ?? 300;
+  const maxDelayMs = options.maxDelayMs ?? 2_000;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await probe();
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt >= maxAttempts) {
+        break;
+      }
+      await sleep(delayMs);
+      delayMs = Math.min(maxDelayMs, Math.round(delayMs * 1.5));
+    }
+  }
+
+  throw new Error(`${label} is not ready: ${lastError?.message || "unknown error"}`);
+}
+
+async function waitForRemoteDebuggingReady(input: { remoteDebuggingPort: number }): Promise<void> {
+  const url = `http://127.0.0.1:${input.remoteDebuggingPort}/json/version`;
+  await waitForReadiness("Trae remote debugging endpoint", async () => {
+    const { statusCode, body } = await fetchJsonWithTimeout(url, 2_000);
+    const parsed = body as Record<string, unknown> | null;
+    if (
+      statusCode !== 200
+      || !parsed
+      || typeof parsed !== "object"
+      || typeof parsed.webSocketDebuggerUrl !== "string"
+      || parsed.webSocketDebuggerUrl.length === 0
+    ) {
+      throw new Error(`unexpected response from ${url}`);
+    }
+  });
+}
+
+async function waitForAutomationReady(input: { automationUrl: string }): Promise<void> {
+  const url = withPath(input.automationUrl, "/ready");
+  await waitForReadiness("automation gateway /ready", async () => {
+    const { statusCode, body } = await fetchJsonWithTimeout(url, 2_000);
+    const parsed = body as Record<string, unknown> | null;
+    const data = parsed && typeof parsed.data === "object" && parsed.data !== null
+      ? parsed.data as Record<string, unknown>
+      : null;
+    const ready = data?.ready === true || parsed?.ready === true;
+    if (statusCode !== 200 || !ready) {
+      throw new Error(`unexpected response from ${url}`);
+    }
+  });
+}
+
+async function waitForDispatcherHealth(input: { dispatcherUrl: string }): Promise<void> {
+  const url = withPath(input.dispatcherUrl, "/health");
+  await waitForReadiness("dispatcher /health", async () => {
+    const { statusCode, body } = await fetchJsonWithTimeout(url, 2_000);
+    const parsed = body as Record<string, unknown> | null;
+    if (statusCode !== 200 || !parsed || parsed.status !== "ok") {
+      throw new Error(`unexpected response from ${url}`);
+    }
+  });
+}
+
 export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {}) {
   const deps: CliDeps = {
     readConfig: readTraeBetaConfig,
@@ -406,6 +520,9 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
     stopProcesses: stopManagedProcesses,
     stopLaunchCmd: stopLaunch,
     updateCmd: updateLocalCheckout,
+    waitForRemoteDebuggingReady,
+    waitForAutomationReady,
+    waitForDispatcherHealth,
     log: (message) => console.log(message),
     ...partialDeps,
   };
@@ -610,6 +727,12 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
       const logFileDir = typeof parsed.options.logFileDir === "string"
         ? parsed.options.logFileDir
         : "/tmp/forgeflow-trae-beta-logs";
+      const projectPath = requireConfigValue(config, "projectPath");
+      const dispatcherUrl = requireConfigValue(config, "dispatcherUrl");
+      const automationUrl = requireConfigValue(config, "automationUrl");
+      const workerId = requireConfigValue(config, "workerId");
+      const traeBin = requireConfigValue(config, "traeBin");
+      const remoteDebuggingPort = requireConfigValue(config, "remoteDebuggingPort");
 
       fs.mkdirSync(logFileDir, { recursive: true });
 
@@ -618,14 +741,15 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
       const stoppedLaunchResult = deps.stopLaunchCmd();
 
       const startLaunchResult = deps.startLaunchCmd({
-        traeBin: requireConfigValue(config, "traeBin"),
-        projectPath: requireConfigValue(config, "projectPath"),
-        remoteDebuggingPort: requireConfigValue(config, "remoteDebuggingPort"),
+        traeBin,
+        projectPath,
+        remoteDebuggingPort,
         timeoutMs: typeof parsed.options.timeoutMs === "number" ? parsed.options.timeoutMs : undefined,
         ...(parsed.options.detach === true && { detached: true }),
         logFile: `${logFileDir}/launch.log`,
       });
       await startLaunchResult.ready;
+      await deps.waitForRemoteDebuggingReady({ remoteDebuggingPort });
 
       const gatewayBind = resolveGatewayBindFromAutomationUrl(config);
       const startGatewayResult = deps.startGatewayCmd({
@@ -637,12 +761,14 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
         logFile: `${logFileDir}/gateway.log`,
       });
       await startGatewayResult.ready;
+      await deps.waitForAutomationReady({ automationUrl });
+      await deps.waitForDispatcherHealth({ dispatcherUrl });
 
       const startWorkerResult = deps.startWorkerCmd({
-        repoDir: requireConfigValue(config, "projectPath"),
-        dispatcherUrl: requireConfigValue(config, "dispatcherUrl"),
-        automationUrl: requireConfigValue(config, "automationUrl"),
-        workerId: requireConfigValue(config, "workerId"),
+        repoDir: projectPath,
+        dispatcherUrl,
+        automationUrl,
+        workerId,
         ...(parsed.options.debug === true && { debug: true }),
         pollIntervalMs: typeof parsed.options.pollIntervalMs === "number" ? parsed.options.pollIntervalMs : undefined,
         force: true,
@@ -765,24 +891,37 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
     const logFileDir = typeof parsed.options.logFileDir === "string"
       ? parsed.options.logFileDir
       : "/tmp/forgeflow-trae-beta-logs";
+    const projectPath =
+      (typeof parsed.options.projectPath === "string" ? parsed.options.projectPath : undefined)
+      || requireConfigValue(config, "projectPath");
+    const dispatcherUrl =
+      (typeof parsed.options.dispatcherUrl === "string" ? parsed.options.dispatcherUrl : undefined)
+      || requireConfigValue(config, "dispatcherUrl");
+    const automationUrl =
+      (typeof parsed.options.automationUrl === "string" ? parsed.options.automationUrl : undefined)
+      || requireConfigValue(config, "automationUrl");
+    const workerId =
+      (typeof parsed.options.workerId === "string" ? parsed.options.workerId : undefined)
+      || requireConfigValue(config, "workerId");
+    const traeBin =
+      (typeof parsed.options.traeBin === "string" ? parsed.options.traeBin : undefined)
+      || requireConfigValue(config, "traeBin");
+    const remoteDebuggingPort =
+      (typeof parsed.options.remoteDebuggingPort === "number" ? parsed.options.remoteDebuggingPort : undefined)
+      || requireConfigValue(config, "remoteDebuggingPort");
 
     fs.mkdirSync(logFileDir, { recursive: true });
 
     const startLaunchResult = deps.startLaunchCmd({
-      traeBin:
-        (typeof parsed.options.traeBin === "string" ? parsed.options.traeBin : undefined)
-        || requireConfigValue(config, "traeBin"),
-      projectPath:
-        (typeof parsed.options.projectPath === "string" ? parsed.options.projectPath : undefined)
-        || requireConfigValue(config, "projectPath"),
-      remoteDebuggingPort:
-        (typeof parsed.options.remoteDebuggingPort === "number" ? parsed.options.remoteDebuggingPort : undefined)
-        || requireConfigValue(config, "remoteDebuggingPort"),
+      traeBin,
+      projectPath,
+      remoteDebuggingPort,
       timeoutMs: typeof parsed.options.timeoutMs === "number" ? parsed.options.timeoutMs : undefined,
       ...(parsed.options.detach === true && { detached: true }),
       logFile: `${logFileDir}/launch.log`,
     });
     await startLaunchResult.ready;
+    await deps.waitForRemoteDebuggingReady({ remoteDebuggingPort });
 
     const gatewayBind = resolveGatewayBindFromAutomationUrl(config);
     const startGatewayResult = deps.startGatewayCmd({
@@ -794,27 +933,19 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
       logFile: `${logFileDir}/gateway.log`,
     });
     await startGatewayResult.ready;
+    await deps.waitForAutomationReady({ automationUrl });
+    await deps.waitForDispatcherHealth({ dispatcherUrl });
 
     const startWorkerResult = deps.startWorkerCmd({
       repoDir:
         (typeof parsed.options.repoDir === "string" ? parsed.options.repoDir : undefined)
-        || requireConfigValue(config, "projectPath"),
-      dispatcherUrl:
-        (typeof parsed.options.dispatcherUrl === "string" ? parsed.options.dispatcherUrl : undefined)
-        || requireConfigValue(config, "dispatcherUrl"),
-      automationUrl:
-        (typeof parsed.options.automationUrl === "string" ? parsed.options.automationUrl : undefined)
-        || requireConfigValue(config, "automationUrl"),
-      workerId:
-        (typeof parsed.options.workerId === "string" ? parsed.options.workerId : undefined)
-        || requireConfigValue(config, "workerId"),
+        || projectPath,
+      dispatcherUrl,
+      automationUrl,
+      workerId,
       ...(parsed.options.debug === true && { debug: true }),
-      traeBin:
-        (typeof parsed.options.traeBin === "string" ? parsed.options.traeBin : undefined)
-        || requireConfigValue(config, "traeBin"),
-      remoteDebuggingPort:
-        (typeof parsed.options.remoteDebuggingPort === "number" ? parsed.options.remoteDebuggingPort : undefined)
-        || requireConfigValue(config, "remoteDebuggingPort"),
+      traeBin,
+      remoteDebuggingPort,
       pollIntervalMs: typeof parsed.options.pollIntervalMs === "number" ? parsed.options.pollIntervalMs : undefined,
       ...(parsed.options.once === true && { once: true }),
       force: parsed.options.force === true,

@@ -15,8 +15,8 @@
 你现在扮演 codex-control。
 
 先做这些事：
-1. 读取 ForgeFlow 仓库中的 AGENTS.md
-2. 读取 ForgeFlow 仓库中的 docs/README.md
+1. 读取 forgeflow-platform 仓库中的 AGENTS.md
+2. 读取 forgeflow-platform 仓库中的 docs/README.md
 3. 如果任务涉及业务仓，再读取业务仓中的 .orchestrator/project.yaml、AGENTS.md、GEMINI.md（如果存在）
 4. 如果目标模块有本地 README.md，先读模块入口
 5. 再检查相关代码，不直接相信文档

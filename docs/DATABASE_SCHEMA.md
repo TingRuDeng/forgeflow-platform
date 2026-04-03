@@ -1,4 +1,4 @@
-# ForgeFlow Database Schema
+# forgeflow-platform Database Schema
 
 > Verified persistence overview. Dispatcher runtime state now defaults to SQLite, but the repository still uses a hybrid persistence model rather than one fully normalized database for every subsystem.
 

@@ -1,4 +1,4 @@
-# ForgeFlow Docs Guide
+# forgeflow-platform Docs Guide
 
 这份文档是仓库唯一的文档导航入口。它负责说明哪些文件是权威来源，哪些只是补充、计划或研究材料。
 
@@ -133,12 +133,12 @@ Trae MCP fallback 维护：
   - 不替代 `AGENTS.md` 或本文件。
 - `../skills/worker-review-orchestrator/SKILL.md`
   - 当前对外发布的 control-layer skill。
-  - 适合通过 `npx skills add https://github.com/TingRuDeng/ForgeFlow/skills --skill worker-review-orchestrator` 安装。
+  - 适合通过 `npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator` 安装。
   - 当前默认审查闭环是 PR-first：审查通过后先完成 PR 集成，再提交 `decision merge`。
 - `../skills/package-release/SKILL.md`
   - 包发布助手 skill。
   - 提供 dry-run-by-default 的安全发布流程。
-  - 适合发布 ForgeFlow npm 包时使用。
+  - 适合发布 forgeflow-platform npm 包时使用。
 - `../packages/worker-review-orchestrator-cli/README.md`
   - 当前对外发布的 control-layer CLI 包入口。
   - 适合全局安装 `@tingrudeng/worker-review-orchestrator-cli` 后提供 `forgeflow-review-orchestrator` 命令。

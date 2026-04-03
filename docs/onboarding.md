@@ -1,6 +1,6 @@
 # 业务仓接入指南
 
-这份文档只负责说明如何把业务仓接入 ForgeFlow。仓库规则看 `../AGENTS.md`，文档导航看 `README.md`，当前主线能力与 Trae 路径定位看 `../README.md`，协议细节看 `contracts/*`。
+这份文档只负责说明如何把业务仓接入 forgeflow-platform。仓库规则看 `../AGENTS.md`，文档导航看 `README.md`，当前主线能力与 Trae 路径定位看 `../README.md`，协议细节看 `contracts/*`。
 
 ## 1. 接入目标
 
@@ -146,7 +146,7 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 控制层最小启动示例：
 
 ```bash
-node /abs/path/to/ForgeFlow/scripts/run-codex-control-flow.js \
+node /abs/path/to/forgeflow-platform/scripts/run-codex-control-flow.js \
   --repo owner/business-repo \
   --ref main \
   --repo-dir /abs/path/to/business-repo \
@@ -160,7 +160,7 @@ node /abs/path/to/ForgeFlow/scripts/run-codex-control-flow.js \
 如果控制层需要标准 review/dispatch skill，可安装：
 
 ```bash
-npx skills add https://github.com/TingRuDeng/ForgeFlow/skills --skill worker-review-orchestrator
+npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator
 npm install -g @tingrudeng/worker-review-orchestrator-cli
 ```
 
@@ -176,6 +176,12 @@ forgeflow-trae-beta start launch
 forgeflow-trae-beta start gateway
 forgeflow-trae-beta start worker
 ```
+
+补充：`forgeflow-trae-beta start all` / `restart all` 会在返回成功前依次等待：
+
+- Trae remote debugging endpoint（`/json/version`）可用
+- automation gateway `/ready` 可用
+- dispatcher `/health` 可用
 
 这条链路已经覆盖：
 
@@ -201,8 +207,9 @@ forgeflow-trae-beta start worker
 
 - `start gateway` 默认启用 session store，并将会话状态落在 `.forgeflow-trae-gateway/sessions.json`。
 - Trae worker 的软超时恢复依赖这份会话状态；如需改目录，可在 gateway 启动时传 `--state-dir /abs/path/to/state-dir`。
+- `forgeflow-trae-beta doctor` 会输出 dispatcher/gateway/CDP 连通性检查（标记为 optional），用于快速排查部署连通性问题。
 
-脚本方式仅用于在 ForgeFlow 仓库内做开发或调试：
+脚本方式仅用于在 forgeflow-platform 仓库内做开发或调试：
 
 ```bash
 node scripts/run-trae-automation-launch.js \

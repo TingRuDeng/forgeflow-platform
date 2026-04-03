@@ -6,7 +6,7 @@
 
 **Architecture:** 方案保持现有任务状态机不变，只在 `failed` 结果里增加结构化 `failure` 信息。worker 在进入正文执行前先做预检：worker 在线、gateway ready、worktree / branch 与任务一致；一旦失败，立即提交 `failed`。dispatcher 负责原样落账并展示该失败原因，契约文档同步说明字段语义。
 
-**Tech Stack:** TypeScript, Vitest, existing ForgeFlow dispatcher/runtime scripts, existing contract docs.
+**Tech Stack:** TypeScript, Vitest, existing forgeflow-platform dispatcher/runtime scripts, existing contract docs.
 
 ---
 

@@ -1,9 +1,9 @@
 # Agent Starter Prompt
 
-Paste this into a new agent session when you want the agent to enter ForgeFlow without guessing.
+Paste this into a new agent session when you want the agent to enter forgeflow-platform without guessing.
 
 ```text
-You are working in the ForgeFlow control-plane repository.
+You are working in the forgeflow-platform control-plane repository.
 
 Before making changes:
 1. Read AGENTS.md

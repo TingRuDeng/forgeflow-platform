@@ -2,7 +2,7 @@
 
 > **致 AI 助手：** 必须具备子技能：使用 superpowers:executing-plans 逐项实施此计划。
 
-**目标：** 让 ForgeFlow 能按方案 A 跑一次两台真实设备的 `codex-worker` 调度演练。
+**目标：** 让 forgeflow-platform 能按方案 A 跑一次两台真实设备的 `codex-worker` 调度演练。
 
 **架构：** 保留现有 dispatcher server / worker daemon 主链路，补上“晚到 worker 领取 ready 任务”的状态推进，再提供双 `codex` 演练专用 planner 和操作 runbook。
 

@@ -1,6 +1,6 @@
 # Trae Automation Gateway v1
 
-这份文档定义 ForgeFlow 中无人值守 Trae 自动化桥接层的最小契约。
+这份文档定义 forgeflow-platform 中无人值守 Trae 自动化桥接层的最小契约。
 
 - Scope: `trae-automation-gateway-v1`
 - Status: Active contract for the preferred unattended Trae path
@@ -287,7 +287,7 @@ Trae automation gateway 本体 v1 还没有直接负责：
 也就是说：
 
 - "gateway 本体" 解决的是程序化控制 Trae 客户端
-- "automation worker runtime" 解决的是 ForgeFlow 串行无人值守执行闭环
+- "automation worker runtime" 解决的是 forgeflow-platform 串行无人值守执行闭环
 
 ## 当前实现范围
 

@@ -1,4 +1,4 @@
-# ForgeFlow v1 发布说明
+# forgeflow-platform v1 发布说明
 
 ## 1. v1 已支持
 

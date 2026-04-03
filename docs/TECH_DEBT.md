@@ -1,4 +1,4 @@
-# ForgeFlow Technical Debt
+# forgeflow-platform Technical Debt
 
 Only confirmed, still-active debt belongs here.
 

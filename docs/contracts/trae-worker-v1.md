@@ -6,7 +6,7 @@
 
 ## Overview
 
-Trae Worker 是 ForgeFlow 中的执行层 agent，负责执行具体任务并汇报结果。
+Trae Worker 是 forgeflow-platform 中的执行层 agent，负责执行具体任务并汇报结果。
 
 这份文档只定义 Trae MCP worker 的协议与最终回复模板，不负责说明当前主线架构。
 
@@ -48,7 +48,7 @@ Trae Worker 是 ForgeFlow 中的执行层 agent，负责执行具体任务并汇
 
 ### 4. Submit Result (结构化结果主契约)
 
-`submit_result` 是 ForgeFlow 状态主契约，包含：
+`submit_result` 是 forgeflow-platform 状态主契约，包含：
 
 - task_id
 - status (review_ready / failed)
@@ -152,7 +152,7 @@ Trae Worker 是 ForgeFlow 中的执行层 agent，负责执行具体任务并汇
 
 ## Contract Evolution
 
-此契约是 ForgeFlow v1 稳定协议的一部分。
+此契约是 forgeflow-platform v1 稳定协议的一部分。
 
 - additive changes allowed (可 additive 扩展)
 - breaking changes require v2

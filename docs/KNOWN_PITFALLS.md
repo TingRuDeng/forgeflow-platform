@@ -1,4 +1,4 @@
-# ForgeFlow Known Pitfalls
+# forgeflow-platform Known Pitfalls
 
 Only code-backed or implementation-backed pitfalls belong here.
 

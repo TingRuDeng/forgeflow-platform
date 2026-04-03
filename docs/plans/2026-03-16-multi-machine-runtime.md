@@ -2,7 +2,7 @@
 
 > **致 AI 助手：** 必须具备子技能：使用 superpowers:executing-plans 逐项实施此计划。
 
-**目标：** 为 ForgeFlow 增加常驻 dispatcher server、多机 worker daemon、PR/review 决策和最小 dashboard。
+**目标：** 为 forgeflow-platform 增加常驻 dispatcher server、多机 worker daemon、PR/review 决策和最小 dashboard。
 
 **架构：** 先保留现有 `ai-dispatch -> .orchestrator` 产物链路，再增加一个中心 dispatcher server 作为多机运行时；worker daemon 从 server 拉取任务并执行，审查决策再经 server 回写状态。
 

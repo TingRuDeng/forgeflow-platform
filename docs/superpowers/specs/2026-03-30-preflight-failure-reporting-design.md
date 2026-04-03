@@ -2,7 +2,7 @@
 
 ## 背景
 
-ForgeFlow 的 `Trae` worker 任务在实际运行中，已经多次出现以下问题：
+forgeflow-platform 的 `Trae` worker 任务在实际运行中，已经多次出现以下问题：
 
 - worker 实际离线，但任务仍被派发出去
 - gateway 未 ready，但 worker 已经开始执行
