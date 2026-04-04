@@ -108,9 +108,15 @@ export const WorkerList: React.FC<{ workers: Worker[]; onAction: (id: string, en
   const { t } = useTranslation();
   if (!workers.length) return <div className="p-10 text-center text-sm text-zinc-600 italic font-mono">{t('noActiveWorkers')}</div>;
 
+  const sortedWorkers = [...workers].sort((a, b) => {
+    if (a.status === 'disabled' && b.status !== 'disabled') return 1;
+    if (a.status !== 'disabled' && b.status === 'disabled') return -1;
+    return 0;
+  });
+
   return (
     <div className="divide-y divide-white/5 grid grid-cols-1">
-      {workers.map(w => (
+      {sortedWorkers.map(w => (
         <div key={w.id} className="group p-4 border-l-[3px] border-transparent hover:border-white/30 hover:bg-white/5 transition-all duration-200">
           <div className="flex justify-between items-center mb-2">
             <div className="flex items-center gap-3">
