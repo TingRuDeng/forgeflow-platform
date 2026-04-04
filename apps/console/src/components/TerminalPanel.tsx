@@ -59,14 +59,9 @@ export const TerminalPanel: React.FC<{ events: Event[] }> = ({ events }) => {
                       <span className="w-2 h-2 rounded-full bg-[#34d399]"></span>
                       {ev.taskId}
                     </span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-zinc-400 font-mono whitespace-nowrap tabular-nums">
-                        {ev.at ? ev.at.split('T')[1]?.split('.')[0] : '--:--:--'}
-                      </span>
-                      <span className="text-xs text-zinc-300 bg-white/[0.06] px-2.5 py-1 rounded-md uppercase font-medium border border-white/[0.08]">
-                        {t(`eventType.${ev.type}`)}
-                      </span>
-                    </div>
+                    <span className="text-xs text-zinc-500 font-mono whitespace-nowrap tabular-nums">
+                      {ev.at ? ev.at.split('T')[1]?.split('.')[0] : '--:--:--'}
+                    </span>
                   </div>
                   
                   <div className="text-[#94a3b8] break-all overflow-hidden rounded-lg bg-black/30 p-3 border border-white/[0.05]">
