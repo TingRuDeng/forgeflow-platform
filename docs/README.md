@@ -35,6 +35,9 @@
   - 任务审查编排器 / dispatcher worker 的通用任务级 prompt 模板。
   - 固定要求先读取 `AGENTS.md`、本文件和 `AGENT_STARTER_PROMPT.md`，再补本次任务特有约束。
   - 不替代仓库规则，也不替代具体任务自己的 `allowedPaths`、验收命令和交付要求。
+- `../skills/worker-review-orchestrator/references/dispatch-quality-checklist.md`
+  - 发单前的质量门 checklist。
+  - 用来卡住主题型任务、弱验收任务和没有 review-to-fix 映射的返工任务。
 - `contracts/*.md`
   - 精确协议、字段与能力边界。
   - 只在对应协议范围内权威，不负责导航整个仓库。
@@ -156,6 +159,8 @@ Trae MCP fallback 维护：
 - `../prompts/dispatch-task-template.md`
   - 给 worker 派发代码任务时的通用骨架模板。
   - 适合和 `AGENT_STARTER_PROMPT.md` 叠加使用，而不是重复粘贴 starter 全文。
+- `../skills/worker-review-orchestrator/references/dispatch-quality-checklist.md`
+  - 给控制层在 `dispatch-task` 前做任务质量自检使用。
 - `github-operations.md`
   - GitHub 侧操作约束与命令参考。
 - `runbooks/trae-remote-beta.md`

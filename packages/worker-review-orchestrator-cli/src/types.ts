@@ -35,6 +35,14 @@ export interface DispatchTaskInputOptions {
   continueFromTaskId?: string;
   followUpOfTaskId?: string;
   workerChangeReason?: string;
+  strictTaskSpec?: boolean;
+  goal?: string;
+  sourceOfTruth?: string;
+  disallowedPaths?: string;
+  requiredChanges?: string;
+  nonGoals?: string;
+  mustPreserve?: string;
+  reworkMapping?: string;
 }
 
 export interface WatchOptions {

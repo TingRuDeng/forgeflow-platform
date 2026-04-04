@@ -385,6 +385,62 @@ describe("dispatch", () => {
     expect(payload.packages[0].contextMarkdown).toBe("# Task Context\n\nDetails here.");
   });
 
+  it("builds structured context markdown from strict task spec fields", () => {
+    const payload = buildSingleTaskDispatchInput({
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      taskId: "task-1",
+      title: "Tight task",
+      pool: "trae",
+      branchName: "ai/trae/task-1",
+      allowedPaths: "packages/a.ts,packages/b.ts",
+      acceptance: "pnpm test,git diff --check",
+      strictTaskSpec: true,
+      goal: "Ensure follow-up task prompts are structured.",
+      sourceOfTruth: "prompts/dispatch-task-template.md,skills/worker-review-orchestrator/SKILL.md",
+      requiredChanges: "add strict validation,build structured context markdown",
+      nonGoals: "do not change dispatcher runtime",
+      mustPreserve: "existing dispatch-task flags remain additive",
+    });
+
+    expect(payload.packages[0].contextMarkdown).toContain("# Goal");
+    expect(payload.packages[0].contextMarkdown).toContain("# Source of Truth");
+    expect(payload.packages[0].contextMarkdown).toContain("# Required Changes");
+    expect(payload.packages[0].contextMarkdown).toContain("# Non-Goals");
+    expect(payload.packages[0].contextMarkdown).toContain("# Must Preserve");
+    expect(payload.packages[0].contextMarkdown).toContain("# Acceptance");
+  });
+
+  it("rejects strict task specs that are missing required sections", () => {
+    expect(() => buildSingleTaskDispatchInput({
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      taskId: "task-1",
+      title: "Loose task",
+      pool: "trae",
+      branchName: "ai/trae/task-1",
+      strictTaskSpec: true,
+      goal: "Do a thing",
+    })).toThrow("strict task spec is missing required fields");
+  });
+
+  it("rejects strict task specs that still contain placeholders", () => {
+    expect(() => buildSingleTaskDispatchInput({
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      taskId: "task-1",
+      title: "Placeholder task",
+      pool: "trae",
+      branchName: "ai/trae/task-1",
+      strictTaskSpec: true,
+      goal: "<fill goal>",
+      sourceOfTruth: "prompts/dispatch-task-template.md",
+      requiredChanges: "add validation",
+      nonGoals: "do not touch runtime",
+      mustPreserve: "keep compatibility",
+    })).toThrow("strict task spec still contains placeholder values");
+  });
+
   it("prefers file content over inline values when both are provided", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-both-"));
     const promptFile = path.join(dir, "worker-prompt.md");

@@ -27,6 +27,99 @@ function splitCsv(input?: string) {
     .filter(Boolean);
 }
 
+function hasPlaceholderValue(input?: string) {
+  return /<[^>\n]+>/.test(String(input || ""));
+}
+
+function buildStructuredContextMarkdown(options: DispatchTaskInputOptions): string | undefined {
+  const goal = String(options.goal || "").trim();
+  const sourceOfTruth = splitCsv(options.sourceOfTruth);
+  const disallowedPaths = splitCsv(options.disallowedPaths);
+  const requiredChanges = splitCsv(options.requiredChanges);
+  const nonGoals = splitCsv(options.nonGoals);
+  const mustPreserve = splitCsv(options.mustPreserve);
+  const reworkMapping = splitCsv(options.reworkMapping);
+  const allowedPaths = splitCsv(options.allowedPaths);
+  const acceptance = splitCsv(options.acceptance);
+
+  const hasStructuredFields = Boolean(
+    goal
+    || sourceOfTruth.length
+    || disallowedPaths.length
+    || requiredChanges.length
+    || nonGoals.length
+    || mustPreserve.length
+    || reworkMapping.length,
+  );
+  if (!hasStructuredFields) {
+    return undefined;
+  }
+
+  const lines = [
+    "# Goal",
+    goal || options.title,
+    "",
+    "# Source of Truth",
+    ...(sourceOfTruth.length > 0 ? sourceOfTruth.map((item) => `- ${item}`) : ["- (not provided)"]),
+    "",
+    "# Allowed Paths",
+    ...(allowedPaths.length > 0 ? allowedPaths.map((item) => `- ${item}`) : ["- (none)"]),
+    "",
+  ];
+
+  if (disallowedPaths.length > 0) {
+    lines.push("# Disallowed Paths", ...disallowedPaths.map((item) => `- ${item}`), "");
+  }
+
+  lines.push(
+    "# Required Changes",
+    ...(requiredChanges.length > 0 ? requiredChanges.map((item, index) => `${index + 1}. ${item}`) : ["1. (not provided)"]),
+    "",
+    "# Non-Goals",
+    ...(nonGoals.length > 0 ? nonGoals.map((item) => `- ${item}`) : ["- (not provided)"]),
+    "",
+    "# Must Preserve",
+    ...(mustPreserve.length > 0 ? mustPreserve.map((item) => `- ${item}`) : ["- (not provided)"]),
+    "",
+    "# Acceptance",
+    ...(acceptance.length > 0 ? acceptance.map((item) => `- Run: ${item}`) : ["- Run: (not provided)"]),
+  );
+
+  if (reworkMapping.length > 0) {
+    lines.push("", "# Rework Mapping", ...reworkMapping.map((item) => `- ${item}`));
+  }
+
+  return lines.join("\n").trim();
+}
+
+function validateStrictTaskSpec(options: DispatchTaskInputOptions): void {
+  if (options.strictTaskSpec !== true) {
+    return;
+  }
+
+  const requiredFields = [
+    { name: "goal", value: options.goal },
+    { name: "source-of-truth", value: options.sourceOfTruth },
+    { name: "required-changes", value: options.requiredChanges },
+    { name: "non-goals", value: options.nonGoals },
+    { name: "must-preserve", value: options.mustPreserve },
+  ];
+
+  const missing = requiredFields
+    .filter((field) => String(field.value || "").trim().length === 0)
+    .map((field) => `--${field.name}`);
+  if (missing.length > 0) {
+    throw new Error(`strict task spec is missing required fields: ${missing.join(", ")}`);
+  }
+
+  const placeholderFields = requiredFields
+    .filter((field) => hasPlaceholderValue(field.value))
+    .map((field) => `--${field.name}`);
+  if (placeholderFields.length > 0) {
+    throw new Error(`strict task spec still contains placeholder values in: ${placeholderFields.join(", ")}`);
+  }
+}
+
 function readFileContent(filePath?: string): string | undefined {
   if (!filePath) {
     return undefined;
@@ -39,6 +132,8 @@ function readFileContent(filePath?: string): string | undefined {
 }
 
 export function buildSingleTaskDispatchInput(options: DispatchTaskInputOptions): DispatchInput {
+  validateStrictTaskSpec(options);
+
   const targetWorkerId = String(options.targetWorkerId || "").trim() || undefined;
   const followUpOfTaskId = String(options.followUpOfTaskId || "").trim() || undefined;
   const workerChangeReason = String(options.workerChangeReason || "").trim() || undefined;
@@ -48,9 +143,10 @@ export function buildSingleTaskDispatchInput(options: DispatchTaskInputOptions):
 
   const workerPromptFromFile = readFileContent(options.workerPromptFile);
   const contextMarkdownFromFile = readFileContent(options.contextMarkdownFile);
+  const structuredContextMarkdown = buildStructuredContextMarkdown(options);
 
   const workerPrompt = workerPromptFromFile || options.workerPrompt || "You are a ForgeFlow worker. Stay within allowedPaths and satisfy acceptance.";
-  const contextMarkdown = contextMarkdownFromFile || options.contextMarkdown || "# Context\n\nComplete the assigned task within scope.";
+  const contextMarkdown = contextMarkdownFromFile || options.contextMarkdown || structuredContextMarkdown || "# Context\n\nComplete the assigned task within scope.";
 
   return {
     repo: options.repo,

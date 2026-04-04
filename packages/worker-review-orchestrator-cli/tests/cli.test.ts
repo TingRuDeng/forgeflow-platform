@@ -732,4 +732,50 @@ describe("worker-review-orchestrator-cli", () => {
       followUpOfTaskId: "dispatch-1:task-source",
     }));
   });
+
+  it("passes strict task spec fields through dispatch-task", async () => {
+    const log = vi.fn();
+    const runDispatch = vi.fn().mockResolvedValue({
+      dispatchId: "dispatch-1",
+      taskIds: ["dispatch-1:task-1"],
+      assignments: [],
+    });
+
+    await runCli(
+      [
+        "dispatch-task",
+        "--dispatcher-url",
+        "http://127.0.0.1:8787",
+        "--repo",
+        "TingRuDeng/ForgeFlow",
+        "--default-branch",
+        "main",
+        "--task-id",
+        "task-1",
+        "--title",
+        "Strict task",
+        "--pool",
+        "trae",
+        "--branch-name",
+        "ai/trae/task-1",
+        "--strict-task-spec",
+        "--goal",
+        "Tighten task prompt quality",
+        "--source-of-truth",
+        "prompts/dispatch-task-template.md,skills/worker-review-orchestrator/SKILL.md",
+        "--required-changes",
+        "add strict validation,build structured context",
+        "--non-goals",
+        "do not change runtime",
+        "--must-preserve",
+        "existing dispatch behavior stays additive",
+      ],
+      { runDispatch, log },
+    );
+
+    expect(runDispatch).toHaveBeenCalled();
+    const firstCall = runDispatch.mock.calls[0]?.[0] as { payload?: { packages?: Array<{ contextMarkdown?: string }> } };
+    expect(firstCall?.payload?.packages?.[0]?.contextMarkdown).toContain("# Goal");
+    expect(firstCall?.payload?.packages?.[0]?.contextMarkdown).toContain("# Source of Truth");
+  });
 });

@@ -82,6 +82,7 @@ Usage:
   forgeflow-review-orchestrator dispatch-task --dispatcher-url http://127.0.0.1:8787 --repo TingRuDeng/ForgeFlow --default-branch main --task-id task-1 --title "Update docs" --pool trae --branch-name ai/trae/task-1 --allowed-paths docs/**,README.md --acceptance "pnpm typecheck,git diff --check"
   forgeflow-review-orchestrator dispatch-task --dispatcher-url http://127.0.0.1:8787 --repo TingRuDeng/ForgeFlow --default-branch main --task-id task-1 --title "Update docs" --pool trae --branch-name ai/trae/task-1 --target-worker-id trae-local-forgeflow --require-existing-worker
   forgeflow-review-orchestrator dispatch-task --dispatcher-url http://127.0.0.1:8787 --repo TingRuDeng/ForgeFlow --default-branch main --task-id task-1 --title "Update docs" --pool trae --branch-name ai/trae/task-1 --follow-up-of-task-id dispatch-1:task-1 --target-worker-id trae-local-forgeflow
+  forgeflow-review-orchestrator dispatch-task --dispatcher-url http://127.0.0.1:8787 --repo TingRuDeng/ForgeFlow --default-branch main --task-id task-1 --title "Update docs" --pool trae --branch-name ai/trae/task-1 --strict-task-spec --goal "Update worker prompt builder" --source-of-truth "prompts/dispatch-task-template.md,skills/worker-review-orchestrator/SKILL.md" --required-changes "add strict task spec validation,build structured context markdown" --non-goals "do not change dispatcher runtime" --must-preserve "existing dispatch-task behavior remains additive"
   forgeflow-review-orchestrator dispatch-task --dispatcher-url http://127.0.0.1:8787 --repo TingRuDeng/ForgeFlow --default-branch main --task-id task-1 --title "Update docs" --pool trae --branch-name ai/trae/task-1 --worker-prompt-file prompts/worker.md --context-markdown-file context/task.md
   forgeflow-review-orchestrator continue-task --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1
   forgeflow-review-orchestrator watch --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1
@@ -196,6 +197,14 @@ Examples:
       contextMarkdownFile: typeof options.contextMarkdownFile === "string" ? options.contextMarkdownFile : undefined,
       followUpOfTaskId: typeof options.followUpOfTaskId === "string" ? options.followUpOfTaskId : undefined,
       workerChangeReason: typeof options.workerChangeReason === "string" ? options.workerChangeReason : undefined,
+      strictTaskSpec: options.strictTaskSpec === true,
+      goal: typeof options.goal === "string" ? options.goal : undefined,
+      sourceOfTruth: typeof options.sourceOfTruth === "string" ? options.sourceOfTruth : undefined,
+      disallowedPaths: typeof options.disallowedPaths === "string" ? options.disallowedPaths : undefined,
+      requiredChanges: typeof options.requiredChanges === "string" ? options.requiredChanges : undefined,
+      nonGoals: typeof options.nonGoals === "string" ? options.nonGoals : undefined,
+      mustPreserve: typeof options.mustPreserve === "string" ? options.mustPreserve : undefined,
+      reworkMapping: typeof options.reworkMapping === "string" ? options.reworkMapping : undefined,
     });
 
     if (options.dryRun === true) {

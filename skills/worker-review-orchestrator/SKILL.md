@@ -247,6 +247,27 @@ Preferred dispatch path:
 - keep the JSON payload focused on task scope; let the CLI inject the target worker when possible
 - when an existing dispatcher is available, prefer reusing its live `--dispatcher-url` and the worker ids discovered from `/api/dashboard/snapshot`
 
+Before dispatching, use the preflight checklist in [references/dispatch-quality-checklist.md](references/dispatch-quality-checklist.md).
+
+Minimum bar before you dispatch:
+
+- the task has a concrete `Goal`, not just a topic
+- the task names a `Source of Truth`
+- `Allowed Paths` are precise
+- `Non-Goals` and `Must Preserve` are explicit
+- `Acceptance` includes runnable commands
+- rework tasks map each review finding to a required fix and proof
+
+When the task is being created manually through `dispatch-task`, prefer `--strict-task-spec` plus structured fields such as:
+
+- `--goal`
+- `--source-of-truth`
+- `--required-changes`
+- `--non-goals`
+- `--must-preserve`
+- `--disallowed-paths`
+- `--rework-mapping`
+
 ### dispatch-task Prompt and Context Inputs
 
 The `dispatch-task` command supports both inline and file-backed worker guidance inputs:
@@ -262,6 +283,8 @@ Priority:
 - missing files fall back to the inline value, then to the command's default prompt/context
 
 Use file-backed inputs when the task prompt is long or needs to be versioned in the repo, but make sure the file already contains a materialized task prompt rather than a raw generic template with placeholders.
+
+Prefer the repo template in [../../prompts/dispatch-task-template.md](../../prompts/dispatch-task-template.md) and fill it in concretely. Do not dispatch a task with placeholder sections left unmaterialized.
 
 For Trae beta execution, prefer:
 
