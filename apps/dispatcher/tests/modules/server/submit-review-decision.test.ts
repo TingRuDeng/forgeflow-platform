@@ -175,4 +175,84 @@ describe("submit review decision", () => {
       status: "merged",
     });
   }, 15_000);
+
+  it("preserves reviewMaterial after merge decision via CLI", async () => {
+    const stateDir = makeTempDir();
+    const { stateMod, taskId } = await createReviewReadyState(stateDir);
+
+    const stateBefore = stateMod.loadRuntimeState(stateDir);
+    const reviewBefore = stateBefore.reviews.find((r: any) => r.taskId === taskId);
+    expect(reviewBefore?.reviewMaterial).toBeDefined();
+    expect(reviewBefore?.reviewMaterial?.changedFiles).toEqual(["src/auth.ts"]);
+
+    const stdout = execFileSync(
+      process.execPath,
+      [
+        reviewScriptPath,
+        "--state-dir",
+        stateDir,
+        "--task-id",
+        taskId,
+        "--decision",
+        "merge",
+        "--actor",
+        "codex-control",
+        "--notes",
+        "looks good",
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+      },
+    );
+
+    const json = JSON.parse(stdout);
+    expect(json.status).toBe("decision_recorded");
+
+    const stateAfter = stateMod.loadRuntimeState(stateDir);
+    const reviewAfter: any = stateAfter.reviews.find((r) => r.taskId === taskId);
+    expect(reviewAfter?.decision).toBe("merge");
+    expect(reviewAfter?.reviewMaterial).toBeDefined();
+    expect(reviewAfter?.reviewMaterial?.changedFiles).toEqual(["src/auth.ts"]);
+    expect(reviewAfter?.reviewMaterial?.selfTestPassed).toBe(true);
+  }, 15_000);
+
+  it("preserves reviewMaterial after rework decision via CLI", async () => {
+    const stateDir = makeTempDir();
+    const { stateMod, taskId } = await createReviewReadyState(stateDir);
+
+    const stdout = execFileSync(
+      process.execPath,
+      [
+        reviewScriptPath,
+        "--state-dir",
+        stateDir,
+        "--task-id",
+        taskId,
+        "--decision",
+        "rework",
+        "--actor",
+        "codex-control",
+        "--notes",
+        "needs changes",
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+      },
+    );
+
+    const json = JSON.parse(stdout);
+    expect(json.status).toBe("decision_recorded");
+
+    const snapshot = stateMod.buildDashboardSnapshot(stateMod.loadRuntimeState(stateDir));
+    expect(snapshot.tasks[0]).toMatchObject({
+      status: "blocked",
+    });
+    expect(snapshot.reviews[0]).toMatchObject({
+      decision: "rework",
+    });
+    expect(snapshot.reviews[0]?.reviewMaterial).toBeDefined();
+    expect(snapshot.reviews[0]?.reviewMaterial?.changedFiles).toEqual(["src/auth.ts"]);
+  }, 15_000);
 });

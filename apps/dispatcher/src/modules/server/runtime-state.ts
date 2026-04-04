@@ -131,6 +131,7 @@ export interface Review {
   notes: string;
   decidedAt?: string | null;
   reviewMaterial?: ReviewMaterial | null;
+  evidence?: WorkerResult | null;
 }
 
 export interface PullRequest {
@@ -1136,6 +1137,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
       notes: "",
       decidedAt: null,
       reviewMaterial,
+      evidence: input.result,
     }),
   };
 
@@ -1172,6 +1174,10 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
     throw new Error(`task not in review: ${input.taskId}`);
   }
 
+  const existingReview = state.reviews.find((candidate) => candidate.taskId === input.taskId);
+  const existingReviewMaterial = existingReview?.reviewMaterial ?? null;
+  const existingEvidence = existingReview?.evidence ?? null;
+
   const nextStatus = input.decision === "merge" ? "merged" : "blocked";
   let nextState = appendEvent(state, {
     taskId: task.id,
@@ -1204,7 +1210,8 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
       actor: input.actor,
       notes: input.notes ?? "",
       decidedAt: input.at ?? nowIso(),
-      reviewMaterial: null,
+      reviewMaterial: existingReviewMaterial,
+      evidence: existingEvidence,
     }),
   };
 

@@ -2422,4 +2422,468 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(worker).toBeDefined();
     expect(worker?.disabledAt).toBeDefined();
   });
+
+  it("recordWorkerResult stores worker result as evidence in review", () => {
+    const stateDir = makeTempDir();
+
+    let state = loadRuntimeState(stateDir);
+    state = registerWorker(state, {
+      workerId: "codex-evidence-test",
+      pool: "codex",
+      hostname: "test-host",
+      labels: ["codex"],
+      repoDir: "/repos/test",
+      at: "2026-04-03T10:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      requestedBy: "test",
+      tasks: [
+        {
+          id: "task-evidence",
+          title: "Evidence test task",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["test"],
+          dependsOn: [],
+          branchName: "ai/codex/task-evidence",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-evidence",
+          assignment: {
+            taskId: "task-evidence",
+            workerId: "codex-evidence-test",
+            pool: "codex",
+            status: "assigned",
+            branchName: "ai/codex/task-evidence",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/ForgeFlow",
+            defaultBranch: "main",
+          },
+          workerPrompt: "Test prompt",
+        },
+      ],
+      createdAt: "2026-04-03T10:00:10.000Z",
+    });
+    state = dispatch.state;
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-evidence-test",
+      result: {
+        taskId: dispatch.taskIds[0],
+        workerId: "codex-evidence-test",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-evidence",
+        repo: "TingRuDeng/ForgeFlow",
+        defaultBranch: "main",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-04-03T10:05:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [
+            { command: "pnpm test", exitCode: 0, output: "ok" },
+            { command: "pnpm typecheck", exitCode: 0, output: "ok" },
+          ],
+        },
+      },
+      changedFiles: ["src/main.ts", "src/utils.ts"],
+      pullRequest: {
+        number: 42,
+        url: "https://github.com/TingRuDeng/ForgeFlow/pull/42",
+        headBranch: "ai/codex/task-evidence",
+        baseBranch: "main",
+      },
+    });
+
+    const review = state.reviews.find((r) => r.taskId === dispatch.taskIds[0]);
+    expect(review).toBeDefined();
+    expect(review?.evidence).toBeDefined();
+    expect(review?.evidence?.taskId).toBe(dispatch.taskIds[0]);
+    expect(review?.evidence?.verification.allPassed).toBe(true);
+    expect(review?.evidence?.verification.commands).toHaveLength(2);
+  });
+
+  it("recordReviewDecision preserves reviewMaterial when recording merge decision", () => {
+    const stateDir = makeTempDir();
+
+    let state = loadRuntimeState(stateDir);
+    state = registerWorker(state, {
+      workerId: "codex-material-preserve-test",
+      pool: "codex",
+      hostname: "test-host",
+      labels: ["codex"],
+      repoDir: "/repos/test",
+      at: "2026-04-03T11:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      requestedBy: "test",
+      tasks: [
+        {
+          id: "task-material",
+          title: "Material preserve test",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["test"],
+          dependsOn: [],
+          branchName: "ai/codex/task-material",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-material",
+          assignment: {
+            taskId: "task-material",
+            workerId: "codex-material-preserve-test",
+            pool: "codex",
+            status: "assigned",
+            branchName: "ai/codex/task-material",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/ForgeFlow",
+            defaultBranch: "main",
+          },
+          workerPrompt: "Test prompt",
+        },
+      ],
+      createdAt: "2026-04-03T11:00:10.000Z",
+    });
+    state = dispatch.state;
+    const taskId = dispatch.taskIds[0];
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-material-preserve-test",
+      result: {
+        taskId,
+        workerId: "codex-material-preserve-test",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-material",
+        repo: "TingRuDeng/ForgeFlow",
+        defaultBranch: "main",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-04-03T11:05:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [{ command: "pnpm test", exitCode: 0, output: "ok" }],
+        },
+      },
+      changedFiles: ["src/main.ts"],
+      pullRequest: {
+        number: 50,
+        url: "https://github.com/TingRuDeng/ForgeFlow/pull/50",
+        headBranch: "ai/codex/task-material",
+        baseBranch: "main",
+      },
+    });
+
+    const reviewBeforeDecision = state.reviews.find((r) => r.taskId === taskId);
+    expect(reviewBeforeDecision?.reviewMaterial).toBeDefined();
+    expect(reviewBeforeDecision?.reviewMaterial?.changedFiles).toEqual(["src/main.ts"]);
+    expect(reviewBeforeDecision?.reviewMaterial?.selfTestPassed).toBe(true);
+
+    state = recordReviewDecision(state, {
+      taskId,
+      decision: "merge",
+      actor: "reviewer",
+      notes: "looks good",
+      at: "2026-04-03T11:06:00.000Z",
+    });
+
+    const reviewAfterDecision = state.reviews.find((r) => r.taskId === taskId);
+    expect(reviewAfterDecision?.decision).toBe("merge");
+    expect(reviewAfterDecision?.reviewMaterial).toBeDefined();
+    expect(reviewAfterDecision?.reviewMaterial?.changedFiles).toEqual(["src/main.ts"]);
+    expect(reviewAfterDecision?.reviewMaterial?.selfTestPassed).toBe(true);
+  });
+
+  it("recordReviewDecision preserves reviewMaterial when recording block decision", () => {
+    const stateDir = makeTempDir();
+
+    let state = loadRuntimeState(stateDir);
+    state = registerWorker(state, {
+      workerId: "codex-block-material-test",
+      pool: "codex",
+      hostname: "test-host",
+      labels: ["codex"],
+      repoDir: "/repos/test",
+      at: "2026-04-03T12:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      requestedBy: "test",
+      tasks: [
+        {
+          id: "task-block-material",
+          title: "Block material preserve test",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["test"],
+          dependsOn: [],
+          branchName: "ai/codex/task-block-material",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-block-material",
+          assignment: {
+            taskId: "task-block-material",
+            workerId: "codex-block-material-test",
+            pool: "codex",
+            status: "assigned",
+            branchName: "ai/codex/task-block-material",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/ForgeFlow",
+            defaultBranch: "main",
+          },
+          workerPrompt: "Test prompt",
+        },
+      ],
+      createdAt: "2026-04-03T12:00:10.000Z",
+    });
+    state = dispatch.state;
+    const taskId = dispatch.taskIds[0];
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-block-material-test",
+      result: {
+        taskId,
+        workerId: "codex-block-material-test",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-block-material",
+        repo: "TingRuDeng/ForgeFlow",
+        defaultBranch: "main",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-04-03T12:05:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [{ command: "pnpm test", exitCode: 0, output: "ok" }],
+        },
+      },
+      changedFiles: ["src/app.ts"],
+      pullRequest: {
+        number: 55,
+        url: "https://github.com/TingRuDeng/ForgeFlow/pull/55",
+        headBranch: "ai/codex/task-block-material",
+        baseBranch: "main",
+      },
+    });
+
+    state = recordReviewDecision(state, {
+      taskId,
+      decision: "block",
+      actor: "reviewer",
+      notes: "needs changes",
+      at: "2026-04-03T12:06:00.000Z",
+    });
+
+    const review = state.reviews.find((r) => r.taskId === taskId);
+    expect(review?.decision).toBe("block");
+    expect(review?.reviewMaterial).toBeDefined();
+    expect(review?.reviewMaterial?.changedFiles).toEqual(["src/app.ts"]);
+  });
+
+  it("recordReviewDecision preserves reviewMaterial when recording rework decision", () => {
+    const stateDir = makeTempDir();
+
+    let state = loadRuntimeState(stateDir);
+    state = registerWorker(state, {
+      workerId: "codex-rework-material-test",
+      pool: "codex",
+      hostname: "test-host",
+      labels: ["codex"],
+      repoDir: "/repos/test",
+      at: "2026-04-03T13:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      requestedBy: "test",
+      tasks: [
+        {
+          id: "task-rework-material",
+          title: "Rework material preserve test",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["test"],
+          dependsOn: [],
+          branchName: "ai/codex/task-rework-material",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-rework-material",
+          assignment: {
+            taskId: "task-rework-material",
+            workerId: "codex-rework-material-test",
+            pool: "codex",
+            status: "assigned",
+            branchName: "ai/codex/task-rework-material",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/ForgeFlow",
+            defaultBranch: "main",
+          },
+          workerPrompt: "Test prompt",
+        },
+      ],
+      createdAt: "2026-04-03T13:00:10.000Z",
+    });
+    state = dispatch.state;
+    const taskId = dispatch.taskIds[0];
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-rework-material-test",
+      result: {
+        taskId,
+        workerId: "codex-rework-material-test",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-rework-material",
+        repo: "TingRuDeng/ForgeFlow",
+        defaultBranch: "main",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-04-03T13:05:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [{ command: "pnpm test", exitCode: 0, output: "ok" }],
+        },
+      },
+      changedFiles: ["src/service.ts"],
+      pullRequest: {
+        number: 60,
+        url: "https://github.com/TingRuDeng/ForgeFlow/pull/60",
+        headBranch: "ai/codex/task-rework-material",
+        baseBranch: "main",
+      },
+    });
+
+    state = recordReviewDecision(state, {
+      taskId,
+      decision: "rework",
+      actor: "reviewer",
+      notes: "please add tests",
+      at: "2026-04-03T13:06:00.000Z",
+    });
+
+    const review = state.reviews.find((r) => r.taskId === taskId);
+    expect(review?.decision).toBe("rework");
+    expect(review?.reviewMaterial).toBeDefined();
+    expect(review?.reviewMaterial?.changedFiles).toEqual(["src/service.ts"]);
+  });
+
+  it("recordReviewDecision preserves evidence when recording decision", () => {
+    const stateDir = makeTempDir();
+
+    let state = loadRuntimeState(stateDir);
+    state = registerWorker(state, {
+      workerId: "codex-evidence-preserve-test",
+      pool: "codex",
+      hostname: "test-host",
+      labels: ["codex"],
+      repoDir: "/repos/test",
+      at: "2026-04-03T14:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      requestedBy: "test",
+      tasks: [
+        {
+          id: "task-evidence-preserve",
+          title: "Evidence preserve test",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["test"],
+          dependsOn: [],
+          branchName: "ai/codex/task-evidence-preserve",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-evidence-preserve",
+          assignment: {
+            taskId: "task-evidence-preserve",
+            workerId: "codex-evidence-preserve-test",
+            pool: "codex",
+            status: "assigned",
+            branchName: "ai/codex/task-evidence-preserve",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/ForgeFlow",
+            defaultBranch: "main",
+          },
+          workerPrompt: "Test prompt",
+        },
+      ],
+      createdAt: "2026-04-03T14:00:10.000Z",
+    });
+    state = dispatch.state;
+    const taskId = dispatch.taskIds[0];
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-evidence-preserve-test",
+      result: {
+        taskId,
+        workerId: "codex-evidence-preserve-test",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-evidence-preserve",
+        repo: "TingRuDeng/ForgeFlow",
+        defaultBranch: "main",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-04-03T14:05:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [
+            { command: "pnpm test", exitCode: 0, output: "ok" },
+            { command: "pnpm typecheck", exitCode: 0, output: "ok" },
+          ],
+        },
+      },
+      changedFiles: ["src/controller.ts"],
+      pullRequest: {
+        number: 65,
+        url: "https://github.com/TingRuDeng/ForgeFlow/pull/65",
+        headBranch: "ai/codex/task-evidence-preserve",
+        baseBranch: "main",
+      },
+    });
+
+    const reviewBefore = state.reviews.find((r) => r.taskId === taskId);
+    expect(reviewBefore?.evidence).toBeDefined();
+    expect(reviewBefore?.evidence?.verification.commands).toHaveLength(2);
+
+    state = recordReviewDecision(state, {
+      taskId,
+      decision: "merge",
+      actor: "reviewer",
+      notes: "approved",
+      at: "2026-04-03T14:06:00.000Z",
+    });
+
+    const reviewAfter = state.reviews.find((r) => r.taskId === taskId);
+    expect(reviewAfter?.evidence).toBeDefined();
+    expect(reviewAfter?.evidence?.verification.commands).toHaveLength(2);
+    expect(reviewAfter?.evidence?.taskId).toBe(taskId);
+  });
 });
