@@ -7,7 +7,8 @@ ForgeFlow Multi-Agent Control Plane 的可视化控制台。
 - **任务监控**：实时查看任务状态、分配情况及对应分支。支持分页浏览（每页 10 条）。
 - **节点管理**：监控工作节点（Worker）的存活状态、当前任务及归属 Pool。
 - **指标概览**：顶部展示集群核心指标（活跃节点、空闲/繁忙占比、任务完成进度）。
-- **实时事件**：流式展示系统历史事件日志。
+- **交互式日志**：集成 `@uiw/react-json-view`，支持可折叠的 JSON 树状结构展示，实时追踪系统事件细节。
+- **极客质感**：采用雷达网格背景、扫行动效及高对比度加粗时间戳，确保在复杂环境下依然具备极佳的信息辨识度。
 - **国际化**：支持中英文切换。
 
 ## 技术栈
@@ -16,8 +17,9 @@ ForgeFlow Multi-Agent Control Plane 的可视化控制台。
 - **构建**: Vite 8
 - **样式**: Tailwind CSS
 - **状态/请求**: SWR (用于实时轮询渲染)
+- **JSON 渲染**: `@uiw/react-json-view`
 - **图标**: Lucide React
-- **测试**: Vitest + React Testing Library
+- **测试**: Vitest + React Testing Library (100% 核心组件覆盖)
 
 ## 快速开始
 
