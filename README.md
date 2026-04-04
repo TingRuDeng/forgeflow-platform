@@ -162,20 +162,22 @@ node scripts/run-dispatcher-server.js \
   --state-dir .forgeflow-dispatcher
 ```
 
-如需启用认证保护，设置环境变量 `DISPATCHER_API_TOKEN`：
+如需启用认证保护，使用 `DISPATCHER_AUTH_MODE=token`：
 
 ```bash
+export DISPATCHER_AUTH_MODE=token
 export DISPATCHER_API_TOKEN="your-secret-token"
 node scripts/run-dispatcher-server.js \
   --host 0.0.0.0 \
   --port 8787 \
-  --state-dir .forgeflow-dispatcher
+  --state-dir .forgeflow-dispatcher \
+  --auth-mode token
 ```
 
-认证说明：
-- 未配置 `DISPATCHER_API_TOKEN` 时，所有接口无需认证（向后兼容）
-- 配置后，除 `/health` 外的所有接口需要 `Authorization: Bearer <token>` 认证
-- 认证失败返回 401 状态码和 JSON 错误信息
+认证模式说明：
+- `legacy`（默认）：无需认证，所有接口可匿名访问，现有部署向后兼容
+- `token`：需要 `DISPATCHER_API_TOKEN`，所有接口（除 `/health`）需要 `Authorization: Bearer <token>`
+- `open`：显式开放模式，无需认证，用于本地开发或可信网络
 
 如需显式回退到 JSON 持久化：
 

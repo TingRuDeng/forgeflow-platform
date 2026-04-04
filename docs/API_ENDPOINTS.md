@@ -19,14 +19,29 @@ Base role: task state, worker coordination, review decisions, dashboard snapshot
 
 ### Authentication
 
-The dispatcher server supports optional token-based authentication:
+The dispatcher server supports three authentication modes controlled by `DISPATCHER_AUTH_MODE`:
 
-- **Environment variable**: `DISPATCHER_API_TOKEN`
-- **Behavior**:
-  - When not set: all endpoints are accessible without authentication (backward compatible)
-  - When set: requires `Authorization: Bearer <token>` header for all endpoints except `/health`
-  - Authentication failure returns `401` status code with `{ "error": "unauthorized" }` JSON response
-- **Whitelist**: `/health` endpoint is always accessible without authentication
+- **Environment variable**: `DISPATCHER_AUTH_MODE` (values: `legacy`, `token`, `open`)
+  - `legacy` (default): No authentication required. All endpoints accessible without a token. Backward compatible with existing deployments.
+  - `token`: Secure mode. Requires `DISPATCHER_API_TOKEN` to be set. All endpoints except `/health` require `Authorization: Bearer <token>` header.
+  - `open`: Explicit unauthenticated access. All endpoints accessible without a token. Useful for local development or trusted networks.
+
+- **Secondary environment variable**: `DISPATCHER_API_TOKEN`
+  - Required when `DISPATCHER_AUTH_MODE=token`
+  - Optional in `legacy` and `open` modes (ignored if set but not enforced)
+
+- **Behavior by mode**:
+  - `legacy`: All endpoints accessible without auth. Existing deployments continue working unchanged.
+  - `token`: Requires valid Bearer token. Missing token returns `401` with `{ "error": "auth_required_no_token" }`. Invalid token returns `401` with `{ "error": "unauthorized" }`.
+  - `open`: All endpoints accessible without auth, regardless of `DISPATCHER_API_TOKEN` setting.
+
+- **Whitelist**: `/health` endpoint is always accessible without authentication in all modes.
+
+- **CLI flag**: `--auth-mode token|open|legacy` can be passed to `run-dispatcher-server.js` to set the mode at startup.
+
+- **Error responses**:
+  - `401` with `{ "error": "auth_required_no_token" }`: Token mode active but no `DISPATCHER_API_TOKEN` configured
+  - `401` with `{ "error": "unauthorized" }`: Token mode with invalid or missing Bearer token
 
 Current endpoint families:
 

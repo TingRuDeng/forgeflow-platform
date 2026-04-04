@@ -117,25 +117,44 @@
 
 当前不建议把它当作新的接入起点；控制中枢优先只启动 dispatcher，让 Trae runtime 先稳定收口。
 
-#### Dispatcher HTTP 认证（可选）
+#### Dispatcher HTTP 认证
 
-如果需要给 dispatcher HTTP 面加一层 token 认证，可在启动 dispatcher 前设置：
+Dispatcher server 支持三种认证模式，通过 `DISPATCHER_AUTH_MODE` 环境变量控制：
+
+| 模式 | 说明 | 适用场景 |
+|------|------|----------|
+| `legacy` (默认) | 无需认证，所有接口可匿名访问 | 现有部署向后兼容 |
+| `token` | 需要设置 `DISPATCHER_API_TOKEN`，所有接口（除 `/health`）需要 Bearer token | 生产环境安全模式 |
+| `open` | 显式开放模式，无需认证 | 本地开发/可信网络 |
+
+**启用 token 模式：**
 
 ```bash
+export DISPATCHER_AUTH_MODE=token
 export DISPATCHER_API_TOKEN="your-secret-token"
 node scripts/run-dispatcher-server.js \
   --host 0.0.0.0 \
   --port 8787 \
-  --state-dir .forgeflow-dispatcher
+  --state-dir .forgeflow-dispatcher \
+  --auth-mode token
 ```
 
-启用后行为：
+**token 模式行为：**
 
 - `/health` 仍可匿名访问
 - 其他 endpoint 需要 `Authorization: Bearer <token>`
-- 缺失或错误 token 返回 `401` + `{ "error": "unauthorized" }`
+- 未设置 `DISPATCHER_API_TOKEN` 时返回 `401` + `{ "error": "auth_required_no_token" }`
+- token 错误返回 `401` + `{ "error": "unauthorized" }`
 
-调用方连通性检查示例：
+**使用 CLI 参数设置模式：**
+
+```bash
+node scripts/run-dispatcher-server.js \
+  --auth-mode open \  # 本地开发
+  --auth-mode token \ # 生产安全模式
+```
+
+调用方连通性检查示例（token 模式）：
 
 ```bash
 curl -s http://127.0.0.1:8787/health
