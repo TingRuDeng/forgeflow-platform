@@ -11,6 +11,7 @@ import {
   createAutomationGatewayClient,
   createDispatcherClient,
 } from "./clients.js";
+import type { WorkerEvidence } from "@forgeflow/result-contracts";
 import { checkArtifactReviewability } from "./trae-automation-artifact-checks.js";
 import { launchTraeForAutomation } from "./trae-launcher.js";
 import {
@@ -643,6 +644,22 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       hasCommit: Boolean(parsed.github.commitSha),
       pushStatus: parsed.github.pushStatus,
     });
+
+    let evidence: WorkerEvidence | undefined;
+    if (status === "failed") {
+      evidence = {
+        failureType: "verification",
+        failureSummary: parsed.notes || parsed.result,
+        blockers: [],
+        findings: [],
+      };
+    } else {
+      evidence = {
+        blockers: [],
+        findings: [],
+      };
+    }
+
     try {
       await dispatcherClient.submitResult({
         taskId: task.task_id,
@@ -651,6 +668,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         testOutput: parsed.testOutput || "",
         risks: parsed.risks,
         filesChanged: parsed.filesChanged,
+        evidence,
         github: parsed.github,
       });
       debugLog("dispatcher.submit_result.done", { taskId: task.task_id, status });
@@ -668,6 +686,20 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       sessionId,
       summary: error.message,
     });
+
+    const evidence: WorkerEvidence = {
+      failureType: "execution",
+      failureSummary: error.message,
+      blockers: [
+        {
+          kind: "execution",
+          code: "ERROR",
+          message: error.message,
+        },
+      ],
+      findings: [],
+    };
+
     try {
       await dispatcherClient.submitResult({
         taskId: task.task_id,
@@ -676,6 +708,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         testOutput: rawOutput,
         risks: [],
         filesChanged: [],
+        evidence,
         github: {
           branchName: null,
           commitSha: null,

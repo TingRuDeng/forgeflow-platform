@@ -149,6 +149,7 @@ export interface TraeSubmitResultRequest {
   test_output?: string;
   risks?: string[];
   files_changed?: string[];
+  evidence?: WorkerEvidence;
   branch_name?: string;
   commit_sha?: string;
   push_status?: string;

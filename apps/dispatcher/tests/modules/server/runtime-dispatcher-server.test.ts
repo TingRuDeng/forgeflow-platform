@@ -280,6 +280,126 @@ describe("runtime-dispatcher-server foundation", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toBe("task_not_found");
     });
+
+    it("persists evidence in review with latestWorkerResult on review_ready", () => {
+      const state = createEmptyRuntimeState();
+      const task = makeTask({ id: "task-3", status: "in_progress" });
+      state.tasks.push(task);
+      state.workers.push({
+        id: "trae-01",
+        pool: "trae",
+        hostname: "",
+        labels: [],
+        repoDir: "/repo",
+        status: "busy",
+        lastHeartbeatAt: new Date().toISOString(),
+        currentTaskId: "task-3",
+      });
+
+      const evidence = {
+        blockers: [],
+        findings: [],
+      };
+
+      const result = applyTraeSubmitResult(state, {
+        taskId: "task-3",
+        status: "review_ready",
+        summary: "Done!",
+        testOutput: "PASS",
+        risks: [],
+        filesChanged: ["src/a.ts"],
+        evidence,
+        branchName: "ai/trae/task-3",
+        commitSha: "abc123",
+        pushStatus: "success",
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.state.reviews).toHaveLength(1);
+      const review = result.state.reviews[0];
+      expect(review.taskId).toBe("task-3");
+      expect(review.decision).toBe("pending");
+      expect(review.latestWorkerResult).toBeDefined();
+      expect(review.latestWorkerResult?.evidence).toEqual(evidence);
+      expect(review.reviewMaterial).toBeDefined();
+      expect(review.reviewMaterial?.changedFiles).toEqual(["src/a.ts"]);
+    });
+
+    it("persists evidence with failureType and failureSummary in failed event payload", () => {
+      const state = createEmptyRuntimeState();
+      const task = makeTask({ id: "task-4", status: "in_progress" });
+      state.tasks.push(task);
+      state.workers.push({
+        id: "trae-01",
+        pool: "trae",
+        hostname: "",
+        labels: [],
+        repoDir: "/repo",
+        status: "busy",
+        lastHeartbeatAt: new Date().toISOString(),
+        currentTaskId: "task-4",
+      });
+
+      const evidence = {
+        failureType: "verification",
+        failureSummary: "Tests failed",
+        blockers: [],
+        findings: [],
+      };
+
+      const result = applyTraeSubmitResult(state, {
+        taskId: "task-4",
+        status: "failed",
+        summary: "Tests failed",
+        testOutput: "FAIL",
+        risks: [],
+        filesChanged: [],
+        evidence,
+      });
+
+      expect(result.ok).toBe(true);
+      const event = result.state.events.find((e) => e.taskId === "task-4");
+      expect(event).toBeDefined();
+      expect(event!.payload).toMatchObject({
+        to: "failed",
+        evidence,
+        failureType: "verification",
+        failureSummary: "Tests failed",
+      });
+    });
+
+    it("maintains legacy compatibility without evidence", () => {
+      const state = createEmptyRuntimeState();
+      const task = makeTask({ id: "task-5", status: "in_progress" });
+      state.tasks.push(task);
+      state.workers.push({
+        id: "trae-01",
+        pool: "trae",
+        hostname: "",
+        labels: [],
+        repoDir: "/repo",
+        status: "busy",
+        lastHeartbeatAt: new Date().toISOString(),
+        currentTaskId: "task-5",
+      });
+
+      const result = applyTraeSubmitResult(state, {
+        taskId: "task-5",
+        status: "review_ready",
+        summary: "Done!",
+        testOutput: "PASS",
+        risks: [],
+        filesChanged: ["src/a.ts"],
+        branchName: "ai/trae/task-5",
+        commitSha: "abc123",
+        pushStatus: "success",
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.state.reviews).toHaveLength(1);
+      const review = result.state.reviews[0];
+      expect(review.latestWorkerResult?.evidence).toBeUndefined();
+    });
   });
 
   describe("applyTraeHeartbeat", () => {

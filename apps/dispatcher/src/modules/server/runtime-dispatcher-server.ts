@@ -4,6 +4,8 @@ import type {
   Task,
   Assignment,
   Event,
+  Review,
+  WorkerResult,
 } from "./runtime-state.js";
 import { registerWorker as registerWorkerFn, reconcileRuntimeState as reconcileRuntimeStateFn } from "./runtime-state.js";
 
@@ -16,6 +18,7 @@ import type {
   TraeRegisterRequest,
   TraeStartTaskRequest,
 } from "./runtime-glue-types.js";
+import type { WorkerEvidence } from "./runtime-glue-types.js";
 import { formatLocalTimestamp } from "../time.js";
 
 function nowIso(): string {
@@ -188,6 +191,7 @@ export function applyTraeSubmitResult(
     testOutput?: string;
     risks?: string[];
     filesChanged?: string[];
+    evidence?: WorkerEvidence;
     branchName?: string;
     commitSha?: string;
     pushStatus?: string;
@@ -204,6 +208,7 @@ export function applyTraeSubmitResult(
   const assignment = state.assignments.find((item) => item.taskId === input.taskId);
   const worker = state.workers.find((w) => w.currentTaskId === input.taskId);
   const newStatus = input.status === "review_ready" ? "review" : "failed";
+  const currentReview = state.reviews.find((candidate) => candidate.taskId === input.taskId);
 
   task.status = newStatus;
   if (assignment) {
@@ -230,19 +235,81 @@ export function applyTraeSubmitResult(
         }
       : null;
 
+  const latestWorkerResult: WorkerResult = {
+    taskId: input.taskId,
+    workerId: worker?.id ?? "unknown",
+    provider: "trae",
+    pool: "trae",
+    branchName: input.branchName ?? "",
+    repo: task.repo,
+    defaultBranch: task.defaultBranch,
+    mode: "review",
+    output: input.summary ?? "",
+    generatedAt: nowIso(),
+    verification: {
+      allPassed: input.status === "review_ready",
+      commands: [],
+    },
+    evidence: input.evidence,
+  };
+
+  const reviewMaterial = input.status === "review_ready"
+    ? {
+        repo: task.repo,
+        title: task.title,
+        changedFiles: input.filesChanged ?? [],
+        selfTestPassed: true,
+        checks: [],
+      }
+    : null;
+
+  const existingReviewIndex = state.reviews.findIndex((candidate) => candidate.taskId === input.taskId);
+  const newReview: Review = {
+    taskId: input.taskId,
+    decision: "pending",
+    actor: null,
+    notes: "",
+    decidedAt: null,
+    reviewMaterial,
+    latestWorkerResult,
+    evidence: currentReview?.evidence ?? null,
+  };
+
+  if (existingReviewIndex === -1) {
+    state.reviews.push(newReview);
+  } else {
+    state.reviews[existingReviewIndex] = {
+      ...state.reviews[existingReviewIndex],
+      ...newReview,
+    };
+  }
+
+  const eventPayload: Record<string, unknown> = {
+    from: "in_progress",
+    to: newStatus,
+    summary: input.summary,
+    test_output: input.testOutput,
+    risks: input.risks || [],
+    files_changed: input.filesChanged || [],
+    github,
+  };
+
+  if (input.evidence) {
+    eventPayload.evidence = input.evidence;
+  }
+
+  if (newStatus === "failed" && input.evidence?.failureType) {
+    eventPayload.failureType = input.evidence.failureType;
+  }
+  if (newStatus === "failed" && input.evidence?.failureSummary) {
+    eventPayload.failureSummary = input.evidence.failureSummary;
+  }
+
   appendRuntimeEvent(state, {
     taskId: input.taskId,
     type: "status_changed",
     at: nowIso(),
-    payload: {
-      from: "in_progress",
-      to: newStatus,
-      summary: input.summary,
-      test_output: input.testOutput,
-      risks: input.risks || [],
-      files_changed: input.filesChanged || [],
-      github,
-    },
+    payload: eventPayload,
   });
 
   return { state, ok: true };
@@ -497,6 +564,7 @@ function handleTraeRouteImpl(
       test_output: testOutput,
       risks,
       files_changed: filesChanged,
+      evidence,
       branch_name: branchName,
       commit_sha: commitSha,
       push_status: pushStatus,
@@ -530,6 +598,7 @@ function handleTraeRouteImpl(
       testOutput,
       risks,
       filesChanged,
+      evidence,
       branchName,
       commitSha,
       pushStatus,

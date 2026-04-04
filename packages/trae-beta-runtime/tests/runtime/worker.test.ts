@@ -183,6 +183,10 @@ describe("runtime/worker", () => {
       testOutput: "pnpm test",
       risks: [],
       filesChanged: ["src/runtime/worker.ts", "src/runtime/task-worktree.ts"],
+      evidence: {
+        blockers: [],
+        findings: [],
+      },
       github: {
         branchName: "codex/trae-beta-self-contained-runtime",
         commitSha: "abc123",
@@ -1992,6 +1996,227 @@ describe("runtime/worker", () => {
       taskId: "dispatch-203:completed-placeholder",
       error: expect.stringContaining("template placeholder"),
     });
+
+    runtime.stop();
+  });
+
+  it("submits evidence on review_ready path", async () => {
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      fetchTask: vi.fn(async () => ({
+        status: "task",
+        task: {
+          task_id: "task-evidence-success",
+          repo: "repo",
+          branch: "feature/evidence-success",
+          default_branch: "main",
+          scope: ["src/**"],
+          acceptance: ["pnpm test"],
+          constraints: [],
+          prompt: "Test evidence on success",
+          chat_mode: "new_chat",
+        },
+      })),
+      startTask: vi.fn(async () => ({})),
+      reportProgress: vi.fn(async () => ({})),
+      submitResult: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => ({})),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-evidence-success" } })),
+      sendChat: vi.fn(async () => ({
+        response: {
+          text: [
+            "## 任务完成",
+            "- 结果: 成功",
+            "- 任务ID: task-evidence-success",
+            "- 修改文件: src/evidence.ts",
+            "- 测试结果: pnpm test",
+            "- 风险: 无",
+            "- GitHub 证据:",
+            "  - branch: feature/evidence-success",
+            "  - commit: abc123",
+            "  - push: 成功",
+            "  - push_error: 无",
+            "  - PR: 无",
+            "  - PR URL: 无",
+            "- 备注: evidence test",
+          ].join("\n"),
+        },
+      })),
+      releaseSession: vi.fn(async () => ({ data: { sessionId: "session-evidence-success", released: true } })),
+    };
+    const launchTrae = vi.fn(async () => ({ reusedExisting: false }));
+
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-remote",
+      repoDir: "/tmp/project",
+      logger: { warn: vi.fn(), log: vi.fn() },
+      launchTrae,
+      sleep: vi.fn(async () => undefined),
+      setIntervalImpl: vi.fn(() => ({}) as never),
+      clearIntervalImpl: vi.fn(),
+    });
+
+    await runtime.runOnce();
+
+    expect(dispatcherClient.submitResult).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-evidence-success",
+      status: "review_ready",
+      evidence: {
+        blockers: [],
+        findings: [],
+      },
+    }));
+
+    runtime.stop();
+  });
+
+  it("submits evidence with failureType on failed path", async () => {
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      fetchTask: vi.fn(async () => ({
+        status: "task",
+        task: {
+          task_id: "task-evidence-failed",
+          repo: "repo",
+          branch: "feature/evidence-failed",
+          default_branch: "main",
+          scope: ["src/**"],
+          acceptance: ["pnpm test"],
+          constraints: [],
+          prompt: "Test evidence on failure",
+          chat_mode: "new_chat",
+        },
+      })),
+      startTask: vi.fn(async () => ({})),
+      reportProgress: vi.fn(async () => ({})),
+      submitResult: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => ({})),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-evidence-failed" } })),
+      sendChat: vi.fn(async () => ({
+        response: {
+          text: [
+            "## 任务完成",
+            "- 结果: 失败",
+            "- 任务ID: task-evidence-failed",
+            "- 修改文件: 无",
+            "- 测试结果: FAIL",
+            "- 风险: test failure",
+            "- GitHub 证据:",
+            "  - branch: feature/evidence-failed",
+            "  - commit: 无",
+            "  - push: 无",
+            "  - push_error: 无",
+            "  - PR: 无",
+            "  - PR URL: 无",
+            "- 备注: tests failed",
+          ].join("\n"),
+        },
+      })),
+      releaseSession: vi.fn(async () => ({ data: { sessionId: "session-evidence-failed", released: true } })),
+    };
+    const launchTrae = vi.fn(async () => ({ reusedExisting: false }));
+
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-remote",
+      repoDir: "/tmp/project",
+      logger: { warn: vi.fn(), log: vi.fn() },
+      launchTrae,
+      sleep: vi.fn(async () => undefined),
+      setIntervalImpl: vi.fn(() => ({}) as never),
+      clearIntervalImpl: vi.fn(),
+    });
+
+    await runtime.runOnce();
+
+    expect(dispatcherClient.submitResult).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-evidence-failed",
+      status: "failed",
+      evidence: {
+        failureType: "verification",
+        failureSummary: expect.stringContaining("tests failed"),
+        blockers: [],
+        findings: [],
+      },
+    }));
+
+    runtime.stop();
+  });
+
+  it("submits evidence with execution failure on error", async () => {
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      fetchTask: vi.fn(async () => ({
+        status: "task",
+        task: {
+          task_id: "task-evidence-error",
+          repo: "repo",
+          branch: "feature/evidence-error",
+          default_branch: "main",
+          scope: ["src/**"],
+          acceptance: ["pnpm test"],
+          constraints: [],
+          prompt: "Test evidence on error",
+          chat_mode: "new_chat",
+        },
+      })),
+      startTask: vi.fn(async () => ({})),
+      reportProgress: vi.fn(async () => ({})),
+      submitResult: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => ({})),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-evidence-error" } })),
+      sendChat: vi.fn(async () => {
+        throw new Error("Execution error occurred");
+      }),
+      releaseSession: vi.fn(async () => ({ data: { sessionId: "session-evidence-error", released: true } })),
+    };
+    const launchTrae = vi.fn(async () => ({ reusedExisting: false }));
+
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-remote",
+      repoDir: "/tmp/project",
+      logger: { warn: vi.fn(), log: vi.fn() },
+      launchTrae,
+      sleep: vi.fn(async () => undefined),
+      setIntervalImpl: vi.fn(() => ({}) as never),
+      clearIntervalImpl: vi.fn(),
+    });
+
+    await runtime.runOnce();
+
+    expect(dispatcherClient.submitResult).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-evidence-error",
+      status: "failed",
+      evidence: {
+        failureType: "execution",
+        failureSummary: "Execution error occurred",
+        blockers: [
+          {
+            kind: "execution",
+            code: "ERROR",
+            message: "Execution error occurred",
+          },
+        ],
+        findings: [],
+      },
+    }));
 
     runtime.stop();
   });
