@@ -44,33 +44,36 @@ export const TaskList: React.FC<{ tasks: Task[] }> = ({ tasks }) => {
             key={task.id} 
             className="group relative p-4 border-l-2 border-transparent hover:border-primary/60 hover:bg-zinc-900/30 transition-all duration-300"
           >
-            <div className="flex justify-between items-center mb-2">
-              <div className="flex items-center gap-3">
-                <span className="text-primary/60 font-mono text-[11px] font-bold tracking-tighter group-hover:text-primary transition-colors">
-                  [{task.id}]
-                </span>
-                <span className="text-zinc-300 group-hover:text-zinc-100 text-sm font-semibold tracking-wide transition-colors">
-                  {task.title}
-                </span>
+            <div className="flex justify-between items-start mb-2">
+              <div className="flex flex-col gap-2 flex-1 min-w-0">
+                <div className="flex items-center gap-3">
+                  <span className="text-primary/60 font-mono text-[11px] font-bold tracking-tighter group-hover:text-primary transition-colors">
+                    [{task.id}]
+                  </span>
+                  <span className="text-zinc-300 group-hover:text-zinc-100 text-[14px] font-semibold tracking-wide transition-colors">
+                    {task.title}
+                  </span>
+                </div>
+                <div className="flex gap-5 text-[10px] text-zinc-600 font-mono">
+                  <span className="flex gap-1.5 items-center">
+                    <span className="text-zinc-700 uppercase">{t('worker')}</span>
+                    <span className="text-zinc-400">{task.assignedWorkerId || t('unassigned')}</span>
+                  </span>
+                  <span className="flex gap-1.5 items-center">
+                    <span className="text-zinc-700 uppercase">{t('branch')}</span>
+                    <span className="text-zinc-400 truncate max-w-[200px]">{task.branchName || '-'}</span>
+                  </span>
+                </div>
               </div>
-              <Badge status={task.status}>{t(`status.${task.status}`)}</Badge>
-            </div>
-            <div className="flex gap-5 text-[10px] text-zinc-600 font-mono mt-1">
-              <span className="flex gap-1.5 items-center">
-                <span className="text-zinc-700 uppercase">{t('worker')}</span>
-                <span className="text-zinc-400">{task.assignedWorkerId || t('unassigned')}</span>
-              </span>
-              <span className="flex gap-1.5 items-center">
-                <span className="text-zinc-700 uppercase">{t('branch')}</span>
-                <span className="text-zinc-400 truncate max-w-[200px]">{task.branchName || '-'}</span>
-              </span>
-              {(task.updatedAt || task.createdAt) && (
-                <span className="flex items-center gap-1 ml-auto">
-                  <span className="text-zinc-700 opacity-50 italic">
+
+              <div className="flex flex-col items-end gap-2 ml-4 shrink-0">
+                <Badge status={task.status}>{t(`status.${task.status}`)}</Badge>
+                {(task.updatedAt || task.createdAt) && (
+                  <span className="text-[11px] font-bold font-mono text-zinc-300 bg-zinc-900 border border-zinc-700/50 px-2 py-1 rounded shadow-lg">
                     {(task.updatedAt || task.createdAt)?.split('T')[1]?.split('.')[0] || '--:--:--'}
                   </span>
-                </span>
-              )}
+                )}
+              </div>
             </div>
           </div>
         ))}
