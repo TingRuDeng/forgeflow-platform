@@ -188,6 +188,7 @@ export function applyTraeSubmitResult(
     testOutput?: string;
     risks?: string[];
     filesChanged?: string[];
+    evidence?: WorkerEvidence;
     branchName?: string;
     commitSha?: string;
     pushStatus?: string;
@@ -230,19 +231,32 @@ export function applyTraeSubmitResult(
         }
       : null;
 
+  const eventPayload: Record<string, unknown> = {
+    from: "in_progress",
+    to: newStatus,
+    summary: input.summary,
+    test_output: input.testOutput,
+    risks: input.risks || [],
+    files_changed: input.filesChanged || [],
+    github,
+  };
+
+  if (input.evidence) {
+    eventPayload.evidence = input.evidence;
+  }
+
+  if (newStatus === "failed" && input.evidence?.failureType) {
+    eventPayload.failureType = input.evidence.failureType;
+  }
+  if (newStatus === "failed" && input.evidence?.failureSummary) {
+    eventPayload.failureSummary = input.evidence.failureSummary;
+  }
+
   appendRuntimeEvent(state, {
     taskId: input.taskId,
     type: "status_changed",
     at: nowIso(),
-    payload: {
-      from: "in_progress",
-      to: newStatus,
-      summary: input.summary,
-      test_output: input.testOutput,
-      risks: input.risks || [],
-      files_changed: input.filesChanged || [],
-      github,
-    },
+    payload: eventPayload,
   });
 
   return { state, ok: true };
@@ -494,6 +508,7 @@ function handleTraeRouteImpl(
       test_output: testOutput,
       risks,
       files_changed: filesChanged,
+      evidence,
       branch_name: branchName,
       commit_sha: commitSha,
       push_status: pushStatus,
@@ -527,6 +542,7 @@ function handleTraeRouteImpl(
       testOutput,
       risks,
       filesChanged,
+      evidence,
       branchName,
       commitSha,
       pushStatus,

@@ -1,5 +1,6 @@
 import * as http from "node:http";
 import * as https from "node:https";
+import type { WorkerEvidence } from "@forgeflow/result-contracts";
 
 const DEFAULT_DISPATCHER_URL = "http://127.0.0.1:8787";
 const DEFAULT_AUTOMATION_URL = "http://127.0.0.1:8790";
@@ -195,6 +196,7 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
       testOutput: string;
       risks: string[];
       filesChanged: string[];
+      evidence?: WorkerEvidence;
       github?: {
         branchName?: string | null;
         commitSha?: string | null;
@@ -213,6 +215,7 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
           test_output: input.testOutput,
           risks: input.risks,
           files_changed: input.filesChanged,
+          evidence: input.evidence,
           branch_name: input.github?.branchName,
           commit_sha: input.github?.commitSha,
           push_status: input.github?.pushStatus,
