@@ -36,6 +36,14 @@ function getApiToken(): string | null {
   return process.env.DISPATCHER_API_TOKEN ?? null;
 }
 
+function getAuthMode(): "token" | "open" | "legacy" {
+  const mode = process.env.DISPATCHER_AUTH_MODE ?? "legacy";
+  if (mode !== "token" && mode !== "open" && mode !== "legacy") {
+    throw new Error(`invalid DISPATCHER_AUTH_MODE: ${mode}. Must be "token", "open", or "legacy"`);
+  }
+  return mode;
+}
+
 function checkAuthToken(authHeader: string | undefined, apiToken: string): boolean {
   if (!authHeader) {
     return false;
@@ -49,20 +57,31 @@ function checkAuthToken(authHeader: string | undefined, apiToken: string): boole
 }
 
 function createAuthMiddleware(input: { method: string; pathname: string; authHeader?: string }): null | { status: number; error: string } {
-  const apiToken = getApiToken();
-  if (!apiToken) {
+  const authMode = getAuthMode();
+
+  if (authMode === "open" || authMode === "legacy") {
     return null;
   }
 
-  if (AUTH_WHITELIST_PATHS.includes(input.pathname)) {
-    return null;
-  }
+  if (authMode === "token") {
+    const apiToken = getApiToken();
+    if (!apiToken) {
+      return {
+        status: 401,
+        error: "auth_required_no_token",
+      };
+    }
 
-  if (!checkAuthToken(input.authHeader, apiToken)) {
-    return {
-      status: 401,
-      error: "unauthorized",
-    };
+    if (AUTH_WHITELIST_PATHS.includes(input.pathname)) {
+      return null;
+    }
+
+    if (!checkAuthToken(input.authHeader, apiToken)) {
+      return {
+        status: 401,
+        error: "unauthorized",
+      };
+    }
   }
 
   return null;
