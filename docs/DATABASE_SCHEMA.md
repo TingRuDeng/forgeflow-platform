@@ -117,6 +117,18 @@ Reviews track dispatcher-side review state:
 - `notes`
 - `decidedAt`
 - `reviewMaterial`
+- `evidence` (additive structured evidence)
+  - `latestWorkerResult` (structured failure evidence)
+    - `failureType`
+    - `failureSummary`
+    - `blockers[]`
+    - `findings[]`
+    - `artifacts[]`
+- `decisionMeta` (additive structured rework metadata)
+  - `reasonCode`
+  - `mustFix[]`
+  - `canRedrive`
+  - `redriveStrategy`
 
 Pull request records track review-side Git metadata:
 

@@ -109,6 +109,64 @@ interface MemoryStore {
 1. **文件存储读取**：dispatcher 会从 `.forgeflow-dispatcher/memory.json` 加载 lesson
 2. **dispatch 注入**：创建 dispatch 时，按 repo/scope/worker 条件筛选 lesson，并把命中结果注入 assignment context
 3. **提取 helper**：提供从 review / failed / rework 结果提炼 lesson 的 helper
+4. **结构化证据优先**：lesson 提取优先使用结构化失败证据，保留旧版 fallback
+
+### 结构化证据模型 (Additive)
+
+Review Memory 现在支持从结构化 worker result 和 review decision 中提取 lesson，优先于自由文本解析：
+
+#### Structured Worker Result
+
+```typescript
+interface StructuredWorkerResult {
+  failureType?:
+    | "verification_failed"
+    | "implementation_incomplete"
+    | "blocked_external"
+    | "blocked_human"
+    | "infra_error";
+  failureSummary?: string;
+  blockers?: StructuredBlocker[];
+  findings?: ReviewFinding[];
+  artifacts?: StructuredArtifactRef[];
+}
+
+interface StructuredBlocker {
+  code: string;
+  summary: string;
+  actionType: "auto_action" | "human_action";
+  blocksCompletion: boolean;
+}
+```
+
+#### Structured Review Decision
+
+```typescript
+interface StructuredReviewDecision {
+  reasonCode?:
+    | "scope_miss"
+    | "test_gap"
+    | "quality_issue"
+    | "behavior_regression"
+    | "human_confirmation_required"
+    | "other";
+  mustFix?: string[];
+  canRedrive?: boolean;
+  redriveStrategy?:
+    | "same_worker_continue"
+    | "redispatch_same_pool"
+    | "manual_only";
+}
+```
+
+#### 提取优先级
+
+1. **优先使用结构化字段**：
+   - 从 `failureType` / `failureSummary` 提取 failed lesson
+   - 从 `reasonCode` / `mustFix` 提取 rework lesson
+   - 从 `blockers` 提取严重级别为 critical 的 lesson
+2. **兼容旧版 fallback**：
+   - 当结构化字段不存在时，回退到原有自由文本解析逻辑
 
 ## 当前限制
 

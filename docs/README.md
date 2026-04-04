@@ -121,7 +121,7 @@ Trae MCP fallback 维护：
 - `codex` / `gemini` 的 `worker daemon` 链路仍可用，但当前迭代策略是 Trae-first，相关扩展暂缓投入（deferred），不属于推荐启动路径。
 - Trae 的首选无人值守路径是 `automation gateway` + `automation worker`。
 - Trae MCP worker 已降级为 deprecated/fallback 接入。
-- review memory 已进入主线的 dispatch 注入路径，但仍不是完整知识库系统。
+- review memory 已进入主线的 dispatch 注入路径，支持从结构化失败/rework证据提取lesson，但仍不是完整知识库系统。
 - `blocked + rework -> continuation` 已进入主线协议与 Trae consumer 链路，并已完成远程 smoke 验证。
 
 ## Supporting Docs

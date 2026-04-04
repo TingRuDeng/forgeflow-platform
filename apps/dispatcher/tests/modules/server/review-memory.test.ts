@@ -330,6 +330,286 @@ describe("review memory - lesson extraction from failed/rework", () => {
   });
 });
 
+describe("review memory - lesson extraction from structured failed evidence", () => {
+  it("extracts lesson from structured failure with failureType", async () => {
+    const mod = await import(memoryModulePath);
+
+    const result = {
+      taskId: "dispatch-1:task-1",
+      workerId: "codex-worker",
+      provider: "codex",
+      pool: "codex",
+      repo: "org/repo",
+      status: "failed",
+      verification: {
+        allPassed: false,
+        commands: [
+          { command: "pnpm test", exitCode: 1, output: "Test failed" },
+        ],
+      },
+      structured: {
+        failureType: "verification_failed",
+        failureSummary: "Test suite failed due to missing mock",
+      },
+    };
+
+    const lesson = mod.extractLessonFromFailed(
+      "dispatch-1:task-1",
+      "codex",
+      "org/repo",
+      result,
+      result.structured
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.source_type).toBe("failed");
+    expect(lesson.category).toBe("testing");
+    expect(lesson.rule).toBe("Test suite failed due to missing mock");
+    expect(lesson.rationale).toBe("Test suite failed due to missing mock");
+    expect(lesson.severity).toBe("warning");
+    expect(lesson.trigger_tags).toContain("verification_failed");
+  });
+
+  it("extracts lesson from structured failure with blockers", async () => {
+    const mod = await import(memoryModulePath);
+
+    const result = {
+      taskId: "dispatch-1:task-2",
+      workerId: "codex-worker",
+      provider: "codex",
+      pool: "codex",
+      repo: "org/repo",
+      status: "failed",
+      verification: {
+        allPassed: false,
+        commands: [],
+      },
+      structured: {
+        failureType: "blocked_human",
+        blockers: [
+          { code: "WAITING_REVIEW", summary: "Waiting for senior engineer review", actionType: "human_action", blocksCompletion: true },
+        ],
+      },
+    };
+
+    const lesson = mod.extractLessonFromFailed(
+      "dispatch-1:task-2",
+      "codex",
+      "org/repo",
+      result,
+      result.structured
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.source_type).toBe("failed");
+    expect(lesson.category).toBe("process");
+    expect(lesson.severity).toBe("critical");
+    expect(lesson.rule).toBe("Handle blocker: WAITING_REVIEW");
+    expect(lesson.rationale).toBe("Waiting for senior engineer review");
+  });
+
+  it("extracts lesson from structured failure with findings", async () => {
+    const mod = await import(memoryModulePath);
+
+    const result = {
+      taskId: "dispatch-1:task-3",
+      workerId: "codex-worker",
+      provider: "codex",
+      pool: "codex",
+      repo: "org/repo",
+      status: "failed",
+      verification: {
+        allPassed: false,
+        commands: [],
+      },
+      structured: {
+        failureType: "implementation_incomplete",
+        findings: [
+          { title: "Missing error handling", recommendation: "Add try-catch", severity: "warning", category: "quality", evidence: { file: "src/api/handler.ts" } },
+        ],
+      },
+    };
+
+    const lesson = mod.extractLessonFromFailed(
+      "dispatch-1:task-3",
+      "codex",
+      "org/repo",
+      result,
+      result.structured
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.trigger_paths).toContain("src/api/handler.ts");
+  });
+
+  it("extracts lesson from structured failure with artifacts", async () => {
+    const mod = await import(memoryModulePath);
+
+    const result = {
+      taskId: "dispatch-1:task-4",
+      workerId: "codex-worker",
+      provider: "codex",
+      pool: "codex",
+      repo: "org/repo",
+      status: "failed",
+      verification: {
+        allPassed: false,
+        commands: [],
+      },
+      structured: {
+        failureType: "infra_error",
+        artifacts: [
+          { kind: "file", label: "error log", value: "logs/error.log" },
+        ],
+      },
+    };
+
+    const lesson = mod.extractLessonFromFailed(
+      "dispatch-1:task-4",
+      "codex",
+      "org/repo",
+      result,
+      result.structured
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.trigger_paths).toContain("logs/error.log");
+    expect(lesson.category).toBe("infrastructure");
+  });
+
+  it("falls back to legacy extraction when no structured evidence", async () => {
+    const mod = await import(memoryModulePath);
+
+    const result = {
+      taskId: "dispatch-1:task-5",
+      workerId: "codex-worker",
+      provider: "codex",
+      pool: "codex",
+      repo: "org/repo",
+      status: "failed",
+      verification: {
+        commands: [
+          { command: "pnpm test", exitCode: 1, output: "Test failed: undefined is not a function" },
+        ],
+      },
+    };
+
+    const lesson = mod.extractLessonFromFailed(
+      "dispatch-1:task-5",
+      "codex",
+      "org/repo",
+      result
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.source_type).toBe("failed");
+    expect(lesson.category).toBe("testing");
+  });
+});
+
+describe("review memory - lesson extraction from structured rework evidence", () => {
+  it("extracts lesson from structured rework with reasonCode", async () => {
+    const mod = await import(memoryModulePath);
+
+    const structured = {
+      reasonCode: "test_gap",
+      mustFix: ["Add unit tests for utils.ts", "Add integration tests for API endpoints"],
+      canRedrive: true,
+      redriveStrategy: "same_worker_continue",
+    };
+
+    const lesson = mod.extractLessonFromRework(
+      "dispatch-1:task-1",
+      "codex",
+      "org/repo",
+      1,
+      "Minor adjustment",
+      structured
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.source_type).toBe("rework");
+    expect(lesson.category).toBe("testing");
+    expect(lesson.rule).toBe("Add unit tests for utils.ts");
+    expect(lesson.rationale).toContain("Add unit tests for utils.ts");
+    expect(lesson.rationale).toContain("Add integration tests for API endpoints");
+    expect(lesson.trigger_tags).toContain("test_gap");
+  });
+
+  it("extracts lesson from structured rework with canRedrive false", async () => {
+    const mod = await import(memoryModulePath);
+
+    const structured = {
+      reasonCode: "scope_miss",
+      canRedrive: false,
+    };
+
+    const lesson = mod.extractLessonFromRework(
+      "dispatch-1:task-2",
+      "codex",
+      "org/repo",
+      1,
+      "Requirements unclear",
+      structured
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.severity).toBe("critical");
+    expect(lesson.rule).toBe("Address reason: scope_miss");
+  });
+
+  it("extracts lesson from structured rework with only reasonCode", async () => {
+    const mod = await import(memoryModulePath);
+
+    const structured = {
+      reasonCode: "behavior_regression",
+    };
+
+    const lesson = mod.extractLessonFromRework(
+      "dispatch-1:task-3",
+      "codex",
+      "org/repo",
+      1,
+      "",
+      structured
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.category).toBe("behavior");
+    expect(lesson.rule).toBe("Address reason: behavior_regression");
+  });
+
+  it("falls back to legacy extraction when no structured evidence", async () => {
+    const mod = await import(memoryModulePath);
+
+    const lesson = mod.extractLessonFromRework(
+      "dispatch-1:task-4",
+      "codex",
+      "org/repo",
+      3,
+      "Requirements were unclear"
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.source_type).toBe("rework");
+    expect(lesson.rationale).toBe("Requirements were unclear");
+  });
+
+  it("returns null when no structured evidence and rework count < 2", async () => {
+    const mod = await import(memoryModulePath);
+
+    const lesson = mod.extractLessonFromRework(
+      "dispatch-1:task-5",
+      "codex",
+      "org/repo",
+      1,
+      "Minor adjustment"
+    );
+
+    expect(lesson).toBeNull();
+  });
+});
+
 describe("review memory - lesson injection", () => {
   it("injects lesson when repo matches exactly", async () => {
     const mod = await import(memoryModulePath);

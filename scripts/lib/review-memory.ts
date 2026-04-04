@@ -56,11 +56,54 @@ export interface VerificationCommand {
   output: string;
 }
 
+export interface StructuredBlocker {
+  code: string;
+  summary: string;
+  actionType: "auto_action" | "human_action";
+  blocksCompletion: boolean;
+}
+
+export interface StructuredArtifactRef {
+  kind: "log" | "report" | "file" | "url";
+  label: string;
+  value: string;
+}
+
+export interface StructuredWorkerResult {
+  failureType?:
+    | "verification_failed"
+    | "implementation_incomplete"
+    | "blocked_external"
+    | "blocked_human"
+    | "infra_error";
+  failureSummary?: string;
+  blockers?: StructuredBlocker[];
+  findings?: Finding[];
+  artifacts?: StructuredArtifactRef[];
+}
+
+export interface StructuredReviewDecision {
+  reasonCode?:
+    | "scope_miss"
+    | "test_gap"
+    | "quality_issue"
+    | "behavior_regression"
+    | "human_confirmation_required"
+    | "other";
+  mustFix?: string[];
+  canRedrive?: boolean;
+  redriveStrategy?:
+    | "same_worker_continue"
+    | "redispatch_same_pool"
+    | "manual_only";
+}
+
 export interface WorkerResult {
   status: string;
   verification: {
     commands: VerificationCommand[];
   };
+  structured?: StructuredWorkerResult;
 }
 
 export interface LessonCriteria {
@@ -186,9 +229,67 @@ export function extractLessonFromReview(taskId: string, workerType: string, repo
   };
 }
 
-export function extractLessonFromFailed(taskId: string, workerType: string, repo: string, result: WorkerResult): Lesson | null {
-  if (!isExtractableFromFailed(result)) {
+export function extractLessonFromFailed(taskId: string, workerType: string, repo: string, result: WorkerResult, structured?: StructuredWorkerResult): Lesson | null {
+  if (!isExtractableFromFailed(result) && !structured?.failureType) {
     return null;
+  }
+
+  if (structured?.failureType) {
+    const categoryMap: Record<string, string> = {
+      verification_failed: 'testing',
+      implementation_incomplete: 'implementation',
+      blocked_external: 'infrastructure',
+      blocked_human: 'process',
+      infra_error: 'infrastructure',
+    };
+    const category = categoryMap[structured.failureType] || 'other';
+    const severity = structured.blockers && structured.blockers.length > 0 ? 'critical' : 'warning';
+
+    let rule = '';
+    let rationale = '';
+
+    if (structured.failureSummary) {
+      rule = structured.failureSummary;
+      rationale = structured.failureSummary;
+    } else if (structured.blockers && structured.blockers.length > 0) {
+      rule = `Handle blocker: ${structured.blockers[0].code}`;
+      rationale = structured.blockers.map(b => b.summary).join('; ');
+    } else {
+      rule = `Handle ${category} failures`;
+      rationale = structured.failureType;
+    }
+
+    const triggerPaths: string[] = [];
+    if (structured.findings) {
+      for (const f of structured.findings) {
+        if (f.evidence?.file) {
+          triggerPaths.push(f.evidence.file);
+        }
+      }
+    }
+    if (structured.artifacts) {
+      for (const a of structured.artifacts) {
+        if (a.kind === 'file') {
+          triggerPaths.push(a.value);
+        }
+      }
+    }
+
+    return {
+      id: generateLessonId(),
+      source_type: 'failed',
+      source_task_id: taskId,
+      source_worker_type: workerType,
+      repo,
+      scope: '',
+      category,
+      rule,
+      rationale,
+      trigger_paths: triggerPaths,
+      trigger_tags: [category, structured.failureType],
+      severity,
+      created_at: formatLocalTimestamp(),
+    };
   }
 
   const failedCommand = result.verification.commands.find(c => c.exitCode !== 0);
@@ -212,9 +313,52 @@ export function extractLessonFromFailed(taskId: string, workerType: string, repo
   };
 }
 
-export function extractLessonFromRework(taskId: string, workerType: string, repo: string, reworkCount: number, rootCause: string): Lesson | null {
-  if (reworkCount < 2) {
+export function extractLessonFromRework(taskId: string, workerType: string, repo: string, reworkCount: number, rootCause: string, structured?: StructuredReviewDecision): Lesson | null {
+  if (reworkCount < 2 && !structured?.reasonCode) {
     return null;
+  }
+
+  if (structured?.reasonCode) {
+    const reasonCodeCategoryMap: Record<string, string> = {
+      scope_miss: 'requirements',
+      test_gap: 'testing',
+      quality_issue: 'quality',
+      behavior_regression: 'behavior',
+      human_confirmation_required: 'process',
+      other: 'other',
+    };
+    const category = reasonCodeCategoryMap[structured.reasonCode] || 'process';
+    const severity = structured.canRedrive === false ? 'critical' : 'warning';
+
+    let rule = '';
+    let rationale = '';
+
+    if (structured.mustFix && structured.mustFix.length > 0) {
+      rule = structured.mustFix[0];
+      rationale = structured.mustFix.join('; ');
+    } else if (structured.reasonCode) {
+      rule = `Address reason: ${structured.reasonCode}`;
+      rationale = structured.reasonCode;
+    } else {
+      rule = 'Reduce rework through better requirements';
+      rationale = rootCause;
+    }
+
+    return {
+      id: generateLessonId(),
+      source_type: 'rework',
+      source_task_id: taskId,
+      source_worker_type: workerType,
+      repo,
+      scope: '',
+      category,
+      rule,
+      rationale,
+      trigger_paths: [],
+      trigger_tags: ['rework', structured.reasonCode].filter(Boolean) as string[],
+      severity,
+      created_at: formatLocalTimestamp(),
+    };
   }
 
   return {
