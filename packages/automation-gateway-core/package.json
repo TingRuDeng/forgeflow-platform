@@ -1,6 +1,6 @@
 {
   "name": "@tingrudeng/automation-gateway-core",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "private": false,
   "description": "Shared final-report parsing and task-id validation helpers for ForgeFlow automation gateway runtimes.",
   "license": "Apache-2.0",
