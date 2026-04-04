@@ -27,6 +27,7 @@ import {
   loadMemoryStore,
 } from "../../../../../scripts/lib/review-memory.js";
 import { safeTaskDirName } from "../../../../../scripts/lib/task-worktree.js";
+import { formatLocalTimestamp } from "../time.js";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
 
@@ -69,7 +70,7 @@ function createAuthMiddleware(input: { method: string; pathname: string; authHea
 }
 
 function nowIso() {
-  return new Date().toISOString();
+  return formatLocalTimestamp();
 }
 
 function buildTraeWorktreeAndAssignmentDirs(stateDir, repoDir, task) {

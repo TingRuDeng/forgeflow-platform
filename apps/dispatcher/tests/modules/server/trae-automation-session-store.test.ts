@@ -33,6 +33,10 @@ describe("trae session store", () => {
     expect(session.status).toBe("prepared");
     expect(session.startedAt).toBeDefined();
     expect(session.lastActivityAt).toBeDefined();
+    expect(session.startedAt).toMatch(/[+-]\d{2}:\d{2}$/);
+    expect(session.startedAt.endsWith("Z")).toBe(false);
+    expect(session.lastActivityAt).toMatch(/[+-]\d{2}:\d{2}$/);
+    expect(session.lastActivityAt.endsWith("Z")).toBe(false);
     expect(session.responseDetected).toBe(false);
     expect(session.error).toBeNull();
   });

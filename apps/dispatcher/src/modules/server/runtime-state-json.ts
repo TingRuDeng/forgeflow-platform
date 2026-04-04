@@ -2,9 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { RuntimeState } from "./runtime-state.js";
+import { formatLocalTimestamp } from "../time.js";
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return formatLocalTimestamp();
 }
 
 function stateFilePath(stateDir: string): string {

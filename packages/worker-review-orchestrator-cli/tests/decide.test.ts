@@ -62,16 +62,23 @@ describe("decide", () => {
     });
 
     const nextState = JSON.parse(fs.readFileSync(path.join(stateDir, "runtime-state.json"), "utf8")) as {
+      updatedAt: string;
       tasks: Array<{ status: string }>;
       assignments: Array<{ status: string; assignment: { status: string } }>;
-      reviews: Array<{ decision: string }>;
-      pullRequests: Array<{ status: string }>;
+      reviews: Array<{ decision: string; decidedAt: string }>;
+      pullRequests: Array<{ status: string; updatedAt: string }>;
     };
 
+    expect(nextState.updatedAt).toMatch(/[+-]\d{2}:\d{2}$/);
+    expect(nextState.updatedAt.endsWith("Z")).toBe(false);
     expect(nextState.tasks[0]?.status).toBe("blocked");
     expect(nextState.assignments[0]?.status).toBe("blocked");
     expect(nextState.assignments[0]?.assignment.status).toBe("blocked");
     expect(nextState.reviews[0]?.decision).toBe("block");
+    expect(nextState.reviews[0]?.decidedAt).toMatch(/[+-]\d{2}:\d{2}$/);
+    expect(nextState.reviews[0]?.decidedAt.endsWith("Z")).toBe(false);
     expect(nextState.pullRequests[0]?.status).toBe("changes_requested");
+    expect(nextState.pullRequests[0]?.updatedAt).toMatch(/[+-]\d{2}:\d{2}$/);
+    expect(nextState.pullRequests[0]?.updatedAt.endsWith("Z")).toBe(false);
   });
 });

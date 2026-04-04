@@ -3,9 +3,10 @@ import type {
   WorkerDaemonCycleInput,
   WorkerDaemonCycleResult,
 } from "./runtime-glue-types.js";
+import { formatLocalTimestamp } from "../time.js";
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return formatLocalTimestamp();
 }
 
 export interface RunWorkerDaemonOptions extends WorkerDaemonCycleInput {

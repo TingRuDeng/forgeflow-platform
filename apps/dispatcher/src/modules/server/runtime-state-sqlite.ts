@@ -2,11 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { RuntimeState } from "./runtime-state.js";
+import { formatLocalTimestamp } from "../time.js";
 
 const { DatabaseSync } = await import("node:sqlite");
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return formatLocalTimestamp();
 }
 
 function dbFilePath(stateDir: string): string {

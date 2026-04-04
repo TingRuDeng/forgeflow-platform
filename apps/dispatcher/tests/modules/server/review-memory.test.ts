@@ -63,6 +63,8 @@ describe("review memory - lesson extraction from review", () => {
     expect(lesson.category).toBe("security");
     expect(lesson.severity).toBe("critical");
     expect(lesson.trigger_paths).toContain("src/auth/login.ts");
+    expect(lesson.created_at).toMatch(/[+-]\d{2}:\d{2}$/);
+    expect(lesson.created_at.endsWith("Z")).toBe(false);
   });
 
   it("extracts lesson from blocked review with warning severity", async () => {

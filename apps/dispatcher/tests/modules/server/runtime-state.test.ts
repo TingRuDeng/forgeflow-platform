@@ -43,6 +43,143 @@ afterEach(() => {
 });
 
 describe("dispatcher runtime state (TypeScript)", () => {
+  it("records new runtime timestamps with explicit local offsets instead of UTC z", () => {
+    let state = createEmptyRuntimeState();
+
+    expect(state.updatedAt).toMatch(/[+-]\d{2}:\d{2}$/);
+    expect(state.updatedAt.endsWith("Z")).toBe(false);
+
+    state = registerWorker(state, {
+      workerId: "codex-local-time",
+      pool: "codex",
+      hostname: "mac-mini",
+      labels: ["mac", "codex"],
+      repoDir: "/repos/openclaw",
+    });
+
+    expect(state.workers[0]?.lastHeartbeatAt).toMatch(/[+-]\d{2}:\d{2}$/);
+    expect(state.workers[0]?.lastHeartbeatAt.endsWith("Z")).toBe(false);
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "main",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-local-time",
+          title: "记录本地时区时间",
+          pool: "codex",
+          branchName: "codex/task-local-time",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-local-time",
+          assignment: {
+            taskId: "task-local-time",
+            workerId: "placeholder",
+            pool: "codex",
+            status: "assigned",
+            branchName: "codex/task-local-time",
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "main",
+          },
+        },
+      ],
+    });
+
+    const task = dispatch.state.tasks[0];
+    const createdEvent = dispatch.state.events.find((event) => event.type === "created");
+
+    expect(task?.createdAt).toMatch(/[+-]\d{2}:\d{2}$/);
+    expect(task?.createdAt.endsWith("Z")).toBe(false);
+    expect(createdEvent?.at).toMatch(/[+-]\d{2}:\d{2}$/);
+    expect(createdEvent?.at.endsWith("Z")).toBe(false);
+    expect(dispatch.state.updatedAt).toMatch(/[+-]\d{2}:\d{2}$/);
+    expect(dispatch.state.updatedAt.endsWith("Z")).toBe(false);
+  });
+
+  it("orders mixed UTC and local-offset ready tasks by actual time instead of lexical order", () => {
+    let state = createEmptyRuntimeState();
+
+    state = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "main",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-utc-created",
+          title: "UTC task",
+          pool: "codex",
+          branchName: "codex/task-utc-created",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-utc-created",
+          assignment: {
+            taskId: "task-utc-created",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "codex/task-utc-created",
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "main",
+          },
+        },
+      ],
+      createdAt: "2026-04-04T00:30:00Z",
+    }).state;
+
+    state = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "main",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-local-created",
+          title: "Local offset task",
+          pool: "codex",
+          branchName: "codex/task-local-created",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-local-created",
+          assignment: {
+            taskId: "task-local-created",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "codex/task-local-created",
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "main",
+          },
+        },
+      ],
+      createdAt: "2026-04-04T08:00:00+08:00",
+    }).state;
+
+    state = registerWorker(state, {
+      workerId: "codex-claim-worker",
+      pool: "codex",
+      hostname: "mac-mini",
+      labels: ["mac", "codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-04-04T09:00:00+08:00",
+    });
+
+    const claimed = claimAssignedTaskForWorker(state, {
+      workerId: "codex-claim-worker",
+      at: "2026-04-04T09:00:05+08:00",
+    });
+
+    expect(claimed.assignment?.task.id).toBe("dispatch-2:task-local-created");
+  });
+
   it("registers workers, dispatches tasks, processes results, and records review decisions", () => {
     const stateDir = makeTempDir();
 

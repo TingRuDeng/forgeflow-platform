@@ -3,6 +3,7 @@ import path from "node:path";
 import type { DecideOptions, DecideResult, LocalRuntimeState } from "./types.js";
 
 import { createJsonHttpClient, createEmptyRuntimeState, loadRuntimeState, saveRuntimeState } from "./http.js";
+import { formatLocalTimestamp } from "./time.js";
 
 function normalizeDecision(decision: DecideOptions["decision"]) {
   if (decision === "merge") {
@@ -12,7 +13,7 @@ function normalizeDecision(decision: DecideOptions["decision"]) {
 }
 
 function readNowIso() {
-  return new Date().toISOString();
+  return formatLocalTimestamp();
 }
 
 function upsertByTaskId(items: Array<Record<string, unknown>>, payload: Record<string, unknown>) {

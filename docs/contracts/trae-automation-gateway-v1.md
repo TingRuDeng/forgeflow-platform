@@ -162,13 +162,15 @@ Gateway 默认启用会话状态持久化（脚本链路默认目录：`.forgefl
   "data": {
     "sessionId": "session-123",
     "status": "running",
-    "startedAt": "2026-03-30T10:00:00Z",
-    "lastActivityAt": "2026-03-30T10:05:00Z",
+    "startedAt": "2026-03-30T18:00:00+08:00",
+    "lastActivityAt": "2026-03-30T18:05:00+08:00",
     "responseDetected": true,
     "error": null
   }
 }
 ```
+
+时间字段使用 ISO 8601 字符串，并显式携带当前本地时区偏移；不再强制写成 UTC `Z`。
 
 状态枚举：
 

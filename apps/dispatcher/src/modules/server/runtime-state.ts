@@ -1,6 +1,7 @@
 import { jsonStore } from "./runtime-state-json.js";
 import { sqliteStore } from "./runtime-state-sqlite.js";
 import type { RuntimeStateStore } from "./runtime-state-store.js";
+import { compareTimestampAsc, formatLocalTimestamp } from "../time.js";
 
 const defaultStore: RuntimeStateStore = sqliteStore;
 
@@ -328,7 +329,7 @@ export interface DashboardSnapshot {
 }
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return formatLocalTimestamp();
 }
 
 function clone<T>(value: T): T {
@@ -452,7 +453,7 @@ function selectWorker(state: RuntimeState, pool: string, options: ReconcileOptio
       !worker.disabledAt &&
       resolveWorkerStatus(worker, options) === "idle")
     .sort((left, right) => {
-      const heartbeatCompare = left.lastHeartbeatAt.localeCompare(right.lastHeartbeatAt);
+      const heartbeatCompare = compareTimestampAsc(left.lastHeartbeatAt, right.lastHeartbeatAt);
       if (heartbeatCompare !== 0) {
         return heartbeatCompare;
       }
@@ -918,7 +919,7 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
         heartbeatTimeoutMs: input.heartbeatTimeoutMs,
       });
     })
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))[0];
+    .sort((left, right) => compareTimestampAsc(left.createdAt, right.createdAt) || left.id.localeCompare(right.id))[0];
 
   if (!readyTask) {
     return {

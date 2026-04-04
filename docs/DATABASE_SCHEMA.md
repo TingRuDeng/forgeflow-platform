@@ -49,6 +49,11 @@ Supporting metadata:
 - `updatedAt`
 - `sequence`
 
+时间字段说明：
+
+- dispatcher state、review memory、task ledger、local CLI state、session store 现在统一写 ISO 8601 字符串，并显式携带本地时区偏移，例如 `2026-04-04T23:15:00.000+08:00`
+- 历史数据中已有的 UTC `Z` 时间戳继续兼容读取与排序，不要求迁移
+
 ### 2.1 Workers
 
 Verified core worker fields include:

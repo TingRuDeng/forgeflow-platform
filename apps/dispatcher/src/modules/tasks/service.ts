@@ -1,6 +1,7 @@
 import type { TaskEvent } from "@forgeflow/task-schema";
 
 import { TaskEventService } from "../events/service.js";
+import { formatLocalTimestamp } from "../time.js";
 
 export type DispatcherTaskStatus =
   | "planned"
@@ -39,7 +40,7 @@ const VALID_TRANSITIONS: Record<DispatcherTaskStatus, DispatcherTaskStatus[]> = 
 };
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return formatLocalTimestamp();
 }
 
 export class TaskService {

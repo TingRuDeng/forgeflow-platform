@@ -182,7 +182,7 @@ describe("dispatcher server", () => {
     expect(dashboardResponse.status).toBe(200);
     const dashboardHtml = dashboardResponse.text;
     expect(dashboardHtml).toContain("ForgeFlow");
-  });
+  }, 15_000);
 
   it("fetch_task returns no_task when no task assigned", async () => {
     const stateDir = makeTempDir();

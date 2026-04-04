@@ -1,6 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
 
+function pad(value: number, width = 2): string {
+  return String(Math.trunc(Math.abs(value))).padStart(width, "0");
+}
+
+function formatLocalTimestamp(date: Date = new Date()): string {
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absOffsetMinutes = Math.abs(offsetMinutes);
+  const offsetHours = Math.floor(absOffsetMinutes / 60);
+  const offsetRemainderMinutes = absOffsetMinutes % 60;
+
+  return [
+    `${pad(date.getFullYear(), 4)}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`,
+    `${sign}${pad(offsetHours)}:${pad(offsetRemainderMinutes)}`,
+  ].join("");
+}
+
 export interface Lesson {
   id: string;
   source_type: string;
@@ -56,7 +74,7 @@ export function createMemoryStore(lessons?: Lesson[]): MemoryStore {
   return {
     version: 1,
     lessons: lessons || [],
-    updated_at: new Date().toISOString(),
+    updated_at: formatLocalTimestamp(),
   };
 }
 
@@ -164,7 +182,7 @@ export function extractLessonFromReview(taskId: string, workerType: string, repo
     trigger_paths: inferTriggerPaths(finding.evidence),
     trigger_tags: [finding.category].filter(Boolean) as string[],
     severity: finding.severity || 'warning',
-    created_at: new Date().toISOString(),
+    created_at: formatLocalTimestamp(),
   };
 }
 
@@ -190,7 +208,7 @@ export function extractLessonFromFailed(taskId: string, workerType: string, repo
     trigger_paths: [],
     trigger_tags: [category],
     severity: 'warning',
-    created_at: new Date().toISOString(),
+    created_at: formatLocalTimestamp(),
   };
 }
 
@@ -212,7 +230,7 @@ export function extractLessonFromRework(taskId: string, workerType: string, repo
     trigger_paths: [],
     trigger_tags: ['rework'],
     severity: 'info',
-    created_at: new Date().toISOString(),
+    created_at: formatLocalTimestamp(),
   };
 }
 

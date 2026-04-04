@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { formatLocalTimestamp } from "./time.js";
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_STATE_DIR = ".forgeflow-trae-gateway";
@@ -68,7 +69,7 @@ export function createSessionStore(stateDir: string | null, options: {
   now?: () => string;
   randomUUID?: typeof crypto.randomUUID;
 } = {}): SessionStore {
-  const now = options.now || (() => new Date().toISOString());
+  const now = options.now || (() => formatLocalTimestamp());
   const randomUUID = options.randomUUID || crypto.randomUUID;
   const resolvedStateDir = stateDir || DEFAULT_STATE_DIR;
   const filePath = path.join(resolvedStateDir, "sessions.json");

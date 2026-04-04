@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { formatLocalTimestamp } from "./lib/time.js";
 const CODEX_MODEL = process.env.FORGEFLOW_CODEX_MODEL?.trim() || "";
 const GEMINI_MODEL = "gemini-2.5-pro";
 const EXEC_TIMEOUT_MS = Number(process.env.FORGEFLOW_EXEC_TIMEOUT_MS) || 300_000;
@@ -250,7 +251,7 @@ async function main() {
             timedOut: result.timedOut,
         });
     }
-    const generatedAt = new Date().toISOString();
+    const generatedAt = formatLocalTimestamp();
     const finalOutput = launchResult.timedOut
         ? `${launchResult.output}\n\n[TIMEOUT] codex exec timed out after ${EXEC_TIMEOUT_MS}ms`
         : launchResult.output;

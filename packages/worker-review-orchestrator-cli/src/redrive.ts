@@ -4,6 +4,7 @@ import type { RedriveOptions, RedriveResult, RedriveFailureType } from "./types.
 import { createJsonHttpClient } from "./http.js";
 import { buildSingleTaskDispatchInput, runDispatch } from "./dispatch.js";
 import type { DispatchInput, DispatchResult } from "./types.js";
+import { compareTimestampDesc } from "./time.js";
 
 const REDRIVEABLE_FAILURE_PATTERNS: Array<{ type: RedriveFailureType; patterns: RegExp[] }> = [
   {
@@ -67,7 +68,7 @@ function extractLatestReviewDecision(
   const sortedReviews = [...taskReviews].sort((a, b) => {
     const aAt = extractStringValue(a, "decidedAt") ?? extractStringValue(a, "at") ?? "";
     const bAt = extractStringValue(b, "decidedAt") ?? extractStringValue(b, "at") ?? "";
-    return bAt.localeCompare(aAt);
+    return compareTimestampDesc(aAt, bAt);
   });
 
   const latestReview = sortedReviews[0];
