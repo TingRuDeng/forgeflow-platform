@@ -441,6 +441,7 @@ export function handleDispatcherHttpRequest(input) {
           decision: body.decision,
           notes: body.notes,
           at: body.at,
+          evidence: body.evidence,
         }),
       }));
       return createJsonResponse(200, {

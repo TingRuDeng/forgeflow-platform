@@ -1,6 +1,7 @@
 import { jsonStore } from "./runtime-state-json.js";
 import { sqliteStore } from "./runtime-state-sqlite.js";
 import type { RuntimeStateStore } from "./runtime-state-store.js";
+import type { ReviewDecisionEvidence } from "./runtime-glue-types.js";
 import { compareTimestampAsc, formatLocalTimestamp } from "../time.js";
 
 const defaultStore: RuntimeStateStore = sqliteStore;
@@ -131,6 +132,7 @@ export interface Review {
   notes: string;
   decidedAt?: string | null;
   reviewMaterial?: ReviewMaterial | null;
+  evidence?: ReviewDecisionEvidence | null;
 }
 
 export interface PullRequest {
@@ -291,6 +293,7 @@ export interface RecordReviewDecisionInput {
   actor: string;
   notes?: string;
   at?: string;
+  evidence?: ReviewDecisionEvidence;
 }
 
 export interface ReconcileOptions {
@@ -1172,6 +1175,9 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
     throw new Error(`task not in review: ${input.taskId}`);
   }
 
+  const existingReview = state.reviews.find((candidate) => candidate.taskId === input.taskId);
+  const existingReviewMaterial = existingReview?.reviewMaterial ?? null;
+
   const nextStatus = input.decision === "merge" ? "merged" : "blocked";
   let nextState = appendEvent(state, {
     taskId: task.id,
@@ -1204,7 +1210,8 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
       actor: input.actor,
       notes: input.notes ?? "",
       decidedAt: input.at ?? nowIso(),
-      reviewMaterial: null,
+      reviewMaterial: existingReviewMaterial,
+      evidence: input.evidence ?? null,
     }),
   };
 

@@ -10,21 +10,12 @@ export const TerminalStateSchema = z.enum([
   "expired",
 ]);
 
-export const RunResultSchema = z.object({
-  command: RunCommandSchema,
-  task_id: z.string().min(1),
-  artifact_root: z.string().min(1),
-  decision: DecisionSchema,
-  terminal_state: TerminalStateSchema,
-  provider_success_count: z.number().int().nonnegative(),
-  provider_failure_count: z.number().int().nonnegative(),
-  findings_count: z.number().int().nonnegative(),
-  parse_success_count: z.number().int().nonnegative(),
-  parse_failure_count: z.number().int().nonnegative(),
-  schema_valid_count: z.number().int().nonnegative(),
-  dropped_findings_count: z.number().int().nonnegative(),
-  created_new_task: z.boolean(),
-});
+export const WorkerFailureTypeSchema = z.enum([
+  "preflight",
+  "execution",
+  "verification",
+  "unknown",
+]);
 
 export const ReviewFindingSchema = z.object({
   finding_id: z.string().min(1).default("finding"),
@@ -49,5 +40,48 @@ export const ReviewFindingSchema = z.object({
   detected_by: z.array(z.string()).default([]),
 });
 
+export const WorkerFailureSchema = z.object({
+  kind: WorkerFailureTypeSchema,
+  code: z.string(),
+  message: z.string(),
+  details: z.record(z.unknown()).optional(),
+});
+
+export const WorkerEvidenceSchema = z.object({
+  failureType: WorkerFailureTypeSchema.optional(),
+  failureSummary: z.string().optional(),
+  blockers: z.array(WorkerFailureSchema).default([]),
+  findings: z.array(ReviewFindingSchema).default([]),
+  artifacts: z.record(z.string()).optional(),
+});
+
+export const ReviewDecisionEvidenceSchema = z.object({
+  reasonCode: z.string().optional(),
+  mustFix: z.array(ReviewFindingSchema).default([]),
+  canRedrive: z.boolean().optional(),
+  redriveStrategy: z.string().optional(),
+});
+
+export const RunResultSchema = z.object({
+  command: RunCommandSchema,
+  task_id: z.string().min(1),
+  artifact_root: z.string().min(1),
+  decision: DecisionSchema,
+  terminal_state: TerminalStateSchema,
+  provider_success_count: z.number().int().nonnegative(),
+  provider_failure_count: z.number().int().nonnegative(),
+  findings_count: z.number().int().nonnegative(),
+  parse_success_count: z.number().int().nonnegative(),
+  parse_failure_count: z.number().int().nonnegative(),
+  schema_valid_count: z.number().int().nonnegative(),
+  dropped_findings_count: z.number().int().nonnegative(),
+  created_new_task: z.boolean(),
+  evidence: WorkerEvidenceSchema.optional(),
+});
+
 export type RunResult = z.infer<typeof RunResultSchema>;
 export type ReviewFinding = z.infer<typeof ReviewFindingSchema>;
+export type WorkerFailure = z.infer<typeof WorkerFailureSchema>;
+export type WorkerFailureType = z.infer<typeof WorkerFailureTypeSchema>;
+export type WorkerEvidence = z.infer<typeof WorkerEvidenceSchema>;
+export type ReviewDecisionEvidence = z.infer<typeof ReviewDecisionEvidenceSchema>;
