@@ -99,6 +99,12 @@ forgeflow-trae-beta start all
 
 If Trae is installed at a non-default path, add `--trae-bin "/Applications/Trae.app"` to `forgeflow-trae-beta init`.
 
+If the machine defaults to a mirrored registry such as `https://registry.npmmirror.com`, newly published shared dependencies may lag behind the npmjs registry and cause dependency 404 errors during install or upgrade. In that case, install from the official registry explicitly:
+
+```bash
+npm install -g @tingrudeng/trae-beta-runtime@0.1.0-beta.42 --registry=https://registry.npmjs.org/
+```
+
 Common lifecycle commands:
 
 ```bash
@@ -108,6 +114,12 @@ forgeflow-trae-beta --version
 forgeflow-trae-beta status
 forgeflow-trae-beta stop gateway
 forgeflow-trae-beta stop worker
+```
+
+If `forgeflow-trae-beta update` fails because a mirrored registry has not synced the latest shared dependency yet, rerun the upgrade with:
+
+```bash
+npm install -g @tingrudeng/trae-beta-runtime@0.1.0-beta.42 --registry=https://registry.npmjs.org/
 ```
 
 To force a fresh local instance instead of reusing an existing one:
