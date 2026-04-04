@@ -65,6 +65,8 @@ Current endpoint families:
   - Task payloads can also carry continuation metadata such as `continuationMode` and `continueFromTaskId`.
 - `POST /api/reviews/:taskId/decision`
   - Submit `merge` or `block` and move task from `review` to `merged` or `blocked`.
+  - Returns `404` when the task or assignment does not exist.
+  - Returns `409` when the task exists but is not currently in `review`.
 
 ### Trae-specific dispatcher endpoints
 

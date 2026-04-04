@@ -170,6 +170,20 @@ function createJsonResponse(status, value) {
   };
 }
 
+function classifyReviewDecisionError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    message.startsWith("task not found:")
+    || message.startsWith("assignment not found for task:")
+  ) {
+    return 404;
+  }
+  if (message.startsWith("task not in review:")) {
+    return 409;
+  }
+  return 500;
+}
+
 function createHtmlResponse(status, html) {
   return {
     status,
@@ -434,19 +448,25 @@ export function handleDispatcherHttpRequest(input) {
       ? pathname.match(/^\/api\/reviews\/([^/]+)\/decision$/)
       : null;
     if (reviewMatch) {
-      const result = withState(stateDir, (state) => ({
-        state: recordReviewDecision(state, {
-          taskId: decodeURIComponent(reviewMatch[1]),
-          actor: body.actor,
-          decision: body.decision,
-          notes: body.notes,
-          at: body.at,
-        }),
-      }));
-      return createJsonResponse(200, {
-        status: "decision_recorded",
-        tasks: result.state.tasks,
-      });
+      try {
+        const result = withState(stateDir, (state) => ({
+          state: recordReviewDecision(state, {
+            taskId: decodeURIComponent(reviewMatch[1]),
+            actor: body.actor,
+            decision: body.decision,
+            notes: body.notes,
+            at: body.at,
+          }),
+        }));
+        return createJsonResponse(200, {
+          status: "decision_recorded",
+          tasks: result.state.tasks,
+        });
+      } catch (error) {
+        return createJsonResponse(classifyReviewDecisionError(error), {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     const traeRoutes = [
