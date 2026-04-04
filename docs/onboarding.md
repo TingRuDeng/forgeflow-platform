@@ -239,7 +239,8 @@ forgeflow-trae-beta start all
 - 还没有自动清理旧 worktree 的完整生命周期治理
 - 没有多实例协调
 - `blocked + rework -> continuation` 已进入主线协议，并完成远程 Trae smoke 验证；当前 continuation 链路依赖更新后的 packaged runtime。
-- 一个最小的远程机器运行时包已进入 beta 安装路径，位于 `packages/trae-beta-runtime/`；当前 npm 包版本为 `@tingrudeng/trae-beta-runtime@0.1.0-beta.39`，用于包装启动与直接包自更新命令。
+- 一个最小的远程机器运行时包已进入 beta 安装路径，位于 `packages/trae-beta-runtime/`；当前 npm 包版本为 `@tingrudeng/trae-beta-runtime@0.1.0-beta.41`，用于包装启动与直接包自更新命令。
+- 该 runtime 现在依赖共享 helper 包 `@tingrudeng/automation-gateway-core`；对远程机器的安装方式没有变化，但发布 runtime 新版本时需要先确保对应 helper 版本已可用。
 
 补充：
 

@@ -1,11 +1,49 @@
 {
   "name": "@tingrudeng/automation-gateway-core",
-  "private": true,
-  "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
+  "version": "0.1.0-beta.1",
+  "private": false,
+  "description": "Shared final-report parsing and task-id validation helpers for ForgeFlow automation gateway runtimes.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TingRuDeng/ForgeFlow.git",
+    "directory": "packages/automation-gateway-core"
   },
+  "homepage": "https://github.com/TingRuDeng/ForgeFlow/tree/main/packages/automation-gateway-core",
+  "bugs": {
+    "url": "https://github.com/TingRuDeng/ForgeFlow/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "PUBLISHING.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "forgeflow",
+    "automation",
+    "gateway",
+    "trae",
+    "report"
+  ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   }

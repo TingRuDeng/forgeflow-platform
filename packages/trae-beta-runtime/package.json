@@ -49,10 +49,10 @@
     "beta"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ./scripts/verify-build.mjs",
+    "build": "pnpm --filter @tingrudeng/automation-gateway-core build && tsc -p tsconfig.build.json && node ./scripts/verify-build.mjs",
     "prepack": "pnpm run build",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "typecheck": "pnpm --filter @tingrudeng/automation-gateway-core build && tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @tingrudeng/automation-gateway-core build && vitest run"
   },
   "dependencies": {
     "@tingrudeng/automation-gateway-core": "workspace:*"
