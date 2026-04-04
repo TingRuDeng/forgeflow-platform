@@ -1,10 +1,17 @@
 {
   "name": "@forgeflow/mcp-repo-policy",
+  "version": "0.1.0",
   "private": true,
+  "description": "Thin MCP wrapper exposing repo policy tools (validate_paths, get_repo_commands). Delegates to dispatcher repo-policy implementation via deps. Behavior is intentionally limited to the tool definitions.",
   "type": "module",
   "exports": {
     ".": "./src/server.ts"
   },
+  "keywords": [
+    "mcp",
+    "thin-wrapper",
+    "repo-policy"
+  ],
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

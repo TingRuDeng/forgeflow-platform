@@ -1,10 +1,18 @@
 {
   "name": "@forgeflow/mcp-scheduler",
+  "version": "0.1.0",
   "private": true,
+  "description": "Thin MCP wrapper exposing scheduler task management tools. Delegates to dispatcher-scheduler implementation injected via deps. Behavior is intentionally limited to the tool definitions; actual scheduling logic lives in the dispatcher layer.",
   "type": "module",
   "exports": {
     ".": "./src/server.ts"
   },
+  "keywords": [
+    "mcp",
+    "thin-wrapper",
+    "scheduler",
+    "dispatcher"
+  ],
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
