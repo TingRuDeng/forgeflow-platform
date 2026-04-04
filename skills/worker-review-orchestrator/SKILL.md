@@ -159,6 +159,37 @@ When a task is `blocked` and should continue, do not stop at the review decision
 - If only one commit is safe to keep, prefer cherry-picking that commit instead of merging the full branch.
 - Keep the rework notes concrete so the worker knows exactly what must change before the next review.
 
+## Sticky Worker Rule
+
+For continuation, rework, review-fix, or same-task follow-up work, the control layer **must** default to the previous task's assigned worker, not whichever worker is currently idle.
+
+### Required Behavior
+
+- **Default**: The follow-up task **must** go to the same worker that completed the original task.
+- **Switching workers**: Requires an explicit reason documented in the dispatch notes. Examples of valid reasons:
+  - Worker is permanently offline
+  - Worker was assigned to a different long-running task
+  - Explicit user request for a different worker
+- **Hard environment constraint**: `trae-local-*` and `trae-remote-*` workers are not interchangeable. They run in different environments (local vs remote). Treat this as a hard constraint, not just "same pool" semantics.
+- **Post-dispatch verification**: After dispatching a follow-up task, verify that:
+  1. The `assignedWorkerId` in the dispatcher state matches the intended worker
+  2. The worker's `currentTaskId` matches the dispatched task ID
+
+### Post-Dispatch Verification Step
+
+```bash
+# Verify worker assignment matches intent
+curl -s http://127.0.0.1:8787/api/dashboard/snapshot | jq '.workers[] | select(.id=="trae-local-forgeflow") | {id, currentTaskId}'
+
+# Cross-check with task assignment
+forgeflow-review-orchestrator inspect --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1 --summary | jq '.assignment.workerId'
+```
+
+If the verification reveals a mismatch:
+- Do not proceed with review
+- Report the worker assignment anomaly
+- Redrive to the correct worker before continuing
+
 ## Parallel Worker Guidance
 
 When multiple workers are available or multiple tasks need dispatching:
