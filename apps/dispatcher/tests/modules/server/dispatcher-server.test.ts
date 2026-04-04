@@ -184,6 +184,90 @@ describe("dispatcher server", () => {
     expect(dashboardHtml).toContain("ForgeFlow");
   }, 15_000);
 
+  it("returns 404 when review decision task does not exist", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/reviews/nonexistent-task/decision",
+      body: {
+        actor: "codex-control",
+        decision: "merge",
+        notes: "probe",
+      },
+    });
+
+    expect(response.status).toBe(404);
+    expect(response.json).toEqual({
+      error: "task not found: nonexistent-task",
+    });
+  });
+
+  it("returns 409 when review decision task is not in review", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    const dispatchResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "master",
+        requestedBy: "codex-control",
+        tasks: [
+          {
+            id: "task-not-in-review",
+            title: "未进入 review 的任务",
+            pool: "codex",
+            allowedPaths: ["src/**"],
+            acceptance: ["pnpm test"],
+            dependsOn: [],
+            branchName: "ai/codex/task-not-in-review",
+            verification: { mode: "run" },
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-not-in-review",
+            assignment: {
+              taskId: "task-not-in-review",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/task-not-in-review",
+              allowedPaths: ["src/**"],
+              repo: "TingRuDeng/openclaw-multi-agent-mvp",
+              defaultBranch: "master",
+            },
+            workerPrompt: "你是 codex-worker。",
+            contextMarkdown: "# Context",
+          },
+        ],
+      },
+    });
+    expect(dispatchResponse.status).toBe(200);
+
+    const taskId = dispatchResponse.json.taskIds[0];
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: `/api/reviews/${taskId}/decision`,
+      body: {
+        actor: "codex-control",
+        decision: "merge",
+        notes: "probe",
+      },
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.json).toEqual({
+      error: `task not in review: ${taskId}`,
+    });
+  });
+
   it("fetch_task returns no_task when no task assigned", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);
