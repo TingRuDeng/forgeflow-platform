@@ -328,6 +328,147 @@ describe("review memory - lesson extraction from failed/rework", () => {
 
     expect(lesson).toBeNull();
   });
+
+  it("extracts lesson from structured failed with failureType", async () => {
+    const mod = await import(memoryModulePath);
+
+    const result = {
+      taskId: "dispatch-1:task-1",
+      workerId: "codex-worker",
+      provider: "codex",
+      pool: "codex",
+      repo: "org/repo",
+      status: "failed",
+      verification: {
+        allPassed: false,
+        commands: [],
+      },
+    };
+
+    const structured = {
+      failureType: "verification_failed",
+      failureSummary: "Tests failed due to missing mock",
+      blockers: [],
+      findings: [],
+      artifacts: [],
+    };
+
+    const lesson = mod.extractLessonFromFailed(
+      "dispatch-1:task-1",
+      "codex",
+      "org/repo",
+      result,
+      structured
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.source_type).toBe("failed");
+    expect(lesson.category).toBe("testing");
+    expect(lesson.rule).toBe("Tests failed due to missing mock");
+    expect(lesson.severity).toBe("warning");
+  });
+
+  it("extracts lesson from structured failed with blockers (critical severity)", async () => {
+    const mod = await import(memoryModulePath);
+
+    const result = {
+      taskId: "dispatch-1:task-1",
+      workerId: "codex-worker",
+      provider: "codex",
+      pool: "codex",
+      repo: "org/repo",
+      status: "failed",
+      verification: {
+        allPassed: false,
+        commands: [],
+      },
+    };
+
+    const structured = {
+      failureType: "blocked_human",
+      blockers: [
+        { code: "AUTH_TOKEN_MISSING", summary: "GitHub token not found", actionType: "human_action", blocksCompletion: true },
+      ],
+    };
+
+    const lesson = mod.extractLessonFromFailed(
+      "dispatch-1:task-1",
+      "codex",
+      "org/repo",
+      result,
+      structured
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.source_type).toBe("failed");
+    expect(lesson.category).toBe("process");
+    expect(lesson.severity).toBe("critical");
+    expect(lesson.trigger_tags).toContain("blocked_human");
+  });
+
+  it("extracts lesson from structured rework with reasonCode", async () => {
+    const mod = await import(memoryModulePath);
+
+    const structured = {
+      reasonCode: "scope_miss",
+      mustFix: ["Add unit tests for new module", "Update API documentation"],
+      canRedrive: true,
+      redriveStrategy: "same_worker_continue",
+    };
+
+    const lesson = mod.extractLessonFromRework(
+      "dispatch-1:task-1",
+      "codex",
+      "org/repo",
+      1,
+      "",
+      structured
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.source_type).toBe("rework");
+    expect(lesson.category).toBe("requirements");
+    expect(lesson.rule).toBe("Add unit tests for new module");
+    expect(lesson.rationale).toContain("Add unit tests for new module");
+    expect(lesson.rationale).toContain("Update API documentation");
+    expect(lesson.trigger_tags).toContain("scope_miss");
+  });
+
+  it("extracts lesson from structured rework with canRedrive=false (critical severity)", async () => {
+    const mod = await import(memoryModulePath);
+
+    const structured = {
+      reasonCode: "human_confirmation_required",
+      canRedrive: false,
+    };
+
+    const lesson = mod.extractLessonFromRework(
+      "dispatch-1:task-1",
+      "codex",
+      "org/repo",
+      1,
+      "",
+      structured
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.source_type).toBe("rework");
+    expect(lesson.severity).toBe("critical");
+  });
+
+  it("does not extract lesson when no structured data and rework count < 2", async () => {
+    const mod = await import(memoryModulePath);
+
+    const lesson = mod.extractLessonFromRework(
+      "dispatch-1:task-1",
+      "codex",
+      "org/repo",
+      1,
+      "Some minor issue"
+    );
+
+    expect(lesson).toBeNull();
+  });
 });
 
 describe("review memory - lesson injection", () => {

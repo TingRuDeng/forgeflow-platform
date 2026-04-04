@@ -116,9 +116,64 @@ export function extractLessonFromReview(taskId, workerType, repo, finding, decis
         created_at: formatLocalTimestamp(),
     };
 }
-export function extractLessonFromFailed(taskId, workerType, repo, result) {
-    if (!isExtractableFromFailed(result)) {
+export function extractLessonFromFailed(taskId, workerType, repo, result, structured) {
+    if (!isExtractableFromFailed(result) && !structured?.failureType) {
         return null;
+    }
+    if (structured?.failureType) {
+        const categoryMap = {
+            verification_failed: 'testing',
+            implementation_incomplete: 'implementation',
+            blocked_external: 'infrastructure',
+            blocked_human: 'process',
+            infra_error: 'infrastructure',
+        };
+        const category = categoryMap[structured.failureType] || 'other';
+        const severity = structured.blockers && structured.blockers.length > 0 ? 'critical' : 'warning';
+        let rule = '';
+        let rationale = '';
+        if (structured.failureSummary) {
+            rule = structured.failureSummary;
+            rationale = structured.failureSummary;
+        }
+        else if (structured.blockers && structured.blockers.length > 0) {
+            rule = `Handle blocker: ${structured.blockers[0].code}`;
+            rationale = structured.blockers.map(b => b.summary).join('; ');
+        }
+        else {
+            rule = `Handle ${category} failures`;
+            rationale = structured.failureType;
+        }
+        const triggerPaths = [];
+        if (structured.findings) {
+            for (const f of structured.findings) {
+                if (f.evidence?.file) {
+                    triggerPaths.push(f.evidence.file);
+                }
+            }
+        }
+        if (structured.artifacts) {
+            for (const a of structured.artifacts) {
+                if (a.kind === 'file') {
+                    triggerPaths.push(a.value);
+                }
+            }
+        }
+        return {
+            id: generateLessonId(),
+            source_type: 'failed',
+            source_task_id: taskId,
+            source_worker_type: workerType,
+            repo,
+            scope: '',
+            category,
+            rule,
+            rationale,
+            trigger_paths: triggerPaths,
+            trigger_tags: [category, structured.failureType],
+            severity,
+            created_at: formatLocalTimestamp(),
+        };
     }
     const failedCommand = result.verification.commands.find(c => c.exitCode !== 0);
     const isTestError = failedCommand?.output.toLowerCase().includes('test');
@@ -139,9 +194,50 @@ export function extractLessonFromFailed(taskId, workerType, repo, result) {
         created_at: formatLocalTimestamp(),
     };
 }
-export function extractLessonFromRework(taskId, workerType, repo, reworkCount, rootCause) {
-    if (reworkCount < 2) {
+export function extractLessonFromRework(taskId, workerType, repo, reworkCount, rootCause, structured) {
+    if (reworkCount < 2 && !structured?.reasonCode) {
         return null;
+    }
+    if (structured?.reasonCode) {
+        const reasonCodeCategoryMap = {
+            scope_miss: 'requirements',
+            test_gap: 'testing',
+            quality_issue: 'quality',
+            behavior_regression: 'behavior',
+            human_confirmation_required: 'process',
+            other: 'other',
+        };
+        const category = reasonCodeCategoryMap[structured.reasonCode] || 'process';
+        const severity = structured.canRedrive === false ? 'critical' : 'warning';
+        let rule = '';
+        let rationale = '';
+        if (structured.mustFix && structured.mustFix.length > 0) {
+            rule = structured.mustFix[0];
+            rationale = structured.mustFix.join('; ');
+        }
+        else if (structured.reasonCode) {
+            rule = `Address reason: ${structured.reasonCode}`;
+            rationale = structured.reasonCode;
+        }
+        else {
+            rule = 'Reduce rework through better requirements';
+            rationale = rootCause;
+        }
+        return {
+            id: generateLessonId(),
+            source_type: 'rework',
+            source_task_id: taskId,
+            source_worker_type: workerType,
+            repo,
+            scope: '',
+            category,
+            rule,
+            rationale,
+            trigger_paths: [],
+            trigger_tags: ['rework', structured.reasonCode].filter(Boolean),
+            severity,
+            created_at: formatLocalTimestamp(),
+        };
     }
     return {
         id: generateLessonId(),
