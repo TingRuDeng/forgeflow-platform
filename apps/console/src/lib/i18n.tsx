@@ -120,7 +120,7 @@ const I18N = {
 interface LanguageContextType {
   lang: Language;
   setLang: (lang: Language) => void;
-  t: (key: string) => any;
+  t: (key: string) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -136,15 +136,15 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const t = (key: string) => {
     const keys = key.split('.');
-    let value: any = I18N[lang];
+    let value: unknown = I18N[lang];
     for (const k of keys) {
       if (value && typeof value === 'object' && k in value) {
-        value = value[k];
+        value = (value as Record<string, unknown>)[k];
       } else {
         return key;
       }
     }
-    return value || key;
+    return (value as string) || key;
   };
 
   return (
@@ -154,6 +154,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useTranslation = () => {
   const context = useContext(LanguageContext);
   if (!context) throw new Error('useTranslation must be used within LanguageProvider');

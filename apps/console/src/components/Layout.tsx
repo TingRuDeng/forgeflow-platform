@@ -23,33 +23,38 @@ export const Layout: React.FC<LayoutProps> = ({ children, updatedAt, isConnectin
   };
 
   return (
-    <div className="min-h-screen bg-[#020202] text-foreground font-mono selection:bg-primary selection:text-black">
-      <div className="max-w-[1600px] mx-auto px-10 py-10 flex flex-col gap-10">
-        <header className="flex justify-between items-center pb-8 border-b border-zinc-900/50">
-          <h1 className="text-2xl font-black tracking-[-0.05em] text-white flex items-center gap-3">
-            <div className="w-8 h-8 rounded bg-primary flex items-center justify-center text-black font-black text-lg shadow-[0_0_20px_rgba(0,255,255,0.3)]">F</div>
-            FORGEFLOW <span className="text-zinc-600 font-light tracking-widest">CONSOLE</span>
+    <div className="min-h-screen text-foreground font-sans selection:bg-primary selection:text-black">
+      <div className="max-w-[1600px] mx-auto px-6 py-6 flex flex-col gap-6">
+        <header className="glass rounded-2xl px-6 py-4 flex justify-between items-center">
+          <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-3">
+            <div className="w-10 h-10 glass-button rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-lg">
+              F
+            </div>
+            <div>
+              <div className="text-white">FORGEFLOW</div>
+              <div className="text-xs text-white/50 tracking-widest">CONSOLE</div>
+            </div>
           </h1>
           <div className="flex items-center gap-6">
             <button
               onClick={toggleLanguage}
-              className="px-4 py-1.5 rounded text-[10px] uppercase font-black tracking-widest text-zinc-500 hover:text-primary hover:bg-zinc-900/50 transition-all border border-transparent hover:border-zinc-800"
+              className="glass-button px-4 py-2 rounded-lg text-xs font-semibold text-white/80 hover:text-white"
             >
               {lang === 'zh' ? 'EN' : 'ZH'}
             </button>
-            <div className="bg-zinc-900/30 border border-zinc-800/50 px-5 py-2 rounded-full text-[10px] font-bold text-zinc-500 flex items-center gap-3 backdrop-blur-sm">
+            <div className="glass-button rounded-full px-4 py-2 text-xs font-semibold text-white/70 flex items-center gap-3">
               <div className={cn(
-                "w-1.5 h-1.5 rounded-full",
-                isConnecting ? "bg-zinc-600" : "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.4)] animate-pulse"
+                "w-2 h-2 rounded-full",
+                isConnecting ? "bg-white/40" : "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"
               )} />
-              <span className="tracking-tight lowercase">
+              <span className="tracking-tight">
                 {isConnecting ? t('connecting') : `${t('lastUpdate')} @ ${formatTime(updatedAt)}`}
               </span>
             </div>
           </div>
         </header>
 
-        <main className="flex flex-col gap-10">
+        <main className="flex flex-col gap-6">
           {children}
         </main>
       </div>
