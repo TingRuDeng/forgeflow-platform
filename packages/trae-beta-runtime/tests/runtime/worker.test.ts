@@ -1473,6 +1473,106 @@ describe("runtime/worker", () => {
     runtime.stop();
   });
 
+  it("recovers from a stale dispatcher task response by re-reading the current session once", async () => {
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      fetchTask: vi.fn(async () => ({
+        status: "task",
+        task: {
+          task_id: "dispatch-150:redrive-19b26510",
+          repo: "repo",
+          branch: "feature/task-id-recovery",
+          default_branch: "main",
+          scope: ["src/**"],
+          acceptance: ["pnpm test"],
+          constraints: [],
+          prompt: "Recover from stale dispatcher response",
+        },
+      })),
+      startTask: vi.fn(async () => ({})),
+      reportProgress: vi.fn(async () => ({})),
+      submitResult: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => ({})),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-task-id-recovery" } })),
+      getSession: vi.fn(async () => ({
+        data: {
+          status: "completed",
+          responseText: [
+            "## 任务完成",
+            "- 结果: 成功",
+            "- 任务ID: dispatch-150:redrive-19b26510",
+            "- 修改文件: apps/dispatcher/src/modules/server/dispatcher-server.ts",
+            "- 测试结果: pnpm test",
+            "- 风险: 无",
+            "- GitHub 证据:",
+            "  - branch: ai/trae/harden-dispatcher-auth-defaults-20260404-redrive-fullscope-19b26510",
+            "  - commit: abc150",
+            "  - push: 成功",
+            "  - push_error: 无",
+            "  - PR: 无",
+            "  - PR URL: 无",
+            "- 备注: recovered from current session",
+          ].join("\n"),
+        },
+      })),
+      sendChat: vi.fn(async () => ({
+        response: {
+          text: [
+            "## 任务完成",
+            "- 结果: 成功",
+            "- 任务ID: dispatch-149:redrive-6959e7c2",
+            "- 修改文件: docs/onboarding.md",
+            "- 测试结果: none",
+            "- 风险: 无",
+            "- GitHub 证据:",
+            "  - branch: ai/trae/harden-dispatcher-auth-defaults-20260404-redrive-remote-6959e7c2",
+            "  - commit: abc149",
+            "  - push: 成功",
+            "  - push_error: 无",
+            "  - PR: 无",
+            "  - PR URL: 无",
+            "- 备注: stale response from previous task",
+          ].join("\n"),
+        },
+      })),
+      releaseSession: vi.fn(async () => ({ data: { sessionId: "session-task-id-recovery", released: true } })),
+    };
+    const launchTrae = vi.fn(async () => ({ reusedExisting: false }));
+
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-remote",
+      repoDir: "/tmp/project",
+      logger: { warn: vi.fn(), log: vi.fn() },
+      launchTrae,
+      sleep: vi.fn(async () => undefined),
+      setIntervalImpl: vi.fn(() => ({}) as never),
+      clearIntervalImpl: vi.fn(),
+    });
+
+    const result = await runtime.runOnce();
+
+    expect(automationClient.sendChat).toHaveBeenCalledTimes(1);
+    expect(automationClient.getSession).toHaveBeenCalledWith("session-task-id-recovery");
+    expect(dispatcherClient.submitResult).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "dispatch-150:redrive-19b26510",
+      status: "review_ready",
+      summary: "recovered from current session",
+    }));
+    expect(result).toEqual({
+      status: "review_ready",
+      taskId: "dispatch-150:redrive-19b26510",
+      responseText: expect.stringContaining("recovered from current session"),
+    });
+
+    runtime.stop();
+  });
+
   it("recovers from template echo via read-only session instead of resending prompt", async () => {
     const dispatcherClient = {
       register: vi.fn(async () => ({})),

@@ -703,4 +703,108 @@ describe("runtime/trae-dom-driver", () => {
     expect(captureResponseSnapshot).toHaveBeenCalledTimes(6);
     expect(session.close).toHaveBeenCalledTimes(1);
   });
+
+  it("ignores a concrete stale task report until the expected task id appears", async () => {
+    const discoverTarget = vi.fn(async () => ({
+      target: {
+        id: "target-1",
+        title: "ForgeFlow — continuation task",
+        url: "vscode-file://workbench",
+      },
+      version: {},
+      targets: [],
+    }));
+    const session = {
+      close: vi.fn(async () => undefined),
+    };
+    const connectToTarget = vi.fn(async () => session);
+    const inspectReadiness = vi.fn(async () => ({
+      ready: true,
+      title: "ForgeFlow — continuation task",
+      url: "vscode-file://workbench",
+      composerFound: true,
+      composerSelector: ".chat-input-v2-input-box-editable",
+      sendButtonFound: true,
+      sendButtonSelector: "button.chat-input-v2-send-button",
+      newChatFound: true,
+      responseFound: false,
+      readyState: "complete",
+    }));
+    const prepareSession = vi.fn(async () => ({ ok: true, clicked: true }));
+    const staleReportText = [
+      "## 任务完成",
+      "- 结果: 成功",
+      "- 任务ID: dispatch-150:redrive-19b26510",
+      "- 修改文件: docs/onboarding.md",
+      "- 测试结果: none",
+      "- 风险: 无",
+      "- GitHub 证据:",
+      "  - branch: ai/trae/harden-dispatcher-auth-defaults-20260404-redrive-fullscope-19b26510",
+      "  - commit: abc150",
+      "  - push: 成功",
+      "  - push_error: 无",
+      "- 备注: stale response",
+    ].join("\n");
+    const finalReportText = [
+      "## 任务完成",
+      "- 结果: 成功",
+      "- 任务ID: dispatch-151:redrive-b5240295",
+      "- 修改文件: apps/dispatcher/src/modules/server/dispatcher-server.ts",
+      "- 测试结果: pnpm test",
+      "- 风险: 无",
+      "- GitHub 证据:",
+      "  - branch: ai/trae/harden-dispatcher-auth-defaults-20260404-redrive-fullscope-retry-b5240295",
+      "  - commit: abc151",
+      "  - push: 成功",
+      "  - push_error: 无",
+      "- 备注: current response",
+    ].join("\n");
+    let responsePollIndex = 0;
+    const responseSnapshots = [
+      [{ index: 0, text: staleReportText, descriptor: {} }],
+      [{ index: 0, text: staleReportText, descriptor: {} }],
+      [{ index: 0, text: finalReportText, descriptor: {} }],
+      [{ index: 0, text: finalReportText, descriptor: {} }],
+    ];
+    const captureResponseSnapshot = vi.fn(async () => {
+      const next = responseSnapshots[Math.min(responsePollIndex, responseSnapshots.length - 1)];
+      responsePollIndex += 1;
+      return next;
+    });
+    const submitPrompt = vi.fn(async () => ({ ok: true }));
+    const domAdapter = {
+      inspectReadiness,
+      prepareSession,
+      captureResponseSnapshot,
+      submitPrompt,
+    };
+    let nowValue = 0;
+
+    const { createTraeAutomationDriver } = await import("../../src/runtime/trae-dom-driver.js");
+    const driver = createTraeAutomationDriver({
+      discoverTarget,
+      connectToTarget,
+      domAdapter: domAdapter as never,
+      now: () => {
+        nowValue += 700;
+        return nowValue;
+      },
+      responsePollIntervalMs: 0,
+      responseIdleMs: 600,
+      responseTimeoutMs: 5000,
+      postActionDelayMs: 0,
+    });
+
+    await expect(driver.sendPrompt({
+      content: "Please continue the task",
+      prepare: true,
+      responseRequiredPrefix: "任务完成",
+      expectedTaskId: "dispatch-151:redrive-b5240295",
+    })).resolves.toMatchObject({
+      status: "ok",
+      response: {
+        text: finalReportText,
+      },
+    });
+  });
 });
