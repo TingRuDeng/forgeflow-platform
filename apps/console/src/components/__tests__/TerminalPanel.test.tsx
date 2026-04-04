@@ -6,7 +6,7 @@ import { LanguageProvider } from '../../lib/i18n';
 
 // Mock JsonView because it might have issues in JSDOM or we just want to test TerminalPanel's logic
 vi.mock('@uiw/react-json-view', () => ({
-  default: ({ value }: { value: any }) => (
+  default: ({ value }: { value: unknown }) => (
     <pre data-testid="json-view">{JSON.stringify(value)}</pre>
   ),
 }));

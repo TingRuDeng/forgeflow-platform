@@ -7,7 +7,7 @@ import { darkTheme } from '@uiw/react-json-view/dark';
 interface Event {
   taskId: string;
   type: string;
-  payload: any;
+  payload: unknown;
   at?: string; // ISO timestamp
 }
 
