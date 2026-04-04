@@ -117,28 +117,53 @@
 
 当前不建议把它当作新的接入起点；控制中枢优先只启动 dispatcher，让 Trae runtime 先稳定收口。
 
-#### Dispatcher HTTP 认证（可选）
+#### Dispatcher HTTP 认证
 
-如果需要给 dispatcher HTTP 面加一层 token 认证，可在启动 dispatcher 前设置：
+Dispatcher 支持三种认证模式，通过 `DISPATCHER_AUTH_MODE` 环境变量控制：
+
+| 模式 | 描述 |
+|------|------|
+| `legacy` (默认) | 当 `DISPATCHER_API_TOKEN` 未设置时，所有接口可匿名访问（向后兼容）; 设置后，除 `/health` 外需认证 |
+| `token` | 强制认证模式，除 `/health` 外所有接口需要 `Authorization: Bearer <token>`，必须设置 `DISPATCHER_API_TOKEN` |
+| `open` | 完全开放模式，所有接口可匿名访问，适合本地开发 |
 
 ```bash
+# 示例：使用 token 模式（推荐生产环境）
+export DISPATCHER_AUTH_MODE="token"
 export DISPATCHER_API_TOKEN="your-secret-token"
+node scripts/run-dispatcher-server.js \
+  --host 0.0.0.0 \
+  --port 8787 \
+  --state-dir .forgeflow-dispatcher
+
+# 示例：使用 open 模式（本地开发）
+export DISPATCHER_AUTH_MODE="open"
 node scripts/run-dispatcher-server.js \
   --host 0.0.0.0 \
   --port 8787 \
   --state-dir .forgeflow-dispatcher
 ```
 
-启用后行为：
+各模式行为说明：
 
-- `/health` 仍可匿名访问
-- 其他 endpoint 需要 `Authorization: Bearer <token>`
-- 缺失或错误 token 返回 `401` + `{ "error": "unauthorized" }`
+- **open 模式**: 所有 endpoint 均可匿名访问，包括 `/health` 和其他所有接口
+- **legacy 模式** (默认):
+  - 当 `DISPATCHER_API_TOKEN` 未设置时，所有接口可匿名访问
+  - 当 `DISPATCHER_API_TOKEN` 设置后，除 `/health` 外其他 endpoint 需要 `Authorization: Bearer <token>`
+- **token 模式**: 除 `/health` 外所有 endpoint 需要 `Authorization: Bearer <DISPATCHER_API_TOKEN>`，必须设置 `DISPATCHER_API_TOKEN` 否则返回 500
+
+通用行为：
+- `/health` 在所有模式下均可匿名访问
+- 认证失败返回 `401` + `{ "error": "unauthorized" }`
 
 调用方连通性检查示例：
 
 ```bash
+# 不需要认证的 endpoint（所有模式）
 curl -s http://127.0.0.1:8787/health
+
+# 需要认证的 endpoint（需先设置环境变量）
+export DISPATCHER_API_TOKEN="your-secret-token"
 curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
   http://127.0.0.1:8787/api/dashboard/snapshot
 ```

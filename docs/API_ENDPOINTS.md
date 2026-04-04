@@ -19,14 +19,19 @@ Base role: task state, worker coordination, review decisions, dashboard snapshot
 
 ### Authentication
 
-The dispatcher server supports optional token-based authentication:
+The dispatcher server supports three authentication modes controlled by the `DISPATCHER_AUTH_MODE` environment variable:
 
-- **Environment variable**: `DISPATCHER_API_TOKEN`
-- **Behavior**:
-  - When not set: all endpoints are accessible without authentication (backward compatible)
-  - When set: requires `Authorization: Bearer <token>` header for all endpoints except `/health`
-  - Authentication failure returns `401` status code with `{ "error": "unauthorized" }` JSON response
-- **Whitelist**: `/health` endpoint is always accessible without authentication
+- **Environment variables**:
+  - `DISPATCHER_AUTH_MODE`: One of `legacy`, `token`, or `open` (default: `legacy`)
+  - `DISPATCHER_API_TOKEN`: The token to use for authentication (required in `token` mode)
+
+- **Auth modes**:
+  - `legacy` (default): When `DISPATCHER_API_TOKEN` is not set, all endpoints are accessible without authentication (backward compatible). When set, requires `Authorization: Bearer <token>` header for all endpoints except `/health`.
+  - `token`: All endpoints except `/health` require `Authorization: Bearer <DISPATCHER_API_TOKEN>` header. Returns `500` if `DISPATCHER_API_TOKEN` is not set.
+  - `open`: All endpoints are accessible without authentication. Useful for local development.
+
+- **Whitelist**: `/health` endpoint is always accessible without authentication in all modes.
+- **Authentication failure**: Returns `401` status code with `{ "error": "unauthorized" }` JSON response
 
 Current endpoint families:
 

@@ -967,6 +967,7 @@ describe("dispatcher server", () => {
 
   describe("auth middleware", () => {
     const originalEnv = process.env.DISPATCHER_API_TOKEN;
+    const originalAuthMode = process.env.DISPATCHER_AUTH_MODE;
 
     afterEach(() => {
       if (originalEnv === undefined) {
@@ -974,10 +975,16 @@ describe("dispatcher server", () => {
       } else {
         process.env.DISPATCHER_API_TOKEN = originalEnv;
       }
+      if (originalAuthMode === undefined) {
+        delete process.env.DISPATCHER_AUTH_MODE;
+      } else {
+        process.env.DISPATCHER_AUTH_MODE = originalAuthMode;
+      }
     });
 
-    it("allows all requests when DISPATCHER_API_TOKEN is not set", async () => {
+    it("allows all requests when DISPATCHER_API_TOKEN is not set (legacy mode)", async () => {
       delete process.env.DISPATCHER_API_TOKEN;
+      delete process.env.DISPATCHER_AUTH_MODE;
       const stateDir = makeTempDir();
       const mod = await import(serverModulePath);
 
@@ -989,8 +996,9 @@ describe("dispatcher server", () => {
       expect(response.status).toBe(200);
     });
 
-    it("returns 401 when token is required but missing", async () => {
+    it("returns 401 when token is required but missing (legacy mode)", async () => {
       process.env.DISPATCHER_API_TOKEN = "test-secret-token";
+      delete process.env.DISPATCHER_AUTH_MODE;
       const stateDir = makeTempDir();
       const mod = await import(serverModulePath);
 
@@ -1003,7 +1011,114 @@ describe("dispatcher server", () => {
       expect(response.json.error).toBe("unauthorized");
     });
 
-    it("returns 401 when token is required but incorrect", async () => {
+    it("returns 401 when token is required but incorrect (legacy mode)", async () => {
+      process.env.DISPATCHER_API_TOKEN = "test-secret-token";
+      delete process.env.DISPATCHER_AUTH_MODE;
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/workers",
+        authHeader: "Bearer wrong-token",
+      });
+      expect(response.status).toBe(401);
+      expect(response.json.error).toBe("unauthorized");
+    });
+
+    it("allows access with correct token (legacy mode)", async () => {
+      process.env.DISPATCHER_API_TOKEN = "test-secret-token";
+      delete process.env.DISPATCHER_AUTH_MODE;
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/workers",
+        authHeader: "Bearer test-secret-token",
+      });
+      expect(response.status).toBe(200);
+    });
+
+    it("allows /health without authentication (legacy mode)", async () => {
+      process.env.DISPATCHER_API_TOKEN = "test-secret-token";
+      delete process.env.DISPATCHER_AUTH_MODE;
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/health",
+      });
+      expect(response.status).toBe(200);
+      expect(response.json.status).toBe("ok");
+    });
+
+    it("rejects malformed authorization header (legacy mode)", async () => {
+      process.env.DISPATCHER_API_TOKEN = "test-secret-token";
+      delete process.env.DISPATCHER_AUTH_MODE;
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/workers",
+        authHeader: "InvalidFormat token",
+      });
+      expect(response.status).toBe(401);
+      expect(response.json.error).toBe("unauthorized");
+    });
+
+    it("allows all requests in open mode", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "open";
+      process.env.DISPATCHER_API_TOKEN = "test-secret-token";
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/workers",
+      });
+      expect(response.status).toBe(200);
+    });
+
+    it("allows /health in open mode without token", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "open";
+      delete process.env.DISPATCHER_API_TOKEN;
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/health",
+      });
+      expect(response.status).toBe(200);
+      expect(response.json.status).toBe("ok");
+    });
+
+    it("returns 401 when token mode is enabled but token is missing", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "token";
+      delete process.env.DISPATCHER_API_TOKEN;
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/workers",
+      });
+      expect(response.status).toBe(500);
+      expect(response.json.error).toBe("DISPATCHER_API_TOKEN is required when auth mode is 'token'");
+    });
+
+    it("returns 401 when token mode is enabled but token is incorrect", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "token";
       process.env.DISPATCHER_API_TOKEN = "test-secret-token";
       const stateDir = makeTempDir();
       const mod = await import(serverModulePath);
@@ -1018,7 +1133,8 @@ describe("dispatcher server", () => {
       expect(response.json.error).toBe("unauthorized");
     });
 
-    it("allows access with correct token", async () => {
+    it("allows access with correct token in token mode", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "token";
       process.env.DISPATCHER_API_TOKEN = "test-secret-token";
       const stateDir = makeTempDir();
       const mod = await import(serverModulePath);
@@ -1032,7 +1148,8 @@ describe("dispatcher server", () => {
       expect(response.status).toBe(200);
     });
 
-    it("allows /health without authentication", async () => {
+    it("allows /health without authentication in token mode", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "token";
       process.env.DISPATCHER_API_TOKEN = "test-secret-token";
       const stateDir = makeTempDir();
       const mod = await import(serverModulePath);
@@ -1044,21 +1161,6 @@ describe("dispatcher server", () => {
       });
       expect(response.status).toBe(200);
       expect(response.json.status).toBe("ok");
-    });
-
-    it("rejects malformed authorization header", async () => {
-      process.env.DISPATCHER_API_TOKEN = "test-secret-token";
-      const stateDir = makeTempDir();
-      const mod = await import(serverModulePath);
-
-      const response = await mod.handleDispatcherHttpRequest({
-        stateDir,
-        method: "GET",
-        pathname: "/api/workers",
-        authHeader: "InvalidFormat token",
-      });
-      expect(response.status).toBe(401);
-      expect(response.json.error).toBe("unauthorized");
     });
   });
 });

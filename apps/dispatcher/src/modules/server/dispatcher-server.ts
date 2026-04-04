@@ -32,6 +32,16 @@ const MAX_REQUEST_BODY_BYTES = 16 * 1024;
 
 const AUTH_WHITELIST_PATHS = ["/health"];
 
+type AuthMode = "legacy" | "token" | "open";
+
+function getAuthMode(): AuthMode {
+  const mode = process.env.DISPATCHER_AUTH_MODE?.toLowerCase();
+  if (mode === "token" || mode === "open") {
+    return mode as AuthMode;
+  }
+  return "legacy";
+}
+
 function getApiToken(): string | null {
   return process.env.DISPATCHER_API_TOKEN ?? null;
 }
@@ -49,6 +59,34 @@ function checkAuthToken(authHeader: string | undefined, apiToken: string): boole
 }
 
 function createAuthMiddleware(input: { method: string; pathname: string; authHeader?: string }): null | { status: number; error: string } {
+  const authMode = getAuthMode();
+
+  if (authMode === "open") {
+    return null;
+  }
+
+  if (authMode === "token") {
+    const apiToken = getApiToken();
+    if (!apiToken) {
+      return {
+        status: 500,
+        error: "DISPATCHER_API_TOKEN is required when auth mode is 'token'",
+      };
+    }
+
+    if (AUTH_WHITELIST_PATHS.includes(input.pathname)) {
+      return null;
+    }
+
+    if (!checkAuthToken(input.authHeader, apiToken)) {
+      return {
+        status: 401,
+        error: "unauthorized",
+      };
+    }
+    return null;
+  }
+
   const apiToken = getApiToken();
   if (!apiToken) {
     return null;
