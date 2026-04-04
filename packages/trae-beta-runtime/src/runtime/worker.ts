@@ -3,6 +3,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  isEquivalentReportedTaskId,
+  isPlaceholderTaskId,
+} from "@tingrudeng/automation-gateway-core";
+
+import {
   createAutomationGatewayClient,
   createDispatcherClient,
 } from "./clients.js";
@@ -190,43 +195,6 @@ function basenameFromPath(value: unknown) {
   }
   const parts = normalized.split(/[\\/]/).filter(Boolean);
   return parts.at(-1) || "";
-}
-
-function isEquivalentReportedTaskId(expectedTaskId: string, reportedTaskId: string) {
-  const expected = String(expectedTaskId || "").trim();
-  const reported = String(reportedTaskId || "").trim();
-  if (!expected || !reported) {
-    return false;
-  }
-
-  if (expected === reported) {
-    return true;
-  }
-
-  const placeholderPattern = /^<[^>]+>$/;
-  if (placeholderPattern.test(reported)) {
-    return false;
-  }
-
-  // Some Trae completions normalize the single dispatcher separator from ":" to "-".
-  // Accept only that narrow form so stale or unrelated task reports still fail closed.
-  if (/^dispatch-\d+:.+/.test(expected) && reported === expected.replace(":", "-")) {
-    return true;
-  }
-
-  // Some completions only return the dispatcher task prefix (for example "dispatch-118")
-  // instead of the full external task id suffix. Accept only that narrow prefix form so
-  // unrelated task reports still fail closed.
-  const expectedDispatchPrefix = expected.match(/^(dispatch-\d+):/);
-  if (expectedDispatchPrefix && reported === expectedDispatchPrefix[1]) {
-    return true;
-  }
-
-  return false;
-}
-
-function isPlaceholderTaskId(taskId: string) {
-  return /^<[^>]+>$/.test(String(taskId || "").trim());
 }
 
 export function buildAutomationPrompt(task: WorkerRuntimeTask) {

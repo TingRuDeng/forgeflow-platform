@@ -137,6 +137,8 @@ importers:
         specifier: ^3.24.2
         version: 3.25.76
 
+  packages/automation-gateway-core: {}
+
   packages/mcp-github: {}
 
   packages/mcp-repo-policy: {}
@@ -170,7 +172,11 @@ importers:
         specifier: ^3.24.2
         version: 3.25.76
 
-  packages/trae-beta-runtime: {}
+  packages/trae-beta-runtime:
+    dependencies:
+      '@tingrudeng/automation-gateway-core':
+        specifier: workspace:*
+        version: link:../automation-gateway-core
 
   packages/worker-review-orchestrator-cli: {}
 
