@@ -2232,6 +2232,210 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(assignedTask?.continueFromTaskId).toBe("dispatch-2:task-1");
   });
 
+  it("defaults follow-up tasks to the source task worker and persists sticky-worker metadata", () => {
+    const stateDir = makeTempDir();
+
+    let state = loadRuntimeState(stateDir);
+    state = registerWorker(state, {
+      workerId: "trae-local",
+      pool: "trae",
+      hostname: "local-host",
+      labels: ["trae"],
+      repoDir: "/repos/local",
+      at: "2026-04-02T10:00:00.000Z",
+    });
+    state = registerWorker(state, {
+      workerId: "trae-remote",
+      pool: "trae",
+      hostname: "remote-host",
+      labels: ["trae"],
+      repoDir: "/repos/remote",
+      at: "2026-04-02T10:00:00.000Z",
+    });
+
+    const sourceDispatch = createDispatch(state, {
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      requestedBy: "test",
+      tasks: [
+        {
+          id: "task-source",
+          title: "Source task",
+          pool: "trae",
+          allowedPaths: ["src/**"],
+          acceptance: ["pnpm test"],
+          dependsOn: [],
+          branchName: "ai/trae/task-source",
+          targetWorkerId: "trae-remote",
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-source",
+          assignment: {
+            taskId: "task-source",
+            workerId: null,
+            pool: "trae",
+            status: "pending",
+            branchName: "ai/trae/task-source",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/ForgeFlow",
+            defaultBranch: "main",
+          },
+          workerPrompt: "Source prompt",
+        },
+      ],
+      createdAt: "2026-04-02T10:00:10.000Z",
+    });
+    state = sourceDispatch.state;
+
+    const remoteWorker = state.workers.find((worker) => worker.id === "trae-remote");
+    if (!remoteWorker) {
+      throw new Error("expected trae-remote worker");
+    }
+    remoteWorker.status = "idle";
+    remoteWorker.currentTaskId = undefined;
+
+    const sourceTaskId = sourceDispatch.taskIds[0];
+
+    const followUpDispatch = createDispatch(state, {
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      requestedBy: "test",
+      tasks: [
+        {
+          id: "task-follow-up",
+          title: "Follow-up task",
+          pool: "trae",
+          allowedPaths: ["src/**"],
+          acceptance: ["pnpm test"],
+          dependsOn: [],
+          branchName: "ai/trae/task-follow-up",
+          followUpOfTaskId: sourceTaskId,
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-follow-up",
+          assignment: {
+            taskId: "task-follow-up",
+            workerId: null,
+            pool: "trae",
+            status: "pending",
+            branchName: "ai/trae/task-follow-up",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/ForgeFlow",
+            defaultBranch: "main",
+          },
+          workerPrompt: "Follow-up prompt",
+        },
+      ],
+      createdAt: "2026-04-02T10:00:20.000Z",
+    });
+
+    const followUpTask = followUpDispatch.state.tasks.find((item) => item.id === followUpDispatch.taskIds[0]);
+    expect(followUpTask?.followUpOfTaskId).toBe(sourceTaskId);
+    expect(followUpTask?.targetWorkerId).toBe("trae-remote");
+    expect(followUpTask?.assignedWorkerId).toBe("trae-remote");
+
+    const followUpAssignment = followUpDispatch.state.assignments.find((item) => item.taskId === followUpDispatch.taskIds[0]);
+    expect(followUpAssignment?.assignment.followUpOfTaskId).toBe(sourceTaskId);
+    expect(followUpAssignment?.assignment.targetWorkerId).toBe("trae-remote");
+  });
+
+  it("rejects follow-up tasks that switch workers without a change reason", () => {
+    const stateDir = makeTempDir();
+
+    let state = loadRuntimeState(stateDir);
+    state = registerWorker(state, {
+      workerId: "trae-local",
+      pool: "trae",
+      hostname: "local-host",
+      labels: ["trae"],
+      repoDir: "/repos/local",
+      at: "2026-04-02T10:00:00.000Z",
+    });
+    state = registerWorker(state, {
+      workerId: "trae-remote",
+      pool: "trae",
+      hostname: "remote-host",
+      labels: ["trae"],
+      repoDir: "/repos/remote",
+      at: "2026-04-02T10:00:00.000Z",
+    });
+
+    const sourceDispatch = createDispatch(state, {
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      requestedBy: "test",
+      tasks: [
+        {
+          id: "task-source",
+          title: "Source task",
+          pool: "trae",
+          allowedPaths: ["src/**"],
+          acceptance: ["pnpm test"],
+          dependsOn: [],
+          branchName: "ai/trae/task-source",
+          targetWorkerId: "trae-remote",
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-source",
+          assignment: {
+            taskId: "task-source",
+            workerId: null,
+            pool: "trae",
+            status: "pending",
+            branchName: "ai/trae/task-source",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/ForgeFlow",
+            defaultBranch: "main",
+          },
+          workerPrompt: "Source prompt",
+        },
+      ],
+      createdAt: "2026-04-02T10:00:10.000Z",
+    });
+
+    expect(() => createDispatch(sourceDispatch.state, {
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      requestedBy: "test",
+      tasks: [
+        {
+          id: "task-follow-up",
+          title: "Follow-up task",
+          pool: "trae",
+          allowedPaths: ["src/**"],
+          acceptance: ["pnpm test"],
+          dependsOn: [],
+          branchName: "ai/trae/task-follow-up",
+          followUpOfTaskId: sourceDispatch.taskIds[0],
+          targetWorkerId: "trae-local",
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-follow-up",
+          assignment: {
+            taskId: "task-follow-up",
+            workerId: null,
+            pool: "trae",
+            status: "pending",
+            branchName: "ai/trae/task-follow-up",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/ForgeFlow",
+            defaultBranch: "main",
+          },
+          workerPrompt: "Follow-up prompt",
+        },
+      ],
+      createdAt: "2026-04-02T10:00:20.000Z",
+    })).toThrow(/worker change reason/i);
+  });
+
   it("dashboard snapshot returns tasks in descending order (newest first)", () => {
     const stateDir = makeTempDir();
 

@@ -247,11 +247,12 @@ describe("worker-review-orchestrator-cli", () => {
       },
     );
 
-    expect(runDispatch).toHaveBeenCalledWith({
+    expect(runDispatch).toHaveBeenCalledWith(expect.objectContaining({
       dispatcherUrl: "http://127.0.0.1:8787",
       input: "-",
       requestTimeoutMs: undefined,
       requireExistingWorker: false,
+      targetWorkerId: "trae-remote-forgeflow",
       payload: expect.objectContaining({
         repo: "TingRuDeng/ForgeFlow",
         defaultBranch: "main",
@@ -265,7 +266,7 @@ describe("worker-review-orchestrator-cli", () => {
           }),
         ],
       }),
-    });
+    }));
   });
 
   it("passes requireExistingWorker through dispatch-task", async () => {
@@ -688,5 +689,47 @@ describe("worker-review-orchestrator-cli", () => {
     expect(log).toHaveBeenCalledTimes(1);
     const versionOutput = log.mock.calls[0][0] as string;
     expect(versionOutput).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it("passes targetWorkerId through dispatch-task follow-up requests so sticky-worker validation can run", async () => {
+    const log = vi.fn();
+    const runDispatch = vi.fn().mockResolvedValue({
+      dispatchId: "dispatch-1",
+      taskIds: ["dispatch-1:task-1"],
+      assignments: [],
+    });
+
+    await runCli(
+      [
+        "dispatch-task",
+        "--dispatcher-url",
+        "http://127.0.0.1:8787",
+        "--repo",
+        "TingRuDeng/ForgeFlow",
+        "--default-branch",
+        "main",
+        "--task-id",
+        "task-1",
+        "--title",
+        "Test task",
+        "--pool",
+        "trae",
+        "--branch-name",
+        "ai/trae/task-1",
+        "--follow-up-of-task-id",
+        "dispatch-1:task-source",
+        "--target-worker-id",
+        "trae-remote-forgeflow",
+      ],
+      {
+        runDispatch,
+        log,
+      },
+    );
+
+    expect(runDispatch).toHaveBeenCalledWith(expect.objectContaining({
+      targetWorkerId: "trae-remote-forgeflow",
+      followUpOfTaskId: "dispatch-1:task-source",
+    }));
   });
 });

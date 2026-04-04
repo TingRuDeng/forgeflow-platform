@@ -12,6 +12,8 @@ export interface DispatchOptions {
   requestTimeoutMs?: number;
   fetchImpl?: typeof globalThis.fetch;
   readStdin?: () => Promise<string>;
+  followUpOfTaskId?: string;
+  workerChangeReason?: string;
 }
 
 export async function loadDispatchInput(source: string, readStdin?: () => Promise<string>) {
@@ -38,6 +40,8 @@ function readFileContent(filePath?: string): string | undefined {
 
 export function buildSingleTaskDispatchInput(options: DispatchTaskInputOptions): DispatchInput {
   const targetWorkerId = String(options.targetWorkerId || "").trim() || undefined;
+  const followUpOfTaskId = String(options.followUpOfTaskId || "").trim() || undefined;
+  const workerChangeReason = String(options.workerChangeReason || "").trim() || undefined;
   const allowedPaths = splitCsv(options.allowedPaths);
   const acceptance = splitCsv(options.acceptance);
   const dependsOn = splitCsv(options.dependsOn);
@@ -67,6 +71,8 @@ export function buildSingleTaskDispatchInput(options: DispatchTaskInputOptions):
         ...(targetWorkerId ? { targetWorkerId } : {}),
         ...(options.continuationMode ? { continuationMode: options.continuationMode } : {}),
         ...(options.continueFromTaskId ? { continueFromTaskId: options.continueFromTaskId } : {}),
+        ...(followUpOfTaskId ? { followUpOfTaskId } : {}),
+        ...(workerChangeReason ? { workerChangeReason } : {}),
       },
     ],
     packages: [
@@ -84,6 +90,8 @@ export function buildSingleTaskDispatchInput(options: DispatchTaskInputOptions):
           ...(targetWorkerId ? { targetWorkerId } : {}),
           ...(options.continuationMode ? { continuationMode: options.continuationMode } : {}),
           ...(options.continueFromTaskId ? { continueFromTaskId: options.continueFromTaskId } : {}),
+          ...(followUpOfTaskId ? { followUpOfTaskId } : {}),
+          ...(workerChangeReason ? { workerChangeReason } : {}),
         },
         workerPrompt,
         contextMarkdown,
@@ -144,6 +152,11 @@ function formatWorkerInventory(workers: SnapshotWorkerRecord[]) {
   }).join(", ");
 }
 
+interface SourceTaskInfo {
+  taskId: string;
+  originalWorkerId: string | null;
+}
+
 async function ensureExistingWorkersAvailable(
   payload: DispatchInput,
   options: Pick<DispatchOptions, "dispatcherUrl" | "fetchImpl" | "requestTimeoutMs">,
@@ -196,7 +209,85 @@ async function ensureExistingWorkersAvailable(
   }
 }
 
+async function fetchSourceTask(
+  followUpOfTaskId: string,
+  options: Pick<DispatchOptions, "dispatcherUrl" | "fetchImpl" | "requestTimeoutMs">,
+): Promise<SourceTaskInfo> {
+  const client = createJsonHttpClient(options.dispatcherUrl, {
+    fetchImpl: options.fetchImpl,
+    requestTimeoutMs: options.requestTimeoutMs,
+  });
+  const snapshot = await client.request("/api/dashboard/snapshot") as Record<string, unknown>;
+
+  const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks as Array<Record<string, unknown>> : [];
+  const sourceTask = tasks.find((task) => task.id === followUpOfTaskId);
+  if (!sourceTask) {
+    throw new Error(`source task not found: ${followUpOfTaskId}`);
+  }
+
+  const assignments = Array.isArray(snapshot.assignments) ? snapshot.assignments as Array<Record<string, unknown>> : [];
+  const assignment = assignments.find((item) => item.taskId === followUpOfTaskId);
+  const assignmentRecord = assignment && typeof assignment.assignment === "object" && assignment.assignment
+    ? assignment.assignment as Record<string, unknown>
+    : null;
+
+  const originalWorkerId = normalizeString(sourceTask.lastAssignedWorkerId)
+    ?? normalizeString(sourceTask.assignedWorkerId)
+    ?? normalizeString(assignmentRecord?.targetWorkerId)
+    ?? normalizeString(assignmentRecord?.workerId)
+    ?? normalizeString(assignment?.workerId)
+    ?? null;
+
+  return {
+    taskId: followUpOfTaskId,
+    originalWorkerId,
+  };
+}
+
+function verifyTargetWorkerMatch(
+  sourceTaskInfo: SourceTaskInfo,
+  targetWorkerId: string | undefined,
+  workerChangeReason: string | undefined,
+): void {
+  if (!sourceTaskInfo.originalWorkerId || !targetWorkerId) {
+    return;
+  }
+
+  if (targetWorkerId !== sourceTaskInfo.originalWorkerId && !workerChangeReason) {
+    throw new Error(
+      `target worker mismatch: source task "${sourceTaskInfo.taskId}" was assigned to worker "${sourceTaskInfo.originalWorkerId}", but target worker is "${targetWorkerId}". `
+      + "To change the worker, you must provide a --worker-change-reason explaining why.",
+    );
+  }
+}
+
+function verifyDispatchAssignment(
+  dispatchResult: DispatchResult,
+  intendedWorkerId: string | undefined,
+): void {
+  if (!intendedWorkerId || !Array.isArray(dispatchResult.assignments)) {
+    return;
+  }
+
+  for (const assignment of dispatchResult.assignments) {
+    const record = assignment as Record<string, unknown>;
+    const assignedWorkerId = normalizeString(record.workerId)
+      ?? normalizeString(record.targetWorkerId)
+      ?? normalizeString(record.target_worker_id);
+    if (assignedWorkerId && assignedWorkerId !== intendedWorkerId) {
+      throw new Error(
+        `dispatch verification failed: expected worker "${intendedWorkerId}" but dispatcher assigned worker "${assignedWorkerId}"`,
+      );
+    }
+  }
+}
+
 export async function runDispatch(options: DispatchOptions): Promise<DispatchResult> {
+  if (options.followUpOfTaskId) {
+    const sourceTaskInfo = await fetchSourceTask(options.followUpOfTaskId, options);
+    verifyTargetWorkerMatch(sourceTaskInfo, options.targetWorkerId, options.workerChangeReason);
+  }
+
   const payload = options.payload
     ? applyDispatchTargetWorker(options.payload, options.targetWorkerId)
     : applyDispatchTargetWorker(
@@ -213,8 +304,12 @@ export async function runDispatch(options: DispatchOptions): Promise<DispatchRes
     requestTimeoutMs: options.requestTimeoutMs,
   });
 
-  return client.request("/api/dispatches", {
+  const dispatchResult = await client.request("/api/dispatches", {
     method: "POST",
     body: payload,
-  }) as Promise<DispatchResult>;
+  }) as DispatchResult;
+
+  verifyDispatchAssignment(dispatchResult, options.targetWorkerId);
+
+  return dispatchResult;
 }

@@ -77,9 +77,11 @@ function printHelp() {
 Usage:
   forgeflow-review-orchestrator dispatch --dispatcher-url http://127.0.0.1:8787 --input dispatch.json
   forgeflow-review-orchestrator dispatch --dispatcher-url http://127.0.0.1:8787 --input dispatch.json --target-worker-id trae-remote-forgeflow
+  forgeflow-review-orchestrator dispatch --dispatcher-url http://127.0.0.1:8787 --input dispatch.json --follow-up-of-task-id dispatch-1:task-1 --target-worker-id trae-remote-forgeflow
   forgeflow-review-orchestrator dispatch --dispatcher-url http://127.0.0.1:8787 --input dispatch.json --require-existing-worker
   forgeflow-review-orchestrator dispatch-task --dispatcher-url http://127.0.0.1:8787 --repo TingRuDeng/ForgeFlow --default-branch main --task-id task-1 --title "Update docs" --pool trae --branch-name ai/trae/task-1 --allowed-paths docs/**,README.md --acceptance "pnpm typecheck,git diff --check"
   forgeflow-review-orchestrator dispatch-task --dispatcher-url http://127.0.0.1:8787 --repo TingRuDeng/ForgeFlow --default-branch main --task-id task-1 --title "Update docs" --pool trae --branch-name ai/trae/task-1 --target-worker-id trae-local-forgeflow --require-existing-worker
+  forgeflow-review-orchestrator dispatch-task --dispatcher-url http://127.0.0.1:8787 --repo TingRuDeng/ForgeFlow --default-branch main --task-id task-1 --title "Update docs" --pool trae --branch-name ai/trae/task-1 --follow-up-of-task-id dispatch-1:task-1 --target-worker-id trae-local-forgeflow
   forgeflow-review-orchestrator dispatch-task --dispatcher-url http://127.0.0.1:8787 --repo TingRuDeng/ForgeFlow --default-branch main --task-id task-1 --title "Update docs" --pool trae --branch-name ai/trae/task-1 --worker-prompt-file prompts/worker.md --context-markdown-file context/task.md
   forgeflow-review-orchestrator continue-task --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1
   forgeflow-review-orchestrator watch --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1
@@ -142,12 +144,19 @@ Examples:
     if (!dispatcherUrl) {
       throw new Error("--dispatcher-url is required");
     }
+    const followUpOfTaskId = typeof options.followUpOfTaskId === "string" ? options.followUpOfTaskId : undefined;
+    const targetWorkerId = typeof options.targetWorkerId === "string" ? options.targetWorkerId : undefined;
+    if (followUpOfTaskId && !targetWorkerId) {
+      throw new Error("--target-worker-id is required when --follow-up-of-task-id is provided");
+    }
     const result = await deps.runDispatch({
       dispatcherUrl,
       input,
       requireExistingWorker: options.requireExistingWorker === true,
-      targetWorkerId: typeof options.targetWorkerId === "string" ? options.targetWorkerId : undefined,
+      targetWorkerId,
       requestTimeoutMs: typeof options.requestTimeoutMs === "number" ? options.requestTimeoutMs : undefined,
+      followUpOfTaskId,
+      workerChangeReason: typeof options.workerChangeReason === "string" ? options.workerChangeReason : undefined,
     });
     deps.log(JSON.stringify(result, null, 2));
     return result;
@@ -185,6 +194,8 @@ Examples:
       contextMarkdown: typeof options.contextMarkdown === "string" ? options.contextMarkdown : undefined,
       workerPromptFile: typeof options.workerPromptFile === "string" ? options.workerPromptFile : undefined,
       contextMarkdownFile: typeof options.contextMarkdownFile === "string" ? options.contextMarkdownFile : undefined,
+      followUpOfTaskId: typeof options.followUpOfTaskId === "string" ? options.followUpOfTaskId : undefined,
+      workerChangeReason: typeof options.workerChangeReason === "string" ? options.workerChangeReason : undefined,
     });
 
     if (options.dryRun === true) {
@@ -193,12 +204,22 @@ Examples:
       return dryRunResult;
     }
 
+    const followUpOfTaskId = typeof options.followUpOfTaskId === "string" ? options.followUpOfTaskId : undefined;
+    const targetWorkerId = typeof options.targetWorkerId === "string" ? options.targetWorkerId : undefined;
+
+    if (followUpOfTaskId && !targetWorkerId) {
+      throw new Error("--target-worker-id is required when --follow-up-of-task-id is provided");
+    }
+
     const result = await deps.runDispatch({
       dispatcherUrl,
       input: "-",
       payload,
       requireExistingWorker: options.requireExistingWorker === true,
       requestTimeoutMs: typeof options.requestTimeoutMs === "number" ? options.requestTimeoutMs : undefined,
+      targetWorkerId,
+      followUpOfTaskId,
+      workerChangeReason: typeof options.workerChangeReason === "string" ? options.workerChangeReason : undefined,
     });
     deps.log(JSON.stringify(result, null, 2));
     return result;

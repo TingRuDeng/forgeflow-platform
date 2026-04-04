@@ -134,20 +134,29 @@ function normalizeDispatchBody(body) {
     ...body,
     tasks: body.tasks.map((task) => {
       const targetWorkerId = task?.targetWorkerId ?? task?.target_worker_id ?? null;
-      return targetWorkerId ? { ...task, targetWorkerId } : task;
+      const followUpOfTaskId = task?.followUpOfTaskId ?? task?.follow_up_of_task_id ?? null;
+      const workerChangeReason = task?.workerChangeReason ?? task?.worker_change_reason ?? null;
+      return {
+        ...task,
+        ...(targetWorkerId ? { targetWorkerId } : {}),
+        ...(followUpOfTaskId ? { followUpOfTaskId } : {}),
+        ...(workerChangeReason ? { workerChangeReason } : {}),
+      };
     }),
     packages: body.packages.map((pkg) => {
       const assignment = pkg?.assignment ?? {};
       const targetWorkerId = assignment?.targetWorkerId ?? assignment?.target_worker_id ?? null;
-      return targetWorkerId
-        ? {
-            ...pkg,
-            assignment: {
-              ...assignment,
-              targetWorkerId,
-            },
-          }
-        : pkg;
+      const followUpOfTaskId = assignment?.followUpOfTaskId ?? assignment?.follow_up_of_task_id ?? null;
+      const workerChangeReason = assignment?.workerChangeReason ?? assignment?.worker_change_reason ?? null;
+      return {
+        ...pkg,
+        assignment: {
+          ...assignment,
+          ...(targetWorkerId ? { targetWorkerId } : {}),
+          ...(followUpOfTaskId ? { followUpOfTaskId } : {}),
+          ...(workerChangeReason ? { workerChangeReason } : {}),
+        },
+      };
     }),
   };
 }

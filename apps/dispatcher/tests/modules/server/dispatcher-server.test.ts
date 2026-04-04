@@ -695,6 +695,118 @@ describe("dispatcher server", () => {
     expect(localFetch.json.status).toBe("no_task");
   });
 
+  it("normalizes follow-up snake_case fields and defaults sticky-worker target from the source task", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/heartbeat",
+      body: { worker_id: "trae-local" },
+    });
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/heartbeat",
+      body: { worker_id: "trae-remote" },
+    });
+
+    const sourceDispatch = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/repo",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [
+          {
+            id: "task-source",
+            title: "Source task",
+            pool: "trae",
+            allowedPaths: ["docs/**"],
+            acceptance: ["pnpm test"],
+            dependsOn: [],
+            branchName: "ai/trae/task-source",
+            target_worker_id: "trae-remote",
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-source",
+            assignment: {
+              taskId: "task-source",
+              workerId: null,
+              pool: "trae",
+              status: "pending",
+              branchName: "ai/trae/task-source",
+              allowedPaths: ["docs/**"],
+              repo: "test/repo",
+              defaultBranch: "main",
+            },
+            workerPrompt: "Source prompt",
+          },
+        ],
+      },
+    });
+
+    const followUpDispatch = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/repo",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [
+          {
+            id: "task-follow-up",
+            title: "Follow-up task",
+            pool: "trae",
+            allowedPaths: ["docs/**"],
+            acceptance: ["pnpm test"],
+            dependsOn: [],
+            branchName: "ai/trae/task-follow-up",
+            follow_up_of_task_id: sourceDispatch.json.taskIds[0],
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-follow-up",
+            assignment: {
+              taskId: "task-follow-up",
+              workerId: null,
+              pool: "trae",
+              status: "pending",
+              branchName: "ai/trae/task-follow-up",
+              allowedPaths: ["docs/**"],
+              repo: "test/repo",
+              defaultBranch: "main",
+            },
+            workerPrompt: "Follow-up prompt",
+          },
+        ],
+      },
+    });
+
+    expect(followUpDispatch.status).toBe(200);
+
+    const snapshot = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dashboard/snapshot",
+    });
+    const followUpTask = snapshot.json.tasks.find((item: { id: string }) => item.id === followUpDispatch.json.taskIds[0]);
+    expect(followUpTask.followUpOfTaskId).toBe(sourceDispatch.json.taskIds[0]);
+    expect(followUpTask.targetWorkerId).toBe("trae-remote");
+
+    const followUpAssignment = snapshot.json.assignments.find((item: { taskId: string }) => item.taskId === followUpDispatch.json.taskIds[0]);
+    expect(followUpAssignment.assignment.followUpOfTaskId).toBe(sourceDispatch.json.taskIds[0]);
+    expect(followUpAssignment.assignment.targetWorkerId).toBe("trae-remote");
+  });
+
   it("submit_result with review_ready moves task to review", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);
