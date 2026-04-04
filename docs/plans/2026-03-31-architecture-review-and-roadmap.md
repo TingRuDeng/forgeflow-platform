@@ -1,8 +1,9 @@
 # forgeflow-platform 架构审查与迭代路线图
 
 > 审查基线：`main` 分支 `5608917` (2026-03-31)
+> 二次核实：`main` 分支 `a8406bb` (2026-04-04)
 > 代码规模：核心运行时 `scripts/lib/` 共 6,215 行 (.mjs)，`apps/dispatcher/` 含 TypeScript 领域层，`packages/` 下 11 个子包
-> 状态更新：本文档已根据 `main` 在 `2026-04-02` 的实际实现做过一次收口标注；本文件仍然是 `plan/review`，不是权威实现说明。权威状态以 `README.md`、`docs/README.md`、`docs/ARCHITECTURE.md` 与代码为准。
+> 状态更新：本文档已在 `2026-04-02` 与 `2026-04-04` 两次按 `main` 实现做过收口标注；本文件仍然是 `plan/review`，不是权威实现说明。权威状态以 `README.md`、`docs/README.md`、`docs/ARCHITECTURE.md` 与代码为准。
 
 ---
 
@@ -81,7 +82,7 @@ graph LR
 **当前剩余风险**：
 - dispatcher 主线虽已默认切到 SQLite，但 review memory 和其他运行时存储仍是 JSON 文件
 - JSON fallback 仍然存在，因此文档与实现都必须明确“默认 SQLite，不是彻底移除 JSON”
-- 事件列表上限仍未完成，状态快照仍可能随运行时间增长
+- `events` 已加 500 条 retention 上限，但这仍是运行时快照级保留策略，不是独立 audit store
 - 持久化 story 仍是 hybrid，而不是“所有状态都统一到一个 DB”
 
 **状态结论**：🟡 核心目标已完成，仍有后续收口
@@ -91,14 +92,9 @@ graph LR
 **路径 A：SQLite 收口（推荐）**：✅ 已成为主线
 
 ```typescript
-// 实现原子写 + WAL 模式
-import Database from 'better-sqlite3';
-
-const db = new Database(path.join(stateDir, 'dispatcher.sqlite'), {
-  journal_mode: 'WAL',
-});
-// 所有状态变更在一个 transaction 中
-db.transaction(() => { ... });
+// 当前主线实际实现使用 node:sqlite
+// 默认文件：.forgeflow-dispatcher/runtime-state.db
+// 入口：apps/dispatcher/src/modules/server/runtime-state-sqlite.ts
 ```
 
 **路径 B：JSON + 原子写 + 锁**：⚪ 未作为主线路径推进；只落了最小原子写修复
@@ -141,35 +137,24 @@ import { lockSync, unlockSync } from 'proper-lockfile';
 
 ### 2.4 🟡 安全与可靠性缺陷
 
-#### 2.4.1 Dispatcher HTTP Server 无认证
+#### 2.4.1 Dispatcher HTTP Server 认证仍是可选项
 
-```javascript
-// dispatcher-server.mjs - 所有端点完全开放
-if (method === "POST" && pathname === "/api/dispatches") {
-  // 任何人都可以创建 dispatch，修改任务状态
-}
-```
+截至 `2026-04-04`，dispatcher HTTP 面已经支持可选 Bearer token 认证：
 
-**影响**：任何能访问 dispatcher 端口的人都可以注入恶意任务、篡改状态。
+- 设置 `DISPATCHER_API_TOKEN` 后，除 `/health` 外接口需带 `Authorization: Bearer <token>`
+- 未设置 token 时，接口仍保持开放
 
-#### 2.4.2 无请求体大小限制
+**影响**：比“完全无认证”已明显收口，但如果部署时未配置 token，风险模型仍然接近原始问题。
 
-```javascript
-async function readJsonBody(request) {
-  const chunks = [];
-  for await (const chunk of request) {
-    chunks.push(chunk); // 无限累积，可被内存攻击
-  }
-}
-```
+#### 2.4.2 请求体大小限制已完成
 
-#### 2.4.3 Dashboard HTML 内联存在 XSS 风险
+`readJsonBody()` 当前已经有 `16KB` 上限，相关 quick win 可视为完成。
 
-```javascript
-// 将原始数据直接拼接到 HTML 中
-'<td>' + task.title + '</td>'      // title 中的 HTML 标签会被执行
-'<div>' + JSON.stringify(event.payload) + '</div>'  // payload 可能包含恶意脚本
-```
+#### 2.4.3 原 dashboard XSS 风险模型已不再对应当前主线
+
+原文描述的是“服务端把任务数据直接拼进 dashboard HTML”。截至 `2026-04-04`，当前 dispatcher dashboard shell 已退化为固定 redirect 页，不再直接把 runtime 数据内联进 HTML。
+
+这并不代表“未来 UI 永远没有 XSS 风险”，而是原文中的具体风险模型已经失效；如果后续重新引入富 dashboard HTML / SPA，仍应继续遵守 `textContent` / escaping 原则。
 
 #### 2.4.4 Worker Daemon 的 GitHub Token 直接从 process.env 读取
 
@@ -182,17 +167,17 @@ if (!process.env.GITHUB_TOKEN || changedFiles.length === 0) {
 
 **当前状态更新**：
 - `QW-1` 原子写保护：已做
-- `QW-2` 请求体大小限制：未做
-- `QW-3` Dashboard XSS 修复：未做
-- `QW-4` events 上限：未做
+- `QW-2` 请求体大小限制：已做
+- `QW-3` 原 dashboard XSS 风险模型：已失效，当前主线不再对应原问题描述
+- `QW-4` events 上限：已做
 
 **建议优先级**：🟡 P1（仍然成立）
 
 **方案**：
-1. 添加 Bearer token / API key 认证中间件
-2. 添加请求体大小限制（16KB）
-3. Dashboard 使用 `textContent` 或 HTML 编码替代字符串拼接
-4. Token 管理从 env 迁移到加密凭据存储
+1. 将“可选 token 认证”进一步收口为默认安全部署方案
+2. 保持 `16KB` 请求体上限和对应测试覆盖
+3. 若后续重建富 dashboard UI，明确采用 escaping / `textContent` 而非字符串拼接
+4. Token 管理从 env 迁移到更清晰的凭据管理方案
 
 ---
 
@@ -234,14 +219,14 @@ if (!process.env.GITHUB_TOKEN || changedFiles.length === 0) {
 
 | 包名 | 状态 |
 |------|------|
-| `mcp-github` | 有入口，无实质实现 |
-| `mcp-repo-policy` | 有入口，无实质实现 |
-| `mcp-review-gate` | 有入口，无实质实现 |
-| `mcp-scheduler` | 有入口，无实质实现 |
+| `mcp-github` | 有基础 tool facade 与测试，但仍偏薄 |
+| `mcp-repo-policy` | 有基础 tool facade 与测试，但仍偏薄 |
+| `mcp-review-gate` | 有基础 tool facade 与测试，但仍偏薄 |
+| `mcp-scheduler` | 有基础 tool facade 与测试，但仍偏薄 |
 | `mcp-trae-worker` | 有实质实现，但已降级为 fallback |
 | `worker-review-orchestrator-cli` | 有实质实现，活跃使用 |
 
-大量声明了但未实现的包增加了新 agent 的认知负担——它们会尝试去使用这些包但发现是空的。
+这些包已经不再是“空目录”，但对新 agent 来说仍有认知负担：名字看起来像完整能力，实际很多还只是薄封装或预留接口。
 
 **建议优先级**：🟢 P2
 
@@ -262,8 +247,8 @@ if (!process.env.GITHUB_TOKEN || changedFiles.length === 0) {
 - SQLite 迁移 POC：✅
 - SQLite 成为默认 backend：✅
 - 显式 JSON fallback：✅
-- HTTP 认证中间件：❌ 未开始
-- 请求体限制 + XSS 修复：❌ 未开始
+- HTTP 认证中间件：🟡 已实现为可选 token 认证
+- 请求体限制 + XSS 修复：🟡 请求体限制已完成；原 dashboard XSS 结论已过时
 
 ```mermaid
 gantt
@@ -284,7 +269,8 @@ gantt
 
 **当前结论**：
 - Phase 1 的“运行时合并到 TypeScript + 持久化默认切到 SQLite”可视为已完成
-- 但 Phase 1 下原计划包含的“HTTP 认证 + 请求体限制 + XSS 修复”还没做完，因此若按原始大包定义，Phase 1 只完成了运行时/持久化子目标，不等于整包安全加固全部完成
+- Phase 1 下原计划里的安全子项已经部分落地：可选 token 认证与请求体限制已完成，原 dashboard XSS 风险模型已不再对应当前主线
+- 因此当前剩余安全项更准确地说是“认证默认化/部署收口、凭据管理、后续 UI 面的安全纪律”，而不是继续把 QW-2/QW-3/QW-4 视为未开始
 
 ---
 
@@ -373,12 +359,12 @@ interface WorkerAdapter {
 | 编号 | 改动 | 当前状态 | 备注 |
 |------|------|---------|------|
 | QW-1 | `saveRuntimeState()` 原子写保护 | ✅ 已完成 | 先落在 JSON 路径；现主线默认已切 SQLite |
-| QW-2 | `readJsonBody()` 加 16KB 上限 | ❌ 未完成 | `dispatcher-server.mjs` 仍未见请求体上限 |
-| QW-3 | Dashboard HTML 的 `+` 拼接改用 `textContent` | ❌ 未完成 | `innerHTML` 拼接仍在 |
-| QW-4 | 给 `events` 数组加上限（最多保留 500 条）| ❌ 未完成 | 仍未见主线事件上限 |
-| QW-5 | 空壳 MCP 包加 `README.md` 标注 "NOT IMPLEMENTED" | ❌ 未完成 | 尚未系统清理 |
+| QW-2 | `readJsonBody()` 加 16KB 上限 | ✅ 已完成 | 当前主线已有 `payload_too_large` 防护 |
+| QW-3 | Dashboard HTML 的 `+` 拼接改用 `textContent` | 🟡 原问题描述已过时 | 当前 dashboard shell 已是固定 redirect 页，不再对应原内联 HTML 风险模型 |
+| QW-4 | 给 `events` 数组加上限（最多保留 500 条）| ✅ 已完成 | 主线已有 500 条 retention 上限 |
+| QW-5 | MCP 薄实现包补状态标注 | 🟡 仍待推进 | 问题已从“空壳”变成“薄实现但状态不够显式” |
 | QW-6 | `dispatcher-state.mjs` 中重复的 `targetWorkerId` 赋值修复 | ✅ 已完成 | 已保留 target routing 语义 |
-| QW-7 | `.github/workflows/` 目录为空，补充 CI workflow | ❌ 未完成 | 仍是待补项 |
+| QW-7 | `.github/workflows/` 目录为空，补充 CI workflow | ✅ 已完成 | 当前主线已有 `CI` workflow，执行 `pnpm typecheck` / `pnpm test` / `git diff --check` |
 
 ### 4.2 `createDispatch()` 中的逻辑瑕疵
 
@@ -394,10 +380,12 @@ const task = {
 
 ### 4.3 Dashboard HTML 应该从服务端代码中分离
 
-当前 289 行的 HTML/CSS/JS 硬编码在 `dispatcher-server.mjs` 中。应该：
-- 提取到 `apps/dispatcher/dashboard/index.html`
-- 运行时 `fs.readFileSync()` 加载
-- 或者用 Vite 构建一个轻量级 SPA
+原审查时的痛点是“dashboard HTML 与服务端 handler 强耦合”。截至 `2026-04-04`，当前 dispatcher dashboard 已退化为固定 redirect shell，这个具体问题已不再是主线热点。
+
+若后续继续推进 console / dashboard 体验，更准确的后续项应是：
+- 由独立 console UI 承接展示
+- dispatcher 继续以 JSON snapshot / API 为主
+- 避免重新回到服务端拼接大段 HTML 的模式
 
 ---
 
@@ -408,17 +396,17 @@ const task = {
 ```
 apps/dispatcher/tests/
   └── modules/
-       ├── dispatch/     (1 文件)
-       ├── doctor/       (1 文件)
-       ├── execution/    (4 文件)
-       ├── review/       (1 文件)
-       ├── runtime/      (3 文件)
-       ├── server/       (12 文件) ← 实际测试 scripts/lib/ 的行为
-       └── tasks/        (1 文件)
+       ├── dispatch/
+       ├── doctor/
+       ├── execution/
+       ├── review/
+       ├── runtime/
+       ├── server/       ← 仍是最重的测试聚集区
+       └── tasks/
 
 packages/trae-beta-runtime/
-  ├── test/              (2 文件)
-  └── tests/             (3 文件) ← 两个测试目录，应统一
+  ├── test/
+  └── tests/             ← 两个测试目录并存，仍建议统一
 ```
 
 **建议**：
@@ -445,7 +433,7 @@ packages/trae-beta-runtime/
 |------|--------|------|
 | `AGENTS.md` | ✅ 高 | 规则清晰，覆盖面好 |
 | `README.md` | ✅ 高 | 已同步 Phase 1 / Phase 2 / continuation 主线状态 |
-| `docs/ARCHITECTURE.md` | ✅ 高 | 已同步 SQLite 默认与 continuation flow |
+| `docs/ARCHITECTURE.md` | ⚠️ 中 | 主体准确，但个别实现细节已落后于当前主线（如 dashboard shell 描述） |
 | `docs/API_ENDPOINTS.md` | ✅ 高 | continuation task metadata 已同步 |
 | `docs/DATABASE_SCHEMA.md` | ✅ 高 | 已同步 SQLite 默认、JSON fallback 与 snapshot schema |
 | `docs/TECH_DEBT.md` | ⚠️ 中 | 已补一部分，但仍不是完整债务清单 |
@@ -464,11 +452,10 @@ packages/trae-beta-runtime/
 ```
 ┌────────────────────────────────────────────────────────────┐
 │  Quick Wins (剩余)                                         │
-│  ├── QW-2: 请求体大小限制                                   │
-│  ├── QW-3: XSS 修复                                        │
-│  ├── QW-4: events 数组上限                                  │
-│  ├── QW-5: 空壳 MCP 包标记                                  │
-│  └── QW-7: GitHub Actions CI                               │
+│  ├── QW-5: MCP 薄实现包状态标注                             │
+│  ├── dispatcher auth 默认化 / 部署收口                     │
+│  ├── 凭据管理与 token 使用边界梳理                          │
+│  └── console / dashboard 边界继续收口                      │
 ├────────────────────────────────────────────────────────────┤
 │  Phase 1（已完成主体）                                     │
 │  ├── 运行时合并到 TypeScript                                │
@@ -490,4 +477,4 @@ packages/trae-beta-runtime/
 ```
 
 > [!IMPORTANT]
-> 截至 `2026-04-02`，**Phase 1 的主干目标已经完成**：运行时主链已桥到 TypeScript foundation，dispatcher 默认持久化已切到 SQLite。当前最紧迫的剩余项已经变成：`QW-2/QW-3/QW-4/QW-7` 这类安全与可靠性补丁，以及 Trae gateway 双实现收口。
+> 截至 `2026-04-04`，**Phase 1 的主干目标已经完成**：运行时主链已桥到 TypeScript foundation，dispatcher 默认持久化已切到 SQLite；可选 token 认证、请求体大小限制、events retention、CI workflow 也已进入主线。当前更紧迫的剩余项已经变成：Trae gateway 双实现收口、可选认证向默认安全部署收口、MCP 薄实现包的状态澄清，以及 Phase 2 的可观测性/通信层升级。
