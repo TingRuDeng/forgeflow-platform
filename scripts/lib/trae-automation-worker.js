@@ -331,7 +331,7 @@ export function isAutomationGatewayReady(readiness) {
 }
 function isTimeoutError(error) {
     const message = error instanceof Error ? error.message : String(error);
-    return /timeout/i.test(message);
+    return /timeout|Timed out/i.test(message);
 }
 function isTemplateEchoError(error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -434,7 +434,7 @@ export function isAutomationGatewayReady(readiness: unknown): boolean {
 
 function isTimeoutError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /timeout/i.test(message);
+  return /timeout|Timed out/i.test(message);
 }
 
 function isTemplateEchoError(error: unknown): boolean {

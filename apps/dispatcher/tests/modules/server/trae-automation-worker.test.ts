@@ -521,6 +521,88 @@ describe("trae automation worker runtime", () => {
     expect(automationClient.sendChat).toHaveBeenCalledTimes(2);
   });
 
+  it("recovers session when gateway returns 'Timed out waiting for Trae to finish responding'", async () => {
+    const mod = await import(workerModulePath);
+    const { repoDir } = createRepoWithOrigin("forgeflow-trae-gateway-timeout-", "main");
+
+    const dispatcherClient = {
+      register: vi.fn(async () => ({ ok: true })),
+      heartbeat: vi.fn(async () => ({ ok: true })),
+      fetchTask: vi.fn(async () => ({
+        status: "ok",
+        task: {
+          task_id: "dispatch-4:task-1",
+          repo: "test/repo",
+          branch: "ai/trae/task-1",
+          default_branch: "main",
+          goal: "Fix errors",
+          scope: ["src/**"],
+          constraints: [],
+          acceptance: ["pnpm test"],
+          prompt: "Fix errors",
+          worktree_dir: "/tmp/worktree",
+          assignment_dir: "/tmp/assignment",
+        },
+      })),
+      startTask: vi.fn(async () => ({ ok: true })),
+      reportProgress: vi.fn(async () => ({ ok: true })),
+      submitResult: vi.fn(async () => ({ ok: true })),
+    };
+
+    let chatCallCount = 0;
+    const automationClient = {
+      ready: vi.fn(async () => ({ data: { ready: true } })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-gateway-timeout" } })),
+      getSession: vi.fn(async () => ({ data: { status: "completed" } })),
+      sendChat: vi.fn(async () => {
+        chatCallCount += 1;
+        if (chatCallCount === 1) {
+          throw new Error("Timed out waiting for Trae to finish responding");
+        }
+        return {
+          data: {
+            response: {
+              text: `
+## 任务完成
+- 结果: 成功
+- 任务ID: dispatch-4:task-1
+- 修改文件: src/recovered.js
+- 测试结果: gateway timeout recovery
+- 风险: 无
+- GitHub 证据:
+  - branch: ai/trae/task-1
+  - commit: abc123
+  - push: success
+  - push_error: 无
+  - PR: 无
+  - PR URL: 无
+- 备注: recovered
+              `,
+            },
+          },
+        };
+      }),
+    };
+
+    const runtime = mod.createTraeAutomationWorkerRuntime({
+      dispatcherClient,
+      automationClient,
+      workerId: "trae-gateway-timeout-1",
+      repoDir,
+      setIntervalImpl: () => 1,
+      clearIntervalImpl: () => {},
+      sleep: async () => {},
+      logger: { warn: vi.fn() },
+    });
+
+    const result = await runtime.runOnce();
+
+    expect(result.status).toBe("review_ready");
+    expect(automationClient.prepareSession).toHaveBeenCalled();
+    expect(automationClient.getSession).toHaveBeenCalled();
+    expect(automationClient.sendChat).toHaveBeenCalledTimes(2);
+  });
+
   it("fails when session status is interrupted", async () => {
     const mod = await import(workerModulePath);
     const { repoDir } = createRepoWithOrigin("forgeflow-trae-timeout-", "main");
