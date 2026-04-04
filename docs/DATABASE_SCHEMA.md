@@ -117,6 +117,24 @@ Reviews track dispatcher-side review state:
 - `notes`
 - `decidedAt`
 - `reviewMaterial`
+- `latestWorkerResult`
+- `evidence`
+
+Current additive review-side structured fields:
+
+- `latestWorkerResult.evidence`
+  - `failureType`
+  - `failureSummary`
+  - `blockers[]`
+  - `findings[]`
+  - `artifacts`
+- `evidence`
+  - `reasonCode`
+  - `mustFix[]`
+  - `canRedrive`
+  - `redriveStrategy`
+
+`reviewMaterial` is retained after a final review decision so the control layer keeps the original review snapshot alongside the structured evidence.
 
 Pull request records track review-side Git metadata:
 

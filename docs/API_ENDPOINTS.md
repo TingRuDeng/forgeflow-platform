@@ -56,6 +56,12 @@ Current endpoint families:
   - Move task from `assigned` to `in_progress`.
 - `POST /api/workers/:workerId/result`
   - Submit execution result, changed files, and optional PR metadata.
+  - `result` may now include additive structured worker evidence for dispatcher persistence:
+    - `failureType`
+    - `failureSummary`
+    - `blockers[]`
+    - `findings[]`
+    - `artifacts`
 
 ### Dispatch and review endpoints
 
@@ -65,6 +71,11 @@ Current endpoint families:
   - Task payloads can also carry continuation metadata such as `continuationMode` and `continueFromTaskId`.
 - `POST /api/reviews/:taskId/decision`
   - Submit `merge` or `block` and move task from `review` to `merged` or `blocked`.
+  - Request body may include additive structured decision evidence:
+    - `reasonCode`
+    - `mustFix[]`
+    - `canRedrive`
+    - `redriveStrategy`
   - Returns `404` when the task or assignment does not exist.
   - Returns `409` when the task exists but is not currently in `review`.
 

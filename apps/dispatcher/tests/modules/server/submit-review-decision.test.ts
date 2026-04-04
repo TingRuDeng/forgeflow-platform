@@ -136,6 +136,38 @@ describe("submit review decision", () => {
     });
   }, 15_000);
 
+  it("persists structured review decision evidence through the review bridge", async () => {
+    const stateDir = makeTempDir();
+    const { stateMod, taskId } = await createReviewReadyState(stateDir);
+    const reviewMod = await import(reviewModulePath);
+
+    const client = reviewMod.createStateDirReviewClient(stateDir);
+    await reviewMod.submitReviewDecision({
+      client,
+      taskId,
+      actor: "codex-control",
+      decision: "rework",
+      notes: "需要补充失败分支测试",
+      evidence: {
+        reasonCode: "test_gap",
+        mustFix: ["补充失败分支覆盖"],
+        canRedrive: true,
+        redriveStrategy: "same_worker_continue",
+      },
+    });
+
+    const snapshot = stateMod.buildDashboardSnapshot(stateMod.loadRuntimeState(stateDir));
+    expect(snapshot.reviews[0]).toMatchObject({
+      decision: "rework",
+      evidence: {
+        reasonCode: "test_gap",
+        mustFix: ["补充失败分支覆盖"],
+        canRedrive: true,
+        redriveStrategy: "same_worker_continue",
+      },
+    });
+  }, 15_000);
+
   it("supports the CLI --state-dir mode without a dispatcher URL", async () => {
     const stateDir = makeTempDir();
     const { stateMod, taskId } = await createReviewReadyState(stateDir);
