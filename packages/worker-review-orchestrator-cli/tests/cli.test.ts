@@ -689,4 +689,175 @@ describe("worker-review-orchestrator-cli", () => {
     const versionOutput = log.mock.calls[0][0] as string;
     expect(versionOutput).toMatch(/^\d+\.\d+\.\d+/);
   });
+
+  it("parses --follow-up-of-task-id and --worker-change-reason flags", () => {
+    expect(parseCliArgs([
+      "dispatch",
+      "--dispatcher-url",
+      "http://127.0.0.1:8787",
+      "--input",
+      "dispatch.json",
+      "--follow-up-of-task-id",
+      "dispatch-1:task-source",
+      "--target-worker-id",
+      "trae-remote-forgeflow",
+      "--worker-change-reason",
+      "original worker unavailable",
+    ])).toMatchObject({
+      command: "dispatch",
+      options: {
+        dispatcherUrl: "http://127.0.0.1:8787",
+        input: "dispatch.json",
+        followUpOfTaskId: "dispatch-1:task-source",
+        targetWorkerId: "trae-remote-forgeflow",
+        workerChangeReason: "original worker unavailable",
+      },
+    });
+  });
+
+  it("requires --target-worker-id when --follow-up-of-task-id is provided in dispatch", async () => {
+    const log = vi.fn();
+    const runDispatch = vi.fn();
+
+    await expect(
+      runCli(
+        [
+          "dispatch",
+          "--dispatcher-url",
+          "http://127.0.0.1:8787",
+          "--input",
+          "dispatch.json",
+          "--follow-up-of-task-id",
+          "dispatch-1:task-source",
+        ],
+        {
+          runDispatch,
+          log,
+        },
+      ),
+    ).rejects.toThrow("--target-worker-id is required when --follow-up-of-task-id is provided");
+  });
+
+  it("requires --target-worker-id when --follow-up-of-task-id is provided in dispatch-task", async () => {
+    const log = vi.fn();
+    const runDispatch = vi.fn();
+
+    await expect(
+      runCli(
+        [
+          "dispatch-task",
+          "--dispatcher-url",
+          "http://127.0.0.1:8787",
+          "--repo",
+          "TingRuDeng/ForgeFlow",
+          "--default-branch",
+          "main",
+          "--task-id",
+          "task-1",
+          "--title",
+          "Test task",
+          "--pool",
+          "trae",
+          "--branch-name",
+          "ai/trae/task-1",
+          "--follow-up-of-task-id",
+          "dispatch-1:task-source",
+        ],
+        {
+          runDispatch,
+          log,
+        },
+      ),
+    ).rejects.toThrow("--target-worker-id is required when --follow-up-of-task-id is provided");
+  });
+
+  it("passes --follow-up-of-task-id and --worker-change-reason through dispatch", async () => {
+    const log = vi.fn();
+    const runDispatch = vi.fn().mockResolvedValue({
+      dispatchId: "dispatch-1",
+      taskIds: ["dispatch-1:task-1"],
+      assignments: [],
+    });
+
+    await runCli(
+      [
+        "dispatch",
+        "--dispatcher-url",
+        "http://127.0.0.1:8787",
+        "--input",
+        "dispatch.json",
+        "--follow-up-of-task-id",
+        "dispatch-1:task-source",
+        "--target-worker-id",
+        "trae-remote-forgeflow",
+        "--worker-change-reason",
+        "original worker unavailable",
+      ],
+      {
+        runDispatch,
+        log,
+      },
+    );
+
+    expect(runDispatch).toHaveBeenCalledWith({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      input: "dispatch.json",
+      requestTimeoutMs: undefined,
+      requireExistingWorker: false,
+      targetWorkerId: "trae-remote-forgeflow",
+      followUpOfTaskId: "dispatch-1:task-source",
+      workerChangeReason: "original worker unavailable",
+    });
+  });
+
+  it("passes --follow-up-of-task-id and --worker-change-reason through dispatch-task", async () => {
+    const log = vi.fn();
+    const runDispatch = vi.fn().mockResolvedValue({
+      dispatchId: "dispatch-1",
+      taskIds: ["dispatch-1:task-1"],
+      assignments: [],
+    });
+
+    await runCli(
+      [
+        "dispatch-task",
+        "--dispatcher-url",
+        "http://127.0.0.1:8787",
+        "--repo",
+        "TingRuDeng/ForgeFlow",
+        "--default-branch",
+        "main",
+        "--task-id",
+        "task-1",
+        "--title",
+        "Test task",
+        "--pool",
+        "trae",
+        "--branch-name",
+        "ai/trae/task-1",
+        "--follow-up-of-task-id",
+        "dispatch-1:task-source",
+        "--target-worker-id",
+        "trae-remote-forgeflow",
+        "--worker-change-reason",
+        "original worker unavailable",
+      ],
+      {
+        runDispatch,
+        log,
+      },
+    );
+
+    expect(runDispatch).toHaveBeenCalledWith({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      input: "-",
+      requestTimeoutMs: undefined,
+      requireExistingWorker: false,
+      payload: expect.objectContaining({
+        repo: "TingRuDeng/ForgeFlow",
+      }),
+      followUpOfTaskId: "dispatch-1:task-source",
+      workerChangeReason: "original worker unavailable",
+    });
+  });
 });

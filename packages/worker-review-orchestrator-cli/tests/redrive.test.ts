@@ -1179,4 +1179,56 @@ describe("redrive", () => {
     expect(contextMarkdown).toBe("# Original");
     expect(contextMarkdown).not.toContain("Rework Notes");
   });
+
+  it("preserves original targetWorkerId in redrive payload (sticky-worker behavior)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(mockWorktreeMismatchSnapshot)),
+    });
+
+    const dispatchMockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            dispatchId: "dispatch-redrive-sticky",
+            taskIds: ["dispatch-75:redrive-sticky"],
+            assignments: [],
+          }),
+        ),
+    });
+
+    let fetchCallCount = 0;
+    let capturedPayload: unknown = null;
+    const combinedFetch = async (url: string, init?: RequestInit) => {
+      fetchCallCount++;
+      if (fetchCallCount === 1) {
+        return mockFetch(url, init);
+      }
+      if (init?.body) {
+        capturedPayload = JSON.parse(init.body as string);
+      }
+      return dispatchMockFetch(url, init);
+    };
+
+    await runRedrive({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-1",
+      fetchImpl: combinedFetch as typeof globalThis.fetch,
+    });
+
+    expect(capturedPayload).not.toBeNull();
+    const payload = capturedPayload as { tasks?: unknown[]; packages?: unknown[] };
+
+    const taskPayload = (payload.tasks as unknown[]).find((t: unknown) => {
+      const task = t as Record<string, unknown>;
+      return task.id && String(task.id).startsWith("redrive-");
+    }) as Record<string, unknown> | undefined;
+    expect(taskPayload).toBeDefined();
+    expect(taskPayload?.targetWorkerId).toBe("trae-remote-forgeflow");
+
+    const pkg = (payload.packages as unknown[])[0] as Record<string, unknown> | undefined;
+    expect(pkg).toBeDefined();
+    expect((pkg?.assignment as Record<string, unknown>)?.targetWorkerId).toBe("trae-remote-forgeflow");
+  });
 });

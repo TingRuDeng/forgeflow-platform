@@ -512,4 +512,245 @@ describe("dispatch", () => {
       }),
     );
   });
+
+  it("fetches source task and verifies target worker match", async () => {
+    const snapshotWithSourceTask = {
+      workers: [],
+      tasks: [
+        {
+          id: "dispatch-1:task-source",
+          status: "completed",
+          title: "Source Task",
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-1:task-source",
+          workerId: "worker-1",
+          targetWorkerId: "trae-remote-forgeflow",
+        },
+      ],
+    };
+
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(snapshotWithSourceTask),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            dispatchId: "dispatch-followup-1",
+            taskIds: ["dispatch-followup-1:task-1"],
+            assignments: [{ taskId: "task-1", workerId: "trae-remote-forgeflow" }],
+          }),
+      });
+
+    const result = await runDispatch({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      input: "-",
+      payload: {
+        repo: "/repo",
+        defaultBranch: "main",
+        tasks: [{ id: "task-1", pool: "trae" }],
+        packages: [],
+      },
+      followUpOfTaskId: "dispatch-1:task-source",
+      targetWorkerId: "trae-remote-forgeflow",
+      fetchImpl: fetchImpl as typeof globalThis.fetch,
+    });
+
+    expect(result).toMatchObject({
+      dispatchId: "dispatch-followup-1",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects dispatch when target worker does not match source task worker without reason", async () => {
+    const snapshotWithSourceTask = {
+      workers: [],
+      tasks: [
+        {
+          id: "dispatch-1:task-source",
+          status: "completed",
+          title: "Source Task",
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-1:task-source",
+          workerId: "worker-1",
+          targetWorkerId: "trae-remote-forgeflow",
+        },
+      ],
+    };
+
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(snapshotWithSourceTask),
+    });
+
+    await expect(
+      runDispatch({
+        dispatcherUrl: "http://127.0.0.1:8787",
+        input: "-",
+        payload: {
+          repo: "/repo",
+          defaultBranch: "main",
+          tasks: [{ id: "task-1", pool: "trae" }],
+          packages: [],
+        },
+        followUpOfTaskId: "dispatch-1:task-source",
+        targetWorkerId: "different-worker",
+        fetchImpl: fetchImpl as typeof globalThis.fetch,
+      }),
+    ).rejects.toThrow('target worker mismatch: source task "dispatch-1:task-source" was assigned to worker "trae-remote-forgeflow", but target worker is "different-worker"');
+  });
+
+  it("allows dispatch when target worker changes with reason", async () => {
+    const snapshotWithSourceTask = {
+      workers: [],
+      tasks: [
+        {
+          id: "dispatch-1:task-source",
+          status: "completed",
+          title: "Source Task",
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-1:task-source",
+          workerId: "worker-1",
+          targetWorkerId: "trae-remote-forgeflow",
+        },
+      ],
+    };
+
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(snapshotWithSourceTask),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            dispatchId: "dispatch-followup-2",
+            taskIds: ["dispatch-followup-2:task-1"],
+            assignments: [{ taskId: "task-1", workerId: "different-worker" }],
+          }),
+      });
+
+    const result = await runDispatch({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      input: "-",
+      payload: {
+        repo: "/repo",
+        defaultBranch: "main",
+        tasks: [{ id: "task-1", pool: "trae" }],
+        packages: [],
+      },
+      followUpOfTaskId: "dispatch-1:task-source",
+      targetWorkerId: "different-worker",
+      workerChangeReason: "original worker is offline",
+      fetchImpl: fetchImpl as typeof globalThis.fetch,
+    });
+
+    expect(result).toMatchObject({
+      dispatchId: "dispatch-followup-2",
+    });
+  });
+
+  it("throws error when source task is not found", async () => {
+    const snapshotWithoutSourceTask = {
+      workers: [],
+      tasks: [],
+      assignments: [],
+    };
+
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(snapshotWithoutSourceTask),
+    });
+
+    await expect(
+      runDispatch({
+        dispatcherUrl: "http://127.0.0.1:8787",
+        input: "-",
+        payload: {
+          repo: "/repo",
+          defaultBranch: "main",
+          tasks: [{ id: "task-1", pool: "trae" }],
+          packages: [],
+        },
+        followUpOfTaskId: "dispatch-1:nonexistent",
+        targetWorkerId: "trae-remote-forgeflow",
+        fetchImpl: fetchImpl as typeof globalThis.fetch,
+      }),
+    ).rejects.toThrow("source task not found: dispatch-1:nonexistent");
+  });
+
+  it("verifies dispatch assignment matches intended worker", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          dispatchId: "dispatch-verify-1",
+          taskIds: ["dispatch-verify-1:task-1"],
+          assignments: [{ taskId: "task-1", workerId: "wrong-worker" }],
+        }),
+    });
+
+    await expect(
+      runDispatch({
+        dispatcherUrl: "http://127.0.0.1:8787",
+        input: "-",
+        payload: {
+          repo: "/repo",
+          defaultBranch: "main",
+          tasks: [{ id: "task-1", pool: "trae" }],
+          packages: [],
+        },
+        targetWorkerId: "trae-remote-forgeflow",
+        fetchImpl: fetchImpl as typeof globalThis.fetch,
+      }),
+    ).rejects.toThrow('dispatch verification failed: expected worker "trae-remote-forgeflow" but dispatcher assigned worker "wrong-worker"');
+  });
+
+  it("does not verify dispatch assignment when no target worker is specified", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          dispatchId: "dispatch-verify-2",
+          taskIds: ["dispatch-verify-2:task-1"],
+          assignments: [{ taskId: "task-1", workerId: "any-worker" }],
+        }),
+    });
+
+    const result = await runDispatch({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      input: "-",
+      payload: {
+        repo: "/repo",
+        defaultBranch: "main",
+        tasks: [{ id: "task-1", pool: "trae" }],
+        packages: [],
+      },
+      fetchImpl: fetchImpl as typeof globalThis.fetch,
+    });
+
+    expect(result).toMatchObject({
+      dispatchId: "dispatch-verify-2",
+    });
+  });
 });

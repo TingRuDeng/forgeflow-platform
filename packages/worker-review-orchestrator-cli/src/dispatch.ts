@@ -12,6 +12,8 @@ export interface DispatchOptions {
   requestTimeoutMs?: number;
   fetchImpl?: typeof globalThis.fetch;
   readStdin?: () => Promise<string>;
+  followUpOfTaskId?: string;
+  workerChangeReason?: string;
 }
 
 export async function loadDispatchInput(source: string, readStdin?: () => Promise<string>) {
@@ -196,7 +198,96 @@ async function ensureExistingWorkersAvailable(
   }
 }
 
+interface SourceTaskInfo {
+  taskId: string;
+  originalWorkerId: string | null;
+}
+
+async function fetchSourceTask(
+  followUpOfTaskId: string,
+  options: Pick<DispatchOptions, "dispatcherUrl" | "fetchImpl" | "requestTimeoutMs">,
+): Promise<SourceTaskInfo> {
+  const client = createJsonHttpClient(options.dispatcherUrl, {
+    fetchImpl: options.fetchImpl,
+    requestTimeoutMs: options.requestTimeoutMs,
+  });
+  const snapshot = await client.request("/api/dashboard/snapshot") as Record<string, unknown>;
+
+  const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks as Array<Record<string, unknown>> : [];
+  const sourceTask = tasks.find((t) => t.id === followUpOfTaskId);
+  if (!sourceTask) {
+    throw new Error(`source task not found: ${followUpOfTaskId}`);
+  }
+
+  const assignments = Array.isArray(snapshot.assignments) ? snapshot.assignments as Array<Record<string, unknown>> : [];
+  const assignment = assignments.find((a) => a.taskId === followUpOfTaskId);
+
+  const originalWorkerId = assignment
+    ? (normalizeString(assignment.targetWorkerId as string | undefined) ?? normalizeString(assignment.workerId as string | undefined))
+    : null;
+
+  return {
+    taskId: followUpOfTaskId,
+    originalWorkerId,
+  };
+}
+
+function verifyTargetWorkerMatch(
+  sourceTaskInfo: SourceTaskInfo,
+  targetWorkerId: string | undefined,
+  workerChangeReason: string | undefined,
+): void {
+  if (!sourceTaskInfo.originalWorkerId) {
+    return;
+  }
+
+  if (!targetWorkerId) {
+    return;
+  }
+
+  if (targetWorkerId !== sourceTaskInfo.originalWorkerId) {
+    if (!workerChangeReason) {
+      throw new Error(
+        `target worker mismatch: source task "${sourceTaskInfo.taskId}" was assigned to worker "${sourceTaskInfo.originalWorkerId}", but target worker is "${targetWorkerId}". ` +
+        `To change the worker, you must provide a --worker-change-reason explaining why.`,
+      );
+    }
+  }
+}
+
+function verifyDispatchAssignment(
+  dispatchResult: DispatchResult,
+  intendedWorkerId: string | undefined,
+): void {
+  if (!intendedWorkerId) {
+    return;
+  }
+
+  const assignments = dispatchResult.assignments;
+  if (!Array.isArray(assignments) || assignments.length === 0) {
+    return;
+  }
+
+  const firstAssignment = assignments[0] as Record<string, unknown>;
+  const assignedWorkerId = normalizeString(firstAssignment.workerId as string | undefined)
+    ?? normalizeString(firstAssignment.targetWorkerId as string | undefined);
+
+  if (assignedWorkerId && assignedWorkerId !== intendedWorkerId) {
+    throw new Error(
+      `dispatch verification failed: expected worker "${intendedWorkerId}" but dispatcher assigned worker "${assignedWorkerId}"`,
+    );
+  }
+}
+
 export async function runDispatch(options: DispatchOptions): Promise<DispatchResult> {
+  let sourceTaskInfo: SourceTaskInfo | undefined;
+
+  if (options.followUpOfTaskId) {
+    sourceTaskInfo = await fetchSourceTask(options.followUpOfTaskId, options);
+
+    verifyTargetWorkerMatch(sourceTaskInfo, options.targetWorkerId, options.workerChangeReason);
+  }
+
   const payload = options.payload
     ? applyDispatchTargetWorker(options.payload, options.targetWorkerId)
     : applyDispatchTargetWorker(
@@ -213,8 +304,12 @@ export async function runDispatch(options: DispatchOptions): Promise<DispatchRes
     requestTimeoutMs: options.requestTimeoutMs,
   });
 
-  return client.request("/api/dispatches", {
+  const dispatchResult = await client.request("/api/dispatches", {
     method: "POST",
     body: payload,
-  }) as Promise<DispatchResult>;
+  }) as DispatchResult;
+
+  verifyDispatchAssignment(dispatchResult, options.targetWorkerId);
+
+  return dispatchResult;
 }

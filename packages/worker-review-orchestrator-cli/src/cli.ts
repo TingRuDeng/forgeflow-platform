@@ -142,12 +142,22 @@ Examples:
     if (!dispatcherUrl) {
       throw new Error("--dispatcher-url is required");
     }
+
+    const followUpOfTaskId = typeof options.followUpOfTaskId === "string" ? options.followUpOfTaskId : undefined;
+    const targetWorkerId = typeof options.targetWorkerId === "string" ? options.targetWorkerId : undefined;
+
+    if (followUpOfTaskId && !targetWorkerId) {
+      throw new Error("--target-worker-id is required when --follow-up-of-task-id is provided");
+    }
+
     const result = await deps.runDispatch({
       dispatcherUrl,
       input,
       requireExistingWorker: options.requireExistingWorker === true,
-      targetWorkerId: typeof options.targetWorkerId === "string" ? options.targetWorkerId : undefined,
+      targetWorkerId,
       requestTimeoutMs: typeof options.requestTimeoutMs === "number" ? options.requestTimeoutMs : undefined,
+      followUpOfTaskId,
+      workerChangeReason: typeof options.workerChangeReason === "string" ? options.workerChangeReason : undefined,
     });
     deps.log(JSON.stringify(result, null, 2));
     return result;
@@ -193,12 +203,20 @@ Examples:
       return dryRunResult;
     }
 
+    const followUpOfTaskId = typeof options.followUpOfTaskId === "string" ? options.followUpOfTaskId : undefined;
+
+    if (followUpOfTaskId && !options.targetWorkerId) {
+      throw new Error("--target-worker-id is required when --follow-up-of-task-id is provided");
+    }
+
     const result = await deps.runDispatch({
       dispatcherUrl,
       input: "-",
       payload,
       requireExistingWorker: options.requireExistingWorker === true,
       requestTimeoutMs: typeof options.requestTimeoutMs === "number" ? options.requestTimeoutMs : undefined,
+      followUpOfTaskId,
+      workerChangeReason: typeof options.workerChangeReason === "string" ? options.workerChangeReason : undefined,
     });
     deps.log(JSON.stringify(result, null, 2));
     return result;
