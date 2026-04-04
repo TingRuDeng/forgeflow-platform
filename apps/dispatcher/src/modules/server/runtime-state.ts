@@ -1,6 +1,7 @@
 import { jsonStore } from "./runtime-state-json.js";
 import { sqliteStore } from "./runtime-state-sqlite.js";
 import type { RuntimeStateStore } from "./runtime-state-store.js";
+import type { WorkerEvidence } from "./runtime-glue-types.js";
 import { compareTimestampAsc, formatLocalTimestamp } from "../time.js";
 
 const defaultStore: RuntimeStateStore = sqliteStore;
@@ -271,6 +272,7 @@ export interface WorkerResult {
     allPassed: boolean;
     commands: WorkerVerificationCommandResult[];
   };
+  evidence?: WorkerEvidence;
 }
 
 export interface RecordWorkerResultInput {
