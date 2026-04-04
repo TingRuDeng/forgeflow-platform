@@ -2,21 +2,21 @@ import React from 'react';
 
 export const Badge: React.FC<{ status: string; children: React.ReactNode }> = ({ status, children }) => {
   const statusColors: Record<string, string> = {
-    idle: 'bg-zinc-800 text-zinc-400 border-zinc-700',
-    busy: 'bg-amber-950/30 text-amber-500 border-amber-900/50',
-    assigned: 'bg-blue-950/30 text-blue-400 border-blue-900/50',
-    in_progress: 'bg-blue-950/30 text-blue-400 border-blue-900/50',
-    review: 'bg-violet-950/30 text-violet-400 border-violet-900/50',
-    merged: 'bg-emerald-950/30 text-emerald-400 border-emerald-900/50',
-    failed: 'bg-rose-950/30 text-rose-400 border-rose-900/50',
-    blocked: 'bg-rose-950/30 text-rose-400 border-rose-900/50',
-    disabled: 'bg-zinc-900 text-zinc-600 border-zinc-800 line-through',
+    idle: 'bg-zinc-800/50 text-zinc-400 border-zinc-700/50',
+    busy: 'bg-amber-500/10 text-amber-500 border-amber-500/20',
+    assigned: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    in_progress: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
+    review: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+    merged: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    failed: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+    blocked: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+    disabled: 'bg-zinc-900 text-zinc-600 border-zinc-800 opacity-60',
   };
 
   const colorClass = statusColors[status.toLowerCase()] || 'bg-zinc-800 text-zinc-400 border-zinc-700';
 
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${colorClass}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border transition-all ${colorClass}`}>
       {children}
     </span>
   );
@@ -24,11 +24,15 @@ export const Badge: React.FC<{ status: string; children: React.ReactNode }> = ({
 
 export const Panel: React.FC<{ title: string; children: React.ReactNode; className?: string }> = ({ title, children, className }) => {
   return (
-    <section className={`bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden flex flex-col shadow-2xl ${className}`}>
-      <div className="px-5 py-4 border-b border-zinc-800 bg-zinc-900/30">
-        <h2 className="text-sm font-semibold text-zinc-200 uppercase tracking-widest">{title}</h2>
+    <section className={`bg-[#030303] border border-zinc-800/80 rounded-lg overflow-hidden flex flex-col shadow-[0_8px_30px_rgb(0,0,0,0.12)] bg-grid-zinc-900/[0.02] ${className}`}>
+      <div className="px-5 py-3.5 border-b border-zinc-800/50 bg-zinc-900/10 backdrop-blur-md flex items-center justify-between">
+        <h2 className="text-[11px] font-bold text-zinc-400 uppercase tracking-[0.2em]">{title}</h2>
+        <div className="flex gap-1.5">
+          <div className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
+          <div className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
+        </div>
       </div>
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto bg-gradient-to-b from-transparent to-zinc-900/5">
         {children}
       </div>
     </section>

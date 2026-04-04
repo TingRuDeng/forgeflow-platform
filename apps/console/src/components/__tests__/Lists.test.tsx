@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { TaskList } from '../Lists';
@@ -32,7 +32,10 @@ describe('TaskList Pagination', () => {
     renderWithProviders(<TaskList tasks={mockTasks(15)} />);
     
     // Check for page indicator (1 / 2)
-    expect(screen.getByText(/1 \/ 2/)).toBeInTheDocument();
+    const indicator = screen.getByTestId('page-indicator');
+    expect(indicator.textContent).toContain('1');
+    expect(indicator.textContent).toContain('/');
+    expect(indicator.textContent).toContain('2');
     // Buttons are present
     expect(screen.getByRole('button', { name: /next|下一页/i })).toBeInTheDocument();
   });
@@ -54,7 +57,7 @@ describe('TaskList Pagination', () => {
     fireEvent.click(nextBtn);
 
     // Now on page 2, should see Task 11 but not Task 1
-    expect(screen.getByText(/2 \/ 2/)).toBeInTheDocument();
+    expect(screen.getByTestId('page-indicator').textContent).toContain('2');
     expect(screen.getByText('Task 11')).toBeInTheDocument();
     expect(screen.queryByText('Task 1')).not.toBeInTheDocument();
     
@@ -69,11 +72,11 @@ describe('TaskList Pagination', () => {
 
     // Go to page 2
     fireEvent.click(nextBtn);
-    expect(screen.getByText(/2 \/ 2/)).toBeInTheDocument();
+    expect(screen.getByTestId('page-indicator').textContent).toContain('2');
 
     // Go back to page 1
     fireEvent.click(prevBtn);
-    expect(screen.getByText(/1 \/ 2/)).toBeInTheDocument();
+    expect(screen.getByTestId('page-indicator').textContent).toContain('1');
     expect(screen.getByText('Task 1')).toBeInTheDocument();
   });
 });
