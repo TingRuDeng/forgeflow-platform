@@ -1,6 +1,7 @@
 import type {
   ReviewDecisionKind,
   ReviewDecisionPayload,
+  ReviewDecisionEvidence,
 } from "./runtime-glue-types.js";
 
 export interface DispatcherReviewClient {
@@ -25,6 +26,7 @@ export interface SubmitReviewDecisionInput {
   pullRequestNumber?: number;
   githubToken?: string;
   fetchImpl?: typeof globalThis.fetch;
+  evidence?: ReviewDecisionEvidence;
 }
 
 export interface ReviewDecisionResult {
@@ -159,6 +161,7 @@ export async function submitReviewDecision(
     decision: input.decision,
     notes: input.notes,
     at: input.at,
+    evidence: input.evidence,
   })) as ReviewDecisionResult;
 
   if (

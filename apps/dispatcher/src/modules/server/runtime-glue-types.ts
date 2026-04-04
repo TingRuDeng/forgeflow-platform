@@ -1,10 +1,56 @@
 export type ReviewDecisionKind = "merge" | "block" | "rework";
 
+export interface WorkerFailure {
+  kind: "preflight" | "execution" | "verification" | "unknown";
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export interface WorkerEvidence {
+  failures: WorkerFailure[];
+  testOutput?: string;
+  risks: string[];
+  branchName?: string;
+  commitSha?: string;
+  pushStatus?: string;
+  pushError?: string;
+  prNumber?: number;
+  prUrl?: string;
+}
+
+export interface ReviewDecisionEvidence {
+  decision: "merge" | "block" | "rework" | "changes_requested";
+  actor?: string;
+  notes?: string;
+  findings?: ReviewFinding[];
+  blockedReason?: string;
+  reworkPrompt?: string;
+}
+
+export interface ReviewFinding {
+  finding_id: string;
+  severity: "critical" | "high" | "medium" | "low";
+  category: "bug" | "security" | "performance" | "maintainability" | "test-gap";
+  title: string;
+  evidence: {
+    file: string;
+    line: number | null;
+    symbol: string | null;
+    snippet: string;
+  };
+  recommendation: string;
+  confidence: number;
+  fingerprint: string;
+  detected_by: string[];
+}
+
 export interface ReviewDecisionPayload {
   actor?: string;
   decision: ReviewDecisionKind;
   notes?: string;
   at?: string;
+  evidence?: ReviewDecisionEvidence;
 }
 
 export interface ReviewSubmitResult {
