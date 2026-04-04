@@ -45,19 +45,19 @@ const App: React.FC = () => {
       isConnecting={isLoading && !data}
     >
       {error && (
-        <div className="bg-rose-950/20 border border-rose-900 text-rose-400 p-4 rounded-lg text-sm mb-6">
+        <div className="glass rounded-lg p-4 text-sm mb-6 border-rose-500/30 bg-rose-500/10 text-rose-300 animate-fade-in">
           {t('connectionError')}: {error.message}
         </div>
       )}
 
       {data && (
-        <>
+        <div className="animate-fade-in">
           {/* Metrics Overview at the top */}
           <MetricsGrid stats={data.stats} />
 
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
             {/* Main Column: Tasks and Terminal */}
-            <div className="lg:col-span-3 flex flex-col gap-8">
+            <div className="lg:col-span-3 flex flex-col gap-6">
               <Panel title={t('tasks')}>
                 <TaskList tasks={data.tasks} />
               </Panel>
@@ -66,13 +66,13 @@ const App: React.FC = () => {
             </div>
 
             {/* Sidebar Column: Workers */}
-            <div className="lg:col-span-1 flex flex-col gap-8">
+            <div className="lg:col-span-1 flex flex-col gap-6">
               <Panel title={t('workers')}>
                 <WorkerList workers={data.workers} onAction={handleWorkerAction} />
               </Panel>
             </div>
           </div>
-        </>
+        </div>
       )}
     </Layout>
   );
