@@ -32,7 +32,15 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    background-color: #050505; 
+    color: #e4e4e7;
     font-family: 'Fira Code', 'JetBrains Mono', monospace;
+    
+    /* 杀手锏：极其微弱的科技网格线 */
+    background-image: 
+      linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-position: center center;
   }
 }

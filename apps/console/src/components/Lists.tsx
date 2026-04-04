@@ -42,7 +42,7 @@ export const TaskList: React.FC<{ tasks: Task[] }> = ({ tasks }) => {
         {currentTasks.map(task => (
           <div 
             key={task.id} 
-            className="group relative p-4 border-l-2 border-transparent hover:border-primary/60 hover:bg-zinc-900/30 transition-all duration-300"
+            className="group relative p-4 border-l-[3px] border-transparent hover:border-cyan-400 hover:bg-gradient-to-r hover:from-cyan-950/40 hover:to-transparent transition-all duration-300"
           >
             <div className="flex justify-between items-start mb-2">
               <div className="flex flex-col gap-2 flex-1 min-w-0">
@@ -111,7 +111,7 @@ export const WorkerList: React.FC<{ workers: Worker[]; onAction: (id: string, en
   return (
     <div className="divide-y divide-zinc-900/50 grid grid-cols-1">
       {workers.map(w => (
-        <div key={w.id} className="group p-4 border-l-2 border-transparent hover:border-zinc-500/50 hover:bg-zinc-900/30 transition-all duration-300">
+        <div key={w.id} className="group p-4 border-l-[3px] border-transparent hover:border-zinc-500/50 hover:bg-gradient-to-r hover:from-zinc-900/50 hover:to-transparent transition-all duration-300">
           <div className="flex justify-between items-center mb-2">
             <div className="flex items-center gap-3">
               <span className="text-zinc-500 font-mono text-[11px] font-bold tracking-tighter group-hover:text-zinc-300 transition-colors">

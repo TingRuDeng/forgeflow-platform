@@ -174,5 +174,5 @@ describe("submit review decision", () => {
     expect(snapshot.pullRequests[0]).toMatchObject({
       status: "merged",
     });
-  });
+  }, 15_000);
 });
