@@ -36,6 +36,12 @@ export const DEFAULT_RESPONSE_IDLE_MS = Number(process.env.TRAE_RESPONSE_IDLE_MS
 export const DEFAULT_RESPONSE_TIMEOUT_MS = Number(process.env.TRAE_RESPONSE_TIMEOUT_MS || 30000);
 export const DEFAULT_POST_ACTION_DELAY_MS = Number(process.env.TRAE_POST_ACTION_DELAY_MS || 350);
 
+import {
+  getLastReportFieldValue,
+  isEquivalentReportedTaskId,
+  looksLikeTemplatePlaceholderReport,
+} from "@tingrudeng/automation-gateway-core";
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

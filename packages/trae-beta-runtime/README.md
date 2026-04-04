@@ -15,6 +15,7 @@ This package is self-contained for the remote Trae runtime path:
 - it **does** require a local checkout of the target project repository that Trae will open and the worker will execute tasks against
 
 This package is now structured for **public beta npm publishing**, but it is still beta-oriented and is not published automatically from this repository.
+It depends on `@tingrudeng/automation-gateway-core` for shared final-report parsing and task-id validation logic.
 
 ## Commands
 
@@ -119,6 +120,7 @@ forgeflow-trae-beta start worker --force
 Current release gate:
 
 - package build/test/typecheck
+- package pack succeeds with all published dependencies resolvable
 - full repository test/typecheck
 - one real remote-machine smoke run using `init`, `doctor`, and `start all`
 
@@ -181,3 +183,4 @@ It is no longer a ForgeFlow runtime root.
   - [docs/runbooks/trae-remote-beta.md](https://github.com/TingRuDeng/forgeflow-platform/blob/main/docs/runbooks/trae-remote-beta.md)
 - Package release steps:
   - [packages/trae-beta-runtime/PUBLISHING.md](https://github.com/TingRuDeng/forgeflow-platform/blob/main/packages/trae-beta-runtime/PUBLISHING.md)
+  - [packages/automation-gateway-core/PUBLISHING.md](https://github.com/TingRuDeng/forgeflow-platform/blob/main/packages/automation-gateway-core/PUBLISHING.md)
