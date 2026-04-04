@@ -1,4 +1,13 @@
-# Codex Control 使用说明
+# Codex Control 使用说明（Archived）
+
+这份文档已归档。
+
+原因：
+
+- 其中把 `node scripts/run-codex-control-flow.js` 描述为推荐中控入口，已不符合当前 Trae-first 主线路径
+- 当前 active path 以 `README.md`、`docs/README.md`、`worker-review-orchestrator` skill、`@tingrudeng/worker-review-orchestrator-cli` 和远程 `@tingrudeng/trae-beta-runtime` 为准
+
+如果你是在维护 deferred 的旧 control-layer 入口或排查历史链路，可把这份文档当历史参考；不要把它当成当前推荐接入方式。
 
 这份文档说明如何把 Codex 当成 forgeflow-platform 的总调度来使用。
 

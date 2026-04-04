@@ -13,6 +13,7 @@ If a historical doc still contains facts that matter, merge those facts into the
 
 Currently archived due to stale or superseded positioning:
 
+- `codex-control-usage.md`
 - `release-v1.md`
 - `phase-2-openclaw.md`
 - `multi-repo-validation.md`

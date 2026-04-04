@@ -215,6 +215,12 @@ forgeflow-trae-beta start all
 
 如果 Trae 安装路径不是默认值，再补 `--trae-bin "/Applications/Trae.app"`。
 
+如果远程机器默认使用镜像源（例如 `https://registry.npmmirror.com`），而 runtime 依赖的新共享包还没有同步到镜像，安装可能出现依赖 404。遇到这种情况，直接显式使用官方 npm registry：
+
+```bash
+npm install -g @tingrudeng/trae-beta-runtime@0.1.0-beta.42 --registry=https://registry.npmjs.org/
+```
+
 补充：`forgeflow-trae-beta start all` / `restart all` 会在返回成功前依次等待：
 
 - Trae remote debugging endpoint（`/json/version`）可用
@@ -239,7 +245,7 @@ forgeflow-trae-beta start all
 - 还没有自动清理旧 worktree 的完整生命周期治理
 - 没有多实例协调
 - `blocked + rework -> continuation` 已进入主线协议，并完成远程 Trae smoke 验证；当前 continuation 链路依赖更新后的 packaged runtime。
-- 一个最小的远程机器运行时包已进入 beta 安装路径，位于 `packages/trae-beta-runtime/`；当前 npm 包版本为 `@tingrudeng/trae-beta-runtime@0.1.0-beta.41`，用于包装启动与直接包自更新命令。
+- 一个最小的远程机器运行时包已进入 beta 安装路径，位于 `packages/trae-beta-runtime/`；当前 npm 包版本为 `@tingrudeng/trae-beta-runtime@0.1.0-beta.42`，用于包装启动与直接包自更新命令。
 - 该 runtime 现在依赖共享 helper 包 `@tingrudeng/automation-gateway-core`；对远程机器的安装方式没有变化，但发布 runtime 新版本时需要先确保对应 helper 版本已可用。
 
 补充：
@@ -282,6 +288,7 @@ forgeflow-trae-beta start all
 如果 Trae 安装路径不是默认值，再补 `--trae-bin "/Applications/Trae.app"`。
 
 `forgeflow-trae-beta update` 会直接对已安装包执行自更新，不是推荐式卸载重装流程。
+如果默认 registry 是镜像源且镜像同步滞后，优先改用 `npm install -g @tingrudeng/trae-beta-runtime@0.1.0-beta.42 --registry=https://registry.npmjs.org/`。
 
 **Git SSH Override:**
 

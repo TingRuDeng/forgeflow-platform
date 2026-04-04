@@ -73,3 +73,25 @@ If two worker processes run concurrently with the same `worker-id`, dispatcher-s
 - final result submission can appear flaky even when the UI already finished
 
 When diagnosing worker/reporting issues, verify there is only one live process per `worker-id` before assuming the runtime logic is wrong.
+
+## 9. Newly published Trae runtime dependencies may lag on mirrored npm registries
+
+`@tingrudeng/trae-beta-runtime` now depends on the separately published package
+`@tingrudeng/automation-gateway-core`.
+
+When a fresh runtime version is published, mirrored registries such as
+`https://registry.npmmirror.com` may expose the runtime package before they expose the
+new shared dependency. In that state:
+
+- `npm view @tingrudeng/trae-beta-runtime@<version>` can already succeed
+- `npm install -g @tingrudeng/trae-beta-runtime@<version>` can still fail with dependency `404`
+- the missing package is usually `@tingrudeng/automation-gateway-core@<version>`
+
+If installation or `forgeflow-trae-beta update` fails right after a release on a mirrored
+registry, do not assume the publish itself is broken first. Retry against the official npm
+registry:
+
+- `npm install -g @tingrudeng/trae-beta-runtime@<version> --registry=https://registry.npmjs.org/`
+
+Document install/upgrade guidance accordingly whenever a runtime release introduces a new
+shared dependency version.

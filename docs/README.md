@@ -64,7 +64,7 @@
 1. `../README.md`
 2. `../scripts/start-control-plane.sh`
 3. `../packages/trae-beta-runtime/README.md`
-4. 如果需要维护已延期的 control-layer 能力，再看 `codex-control-usage.md`
+4. 如果需要维护已延期的 control-layer 旧入口，再看 `archive/codex-control-usage.md`
 5. 再回到 `../scripts/`、`../packages/` 和实际命令验证
 
 业务仓接入或模板调整：
@@ -129,9 +129,6 @@ Trae MCP fallback 维护：
 - `../.github/workflows/ci.yml`
   - GitHub Actions CI workflow 配置。
   - 定义 push/pull_request 触发条件与验证步骤。
-- `codex-control-usage.md`
-  - 说明如何把 Codex 当成控制层使用。
-  - 包含当前推荐的中控启动命令。
 - `codex-session-bootstrap.md`
   - Codex-control 专用会话提示助手。
   - 不替代 `AGENTS.md` 或本文件。
@@ -178,6 +175,7 @@ Trae MCP fallback 维护：
 - `archive/*`
   - 历史材料保留区，不是当前开发入口。
   - 当前已归档的过期阶段文档包括：
+    - `archive/codex-control-usage.md`
     - `archive/release-v1.md`
     - `archive/phase-2-openclaw.md`
     - `archive/multi-repo-validation.md`
