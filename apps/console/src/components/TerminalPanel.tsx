@@ -63,7 +63,7 @@ export const TerminalPanel: React.FC<{ events: Event[] }> = ({ events }) => {
                     </span>
                     <div className="flex items-center gap-3">
                       <span className="text-[10px] text-zinc-500 font-mono opacity-50 whitespace-nowrap">
-                        {ev.at ? new Date(ev.at).toLocaleTimeString('en-GB', { hour12: false }) : '--:--:--'}
+                        {ev.at ? ev.at.split('T')[1]?.split('.')[0] : '--:--:--'}
                       </span>
                       <span className="text-[10px] text-zinc-400 bg-zinc-900/80 px-2 py-0.5 rounded uppercase border border-zinc-800">
                         {t(`eventType.${ev.type}`)}
