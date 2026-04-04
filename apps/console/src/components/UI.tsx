@@ -1,22 +1,25 @@
 import React from 'react';
 
 export const Badge: React.FC<{ status: string; children: React.ReactNode }> = ({ status, children }) => {
-  const statusColors: Record<string, string> = {
-    idle: 'bg-zinc-800/50 text-zinc-400 border-zinc-700/50',
-    busy: 'bg-amber-500/10 text-amber-500 border-amber-500/20',
-    assigned: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    in_progress: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
-    review: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
-    merged: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    failed: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
-    blocked: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
-    disabled: 'bg-zinc-900 text-zinc-600 border-zinc-800 opacity-60',
+  // 将单一的 class 拆分为外框颜色和指示灯颜色，并增加发光阴影
+  const statusConfig: Record<string, { colors: string; dot: string }> = {
+    idle: { colors: 'bg-zinc-900/50 text-zinc-400 border-zinc-700/50', dot: 'bg-zinc-500' },
+    busy: { colors: 'bg-amber-950/40 text-amber-400 border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.2)]', dot: 'bg-amber-400' },
+    assigned: { colors: 'bg-sky-950/40 text-sky-400 border-sky-500/40 shadow-[0_0_8px_rgba(14,165,233,0.2)]', dot: 'bg-sky-400' },
+    in_progress: { colors: 'bg-sky-950/40 text-sky-400 border-sky-500/40 shadow-[0_0_8px_rgba(14,165,233,0.2)]', dot: 'bg-sky-400' },
+    review: { colors: 'bg-fuchsia-950/40 text-fuchsia-400 border-fuchsia-500/40 shadow-[0_0_8px_rgba(217,70,239,0.2)]', dot: 'bg-fuchsia-400' },
+    merged: { colors: 'bg-emerald-950/40 text-emerald-400 border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.2)]', dot: 'bg-emerald-400' },
+    failed: { colors: 'bg-rose-950/40 text-rose-400 border-rose-500/40 shadow-[0_0_8px_rgba(244,63,94,0.2)]', dot: 'bg-rose-400' },
+    blocked: { colors: 'bg-rose-950/40 text-rose-400 border-rose-500/40 shadow-[0_0_8px_rgba(244,63,94,0.2)]', dot: 'bg-rose-400' },
+    disabled: { colors: 'bg-zinc-950 text-zinc-600 border-zinc-800 line-through', dot: 'bg-zinc-800' },
   };
 
-  const colorClass = statusColors[status.toLowerCase()] || 'bg-zinc-800 text-zinc-400 border-zinc-700';
+  const config = statusConfig[status.toLowerCase()] || statusConfig.idle;
 
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border transition-all ${colorClass}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider backdrop-blur-sm transition-colors ${config.colors}`}>
+      {/* 呼吸灯特效 */}
+      <span className={`w-1.5 h-1.5 rounded-full ${config.dot} ${status !== 'disabled' && status !== 'idle' ? 'animate-pulse' : ''}`}></span>
       {children}
     </span>
   );
@@ -24,15 +27,11 @@ export const Badge: React.FC<{ status: string; children: React.ReactNode }> = ({
 
 export const Panel: React.FC<{ title: string; children: React.ReactNode; className?: string }> = ({ title, children, className }) => {
   return (
-    <section className={`bg-[#030303] border border-zinc-800/80 rounded-lg overflow-hidden flex flex-col shadow-[0_8px_30px_rgb(0,0,0,0.12)] bg-grid-zinc-900/[0.02] ${className}`}>
-      <div className="px-5 py-3.5 border-b border-zinc-800/50 bg-zinc-900/10 backdrop-blur-md flex items-center justify-between">
-        <h2 className="text-[11px] font-bold text-zinc-400 uppercase tracking-[0.2em]">{title}</h2>
-        <div className="flex gap-1.5">
-          <div className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
-          <div className="w-1.5 h-1.5 rounded-full bg-zinc-800" />
-        </div>
+    <section className={`bg-[#050505] border border-zinc-800 rounded-xl overflow-hidden flex flex-col shadow-2xl ${className}`}>
+      <div className="px-5 py-3 border-b border-zinc-800/80 bg-zinc-900/20">
+        <h2 className="text-xs font-bold text-zinc-300 uppercase tracking-[0.2em]">{title}</h2>
       </div>
-      <div className="flex-1 overflow-auto bg-gradient-to-b from-transparent to-zinc-900/5">
+      <div className="flex-1 overflow-auto">
         {children}
       </div>
     </section>
