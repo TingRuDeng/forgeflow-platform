@@ -8,6 +8,7 @@ import type {
   SubmitResultPayload,
   AssignedTaskResponse,
 } from "./runtime-glue-types.js";
+import { formatLocalTimestamp } from "../time.js";
 
 const HEARTBEAT_TIMEOUT_MS = 5_000;
 const HEARTBEAT_MAX_RETRIES = 3;
@@ -247,7 +248,7 @@ export interface WorkerDaemonCycleResult {
 }
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return formatLocalTimestamp();
 }
 
 export async function runWorkerDaemonCycle(

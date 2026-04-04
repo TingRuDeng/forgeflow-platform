@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn, spawnSync, execSync } from "node:child_process";
 import { handleDispatcherHttpRequest } from "./dispatcher-server.js";
 import { prepareTaskWorktree, safeTaskDirName } from "./task-worktree.js";
+import { formatLocalTimestamp } from "./time.js";
 function resolveDispatcherDist() {
     const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
     const distPath = path.join(repoRoot, "apps/dispatcher/dist/modules/server/runtime-glue-dispatcher-client.js");
@@ -28,7 +29,7 @@ async function bootstrapDispatcherBridge() {
     return import(path.join(distDir, "modules/server/runtime-glue-dispatcher-client.js"));
 }
 function nowIso() {
-    return new Date().toISOString();
+    return formatLocalTimestamp();
 }
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));

@@ -800,6 +800,53 @@ describe("redrive", () => {
     ).rejects.toThrow('task dispatch-1:task-blocked-merge is blocked but latest review decision is "merge" (only "rework" is redriveable)');
   });
 
+  it("uses parsed review timestamps when UTC and local-offset decisions are mixed", async () => {
+    const snapshot = {
+      tasks: [
+        {
+          id: "dispatch-1:task-mixed-review-times",
+          status: "blocked",
+          title: "Mixed Review Time Task",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/mixed-review-times",
+          pool: "trae",
+        },
+      ],
+      assignments: [],
+      reviews: [
+        {
+          taskId: "dispatch-1:task-mixed-review-times",
+          decision: "rework",
+          actor: "reviewer-a",
+          notes: "older local-offset rework note",
+          decidedAt: "2026-03-29T08:00:00+08:00",
+        },
+        {
+          taskId: "dispatch-1:task-mixed-review-times",
+          decision: "merge",
+          actor: "reviewer-b",
+          notes: "newer UTC merge note",
+          decidedAt: "2026-03-29T00:30:00Z",
+        },
+      ],
+      events: [],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(snapshot)),
+    });
+
+    await expect(
+      runRedrive({
+        dispatcherUrl: "http://127.0.0.1:8787",
+        taskId: "dispatch-1:task-mixed-review-times",
+        fetchImpl: mockFetch as typeof globalThis.fetch,
+      }),
+    ).rejects.toThrow('task dispatch-1:task-mixed-review-times is blocked but latest review decision is "merge" (only "rework" is redriveable)');
+  });
+
   it("blocked+rework redrive generates payload with continuation fields", async () => {
     const snapshot = {
       tasks: [

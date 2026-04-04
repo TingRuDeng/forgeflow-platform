@@ -1,10 +1,25 @@
 import fs from "node:fs";
 import path from "node:path";
+function pad(value, width = 2) {
+    return String(Math.trunc(Math.abs(value))).padStart(width, "0");
+}
+function formatLocalTimestamp(date = new Date()) {
+    const offsetMinutes = -date.getTimezoneOffset();
+    const sign = offsetMinutes >= 0 ? "+" : "-";
+    const absOffsetMinutes = Math.abs(offsetMinutes);
+    const offsetHours = Math.floor(absOffsetMinutes / 60);
+    const offsetRemainderMinutes = absOffsetMinutes % 60;
+    return [
+        `${pad(date.getFullYear(), 4)}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+        `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`,
+        `${sign}${pad(offsetHours)}:${pad(offsetRemainderMinutes)}`,
+    ].join("");
+}
 export function createMemoryStore(lessons) {
     return {
         version: 1,
         lessons: lessons || [],
-        updated_at: new Date().toISOString(),
+        updated_at: formatLocalTimestamp(),
     };
 }
 function generateLessonId() {
@@ -98,7 +113,7 @@ export function extractLessonFromReview(taskId, workerType, repo, finding, decis
         trigger_paths: inferTriggerPaths(finding.evidence),
         trigger_tags: [finding.category].filter(Boolean),
         severity: finding.severity || 'warning',
-        created_at: new Date().toISOString(),
+        created_at: formatLocalTimestamp(),
     };
 }
 export function extractLessonFromFailed(taskId, workerType, repo, result) {
@@ -121,7 +136,7 @@ export function extractLessonFromFailed(taskId, workerType, repo, result) {
         trigger_paths: [],
         trigger_tags: [category],
         severity: 'warning',
-        created_at: new Date().toISOString(),
+        created_at: formatLocalTimestamp(),
     };
 }
 export function extractLessonFromRework(taskId, workerType, repo, reworkCount, rootCause) {
@@ -141,7 +156,7 @@ export function extractLessonFromRework(taskId, workerType, repo, reworkCount, r
         trigger_paths: [],
         trigger_tags: ['rework'],
         severity: 'info',
-        created_at: new Date().toISOString(),
+        created_at: formatLocalTimestamp(),
     };
 }
 function matchRepo(criteriaRepo, lessonRepo) {

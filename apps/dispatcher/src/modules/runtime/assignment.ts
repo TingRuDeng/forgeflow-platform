@@ -5,6 +5,7 @@ import type {
   WorkerExecutionResult,
   WorkerVerificationCommandResult,
 } from "./types.js";
+import { formatLocalTimestamp } from "../time.js";
 
 export interface BuildLaunchInputFromAssignmentPackageInput {
   assignment: WorkerAssignmentPayload;
@@ -64,7 +65,7 @@ export function buildWorkerExecutionResult(
     defaultBranch: input.assignment.defaultBranch,
     mode: "run",
     output: input.output,
-    generatedAt: input.generatedAt ?? new Date().toISOString(),
+    generatedAt: input.generatedAt ?? formatLocalTimestamp(),
     verification: {
       allPassed: input.verification.every((item) => item.exitCode === 0),
       commands: input.verification,

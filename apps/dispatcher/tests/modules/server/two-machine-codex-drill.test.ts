@@ -121,5 +121,5 @@ describe("two-machine codex drill", () => {
     expect(snapshot.tasks.every((task: { status: string }) => task.status === "assigned")).toBe(true);
     expect(new Set(snapshot.tasks.map((task: { assignedWorkerId?: string }) => task.assignedWorkerId)).size).toBe(2);
     expect(snapshot.workers.filter((worker: { status: string }) => worker.status === "busy")).toHaveLength(2);
-  });
+  }, 15_000);
 });

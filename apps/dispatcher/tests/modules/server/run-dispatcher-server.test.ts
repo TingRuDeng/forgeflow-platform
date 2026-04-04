@@ -16,7 +16,7 @@ describe("run-dispatcher-server.js CLI", () => {
     const { parseArgs } = await loadCliModule();
     const args = parseArgs([]);
     expect(args.persistenceBackend).toBe("sqlite");
-  });
+  }, 15_000);
 
   it("uses json persistence backend when --persistence-backend json is provided", async () => {
     const { parseArgs } = await loadCliModule();

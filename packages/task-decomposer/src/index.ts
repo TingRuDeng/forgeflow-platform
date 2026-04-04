@@ -1,3 +1,5 @@
+import { formatLocalTimestamp } from "./time.js";
+
 export interface DecomposerProjectConfig {
   project?: {
     key?: string;
@@ -584,7 +586,7 @@ export function buildTaskLedger(input: BuildTaskLedgerInput): TaskLedger {
     taskType: input.plan.taskType,
     repo: parsed.project.repo,
     defaultBranch: parsed.project.default_branch,
-    generatedAt: input.generatedAt ?? new Date().toISOString(),
+    generatedAt: input.generatedAt ?? formatLocalTimestamp(),
     tasks: input.plan.tasks.map((task) => ({
       ...task,
       status: "planned",
@@ -673,7 +675,7 @@ export function buildDispatchRecord(input: BuildTaskLedgerInput): DispatchRecord
 
 export function buildWorkerRegistry(input: BuildWorkerRegistryInput): WorkerRegistryEntry[] {
   const parsed = parseProjectContractYaml(input.projectContractYaml);
-  const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const generatedAt = input.generatedAt ?? formatLocalTimestamp();
   const uniquePools = [...new Set(parsed.providers.enabled)];
 
   return uniquePools.flatMap((pool) => {

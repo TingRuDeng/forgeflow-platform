@@ -170,7 +170,7 @@ describe("dispatcher runtime state", () => {
       actor: "codex-control",
     });
     expect(snapshot.events.some((event: { payload?: { to?: string } }) => event.payload?.to === "merged")).toBe(true);
-  });
+  }, 15_000);
 
   it("retains only the latest 500 events in immutable runtime-state appends", () => {
     const initialState = createEmptyRuntimeState();

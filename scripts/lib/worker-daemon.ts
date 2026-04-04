@@ -5,6 +5,7 @@ import { spawn, spawnSync, execSync, ChildProcess } from "node:child_process";
 
 import { handleDispatcherHttpRequest } from "./dispatcher-server.js";
 import { prepareTaskWorktree, safeTaskDirName } from "./task-worktree.js";
+import { formatLocalTimestamp } from "./time.js";
 
 function resolveDispatcherDist(): { repoRoot: string; distPath: string } {
   const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
@@ -38,7 +39,7 @@ async function bootstrapDispatcherBridge(): Promise<DispatcherClientBridge> {
 }
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return formatLocalTimestamp();
 }
 
 function sleep(ms: number): Promise<void> {

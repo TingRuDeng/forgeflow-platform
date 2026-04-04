@@ -1,5 +1,6 @@
 import { TaskService } from "../tasks/service.js";
 import { WorkerService } from "../workers/service.js";
+import { compareTimestampAsc } from "../time.js";
 
 const roundRobinOffsets = new Map<string, number>();
 
@@ -14,7 +15,7 @@ export class DispatchService {
       .listByPool(pool)
       .filter((worker) => worker.status === "idle" && !worker.disabledAt)
       .sort((left, right) => {
-        const timeCompare = left.lastHeartbeatAt.localeCompare(right.lastHeartbeatAt);
+        const timeCompare = compareTimestampAsc(left.lastHeartbeatAt, right.lastHeartbeatAt);
         if (timeCompare !== 0) {
           return timeCompare;
         }

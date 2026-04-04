@@ -7,6 +7,7 @@ import type {
   JsonHttpRequestOptions,
   LocalRuntimeState,
 } from "./types.js";
+import { formatLocalTimestamp } from "./time.js";
 
 function isLocalUrl(url: string): boolean {
   try {
@@ -115,7 +116,7 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
 export function createEmptyRuntimeState(): LocalRuntimeState {
   return {
     version: 1,
-    updatedAt: new Date().toISOString(),
+    updatedAt: formatLocalTimestamp(),
     sequence: 0,
     workers: [],
     tasks: [],
@@ -150,7 +151,7 @@ export function saveRuntimeState(stateDir: string, state: LocalRuntimeState) {
     runtimeStatePath(stateDir),
     `${JSON.stringify({
       ...state,
-      updatedAt: new Date().toISOString(),
+      updatedAt: formatLocalTimestamp(),
     }, null, 2)}\n`,
   );
 }

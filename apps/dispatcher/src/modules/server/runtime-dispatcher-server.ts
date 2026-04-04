@@ -16,9 +16,10 @@ import type {
   TraeRegisterRequest,
   TraeStartTaskRequest,
 } from "./runtime-glue-types.js";
+import { formatLocalTimestamp } from "../time.js";
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return formatLocalTimestamp();
 }
 
 const RUNTIME_EVENTS_RETENTION_LIMIT = 500;

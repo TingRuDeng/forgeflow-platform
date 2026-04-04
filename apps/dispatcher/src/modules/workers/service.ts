@@ -1,4 +1,5 @@
 import type { Worker } from "@forgeflow/task-schema";
+import { formatLocalTimestamp } from "../time.js";
 
 export class WorkerService {
   private readonly workers = new Map<string, Worker>();
@@ -63,7 +64,7 @@ export class WorkerService {
     this.workers.set(workerId, {
       ...worker,
       status: "disabled",
-      disabledAt: at ?? new Date().toISOString(),
+      disabledAt: at ?? formatLocalTimestamp(),
       disabledBy: disabledBy ?? undefined,
     });
   }
@@ -79,7 +80,7 @@ export class WorkerService {
       status: "idle",
       disabledAt: undefined,
       disabledBy: undefined,
-      lastHeartbeatAt: at ?? new Date().toISOString(),
+      lastHeartbeatAt: at ?? formatLocalTimestamp(),
     });
   }
 }

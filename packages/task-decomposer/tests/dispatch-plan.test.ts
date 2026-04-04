@@ -269,6 +269,22 @@ describe("buildTaskLedger", () => {
       }),
     ]);
   });
+
+  it("defaults generatedAt to an explicit local offset timestamp", () => {
+    const plan = buildDispatchPlan({
+      requestSummary: "补充接入文档并增加 API 冒烟测试",
+      taskType: "feature",
+      projectContractYaml: projectContract,
+    });
+
+    const ledger = buildTaskLedger({
+      plan,
+      projectContractYaml: projectContract,
+    });
+
+    expect(ledger.generatedAt).toMatch(/[+-]\d{2}:\d{2}$/);
+    expect(ledger.generatedAt.endsWith("Z")).toBe(false);
+  });
 });
 
 describe("renderDispatchSummaryMarkdown", () => {

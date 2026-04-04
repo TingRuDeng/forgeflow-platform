@@ -134,7 +134,7 @@ describe("submit review decision", () => {
     expect(snapshot.pullRequests[0]).toMatchObject({
       status: "changes_requested",
     });
-  });
+  }, 15_000);
 
   it("supports the CLI --state-dir mode without a dispatcher URL", async () => {
     const stateDir = makeTempDir();

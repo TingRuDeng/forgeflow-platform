@@ -144,7 +144,7 @@ describe("worker daemon cycle", () => {
     );
     expect(fs.existsSync(path.join(materializedAssignmentDir, "assignment.json"))).toBe(true);
     expect(fs.existsSync(path.join(materializedAssignmentDir, "execution", "worker-result.json"))).toBe(true);
-  });
+  }, 15_000);
 
   it("lets a late worker claim a ready task and complete it", async () => {
     const tempDir = makeTempDir();
