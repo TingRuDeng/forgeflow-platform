@@ -1,10 +1,18 @@
 export type ReviewDecisionKind = "merge" | "block" | "rework";
 
+import type {
+  ReviewDecisionEvidence,
+  WorkerEvidence,
+} from "@forgeflow/result-contracts";
+
+export { ReviewDecisionEvidence, WorkerEvidence };
+
 export interface ReviewDecisionPayload {
   actor?: string;
   decision: ReviewDecisionKind;
   notes?: string;
   at?: string;
+  evidence?: ReviewDecisionEvidence;
 }
 
 export interface ReviewSubmitResult {

@@ -1,6 +1,10 @@
 import { jsonStore } from "./runtime-state-json.js";
 import { sqliteStore } from "./runtime-state-sqlite.js";
 import type { RuntimeStateStore } from "./runtime-state-store.js";
+import type {
+  ReviewDecisionEvidence,
+  WorkerEvidence,
+} from "./runtime-glue-types.js";
 import { compareTimestampAsc, formatLocalTimestamp } from "../time.js";
 
 const defaultStore: RuntimeStateStore = sqliteStore;
@@ -131,6 +135,8 @@ export interface Review {
   notes: string;
   decidedAt?: string | null;
   reviewMaterial?: ReviewMaterial | null;
+  latestWorkerResult?: WorkerResult | null;
+  evidence?: ReviewDecisionEvidence | null;
 }
 
 export interface PullRequest {
@@ -271,6 +277,7 @@ export interface WorkerResult {
     allPassed: boolean;
     commands: WorkerVerificationCommandResult[];
   };
+  evidence?: WorkerEvidence;
 }
 
 export interface RecordWorkerResultInput {
@@ -291,6 +298,7 @@ export interface RecordReviewDecisionInput {
   actor: string;
   notes?: string;
   at?: string;
+  evidence?: ReviewDecisionEvidence;
 }
 
 export interface ReconcileOptions {
@@ -1073,6 +1081,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   if (!["assigned", "in_progress"].includes(task.status)) {
     throw new Error(`task not executable: ${input.result.taskId}`);
   }
+  const currentReview = state.reviews.find((candidate) => candidate.taskId === input.result.taskId);
 
   const nextStatus = input.result.verification.allPassed ? "review" : "failed";
   const reviewMaterial = input.result.verification.allPassed
@@ -1136,6 +1145,8 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
       notes: "",
       decidedAt: null,
       reviewMaterial,
+      latestWorkerResult: clone(input.result),
+      evidence: currentReview?.evidence ?? null,
     }),
   };
 
@@ -1168,6 +1179,7 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
   if (!assignment) {
     throw new Error(`assignment not found for task: ${input.taskId}`);
   }
+  const review = state.reviews.find((candidate) => candidate.taskId === input.taskId);
   if (task.status !== "review") {
     throw new Error(`task not in review: ${input.taskId}`);
   }
@@ -1204,7 +1216,9 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
       actor: input.actor,
       notes: input.notes ?? "",
       decidedAt: input.at ?? nowIso(),
-      reviewMaterial: null,
+      reviewMaterial: review?.reviewMaterial ?? null,
+      latestWorkerResult: review?.latestWorkerResult ?? null,
+      evidence: input.evidence ?? review?.evidence ?? null,
     }),
   };
 

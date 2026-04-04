@@ -1252,6 +1252,127 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
   });
 
+  it("submit_result persists structured worker evidence on the review record", () => {
+    const stateDir = makeTempDir();
+
+    let state = loadRuntimeState(stateDir);
+    state = registerWorker(state, {
+      workerId: "codex-submit-evidence",
+      pool: "codex",
+      hostname: "test-host",
+      labels: ["codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-03-17T10:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-evidence",
+          title: "结构化 evidence 测试任务",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["完成代码"],
+          dependsOn: [],
+          branchName: "ai/codex/task-evidence",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-evidence",
+          assignment: {
+            taskId: "task-evidence",
+            workerId: "placeholder",
+            pool: "codex",
+            status: "assigned",
+            branchName: "ai/codex/task-evidence",
+            allowedPaths: ["src/**"],
+            commands: {
+              test: "pnpm test",
+            },
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+          },
+          workerPrompt: "你是 codex-worker。",
+          contextMarkdown: "# Context",
+        },
+      ],
+      createdAt: "2026-03-17T10:00:10.000Z",
+    });
+    state = dispatch.state;
+    const taskId = dispatch.taskIds[0];
+
+    state = beginTaskForWorker(state, {
+      workerId: "codex-submit-evidence",
+      taskId,
+      at: "2026-03-17T10:00:15.000Z",
+    });
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-submit-evidence",
+      result: {
+        taskId,
+        workerId: "codex-submit-evidence",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-evidence",
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "master",
+        mode: "run",
+        output: "tests failed",
+        generatedAt: "2026-03-17T10:05:00.000Z",
+        verification: {
+          allPassed: false,
+          commands: [
+            {
+              command: "pnpm test",
+              exitCode: 1,
+              output: "FAIL",
+            },
+          ],
+        },
+        evidence: {
+          failureType: "verification",
+          failureSummary: "pnpm test failed",
+          blockers: [
+            {
+              kind: "verification",
+              code: "test_failure",
+              message: "unit tests failed",
+            },
+          ],
+          findings: [],
+          artifacts: {
+            log: "artifacts/test.log",
+          },
+        },
+      },
+      changedFiles: [],
+      pullRequest: null,
+    });
+
+    const review = state.reviews.find((item) => item.taskId === taskId);
+    expect(review?.latestWorkerResult?.evidence).toEqual({
+      failureType: "verification",
+      failureSummary: "pnpm test failed",
+      blockers: [
+        {
+          kind: "verification",
+          code: "test_failure",
+          message: "unit tests failed",
+        },
+      ],
+      findings: [],
+      artifacts: {
+        log: "artifacts/test.log",
+      },
+    });
+  });
+
   it("review decision keeps assignment status aligned with the task", () => {
     const stateDir = makeTempDir();
 
@@ -1338,6 +1459,12 @@ describe("dispatcher runtime state (TypeScript)", () => {
       actor: "reviewer",
       notes: "needs changes",
       at: "2026-03-17T10:06:00.000Z",
+      evidence: {
+        reasonCode: "test_gap",
+        mustFix: ["补充失败场景覆盖"],
+        canRedrive: true,
+        redriveStrategy: "same_worker_continue",
+      },
     });
 
     const snapshot = buildDashboardSnapshot(state, {
@@ -1351,6 +1478,17 @@ describe("dispatcher runtime state (TypeScript)", () => {
       assignment: {
         status: "blocked",
       },
+    });
+    const review = state.reviews.find((item) => item.taskId === taskId);
+    expect(review?.reviewMaterial).toMatchObject({
+      changedFiles: ["src/main.ts"],
+      selfTestPassed: true,
+    });
+    expect(review?.evidence).toEqual({
+      reasonCode: "test_gap",
+      mustFix: ["补充失败场景覆盖"],
+      canRedrive: true,
+      redriveStrategy: "same_worker_continue",
     });
   });
 

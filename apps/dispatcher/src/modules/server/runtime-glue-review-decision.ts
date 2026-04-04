@@ -20,6 +20,7 @@ export interface SubmitReviewDecisionInput {
   decision: ReviewDecisionKind;
   notes?: string;
   at?: string;
+  evidence?: ReviewDecisionPayload["evidence"];
   mergePullRequest?: boolean;
   repo?: string;
   pullRequestNumber?: number;
@@ -159,6 +160,7 @@ export async function submitReviewDecision(
     decision: input.decision,
     notes: input.notes,
     at: input.at,
+    evidence: input.evidence,
   })) as ReviewDecisionResult;
 
   if (
