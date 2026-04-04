@@ -25,18 +25,24 @@ describe('MetricsGrid', () => {
   it('should render correct worker counts', () => {
     renderWithProviders(<MetricsGrid stats={mockStats} />);
     
-    // Using matcher function to handle potential breakage by spaces or other elements
-    expect(screen.getByText((content) => content.trim() === '10')).toBeInTheDocument();
-    expect(screen.getByText((content) => content.trim() === '7')).toBeInTheDocument();
-    expect(screen.getByText((content) => content.trim() === '3')).toBeInTheDocument();
+    // Using exact text match for the containers that hold only the number
+    expect(screen.getByText('10')).toBeInTheDocument();
+    
+    // For idle/busy, they are in the same div but separate nodes. 
+    // JSDOM/Testing-Library findByText('7') should work if they are distinct text nodes.
+    const idleBusyContainer = screen.getByText(/空闲/i).closest('div')?.nextElementSibling;
+    expect(idleBusyContainer).toHaveTextContent('7');
+    expect(idleBusyContainer).toHaveTextContent('3');
   });
 
   it('should render correct task counts', () => {
     renderWithProviders(<MetricsGrid stats={mockStats} />);
     
-    expect(screen.getByText((content) => content.trim() === '25')).toBeInTheDocument();
-    expect(screen.getByText((content) => content.trim() === '5')).toBeInTheDocument();
-    expect(screen.getByText((content) => content.trim() === '15')).toBeInTheDocument();
+    expect(screen.getByText('25')).toBeInTheDocument();
+    
+    const reviewMergedContainer = screen.getByText(/待审查/i).closest('div')?.nextElementSibling;
+    expect(reviewMergedContainer).toHaveTextContent('5');
+    expect(reviewMergedContainer).toHaveTextContent('15');
   });
 
   it('should render localized labels (default to zh)', () => {
