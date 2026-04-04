@@ -9,6 +9,7 @@ interface Task {
   assignedWorkerId?: string;
   branchName?: string;
   updatedAt?: string; // ISO timestamp
+  createdAt?: string; // ISO timestamp
 }
 
 interface Worker {
@@ -63,10 +64,10 @@ export const TaskList: React.FC<{ tasks: Task[] }> = ({ tasks }) => {
                 <span className="text-zinc-700 uppercase">{t('branch')}</span>
                 <span className="text-zinc-400 truncate max-w-[200px]">{task.branchName || '-'}</span>
               </span>
-              {task.updatedAt && (
+              {(task.updatedAt || task.createdAt) && (
                 <span className="flex items-center gap-1 ml-auto">
                   <span className="text-zinc-700 opacity-50 italic">
-                    {new Date(task.updatedAt).toLocaleTimeString('en-GB', { hour12: false })}
+                    {(task.updatedAt || task.createdAt)?.split('T')[1]?.split('.')[0] || '--:--:--'}
                   </span>
                 </span>
               )}
