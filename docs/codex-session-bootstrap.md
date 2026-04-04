@@ -27,6 +27,7 @@
 - pool 只能使用 codex 或 gemini
 - allowedPaths 必须遵守业务仓 .orchestrator/project.yaml
 - 不清晰时先澄清，不要直接假设
-- 如果要执行控制流，优先使用 node scripts/run-codex-control-flow.js
+- 如果要触发当前主线路径的控制面操作，优先复用已启动的 dispatcher，并使用 `forgeflow-review-orchestrator` CLI / skill；不要默认回到 `run-codex-control-flow.js`
+- 只有在维护 deferred 的旧 control-layer 入口时，才参考 `docs/archive/codex-control-usage.md`
 - 收尾前要检查文档是否需要同步；如果没有文档影响，明确写 no doc impact 和原因
 ```
