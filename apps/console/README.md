@@ -1,73 +1,63 @@
-# React + TypeScript + Vite
+# ForgeFlow Console
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+ForgeFlow Multi-Agent Control Plane 的可视化控制台。
 
-Currently, two official plugins are available:
+## 功能特性
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **任务监控**：实时查看任务状态、分配情况及对应分支。支持分页浏览（每页 10 条）。
+- **节点管理**：监控工作节点（Worker）的存活状态、当前任务及归属 Pool。
+- **指标概览**：顶部展示集群核心指标（活跃节点、空闲/繁忙占比、任务完成进度）。
+- **实时事件**：流式展示系统历史事件日志。
+- **国际化**：支持中英文切换。
 
-## React Compiler
+## 技术栈
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **框架**: React 19 + TypeScript
+- **构建**: Vite 8
+- **样式**: Tailwind CSS
+- **状态/请求**: SWR (用于实时轮询渲染)
+- **图标**: Lucide React
+- **测试**: Vitest + React Testing Library
 
-## Expanding the ESLint configuration
+## 快速开始
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### 开发运行
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+# 在项目根目录运行
+pnpm --filter console dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+默认访问地址: [http://localhost:8788](http://localhost:8788) (需配合 `dispatcher` 后端运行)。
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### 生产构建
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+pnpm --filter console build
 ```
+
+## 测试
+
+本项目使用 Vitest 进行单元测试和交互测试。
+
+```bash
+# 运行所有测试并进入监听模式
+pnpm --filter console test
+
+# 运行单次测试 (CI 环境)
+pnpm --filter console test:run
+
+# 查看测试覆盖率
+pnpm --filter console test:coverage
+```
+
+测试用例位于 `src/components/__tests__` 目录下。目前已覆盖 `TaskList` 的分页逻辑和边界情况。
+
+## 目录结构
+
+- `src/components`: UI 组件库
+  - `Lists.tsx`: 任务与节点列表实现（含分页逻辑）
+  - `MetricsGrid.tsx`: 顶部指标卡片
+  - `TerminalPanel.tsx`: 事件日志面板
+- `src/lib`: 通用库（i18n, utils）
+- `src/test`: 测试配置文件

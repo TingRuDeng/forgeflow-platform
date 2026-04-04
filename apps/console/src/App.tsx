@@ -52,21 +52,24 @@ const App: React.FC = () => {
 
       {data && (
         <>
+          {/* Metrics Overview at the top */}
           <MetricsGrid stats={data.stats} />
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-            <div className="lg:col-span-2 flex flex-col gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
+            {/* Main Column: Tasks and Terminal */}
+            <div className="lg:col-span-3 flex flex-col gap-8">
               <Panel title={t('tasks')}>
                 <TaskList tasks={data.tasks} />
               </Panel>
 
+              <TerminalPanel events={data.events} />
+            </div>
+
+            {/* Sidebar Column: Workers */}
+            <div className="lg:col-span-1 flex flex-col gap-8">
               <Panel title={t('workers')}>
                 <WorkerList workers={data.workers} onAction={handleWorkerAction} />
               </Panel>
-            </div>
-
-            <div className="lg:col-span-1 h-full">
-              <TerminalPanel events={data.events} />
             </div>
           </div>
         </>

@@ -32,6 +32,9 @@ const I18N = {
     lastUpdate: '最后更新',
     connectionError: '连接错误',
     confirmDisable: '确定要禁用工作节点',
+    previous: '上一页',
+    next: '下一页',
+    page: '页',
     status: {
       idle: '空闲',
       busy: '忙碌',
@@ -85,6 +88,9 @@ const I18N = {
     lastUpdate: 'Last update',
     connectionError: 'Connection error',
     confirmDisable: 'Are you sure you want to disable worker',
+    previous: 'Previous',
+    next: 'Next',
+    page: 'Page',
     status: {
       idle: 'Idle',
       busy: 'Busy',
