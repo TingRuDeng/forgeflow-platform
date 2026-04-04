@@ -5,6 +5,22 @@ export interface ReviewDecisionPayload {
   decision: ReviewDecisionKind;
   notes?: string;
   at?: string;
+  evidence?: {
+    rework_required?: boolean;
+    failure_reasons?: Array<{
+      category?: "test" | "lint" | "typecheck" | "build" | "coverage" | "security" | "other";
+      description?: string;
+      file?: string | null;
+      line?: number | null;
+    }>;
+    blocked_by?: string[];
+    pending_feedback?: Array<{
+      from_actor?: string;
+      topic?: string;
+      status?: "open" | "resolved";
+    }>;
+    additional_notes?: string;
+  };
 }
 
 export interface ReviewSubmitResult {

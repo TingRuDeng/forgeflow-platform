@@ -49,5 +49,46 @@ export const ReviewFindingSchema = z.object({
   detected_by: z.array(z.string()).default([]),
 });
 
+export const WorkerResultEvidenceSchema = z.object({
+  findings: z.array(ReviewFindingSchema).default([]),
+  test_failures: z.array(z.object({
+    command: z.string(),
+    exit_code: z.number().int(),
+    output_snippet: z.string(),
+  })).default([]),
+  static_analysis_issues: z.array(z.object({
+    tool: z.string(),
+    file: z.string().nullable(),
+    line: z.number().int().nullable(),
+    message: z.string(),
+    severity: z.enum(["error", "warning", "info"]),
+  })).default([]),
+  coverage_summary: z.object({
+    lines_covered: z.number().int().nonnegative().default(0),
+    lines_total: z.number().int().nonnegative().default(0),
+    branches_covered: z.number().int().nonnegative().default(0),
+    branches_total: z.number().int().nonnegative().default(0),
+  }).optional(),
+});
+
+export const ReviewDecisionEvidenceSchema = z.object({
+  rework_required: z.boolean().default(false),
+  failure_reasons: z.array(z.object({
+    category: z.enum(["test", "lint", "typecheck", "build", "coverage", "security", "other"]),
+    description: z.string(),
+    file: z.string().nullable(),
+    line: z.number().int().nullable(),
+  })).default([]),
+  blocked_by: z.array(z.string()).default([]),
+  pending_feedback: z.array(z.object({
+    from_actor: z.string(),
+    topic: z.string(),
+    status: z.enum(["open", "resolved"]),
+  })).default([]),
+  additional_notes: z.string().default(""),
+});
+
 export type RunResult = z.infer<typeof RunResultSchema>;
 export type ReviewFinding = z.infer<typeof ReviewFindingSchema>;
+export type WorkerResultEvidence = z.infer<typeof WorkerResultEvidenceSchema>;
+export type ReviewDecisionEvidence = z.infer<typeof ReviewDecisionEvidenceSchema>;

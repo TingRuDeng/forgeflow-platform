@@ -25,6 +25,22 @@ export interface SubmitReviewDecisionInput {
   pullRequestNumber?: number;
   githubToken?: string;
   fetchImpl?: typeof globalThis.fetch;
+  evidence?: {
+    rework_required?: boolean;
+    failure_reasons?: Array<{
+      category?: "test" | "lint" | "typecheck" | "build" | "coverage" | "security" | "other";
+      description?: string;
+      file?: string | null;
+      line?: number | null;
+    }>;
+    blocked_by?: string[];
+    pending_feedback?: Array<{
+      from_actor?: string;
+      topic?: string;
+      status?: "open" | "resolved";
+    }>;
+    additional_notes?: string;
+  };
 }
 
 export interface ReviewDecisionResult {
@@ -159,6 +175,7 @@ export async function submitReviewDecision(
     decision: input.decision,
     notes: input.notes,
     at: input.at,
+    evidence: input.evidence,
   })) as ReviewDecisionResult;
 
   if (

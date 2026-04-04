@@ -131,6 +131,7 @@ export interface Review {
   notes: string;
   decidedAt?: string | null;
   reviewMaterial?: ReviewMaterial | null;
+  evidence?: unknown;
 }
 
 export interface PullRequest {
@@ -271,6 +272,42 @@ export interface WorkerResult {
     allPassed: boolean;
     commands: WorkerVerificationCommandResult[];
   };
+  evidence?: {
+    findings?: Array<{
+      finding_id?: string;
+      severity?: "critical" | "high" | "medium" | "low";
+      category?: "bug" | "security" | "performance" | "maintainability" | "test-gap";
+      title?: string;
+      evidence?: {
+        file?: string;
+        line?: number | null;
+        symbol?: string | null;
+        snippet?: string;
+      };
+      recommendation?: string;
+      confidence?: number;
+      fingerprint?: string;
+      detected_by?: string[];
+    }>;
+    test_failures?: Array<{
+      command?: string;
+      exit_code?: number;
+      output_snippet?: string;
+    }>;
+    static_analysis_issues?: Array<{
+      tool?: string;
+      file?: string | null;
+      line?: number | null;
+      message?: string;
+      severity?: "error" | "warning" | "info";
+    }>;
+    coverage_summary?: {
+      lines_covered?: number;
+      lines_total?: number;
+      branches_covered?: number;
+      branches_total?: number;
+    };
+  };
 }
 
 export interface RecordWorkerResultInput {
@@ -291,6 +328,22 @@ export interface RecordReviewDecisionInput {
   actor: string;
   notes?: string;
   at?: string;
+  evidence?: {
+    rework_required?: boolean;
+    failure_reasons?: Array<{
+      category?: "test" | "lint" | "typecheck" | "build" | "coverage" | "security" | "other";
+      description?: string;
+      file?: string | null;
+      line?: number | null;
+    }>;
+    blocked_by?: string[];
+    pending_feedback?: Array<{
+      from_actor?: string;
+      topic?: string;
+      status?: "open" | "resolved";
+    }>;
+    additional_notes?: string;
+  };
 }
 
 export interface ReconcileOptions {
@@ -1136,6 +1189,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
       notes: "",
       decidedAt: null,
       reviewMaterial,
+      evidence: input.result.evidence,
     }),
   };
 
@@ -1205,6 +1259,7 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
       notes: input.notes ?? "",
       decidedAt: input.at ?? nowIso(),
       reviewMaterial: null,
+      evidence: input.evidence,
     }),
   };
 
