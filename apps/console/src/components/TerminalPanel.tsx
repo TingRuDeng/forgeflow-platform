@@ -8,11 +8,15 @@ interface Event {
   taskId: string;
   type: string;
   payload: any;
+  at?: string; // ISO timestamp
 }
 
 export const TerminalPanel: React.FC<{ events: Event[] }> = ({ events }) => {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 反转事件数组，使最新的事件在底部
+  const sortedEvents = [...(events || [])].reverse();
 
   // 当有新事件推入时，平滑滚动到底部
   useEffect(() => {
@@ -43,7 +47,7 @@ export const TerminalPanel: React.FC<{ events: Event[] }> = ({ events }) => {
           <div className="text-zinc-600 italic animate-pulse mt-4">{t('noRecentEvents')}</div>
         ) : (
           <div className="flex flex-col gap-3">
-            {events.map((ev, i) => {
+            {sortedEvents.map((ev, i) => {
               const isString = typeof ev.payload === 'string';
               
               return (
@@ -57,9 +61,14 @@ export const TerminalPanel: React.FC<{ events: Event[] }> = ({ events }) => {
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse box-shadow-glow"></span>
                       {ev.taskId}
                     </span>
-                    <span className="text-[10px] text-zinc-400 bg-zinc-900/80 px-2 py-0.5 rounded uppercase border border-zinc-800">
-                      {t(`eventType.${ev.type}`)}
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] text-zinc-500 font-mono opacity-50 whitespace-nowrap">
+                        {ev.at ? new Date(ev.at).toLocaleTimeString('en-GB', { hour12: false }) : '--:--:--'}
+                      </span>
+                      <span className="text-[10px] text-zinc-400 bg-zinc-900/80 px-2 py-0.5 rounded uppercase border border-zinc-800">
+                        {t(`eventType.${ev.type}`)}
+                      </span>
+                    </div>
                   </div>
                   
                   {/* 核心高亮区域 */}

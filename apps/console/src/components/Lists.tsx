@@ -8,6 +8,7 @@ interface Task {
   status: string;
   assignedWorkerId?: string;
   branchName?: string;
+  updatedAt?: string; // ISO timestamp
 }
 
 interface Worker {
@@ -36,56 +37,60 @@ export const TaskList: React.FC<{ tasks: Task[] }> = ({ tasks }) => {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1">
+      <div className="divide-y divide-zinc-900/50">
         {currentTasks.map(task => (
-          <div key={task.id} className="group border-b border-zinc-900 last:border-0 hover:bg-zinc-900/30 transition-all px-5 py-3 flex items-center gap-4">
-            <div className="flex-shrink-0 w-24">
-              <span className="text-[10px] font-bold text-zinc-600 group-hover:text-primary transition-colors font-mono tracking-tighter block truncate">
-                {task.id}
-              </span>
-            </div>
-            
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-zinc-200 text-[13px] font-medium truncate group-hover:text-white transition-colors">
+          <div 
+            key={task.id} 
+            className="group relative p-4 border-l-2 border-transparent hover:border-primary/60 hover:bg-zinc-900/30 transition-all duration-300"
+          >
+            <div className="flex justify-between items-center mb-2">
+              <div className="flex items-center gap-3">
+                <span className="text-primary/60 font-mono text-[11px] font-bold tracking-tighter group-hover:text-primary transition-colors">
+                  [{task.id}]
+                </span>
+                <span className="text-zinc-300 group-hover:text-zinc-100 text-sm font-semibold tracking-wide transition-colors">
                   {task.title}
                 </span>
               </div>
-              <div className="flex gap-3 text-[9px] text-zinc-500 font-mono uppercase tracking-tight">
-                <span className="flex items-center gap-1">
-                  <span className="text-zinc-700">{t('worker')}:</span>
-                  <span className="text-zinc-400 truncate max-w-[100px]">{task.assignedWorkerId || '-'}</span>
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="text-zinc-700">{t('branch')}:</span>
-                  <span className="text-zinc-400 truncate max-w-[150px]">{task.branchName || '-'}</span>
-                </span>
-              </div>
-            </div>
-
-            <div className="flex-shrink-0 text-right min-w-[80px]">
               <Badge status={task.status}>{t(`status.${task.status}`)}</Badge>
+            </div>
+            <div className="flex gap-5 text-[10px] text-zinc-600 font-mono mt-1">
+              <span className="flex gap-1.5 items-center">
+                <span className="text-zinc-700 uppercase">{t('worker')}</span>
+                <span className="text-zinc-400">{task.assignedWorkerId || t('unassigned')}</span>
+              </span>
+              <span className="flex gap-1.5 items-center">
+                <span className="text-zinc-700 uppercase">{t('branch')}</span>
+                <span className="text-zinc-400 truncate max-w-[200px]">{task.branchName || '-'}</span>
+              </span>
+              {task.updatedAt && (
+                <span className="flex items-center gap-1 ml-auto">
+                  <span className="text-zinc-700 opacity-50 italic">
+                    {new Date(task.updatedAt).toLocaleTimeString('en-GB', { hour12: false })}
+                  </span>
+                </span>
+              )}
             </div>
           </div>
         ))}
       </div>
       
       {totalPages > 1 && (
-        <div className="px-5 py-3 border-t border-zinc-900 flex justify-between items-center bg-black/20 backdrop-blur-sm mt-auto">
+        <div className="p-3 border-t border-zinc-900 flex justify-between items-center bg-[#050505] mt-auto">
           <button
             disabled={currentPage === 1}
             onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-            className="px-2.5 py-1 text-[9px] uppercase font-black border border-zinc-800 rounded bg-zinc-900 text-zinc-500 hover:text-primary hover:border-primary/50 disabled:opacity-20 disabled:grayscale transition-all"
+            className="px-4 py-1.5 text-[10px] uppercase font-bold border border-zinc-800 rounded bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
             {t('previous')}
           </button>
-          <span data-testid="page-indicator" className="text-[9px] font-black text-zinc-600 tracking-widest uppercase">
-             {currentPage} <span className="text-zinc-800">/</span> {totalPages}
+          <span data-testid="page-indicator" className="text-[10px] font-mono text-primary/70 tracking-widest bg-primary/10 px-3 py-1 rounded-full">
+            {currentPage} / {totalPages}
           </span>
           <button
             disabled={currentPage === totalPages}
             onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-            className="px-2.5 py-1 text-[9px] uppercase font-black border border-zinc-800 rounded bg-zinc-900 text-zinc-500 hover:text-primary hover:border-primary/50 disabled:opacity-20 disabled:grayscale transition-all"
+            className="px-4 py-1.5 text-[10px] uppercase font-bold border border-zinc-800 rounded bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
             {t('next')}
           </button>
@@ -100,38 +105,42 @@ export const WorkerList: React.FC<{ workers: Worker[]; onAction: (id: string, en
   if (!workers.length) return <div className="p-10 text-center text-sm text-zinc-600 italic font-mono">{t('noActiveWorkers')}</div>;
 
   return (
-    <div className="flex flex-col">
+    <div className="divide-y divide-zinc-900/50 grid grid-cols-1">
       {workers.map(w => (
-        <div key={w.id} className="p-4 border-b border-zinc-900 last:border-0 hover:bg-zinc-900/30 transition-all group">
-          <div className="flex justify-between items-start mb-2">
-            <div className="flex items-center gap-2">
-              <div className={`w-1.5 h-1.5 rounded-full ${w.status === 'busy' ? 'bg-amber-500 animate-pulse' : w.status === 'idle' ? 'bg-emerald-500' : 'bg-zinc-700'}`} />
-              <span className="text-zinc-300 font-bold text-xs tracking-tighter group-hover:text-primary transition-colors">
-                {w.id}
+        <div key={w.id} className="group p-4 border-l-2 border-transparent hover:border-zinc-500/50 hover:bg-zinc-900/30 transition-all duration-300">
+          <div className="flex justify-between items-center mb-2">
+            <div className="flex items-center gap-3">
+              <span className="text-zinc-500 font-mono text-[11px] font-bold tracking-tighter group-hover:text-zinc-300 transition-colors">
+                [{w.id}]
+              </span>
+              <span className="px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-400 text-[9px] uppercase tracking-wider">
+                Pool: {w.pool}
               </span>
             </div>
             <Badge status={w.status}>{t(`status.${w.status}`)}</Badge>
           </div>
-          <div className="flex flex-col gap-1.5 pl-3.5 mt-1">
-            <div className="flex justify-between items-center">
-              <span className="text-[9px] text-zinc-600 font-mono uppercase tracking-tighter">
-                Pool: <span className="text-zinc-400">{w.pool}</span>
+          
+          <div className="flex justify-between items-end mt-2">
+            <div className="flex gap-5 text-[10px] text-zinc-600 font-mono">
+              <span className="flex gap-1.5 items-center">
+                <span className="text-zinc-700 uppercase">{t('task')}</span>
+                <span className={`${w.currentTaskId ? 'text-primary/80' : 'text-zinc-500'}`}>{w.currentTaskId || t('none')}</span>
               </span>
-              <span className="text-[9px] text-zinc-600 font-mono uppercase tracking-tighter">
-                Host: <span className="text-zinc-400">{w.hostname || '-'}</span>
+              <span className="flex gap-1.5 items-center">
+                <span className="text-zinc-700 uppercase">{t('host')}</span>
+                <span className="text-zinc-400">{w.hostname || '-'}</span>
               </span>
             </div>
-            <div className="flex justify-between items-center gap-4">
-              <div className="text-[9px] text-zinc-500 truncate flex-1">
-                {t('task')}: <span className={w.currentTaskId ? "text-primary/70" : "text-zinc-700"}>{w.currentTaskId || t('none')}</span>
-              </div>
-              <button
-                onClick={() => onAction(w.id, w.status === 'disabled')}
-                className="opacity-0 group-hover:opacity-100 px-2 py-0.5 rounded border border-zinc-800 bg-zinc-900 text-[8px] text-zinc-500 hover:text-white hover:border-zinc-600 transition-all uppercase font-black"
-              >
-                {w.status === 'disabled' ? t('enable') : t('disable')}
-              </button>
-            </div>
+            
+            <button
+              onClick={() => onAction(w.id, w.status === 'disabled')}
+              className={`px-3 py-1 rounded border text-[9px] uppercase font-bold tracking-widest transition-all duration-300
+                ${w.status === 'disabled' 
+                  ? 'border-emerald-900/50 bg-emerald-950/20 text-emerald-500 hover:bg-emerald-500 hover:text-black hover:shadow-[0_0_10px_rgba(16,185,129,0.4)]' 
+                  : 'border-zinc-700 bg-zinc-900 text-zinc-400 hover:bg-rose-500 hover:border-rose-500 hover:text-white hover:shadow-[0_0_10px_rgba(244,63,94,0.4)]'}`}
+            >
+              {w.status === 'disabled' ? t('enable') : t('disable')}
+            </button>
           </div>
         </div>
       ))}
