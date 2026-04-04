@@ -8,8 +8,8 @@ interface Task {
   status: string;
   assignedWorkerId?: string;
   branchName?: string;
-  updatedAt?: string; // ISO timestamp
-  createdAt?: string; // ISO timestamp
+  updatedAt?: string;
+  createdAt?: string;
 }
 
 interface Worker {
@@ -19,6 +19,15 @@ interface Worker {
   currentTaskId?: string;
   hostname?: string;
 }
+
+const formatTime = (isoString?: string): string => {
+  if (!isoString) return '--:--:--';
+  const date = new Date(isoString);
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+};
 
 export const TaskList: React.FC<{ tasks: Task[] }> = ({ tasks }) => {
   const { t } = useTranslation();
@@ -70,7 +79,7 @@ export const TaskList: React.FC<{ tasks: Task[] }> = ({ tasks }) => {
                 <Badge status={task.status}>{t(`status.${task.status}`)}</Badge>
                 {(task.updatedAt || task.createdAt) && (
                   <span className="text-xs font-bold font-mono text-white/70 glass-button px-2 py-1 rounded">
-                    {(task.updatedAt || task.createdAt)?.split('T')[1]?.split('.')[0] || '--:--:--'}
+                    {formatTime(task.updatedAt || task.createdAt)}
                   </span>
                 )}
               </div>
