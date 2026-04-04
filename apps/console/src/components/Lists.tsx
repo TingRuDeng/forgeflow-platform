@@ -8,8 +8,8 @@ interface Task {
   status: string;
   assignedWorkerId?: string;
   branchName?: string;
-  updatedAt?: string; // ISO timestamp
-  createdAt?: string; // ISO timestamp
+  updatedAt?: string;
+  createdAt?: string;
 }
 
 interface Worker {
@@ -19,6 +19,15 @@ interface Worker {
   currentTaskId?: string;
   hostname?: string;
 }
+
+const formatTime = (isoString?: string): string => {
+  if (!isoString) return '--:--:--';
+  const date = new Date(isoString);
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+};
 
 export const TaskList: React.FC<{ tasks: Task[] }> = ({ tasks }) => {
   const { t } = useTranslation();
@@ -48,7 +57,7 @@ export const TaskList: React.FC<{ tasks: Task[] }> = ({ tasks }) => {
               <div className="flex flex-col gap-2 flex-1 min-w-0">
                 <div className="flex items-center gap-3">
                   <span className="text-cyan-400/60 font-mono text-xs font-bold tracking-tight group-hover:text-cyan-400 transition-colors">
-                    [{task.id}]
+                    [{task.id.split(':')[0]}]
                   </span>
                   <span className="text-white group-hover:text-white text-sm font-semibold tracking-wide transition-colors">
                     {task.title}
@@ -70,7 +79,7 @@ export const TaskList: React.FC<{ tasks: Task[] }> = ({ tasks }) => {
                 <Badge status={task.status}>{t(`status.${task.status}`)}</Badge>
                 {(task.updatedAt || task.createdAt) && (
                   <span className="text-xs font-bold font-mono text-white/70 glass-button px-2 py-1 rounded">
-                    {(task.updatedAt || task.createdAt)?.split('T')[1]?.split('.')[0] || '--:--:--'}
+                    {formatTime(task.updatedAt || task.createdAt)}
                   </span>
                 )}
               </div>
@@ -108,9 +117,15 @@ export const WorkerList: React.FC<{ workers: Worker[]; onAction: (id: string, en
   const { t } = useTranslation();
   if (!workers.length) return <div className="p-10 text-center text-sm text-zinc-600 italic font-mono">{t('noActiveWorkers')}</div>;
 
+  const sortedWorkers = [...workers].sort((a, b) => {
+    if (a.status === 'disabled' && b.status !== 'disabled') return 1;
+    if (a.status !== 'disabled' && b.status === 'disabled') return -1;
+    return 0;
+  });
+
   return (
     <div className="divide-y divide-white/5 grid grid-cols-1">
-      {workers.map(w => (
+      {sortedWorkers.map(w => (
         <div key={w.id} className="group p-4 border-l-[3px] border-transparent hover:border-white/30 hover:bg-white/5 transition-all duration-200">
           <div className="flex justify-between items-center mb-2">
             <div className="flex items-center gap-3">
