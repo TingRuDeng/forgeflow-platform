@@ -11,6 +11,7 @@ interface MetricsGridProps {
 
 export const MetricsGrid: React.FC<MetricsGridProps> = ({ stats }) => {
   const { t } = useTranslation();
+  const activeWorkers = stats.workers.total - stats.workers.disabled;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -21,7 +22,7 @@ export const MetricsGrid: React.FC<MetricsGridProps> = ({ stats }) => {
             <Users className="w-4 h-4 text-blue-400" />
           </div>
         </div>
-        <div className="text-3xl font-bold text-white">{stats.workers.total}</div>
+        <div className="text-3xl font-bold text-white">{activeWorkers}</div>
         <div className="text-xs text-white/50">Total capacity: 20</div>
       </div>
 
@@ -35,7 +36,7 @@ export const MetricsGrid: React.FC<MetricsGridProps> = ({ stats }) => {
         <div className="text-3xl font-bold text-white">
           {stats.workers.idle} <span className="text-lg text-white/40">/</span> {stats.workers.busy}
         </div>
-        <div className="text-xs text-white/50">Utilization: {Math.round((stats.workers.busy / stats.workers.total) * 100)}%</div>
+        <div className="text-xs text-white/50">Utilization: {activeWorkers > 0 ? Math.round((stats.workers.busy / activeWorkers) * 100) : 0}%</div>
       </div>
 
       <div className="glass rounded-2xl p-4 flex flex-col gap-2 transition-all duration-300 hover:scale-[1.02] hover:shadow-xl cursor-default">
