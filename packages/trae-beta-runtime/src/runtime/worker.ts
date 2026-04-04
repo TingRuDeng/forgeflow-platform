@@ -395,7 +395,7 @@ export function deriveTaskDiscoveryHints(
 
 function isTimeoutError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return /timeout/i.test(message);
+  return /timeout|timed out/i.test(message);
 }
 
 function isTemplateEchoError(error: unknown) {
