@@ -149,6 +149,10 @@ Trae MCP fallback 维护：
 - `../packages/trae-beta-runtime/README.md`
   - 当前对外发布的远程 Trae npm 包入口。
   - 适合远程机器用 `npm install -g @tingrudeng/trae-beta-runtime` 安装。
+- `../packages/mcp-*/README.md`
+  - MCP thin-wrapper 包入口（`mcp-scheduler`、`mcp-trae-worker`、`mcp-review-gate`、`mcp-github`、`mcp-repo-policy`）。
+  - 都是 thin wrapper：工具定义和 deps 注入委托，实际逻辑在 dispatcher 层。
+  - `mcp-trae-worker` 是 deprecated/fallback；推荐路径是 Trae automation gateway + automation worker。
 - `../prompts/dispatch-task-template.md`
   - 给 worker 派发代码任务时的通用骨架模板。
   - 适合和 `AGENT_STARTER_PROMPT.md` 叠加使用，而不是重复粘贴 starter 全文。
