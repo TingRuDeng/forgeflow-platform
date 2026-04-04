@@ -1828,6 +1828,95 @@ describe("runtime/worker", () => {
     runtime.stop();
   });
 
+  it("recovers from gateway-emitted 'Timed out waiting for Trae to finish responding' message", async () => {
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      fetchTask: vi.fn(async () => ({
+        status: "task",
+        task: {
+          task_id: "dispatch-165:gateway-timeout-recovery",
+          repo: "repo",
+          branch: "feature/gateway-timeout-recovery",
+          default_branch: "main",
+          scope: ["src/**"],
+          acceptance: ["pnpm test"],
+          constraints: [],
+          prompt: "Recover from gateway timeout message",
+          chat_mode: "new_chat",
+        },
+      })),
+      startTask: vi.fn(async () => ({})),
+      reportProgress: vi.fn(async () => ({})),
+      submitResult: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => ({})),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-gateway-timeout" } })),
+      getSession: vi.fn(async () => ({
+        data: {
+          status: "completed",
+          responseText: [
+            "## 任务完成",
+            "- 结果: 成功",
+            "- 任务ID: dispatch-165:gateway-timeout-recovery",
+            "- 修改文件: src/gateway-recovered.ts",
+            "- 测试结果: gateway recovery",
+            "- 风险: 无",
+            "- GitHub 证据:",
+            "  - branch: feature/gateway-timeout-recovery",
+            "  - commit: abc165",
+            "  - push: 成功",
+            "  - push_error: 无",
+            "  - PR: 无",
+            "  - PR URL: 无",
+            "- 备注: recovered from gateway timeout",
+          ].join("\n"),
+        },
+      })),
+      sendChat: vi.fn(async () => {
+        throw new Error("Timed out waiting for Trae to finish responding");
+      }),
+      releaseSession: vi.fn(async () => ({ data: { sessionId: "session-gateway-timeout", released: true } })),
+    };
+    const launchTrae = vi.fn(async () => ({ reusedExisting: false }));
+
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-remote",
+      repoDir: "/tmp/project",
+      logger: { warn: vi.fn(), log: vi.fn() },
+      launchTrae,
+      sleep: vi.fn(async () => undefined),
+      setIntervalImpl: vi.fn(() => ({}) as never),
+      clearIntervalImpl: vi.fn(),
+    });
+
+    const result = await runtime.runOnce();
+
+    expect(automationClient.getSession).toHaveBeenCalledWith("session-gateway-timeout");
+    expect(dispatcherClient.reportProgress).toHaveBeenCalledWith(
+      "dispatch-165:gateway-timeout-recovery",
+      "Chat timeout, checking session status",
+      "trae-remote"
+    );
+    expect(dispatcherClient.reportProgress).toHaveBeenCalledWith(
+      "dispatch-165:gateway-timeout-recovery",
+      "Session completed, extracting stored response",
+      "trae-remote"
+    );
+    expect(automationClient.releaseSession).toHaveBeenCalledWith("session-gateway-timeout");
+    expect(result).toEqual({
+      status: "review_ready",
+      taskId: "dispatch-165:gateway-timeout-recovery",
+      responseText: expect.stringContaining("## 任务完成"),
+    });
+
+    runtime.stop();
+  });
+
   it("fails when session completed but response is still a template placeholder", async () => {
     const dispatcherClient = {
       register: vi.fn(async () => ({})),
