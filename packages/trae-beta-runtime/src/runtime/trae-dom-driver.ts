@@ -1,4 +1,10 @@
 // @ts-nocheck
+import {
+  getLastReportFieldValue,
+  isEquivalentReportedTaskId,
+  looksLikeTemplatePlaceholderReport,
+} from "@tingrudeng/automation-gateway-core";
+
 import { createCDPSession } from "./trae-cdp-client.js";
 import { discoverTraeTarget } from "./trae-cdp-discovery.js";
 import { TraeAutomationError, normalizeAutomationError } from "./trae-automation-errors.js";
@@ -779,59 +785,6 @@ function shouldPreferActivityText(finalText, activityState) {
     return true;
   }
   return normalizedActivity.length >= normalizedFinal.length + 12;
-}
-
-function getLastReportFieldValue(text, fieldName) {
-  let value = "";
-  for (const rawLine of String(text || "").split(/\r?\n/)) {
-    const line = rawLine.trimEnd();
-    const match = line.match(/^\s*(?:-\s*)?([^:]+):\s*(.*)$/);
-    if (!match) {
-      continue;
-    }
-    if (match[1].trim() === fieldName) {
-      value = match[2].trim();
-    }
-  }
-  return value;
-}
-
-function isEquivalentReportedTaskId(expectedTaskId, reportedTaskId) {
-  const expected = String(expectedTaskId || "").trim();
-  const reported = String(reportedTaskId || "").trim();
-  if (!expected || !reported) {
-    return false;
-  }
-
-  if (expected === reported) {
-    return true;
-  }
-
-  if (/^dispatch-\d+:.+/.test(expected) && reported === expected.replace(":", "-")) {
-    return true;
-  }
-
-  const expectedDispatchPrefix = expected.match(/^(dispatch-\d+):/);
-  if (expectedDispatchPrefix && reported === expectedDispatchPrefix[1]) {
-    return true;
-  }
-
-  return false;
-}
-
-function looksLikeTemplatePlaceholderReport(text) {
-  const result = getLastReportFieldValue(text, "结果");
-  const taskId = getLastReportFieldValue(text, "任务ID");
-  if (!result || !taskId) {
-    return true;
-  }
-  if (/^<[^>]+>$/.test(taskId)) {
-    return true;
-  }
-  if (result === "成功 / 失败") {
-    return true;
-  }
-  return false;
 }
 
 async function collectAutomationResponse({
