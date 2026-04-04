@@ -279,6 +279,7 @@ export function createAutomationGatewayClient(baseUrl = DEFAULT_AUTOMATION_URL, 
     async sendChat(input: {
       content: string;
       sessionId?: string | null;
+      expectedTaskId?: string | null;
       prepare?: boolean;
       discovery?: unknown;
       chatMode?: string;
@@ -292,6 +293,7 @@ export function createAutomationGatewayClient(baseUrl = DEFAULT_AUTOMATION_URL, 
         body: {
           content: input.content,
           sessionId: input.sessionId || null,
+          expectedTaskId: input.expectedTaskId || null,
           prepare: input.prepare !== false,
           discovery: input.discovery || null,
           chatMode: input.chatMode || null,

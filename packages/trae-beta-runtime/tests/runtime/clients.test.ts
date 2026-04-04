@@ -79,6 +79,29 @@ describe("runtime/clients", () => {
     });
   });
 
+  it("sends expectedTaskId in sendChat request", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ data: { response: { text: "ok" } } }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const automation = createAutomationGatewayClient("http://127.0.0.1:8790", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await automation.sendChat({
+      content: "test prompt",
+      sessionId: "session-123",
+      expectedTaskId: "dispatch-151:redrive-b5240295",
+    });
+
+    const body = JSON.parse((fetchImpl.mock.calls[0] as unknown as [string, { body: string }])[1].body);
+    expect(body).toMatchObject({
+      content: "test prompt",
+      sessionId: "session-123",
+      expectedTaskId: "dispatch-151:redrive-b5240295",
+    });
+  });
+
   it("requests session status through the automation gateway", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ data: { status: "running" } }), {
       status: 200,

@@ -796,6 +796,29 @@ function getLastReportFieldValue(text, fieldName) {
   return value;
 }
 
+function isEquivalentReportedTaskId(expectedTaskId, reportedTaskId) {
+  const expected = String(expectedTaskId || "").trim();
+  const reported = String(reportedTaskId || "").trim();
+  if (!expected || !reported) {
+    return false;
+  }
+
+  if (expected === reported) {
+    return true;
+  }
+
+  if (/^dispatch-\d+:.+/.test(expected) && reported === expected.replace(":", "-")) {
+    return true;
+  }
+
+  const expectedDispatchPrefix = expected.match(/^(dispatch-\d+):/);
+  if (expectedDispatchPrefix && reported === expectedDispatchPrefix[1]) {
+    return true;
+  }
+
+  return false;
+}
+
 function looksLikeTemplatePlaceholderReport(text) {
   const result = getLastReportFieldValue(text, "结果");
   const taskId = getLastReportFieldValue(text, "任务ID");
@@ -829,6 +852,7 @@ async function collectAutomationResponse({
   let lastChangeAt = startedAt;
   let finalSnapshot = baselineSnapshot;
   const requiredPrefix = String(config.responseRequiredPrefix || "").trim();
+  const expectedTaskId = String(config.expectedTaskId || "").trim();
 
   const normalizePrefixComparableText = (value) => String(value || "")
     .trimStart()
@@ -879,6 +903,13 @@ async function collectAutomationResponse({
 
     if (candidateText && looksLikeTemplatePlaceholderReport(candidateText)) {
       candidateCanFinish = false;
+    }
+
+    if (candidateText && expectedTaskId) {
+      const reportedTaskId = getLastReportFieldValue(candidateText, "任务ID");
+      if (reportedTaskId && !isEquivalentReportedTaskId(expectedTaskId, reportedTaskId)) {
+        candidateCanFinish = false;
+      }
     }
 
     if (candidateText && (candidateText !== lastMeaningfulText || candidateCanFinish !== lastResponseCanFinish)) {
@@ -1131,6 +1162,7 @@ export function createTraeAutomationDriver(options = {}) {
           session,
           config: {
             ...config,
+            expectedTaskId: payload.expectedTaskId ?? null,
             responseRequiredPrefix: payload.responseRequiredPrefix ?? config.responseRequiredPrefix,
             responseTimeoutMs: Number(payload.responseTimeoutMs || config.responseTimeoutMs),
           },

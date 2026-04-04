@@ -41,6 +41,7 @@ interface AutomationDriver {
   sendPrompt: (input: {
     content: string;
     sessionId: string | null;
+    expectedTaskId?: string | null;
     prepare: boolean;
     discovery: unknown;
     chatMode?: string | null;
@@ -394,6 +395,7 @@ export async function handleTraeAutomationHttpRequest(
       const result = await automationDriver.sendPrompt({
         content,
         sessionId,
+        expectedTaskId: readOptionalString(body.expectedTaskId),
         prepare: body.prepare !== false,
         discovery: body.discovery || null,
         chatMode: typeof body.chatMode === "string" ? body.chatMode : null,

@@ -734,6 +734,60 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       || "";
   }
 
+  async function tryRecoverFromCurrentSession(task: WorkerRuntimeTask, sessionId: string | null) {
+    if (!sessionId || typeof automationClient.getSession !== "function") {
+      return null;
+    }
+
+    await dispatcherClient.reportProgress(
+      task.task_id,
+      "Task ID mismatch detected, checking current session response",
+      workerId,
+    );
+    const session = await automationClient.getSession(sessionId);
+    const sessionData = (session as {
+      data?: {
+        status?: string;
+        responseText?: string | null;
+      };
+      status?: string;
+      responseText?: string | null;
+    } | undefined)?.data
+      || (session as {
+        status?: string;
+        responseText?: string | null;
+      } | undefined);
+
+    if (sessionData?.status !== "completed") {
+      return null;
+    }
+
+    const finalText = String(sessionData.responseText || "").trim();
+    if (!finalText) {
+      return null;
+    }
+
+    const parsed = parseFinalReport(finalText);
+    if (isPlaceholderTaskId(parsed.taskId)) {
+      return null;
+    }
+    if (!isEquivalentReportedTaskId(task.task_id, parsed.taskId)) {
+      return null;
+    }
+
+    await dispatcherClient.reportProgress(
+      task.task_id,
+      "Session completed, extracting stored response",
+      workerId,
+    );
+    const finalStatus = await submitParsedResult(task, parsed, sessionId);
+    return {
+      status: finalStatus,
+      taskId: task.task_id,
+      responseText: finalText,
+    };
+  }
+
   async function pollSessionStatus(
     sessionId: string,
     timeoutMs: number,
@@ -907,6 +961,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           const response = await automationClient.sendChat({
             content: prompt,
             sessionId,
+            expectedTaskId: task.task_id,
             prepare: false,
             discovery,
             chatMode,
@@ -927,9 +982,14 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
             throw new Error("Response appears to be a template echo; waiting for real response");
           }
           if (!isEquivalentReportedTaskId(task.task_id, parsed.taskId)) {
-            throw new Error(
+            const mismatchError = new Error(
               `Task ID mismatch: expected "${task.task_id}" but got "${parsed.taskId}". The response may be from a previous task.`
             );
+            const recovered = await tryRecoverFromCurrentSession(task, sessionId);
+            if (recovered) {
+              return recovered;
+            }
+            throw mismatchError;
           }
           const finalStatus = await submitParsedResult(task, parsed, sessionId);
           return {

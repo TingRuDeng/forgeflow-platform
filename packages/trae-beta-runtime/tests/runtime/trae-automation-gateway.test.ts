@@ -123,6 +123,7 @@ describe("runtime/trae-automation-gateway", () => {
         body: {
           content: "Summarize the repository",
           sessionId: "chat-session",
+          expectedTaskId: "dispatch-151:redrive-b5240295",
         },
       },
       {
@@ -132,6 +133,10 @@ describe("runtime/trae-automation-gateway", () => {
     );
 
     expect(result.status).toBe(200);
+    expect(automationDriver.sendPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "chat-session",
+      expectedTaskId: "dispatch-151:redrive-b5240295",
+    }));
     const updatedSession = sessionStore.get("chat-session");
     expect(updatedSession).toMatchObject({
       sessionId: "chat-session",
