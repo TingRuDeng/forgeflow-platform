@@ -72,6 +72,8 @@ export interface Task {
   chatMode?: string;
   continuationMode?: string;
   continueFromTaskId?: string | null;
+  followUpOfTaskId?: string | null;
+  workerChangeReason?: string | null;
   status: TaskStatus;
   assignedWorkerId?: string | null;
   lastAssignedWorkerId?: string | null;
@@ -100,6 +102,8 @@ export interface AssignmentPayload {
   chatMode?: string;
   continuationMode?: string;
   continueFromTaskId?: string | null;
+  followUpOfTaskId?: string | null;
+  workerChangeReason?: string | null;
 }
 
 export interface Assignment {
@@ -207,6 +211,10 @@ export interface CreateDispatchInput {
     chatMode?: string;
     continuationMode?: string;
     continueFromTaskId?: string | null;
+    followUpOfTaskId?: string | null;
+    follow_up_of_task_id?: string | null;
+    workerChangeReason?: string | null;
+    worker_change_reason?: string | null;
   }>;
   packages: Array<{
     taskId: string;
@@ -236,6 +244,8 @@ export interface GetAssignedTaskResult {
   chatMode?: string;
   continuationMode?: string;
   continueFromTaskId?: string | null;
+  followUpOfTaskId?: string | null;
+  workerChangeReason?: string | null;
 }
 
 export interface ClaimAssignedTaskInput {
@@ -342,6 +352,24 @@ function nowIso(): string {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
+}
+
+function resolveSourceTaskForFollowUp(state: RuntimeState, followUpOfTaskId: string) {
+  const sourceTask = state.tasks.find((task) => task.id === followUpOfTaskId);
+  if (!sourceTask) {
+    throw new Error(`follow-up source task not found: ${followUpOfTaskId}`);
+  }
+  const sourceAssignment = state.assignments.find((assignment) => assignment.taskId === followUpOfTaskId);
+  const sourceWorkerId = sourceTask.lastAssignedWorkerId
+    ?? sourceTask.assignedWorkerId
+    ?? sourceAssignment?.assignment.targetWorkerId
+    ?? sourceAssignment?.workerId
+    ?? null;
+
+  return {
+    sourceTask,
+    sourceWorkerId,
+  };
 }
 
 function nextDispatchId(state: RuntimeState): { state: RuntimeState; dispatchId: string } {
@@ -678,7 +706,20 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
   for (const taskInput of input.tasks) {
     const taskId = `${dispatchId}:${taskInput.id}`;
     taskIds.push(taskId);
-    const targetWorkerId = taskInput.targetWorkerId ?? taskInput.target_worker_id ?? null;
+    const followUpOfTaskId = taskInput.followUpOfTaskId ?? taskInput.follow_up_of_task_id ?? null;
+    const workerChangeReason = taskInput.workerChangeReason ?? taskInput.worker_change_reason ?? null;
+    let targetWorkerId = taskInput.targetWorkerId ?? taskInput.target_worker_id ?? null;
+    if (followUpOfTaskId) {
+      const { sourceWorkerId } = resolveSourceTaskForFollowUp(nextState, followUpOfTaskId);
+      if (targetWorkerId && sourceWorkerId && targetWorkerId !== sourceWorkerId && !workerChangeReason) {
+        throw new Error(
+          `follow-up task "${taskInput.id}" changes worker from "${sourceWorkerId}" to "${targetWorkerId}" without a worker change reason`,
+        );
+      }
+      if (!targetWorkerId && sourceWorkerId) {
+        targetWorkerId = sourceWorkerId;
+      }
+    }
     let worker: Worker | null = null;
     let hasTargetWorkerConstraint = false;
     if (targetWorkerId) {
@@ -719,6 +760,8 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
       chatMode: taskInput.chatMode ?? "new_chat",
       continuationMode: taskInput.continuationMode,
       continueFromTaskId: taskInput.continueFromTaskId ?? null,
+      followUpOfTaskId,
+      workerChangeReason,
       status: worker ? "assigned" : "ready",
       assignedWorkerId: worker?.id ?? null,
       lastAssignedWorkerId: worker?.id ?? null,
@@ -764,6 +807,8 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
         chatMode: taskInput.chatMode ?? "new_chat",
         continuationMode: taskInput.continuationMode,
         continueFromTaskId: taskInput.continueFromTaskId ?? null,
+        followUpOfTaskId,
+        workerChangeReason,
       },
       workerPrompt: sourcePackage.workerPrompt,
       contextMarkdown: sourcePackage.contextMarkdown,

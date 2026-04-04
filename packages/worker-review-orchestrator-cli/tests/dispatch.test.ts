@@ -228,6 +228,40 @@ describe("dispatch", () => {
     );
   });
 
+  it("verifies every returned assignment against the intended target worker", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          dispatchId: "dispatch-verify-all",
+          taskIds: ["dispatch-verify-all:task-1", "dispatch-verify-all:task-2"],
+          assignments: [
+            { taskId: "dispatch-verify-all:task-1", workerId: "trae-remote-forgeflow" },
+            { taskId: "dispatch-verify-all:task-2", workerId: "wrong-worker" },
+          ],
+        }),
+    });
+
+    await expect(
+      runDispatch({
+        dispatcherUrl: "http://127.0.0.1:8787",
+        input: "-",
+        payload: {
+          repo: "/repo",
+          defaultBranch: "main",
+          tasks: [
+            { id: "task-1", pool: "trae" },
+            { id: "task-2", pool: "trae" },
+          ],
+          packages: [],
+        },
+        targetWorkerId: "trae-remote-forgeflow",
+        fetchImpl: fetchImpl as typeof globalThis.fetch,
+      }),
+    ).rejects.toThrow('dispatch verification failed: expected worker "trae-remote-forgeflow" but dispatcher assigned worker "wrong-worker"');
+  });
+
   it("lets explicit targetWorkerId override older snake_case values", () => {
     const payload = applyDispatchTargetWorker(
       {

@@ -33,6 +33,8 @@ export interface DispatchTaskInputOptions {
   contextMarkdownFile?: string;
   continuationMode?: string;
   continueFromTaskId?: string;
+  followUpOfTaskId?: string;
+  workerChangeReason?: string;
 }
 
 export interface WatchOptions {

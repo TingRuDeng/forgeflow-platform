@@ -159,6 +159,15 @@ When a task is `blocked` and should continue, do not stop at the review decision
 - If only one commit is safe to keep, prefer cherry-picking that commit instead of merging the full branch.
 - Keep the rework notes concrete so the worker knows exactly what must change before the next review.
 
+## Sticky Worker Rule
+
+For continuation, rework, review-fix, or same-task follow-up work, the control layer must default to the previous task's assigned worker, not whichever worker is currently idle.
+
+- Default: follow-up work goes to the same worker that last executed the source task.
+- Switching workers requires an explicit reason in the dispatch request or review notes.
+- `trae-local-*` and `trae-remote-*` are different execution environments, not interchangeable pool members.
+- After dispatching a follow-up task, verify both `assignedWorkerId` and the worker's `currentTaskId` against the intended worker before waiting on the task.
+
 ## Parallel Worker Guidance
 
 When multiple workers are available or multiple tasks need dispatching:
