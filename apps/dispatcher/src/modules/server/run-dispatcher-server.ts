@@ -14,6 +14,7 @@ export function parseArgs(argv) {
     port: 8787,
     stateDir: ".forgeflow-dispatcher",
     persistenceBackend: "sqlite",
+    authMode: "token",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -43,6 +44,14 @@ export function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--auth-mode" && next) {
+      if (next !== "token" && next !== "open") {
+        throw new Error(`invalid auth-mode: ${next}. Must be "token" or "open"`);
+      }
+      args.authMode = next;
+      index += 1;
+      continue;
+    }
     if (arg === "--help") {
       args.help = true;
       continue;
@@ -61,12 +70,17 @@ Usage:
     [--host 0.0.0.0] \\
     [--port 8787] \\
     [--state-dir .forgeflow-dispatcher] \\
-    [--persistence-backend json|sqlite]
+    [--persistence-backend json|sqlite] \\
+    [--auth-mode token|open]
 `);
 }
 
 export function applyPersistenceBackend(args) {
   process.env.RUNTIME_STATE_BACKEND = args.persistenceBackend;
+}
+
+export function applyAuthMode(args) {
+  process.env.DISPATCHER_AUTH_MODE = args.authMode;
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -77,6 +91,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   applyPersistenceBackend(args);
+  applyAuthMode(args);
   const instance = await startDispatcherServer(args);
   console.log(JSON.stringify({
     status: "listening",
@@ -85,6 +100,7 @@ export async function main(argv = process.argv.slice(2)) {
     baseUrl: instance.baseUrl,
     stateDir: args.stateDir,
     persistenceBackend: args.persistenceBackend,
+    authMode: args.authMode,
   }, null, 2));
 }
 

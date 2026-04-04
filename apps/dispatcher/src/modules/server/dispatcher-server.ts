@@ -36,6 +36,14 @@ function getApiToken(): string | null {
   return process.env.DISPATCHER_API_TOKEN ?? null;
 }
 
+function getAuthMode(): "token" | "open" {
+  const mode = process.env.DISPATCHER_AUTH_MODE ?? "token";
+  if (mode !== "token" && mode !== "open") {
+    throw new Error(`invalid DISPATCHER_AUTH_MODE: ${mode}. Must be "token" or "open"`);
+  }
+  return mode;
+}
+
 function checkAuthToken(authHeader: string | undefined, apiToken: string): boolean {
   if (!authHeader) {
     return false;
@@ -49,9 +57,18 @@ function checkAuthToken(authHeader: string | undefined, apiToken: string): boole
 }
 
 function createAuthMiddleware(input: { method: string; pathname: string; authHeader?: string }): null | { status: number; error: string } {
+  const authMode = getAuthMode();
+
+  if (authMode === "open") {
+    return null;
+  }
+
   const apiToken = getApiToken();
   if (!apiToken) {
-    return null;
+    return {
+      status: 401,
+      error: "auth_required_no_token",
+    };
   }
 
   if (AUTH_WHITELIST_PATHS.includes(input.pathname)) {

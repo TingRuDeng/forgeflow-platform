@@ -80,4 +80,59 @@ describe("run-dispatcher-server.js CLI", () => {
       process.env.RUNTIME_STATE_BACKEND = previous;
     }
   });
+
+  it("defaults to token auth mode when no argument provided", async () => {
+    const { parseArgs } = await loadCliModule();
+    const args = parseArgs([]);
+    expect(args.authMode).toBe("token");
+  });
+
+  it("uses open auth mode when --auth-mode open is provided", async () => {
+    const { parseArgs } = await loadCliModule();
+    const args = parseArgs(["--auth-mode", "open"]);
+    expect(args.authMode).toBe("open");
+  });
+
+  it("uses token auth mode when --auth-mode token is explicitly provided", async () => {
+    const { parseArgs } = await loadCliModule();
+    const args = parseArgs(["--auth-mode", "token"]);
+    expect(args.authMode).toBe("token");
+  });
+
+  it("throws error for invalid auth-mode value", async () => {
+    const { parseArgs } = await loadCliModule();
+    expect(() => {
+      parseArgs(["--auth-mode", "invalid"]);
+    }).toThrow("invalid auth-mode");
+  });
+
+  it("writes DISPATCHER_AUTH_MODE=open when --auth-mode open is requested", async () => {
+    const { applyAuthMode, parseArgs } = await loadCliModule();
+    const previous = process.env.DISPATCHER_AUTH_MODE;
+    const args = parseArgs(["--auth-mode", "open"]);
+    applyAuthMode(args);
+
+    expect(process.env.DISPATCHER_AUTH_MODE).toBe("open");
+
+    if (previous === undefined) {
+      delete process.env.DISPATCHER_AUTH_MODE;
+    } else {
+      process.env.DISPATCHER_AUTH_MODE = previous;
+    }
+  });
+
+  it("writes DISPATCHER_AUTH_MODE=token by default", async () => {
+    const { applyAuthMode, parseArgs } = await loadCliModule();
+    const previous = process.env.DISPATCHER_AUTH_MODE;
+    const args = parseArgs([]);
+    applyAuthMode(args);
+
+    expect(process.env.DISPATCHER_AUTH_MODE).toBe("token");
+
+    if (previous === undefined) {
+      delete process.env.DISPATCHER_AUTH_MODE;
+    } else {
+      process.env.DISPATCHER_AUTH_MODE = previous;
+    }
+  });
 });
