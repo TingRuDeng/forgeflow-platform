@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Thin MCP wrapper exposing review gate tools (submit_findings, check_merge_readiness, render_markdown_pr). Delegates to dispatcher review-gate implementation via deps. Behavior is intentionally limited to the tool definitions.",
+  "status": "stub",
   "type": "module",
   "exports": {
     ".": "./src/server.ts"

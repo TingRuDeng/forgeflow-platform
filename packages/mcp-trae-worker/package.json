@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Thin MCP wrapper for Trae worker registration and task lifecycle. Delegates to dispatcher Trae integration via deps. This is a deprecated/fallback path; the recommended unattended path is Trae automation gateway + automation worker.",
+  "status": "deprecated",
   "type": "module",
   "exports": {
     ".": "./src/server.ts"

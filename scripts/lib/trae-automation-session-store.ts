@@ -59,9 +59,11 @@ export interface SessionStore {
   markRunning: (sessionId: string) => SessionPublic | null;
   markCompleted: (sessionId: string, result: { responseText: string }) => SessionPublic | null;
   markFailed: (sessionId: string, error: string) => SessionPublic | null;
+  markReleased: (sessionId: string) => SessionPublic | null;
   touchActivity: (sessionId: string, details?: TouchActivityDetails) => SessionPublic | null;
   list: (filter?: { status?: SessionStatusValue }) => SessionPublic[];
   prune: (ttlMs?: number) => number;
+  release: (sessionId: string) => boolean;
   getStateFilePath: () => string;
 }
 
@@ -223,6 +225,23 @@ export function createSessionStore(stateDir: string | null, options: {
     });
   }
 
+  function markReleased(sessionId: string): SessionPublic | null {
+    return update(sessionId, {
+      status: SessionStatus.INTERRUPTED,
+      error: "Released by user",
+      completedAt: now(),
+    });
+  }
+
+  function release(sessionId: string): boolean {
+    ensureLoaded();
+    const existed = sessions.delete(sessionId);
+    if (existed) {
+      save();
+    }
+    return existed;
+  }
+
   function touchActivity(sessionId: string, details: TouchActivityDetails = {}): SessionPublic | null {
     const updates: Partial<Session> = { lastActivityAt: now() };
     if (details.responseDetected !== undefined) {
@@ -292,9 +311,11 @@ export function createSessionStore(stateDir: string | null, options: {
     markRunning,
     markCompleted,
     markFailed,
+    markReleased,
     touchActivity,
     list,
     prune,
+    release,
     getStateFilePath,
   };
 }
