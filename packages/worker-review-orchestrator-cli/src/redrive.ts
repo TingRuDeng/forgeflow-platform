@@ -27,6 +27,10 @@ function extractStringValue(record: Record<string, unknown> | null, key: string)
   return typeof value === "string" ? value : null;
 }
 
+function extractArrayOfStrings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
 function findFailureType(failureSummary: string): RedriveFailureType | null {
   for (const { type, patterns } of REDRIVEABLE_FAILURE_PATTERNS) {
     for (const pattern of patterns) {
@@ -55,14 +59,14 @@ function extractFailedSummaryFromEvents(events: Array<Record<string, unknown>>):
 function extractLatestReviewDecision(
   reviews: Array<Record<string, unknown>>,
   taskId: string,
-): { decision: string | null; notes: string | null } {
+): { decision: string | null; notes: string | null; reviewRecord: Record<string, unknown> | null } {
   const taskReviews = reviews.filter((r) => {
     const reviewTaskId = extractStringValue(r, "taskId");
     return reviewTaskId === taskId;
   });
 
   if (taskReviews.length === 0) {
-    return { decision: null, notes: null };
+    return { decision: null, notes: null, reviewRecord: null };
   }
 
   const sortedReviews = [...taskReviews].sort((a, b) => {
@@ -75,6 +79,7 @@ function extractLatestReviewDecision(
   return {
     decision: extractStringValue(latestReview, "decision"),
     notes: extractStringValue(latestReview, "notes"),
+    reviewRecord: latestReview,
   };
 }
 
@@ -188,7 +193,7 @@ export async function runRedrive(options: RedriveOptions): Promise<RedriveResult
   const { status, failureSummary } = extractTaskFailureInfo(task, events);
 
   let redriveReason: string;
-  let latestReview: { decision: string | null; notes: string | null } | null = null;
+  let latestReview: { decision: string | null; notes: string | null; reviewRecord: Record<string, unknown> | null } | null = null;
 
   if (status === "failed") {
     if (!failureSummary) {
@@ -213,7 +218,25 @@ export async function runRedrive(options: RedriveOptions): Promise<RedriveResult
         `task ${options.taskId} is blocked but latest review decision is "${latestReview.decision}" (only "rework" is redriveable)`,
       );
     }
-    redriveReason = `rework: ${latestReview.notes ?? "no notes"}`;
+
+    const latestReviewEvidence = latestReview.reviewRecord?.evidence as Record<string, unknown> | null;
+    const mustFix = extractArrayOfStrings(latestReviewEvidence?.mustFix);
+    const reasonCode =
+      typeof latestReviewEvidence?.reasonCode === "string" ? latestReviewEvidence.reasonCode : null;
+    const canRedrive =
+      typeof latestReviewEvidence?.canRedrive === "boolean" ? latestReviewEvidence.canRedrive : null;
+
+    if (canRedrive === false) {
+      throw new Error(`task ${options.taskId} latest review explicitly disabled redrive`);
+    }
+
+    if (mustFix.length > 0) {
+      redriveReason = `rework: ${mustFix.join("; ")}`;
+    } else if (reasonCode) {
+      redriveReason = `rework: ${reasonCode}`;
+    } else {
+      redriveReason = `rework: ${latestReview.notes ?? "no notes"}`;
+    }
   } else {
     throw new Error(
       `task ${options.taskId} is in "${status}" state and is not redriveable (only "failed" and "blocked" with rework are redriveable)`,
@@ -224,7 +247,16 @@ export async function runRedrive(options: RedriveOptions): Promise<RedriveResult
   const newTaskId = `redrive-${randomUUID().slice(0, 8)}`;
   const newBranchName = generateRedriveBranchName(fields.originalBranchName);
 
-  const reworkNotes = status === "blocked" ? latestReview?.notes : null;
+  let reworkNotes: string | null = null;
+  if (status === "blocked" && latestReview) {
+    const latestReviewEvidence = latestReview.reviewRecord?.evidence as Record<string, unknown> | null;
+    const mustFixForNotes = extractArrayOfStrings(latestReviewEvidence?.mustFix);
+    if (mustFixForNotes.length > 0) {
+      reworkNotes = mustFixForNotes.join("; ");
+    } else {
+      reworkNotes = latestReview.notes;
+    }
+  }
   const payload = buildRedrivePayload(fields, newTaskId, newBranchName, options.taskId, reworkNotes);
 
   const dispatchResult = await runDispatch({

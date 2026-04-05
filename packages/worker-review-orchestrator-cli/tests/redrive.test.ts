@@ -1179,4 +1179,240 @@ describe("redrive", () => {
     expect(contextMarkdown).toBe("# Original");
     expect(contextMarkdown).not.toContain("Rework Notes");
   });
+
+  it("blocked+rework with mustFix uses mustFix for redrive reason", async () => {
+    const snapshot = {
+      tasks: [
+        {
+          id: "dispatch-1:task-mustfix",
+          status: "blocked",
+          title: "MustFix Task",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/mustfix",
+          pool: "trae",
+          allowedPaths: ["src/**"],
+          acceptance: ["pnpm test"],
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-1:task-mustfix",
+          workerId: "worker-1",
+          pool: "trae",
+          status: "blocked",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/mustfix",
+          allowedPaths: ["src/**"],
+          targetWorkerId: "trae-remote-forgeflow",
+          workerPrompt: "Original prompt",
+          contextMarkdown: "# Original",
+        },
+      ],
+      reviews: [
+        {
+          taskId: "dispatch-1:task-mustfix",
+          decision: "rework",
+          actor: "reviewer",
+          notes: "fallback notes",
+          decidedAt: "2026-03-29T12:00:00Z",
+          evidence: {
+            mustFix: ["补充失败场景覆盖", "修复类型错误"],
+            reasonCode: "test_gap",
+            canRedrive: true,
+          },
+        },
+      ],
+      events: [],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(snapshot)),
+    });
+
+    const dispatchMockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            dispatchId: "dispatch-redrive-mustfix",
+            taskIds: ["dispatch-75:redrive-mustfix"],
+            assignments: [],
+          }),
+        ),
+    });
+
+    let fetchCallCount = 0;
+    let capturedPayload: unknown = null;
+    const combinedFetch = async (url: string, init?: RequestInit) => {
+      fetchCallCount++;
+      if (fetchCallCount === 1) {
+        return mockFetch(url, init);
+      }
+      if (init?.body) {
+        capturedPayload = JSON.parse(init.body as string);
+      }
+      return dispatchMockFetch(url, init);
+    };
+
+    const result = await runRedrive({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-mustfix",
+      fetchImpl: combinedFetch as typeof globalThis.fetch,
+    });
+
+    expect(result.failureSummary).toBe("rework: 补充失败场景覆盖; 修复类型错误");
+    expect(result.failureSummary).not.toContain("fallback notes");
+
+    expect(capturedPayload).not.toBeNull();
+    const payload = capturedPayload as { packages?: unknown[] };
+    const pkg = (payload.packages as unknown[])[0] as Record<string, unknown> | undefined;
+    const workerPrompt = pkg?.workerPrompt as string;
+    expect(workerPrompt).toContain("补充失败场景覆盖");
+    expect(workerPrompt).toContain("修复类型错误");
+  });
+
+  it("blocked+rework with reasonCode but no mustFix uses reasonCode for redrive reason", async () => {
+    const snapshot = {
+      tasks: [
+        {
+          id: "dispatch-1:task-reasoncode",
+          status: "blocked",
+          title: "ReasonCode Task",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/reasoncode",
+          pool: "trae",
+          allowedPaths: ["src/**"],
+          acceptance: ["pnpm test"],
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-1:task-reasoncode",
+          workerId: "worker-1",
+          pool: "trae",
+          status: "blocked",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/reasoncode",
+          allowedPaths: ["src/**"],
+          targetWorkerId: "trae-remote-forgeflow",
+          workerPrompt: "Original prompt",
+          contextMarkdown: "# Original",
+        },
+      ],
+      reviews: [
+        {
+          taskId: "dispatch-1:task-reasoncode",
+          decision: "rework",
+          actor: "reviewer",
+          notes: "fallback notes",
+          decidedAt: "2026-03-29T12:00:00Z",
+          evidence: {
+            reasonCode: "test_gap",
+            canRedrive: true,
+          },
+        },
+      ],
+      events: [],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(snapshot)),
+    });
+
+    const dispatchMockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            dispatchId: "dispatch-redrive-reasoncode",
+            taskIds: ["dispatch-76:redrive-reasoncode"],
+            assignments: [],
+          }),
+        ),
+    });
+
+    let fetchCallCount = 0;
+    const combinedFetch = async (url: string, init?: RequestInit) => {
+      fetchCallCount++;
+      if (fetchCallCount === 1) {
+        return mockFetch(url, init);
+      }
+      return dispatchMockFetch(url, init);
+    };
+
+    const result = await runRedrive({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-reasoncode",
+      fetchImpl: combinedFetch as typeof globalThis.fetch,
+    });
+
+    expect(result.failureSummary).toBe("rework: test_gap");
+    expect(result.failureSummary).not.toContain("fallback notes");
+  });
+
+  it("blocked+rework with canRedrive=false throws error", async () => {
+    const snapshot = {
+      tasks: [
+        {
+          id: "dispatch-1:task-no-redrive",
+          status: "blocked",
+          title: "No Redrive Task",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/no-redrive",
+          pool: "trae",
+          allowedPaths: ["src/**"],
+          acceptance: ["pnpm test"],
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-1:task-no-redrive",
+          workerId: "worker-1",
+          pool: "trae",
+          status: "blocked",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/no-redrive",
+          allowedPaths: ["src/**"],
+          targetWorkerId: "trae-remote-forgeflow",
+          workerPrompt: "Original prompt",
+          contextMarkdown: "# Original",
+        },
+      ],
+      reviews: [
+        {
+          taskId: "dispatch-1:task-no-redrive",
+          decision: "rework",
+          actor: "reviewer",
+          notes: "this task should not be redriven",
+          decidedAt: "2026-03-29T12:00:00Z",
+          evidence: {
+            canRedrive: false,
+            reasonCode: "manual_intervention_required",
+          },
+        },
+      ],
+      events: [],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(snapshot)),
+    });
+
+    await expect(
+      runRedrive({
+        dispatcherUrl: "http://127.0.0.1:8787",
+        taskId: "dispatch-1:task-no-redrive",
+        fetchImpl: mockFetch as typeof globalThis.fetch,
+      }),
+    ).rejects.toThrow("task dispatch-1:task-no-redrive latest review explicitly disabled redrive");
+  });
 });

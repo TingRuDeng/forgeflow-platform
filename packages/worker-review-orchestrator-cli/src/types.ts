@@ -138,6 +138,12 @@ export interface InspectSummaryResult {
     commit: string | null;
     pushStatus: string | null;
     testOutput: string | null;
+    failureType: string | null;
+    failureSummary: string | null;
+    reasonCode: string | null;
+    mustFix: string[];
+    canRedrive: boolean | null;
+    redriveStrategy: string | null;
   };
   recentEvents: Array<{
     type: string;
