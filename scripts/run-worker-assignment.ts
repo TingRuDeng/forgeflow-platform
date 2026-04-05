@@ -160,7 +160,7 @@ function resolveVerificationShell(): string {
     if ((probe.status ?? 1) === 0) {
       return candidate;
     }
-    if ((probe.error as any)?.code === "ENOENT") {
+    if ((probe.error as NodeJS.ErrnoException | null)?.code === "ENOENT") {
       continue;
     }
   }
