@@ -383,6 +383,116 @@ describe("inspect", () => {
     });
   });
 
+  it("summary mode extracts structured evidence from review", async () => {
+    const structuredEvidenceSnapshot = {
+      tasks: [
+        {
+          id: "dispatch-5:task-1",
+          status: "blocked",
+          branchName: "feature/structured",
+          repo: "owner/repo",
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-5:task-1",
+          workerId: "worker-1",
+          status: "blocked",
+          repo: "owner/repo",
+        },
+      ],
+      reviews: [
+        {
+          taskId: "dispatch-5:task-1",
+          decision: "rework",
+          actor: "reviewer-1",
+          at: "2026-03-29T02:00:00Z",
+          notes: "Please fix the issues",
+          latestWorkerResult: {
+            evidence: {
+              failureType: "verification",
+              failureSummary: "Tests failed after changes",
+            },
+          },
+          evidence: {
+            reasonCode: "test_gap",
+            mustFix: ["补充失败场景覆盖", "修复类型错误"],
+            canRedrive: true,
+            redriveStrategy: "continue",
+          },
+        },
+      ],
+      events: [],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(structuredEvidenceSnapshot)),
+    });
+
+    const result = (await runInspect({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-5:task-1",
+      summary: true,
+      fetchImpl: mockFetch,
+    })) as InspectSummaryResult;
+
+    expect(result.latestResultEvidence.failureType).toBe("verification");
+    expect(result.latestResultEvidence.failureSummary).toBe("Tests failed after changes");
+    expect(result.latestResultEvidence.reasonCode).toBe("test_gap");
+    expect(result.latestResultEvidence.mustFix).toEqual(["补充失败场景覆盖", "修复类型错误"]);
+    expect(result.latestResultEvidence.canRedrive).toBe(true);
+    expect(result.latestResultEvidence.redriveStrategy).toBe("continue");
+  });
+
+  it("summary mode handles missing structured evidence gracefully", async () => {
+    const noStructuredEvidenceSnapshot = {
+      tasks: [
+        {
+          id: "dispatch-6:task-1",
+          status: "review",
+          branchName: "feature/no-evidence",
+          repo: "owner/repo",
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-6:task-1",
+          workerId: "worker-1",
+          status: "review",
+          repo: "owner/repo",
+        },
+      ],
+      reviews: [
+        {
+          taskId: "dispatch-6:task-1",
+          decision: "merge",
+          at: "2026-03-29T02:00:00Z",
+        },
+      ],
+      events: [],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(noStructuredEvidenceSnapshot)),
+    });
+
+    const result = (await runInspect({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-6:task-1",
+      summary: true,
+      fetchImpl: mockFetch,
+    })) as InspectSummaryResult;
+
+    expect(result.latestResultEvidence.failureType).toBeNull();
+    expect(result.latestResultEvidence.failureSummary).toBeNull();
+    expect(result.latestResultEvidence.reasonCode).toBeNull();
+    expect(result.latestResultEvidence.mustFix).toEqual([]);
+    expect(result.latestResultEvidence.canRedrive).toBeNull();
+    expect(result.latestResultEvidence.redriveStrategy).toBeNull();
+  });
+
   it("summary mode returns last 5 events in reverse order", async () => {
     const manyEventsSnapshot = {
       tasks: [

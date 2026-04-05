@@ -36,6 +36,10 @@ function extractNumberValue(record: Record<string, unknown> | null, key: string)
   return typeof value === "number" ? value : null;
 }
 
+function extractArrayOfStrings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
 function extractResultEvidence(
   reviews: Array<Record<string, unknown>>,
   events: Array<Record<string, unknown>>,
@@ -43,8 +47,25 @@ function extractResultEvidence(
   commit: string | null;
   pushStatus: string | null;
   testOutput: string | null;
+  failureType: string | null;
+  failureSummary: string | null;
+  reasonCode: string | null;
+  mustFix: string[];
+  canRedrive: boolean | null;
+  redriveStrategy: string | null;
 } {
   const latestReview = reviews.length > 0 ? reviews[reviews.length - 1] : null;
+  const latestWorkerResult = latestReview?.latestWorkerResult as Record<string, unknown> | null;
+  const workerEvidence = latestWorkerResult?.evidence as Record<string, unknown> | null;
+  const reviewEvidence = latestReview?.evidence as Record<string, unknown> | null;
+
+  const failureType = typeof workerEvidence?.failureType === "string" ? workerEvidence.failureType : null;
+  const failureSummary = typeof workerEvidence?.failureSummary === "string" ? workerEvidence.failureSummary : null;
+  const reasonCode = typeof reviewEvidence?.reasonCode === "string" ? reviewEvidence.reasonCode : null;
+  const mustFix = extractArrayOfStrings(reviewEvidence?.mustFix);
+  const canRedrive = typeof reviewEvidence?.canRedrive === "boolean" ? reviewEvidence.canRedrive : null;
+  const redriveStrategy = typeof reviewEvidence?.redriveStrategy === "string" ? reviewEvidence.redriveStrategy : null;
+
   if (latestReview) {
     const reviewMaterial = latestReview.reviewMaterial as Record<string, unknown> | null;
     if (reviewMaterial) {
@@ -56,7 +77,7 @@ function extractResultEvidence(
       const testOutput = checks ? (checks.map((c) => extractStringValue(c, "command") ?? "").join("; ") || null) : null;
 
       if (commit || pushStatus || testOutput) {
-        return { commit, pushStatus, testOutput };
+        return { commit, pushStatus, testOutput, failureType, failureSummary, reasonCode, mustFix, canRedrive, redriveStrategy };
       }
     }
   }
@@ -70,11 +91,17 @@ function extractResultEvidence(
         commit: github ? extractStringValue(github, "commit_sha") : null,
         pushStatus: github ? extractStringValue(github, "push_status") : null,
         testOutput: extractStringValue(payload, "test_output"),
+        failureType,
+        failureSummary,
+        reasonCode,
+        mustFix,
+        canRedrive,
+        redriveStrategy,
       };
     }
   }
 
-  return { commit: null, pushStatus: null, testOutput: null };
+  return { commit: null, pushStatus: null, testOutput: null, failureType, failureSummary, reasonCode, mustFix, canRedrive, redriveStrategy };
 }
 
 function generateSummary(
