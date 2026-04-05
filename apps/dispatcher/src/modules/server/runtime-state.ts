@@ -951,6 +951,68 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
     };
   }
 
+  // Trae fetch/start flow can assign a task before writing currentTaskId.
+  // Allow claiming that pre-assigned task so start-task can converge state.
+  const preAssignedTask = reconciledState.tasks.find((candidate) =>
+    candidate.status === "assigned" && candidate.assignedWorkerId === input.workerId);
+  if (preAssignedTask) {
+    const assignmentRecord = reconciledState.assignments.find((candidate) => candidate.taskId === preAssignedTask.id);
+    if (!assignmentRecord) {
+      throw new Error(`assignment not found for task: ${preAssignedTask.id}`);
+    }
+    if (assignmentRecord.status !== "assigned" || assignmentRecord.workerId !== input.workerId) {
+      throw new Error(`task not assigned to worker: ${input.workerId}`);
+    }
+
+    let nextState = reconciledState;
+    if (!assignmentRecord.claimedAt) {
+      nextState = {
+        ...appendEvent(reconciledState, {
+          taskId: preAssignedTask.id,
+          type: "assignment_claimed",
+          at,
+          payload: {
+            workerId: input.workerId,
+          },
+        }),
+        updatedAt: at,
+        assignments: upsertAssignment(reconciledState.assignments, {
+          ...assignmentRecord,
+          claimedAt: at,
+        }),
+      };
+    }
+
+    nextState = {
+      ...nextState,
+      workers: upsertWorker(nextState.workers, {
+        ...worker,
+        status: "busy",
+        currentTaskId: preAssignedTask.id,
+        lastHeartbeatAt: at,
+      }),
+    };
+
+    return {
+      state: nextState,
+      assignment: {
+        task: nextState.tasks.find((candidate) => candidate.id === preAssignedTask.id)!,
+        assignment: {
+          ...assignmentRecord.assignment,
+          workerId: input.workerId,
+          status: "assigned",
+        },
+        workerPrompt: assignmentRecord.workerPrompt,
+        contextMarkdown: assignmentRecord.contextMarkdown,
+        chatMode: (assignmentRecord as { chatMode?: string }).chatMode ?? preAssignedTask.chatMode ?? "new_chat",
+        continuationMode: (assignmentRecord as { continuationMode?: string }).continuationMode ?? preAssignedTask.continuationMode,
+        continueFromTaskId: (assignmentRecord as { continueFromTaskId?: string | null }).continueFromTaskId ?? preAssignedTask.continueFromTaskId ?? null,
+        followUpOfTaskId: (assignmentRecord as { followUpOfTaskId?: string | null }).followUpOfTaskId ?? preAssignedTask.followUpOfTaskId ?? null,
+        workerChangeReason: (assignmentRecord as { workerChangeReason?: string | null }).workerChangeReason ?? preAssignedTask.workerChangeReason ?? null,
+      },
+    };
+  }
+
   if (worker.status !== "idle") {
     return {
       state: reconciledState,

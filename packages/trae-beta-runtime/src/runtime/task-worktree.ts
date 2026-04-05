@@ -22,6 +22,43 @@ function runGit(args: string[], cwd: string) {
   });
 }
 
+function findWorktreePathForBranch(repoDir: string, branchName: string): string | null {
+  const result = runGit(["worktree", "list", "--porcelain"], repoDir);
+  ensureSuccess(result, "failed to list git worktrees");
+  const stdout = String(result.stdout || "");
+  if (!stdout.trim()) {
+    return null;
+  }
+
+  let currentPath = "";
+  let currentBranch = "";
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) {
+      if (currentPath && currentBranch === branchName) {
+        return currentPath;
+      }
+      currentPath = "";
+      currentBranch = "";
+      continue;
+    }
+
+    if (line.startsWith("worktree ")) {
+      currentPath = line.slice("worktree ".length).trim();
+      continue;
+    }
+
+    if (line.startsWith("branch refs/heads/")) {
+      currentBranch = line.slice("branch refs/heads/".length).trim();
+      continue;
+    }
+  }
+
+  if (currentPath && currentBranch === branchName) {
+    return currentPath;
+  }
+  return null;
+}
+
 function resolveBaseRef(repoDir: string, defaultBranch: string) {
   const originRef = `origin/${defaultBranch}`;
   const originCheck = runGit(["rev-parse", "--verify", originRef], repoDir);
@@ -63,6 +100,14 @@ export function prepareTaskWorktree(
   const worktreeRoot = path.join(repoDir, ".worktrees");
   const worktreeDir = path.join(worktreeRoot, safeTaskDirName(taskId));
   fs.mkdirSync(worktreeRoot, { recursive: true });
+
+  const occupiedWorktree = findWorktreePathForBranch(repoDir, branchName);
+  if (occupiedWorktree && occupiedWorktree !== worktreeDir) {
+    if (options.allowReuse) {
+      return occupiedWorktree;
+    }
+    throw new Error(`branch ${branchName} is already checked out at ${occupiedWorktree}`);
+  }
 
   if (fs.existsSync(worktreeDir)) {
     if (options.allowReuse) {

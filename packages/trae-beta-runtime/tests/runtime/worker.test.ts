@@ -201,6 +201,73 @@ describe("runtime/worker", () => {
     runtime.stop();
   });
 
+  it("submits a failed result when workspace preparation fails before start-task", async () => {
+    prepareTaskWorktreeMock.mockImplementationOnce(() => {
+      throw new Error("branch feature/runtime is already checked out at /tmp/project/.worktrees/dispatch-178");
+    });
+
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      fetchTask: vi.fn(async () => ({
+        status: "task",
+        task: {
+          task_id: "task-workspace-fail",
+          repo: "repo",
+          branch: "feature/runtime",
+          default_branch: "main",
+          scope: ["src/**"],
+          acceptance: ["pnpm test"],
+          constraints: [],
+          prompt: "workspace fail case",
+          chat_mode: "new_chat",
+        },
+      })),
+      startTask: vi.fn(async () => ({})),
+      reportProgress: vi.fn(async () => ({})),
+      submitResult: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => ({})),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-001" } })),
+      sendChat: vi.fn(async () => ({ response: { text: "" } })),
+      releaseSession: vi.fn(async () => ({ data: { sessionId: "session-001", released: true } })),
+    };
+
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-local",
+      repoDir: "/tmp/project",
+      logger: { warn: vi.fn(), log: vi.fn() },
+      sleep: vi.fn(async () => undefined),
+      setIntervalImpl: vi.fn(() => ({}) as never),
+      clearIntervalImpl: vi.fn(),
+    });
+
+    const result = await runtime.runOnce();
+
+    expect(dispatcherClient.startTask).not.toHaveBeenCalled();
+    expect(dispatcherClient.submitResult).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-workspace-fail",
+      status: "failed",
+      summary: expect.stringContaining("workspace_prepare_failed"),
+    }));
+    expect(dispatcherClient.reportProgress).toHaveBeenCalledWith(
+      "task-workspace-fail",
+      expect.stringContaining("Task bootstrap failed: workspace_prepare_failed"),
+      "trae-local",
+    );
+    expect(result).toEqual({
+      status: "failed",
+      taskId: "task-workspace-fail",
+      error: expect.stringContaining("workspace_prepare_failed"),
+    });
+
+    runtime.stop();
+  });
+
   it("emits debug logs when debug mode is enabled", async () => {
     const dispatcherClient = {
       register: vi.fn(async () => ({})),
