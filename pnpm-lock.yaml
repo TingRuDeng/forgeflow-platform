@@ -174,6 +174,9 @@ importers:
 
   packages/trae-beta-runtime:
     dependencies:
+      '@forgeflow/result-contracts':
+        specifier: workspace:*
+        version: link:../result-contracts
       '@tingrudeng/automation-gateway-core':
         specifier: workspace:*
         version: link:../automation-gateway-core
