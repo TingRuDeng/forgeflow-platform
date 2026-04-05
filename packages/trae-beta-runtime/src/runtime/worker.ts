@@ -635,8 +635,24 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     }
   }
 
-  async function submitParsedResult(task: WorkerRuntimeTask, parsed: WorkerRuntimeReport, sessionId: string | null) {
+  async function submitParsedResult(task: WorkerRuntimeTask, parsed: WorkerRuntimeReport, sessionId: string | null, recoverySource?: string) {
     const status = parsed.result === "成功" ? "review_ready" : "failed";
+    const isSuccess = status === "review_ready";
+
+    const evidence: WorkerEvidence | undefined = isSuccess
+      ? {
+          blockers: [],
+          findings: [],
+          artifacts: {
+            source: recoverySource || "chat_completion",
+            branchName: parsed.github.branchName || "unknown",
+            commitSha: parsed.github.commitSha || "unknown",
+            pushStatus: parsed.github.pushStatus,
+            filesChanged: parsed.filesChanged.join(","),
+          },
+        }
+      : undefined;
+
     debugLog("dispatcher.submit_result.start", {
       taskId: task.task_id,
       status,
@@ -644,6 +660,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       filesChangedCount: parsed.filesChanged.length,
       hasCommit: Boolean(parsed.github.commitSha),
       pushStatus: parsed.github.pushStatus,
+      hasEvidence: Boolean(evidence),
     });
     try {
       await dispatcherClient.submitResult({
@@ -654,6 +671,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         risks: parsed.risks,
         filesChanged: parsed.filesChanged,
         github: parsed.github,
+        ...(evidence ? { evidence } : {}),
       });
       debugLog("dispatcher.submit_result.done", { taskId: task.task_id, status });
     } finally {
@@ -1129,7 +1147,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
                 prNumber: null,
                 prUrl: null,
               },
-            }, sessionId);
+            }, sessionId, "artifact_recovery");
             return {
               status: "review_ready",
               taskId: task.task_id,
@@ -1171,7 +1189,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
               prNumber: null,
               prUrl: null,
             },
-          }, sessionId);
+          }, sessionId, "artifact_recovery");
           return {
             status: "review_ready",
             taskId: task.task_id,

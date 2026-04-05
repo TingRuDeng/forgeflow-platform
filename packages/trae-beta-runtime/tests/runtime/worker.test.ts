@@ -191,6 +191,17 @@ describe("runtime/worker", () => {
         prNumber: 42,
         prUrl: "https://example.com/pr/42",
       },
+      evidence: {
+        artifacts: {
+          source: "chat_completion",
+          branchName: "codex/trae-beta-self-contained-runtime",
+          commitSha: "abc123",
+          pushStatus: "success",
+          filesChanged: "src/runtime/worker.ts,src/runtime/task-worktree.ts",
+        },
+        blockers: [],
+        findings: [],
+      },
     });
     expect(result).toEqual({
       status: "review_ready",
@@ -842,6 +853,17 @@ describe("runtime/worker", () => {
         pushError: null,
         prNumber: null,
         prUrl: null,
+      },
+      evidence: {
+        artifacts: {
+          source: "artifact_recovery",
+          branchName: "feature/runtime-salvage",
+          commitSha: "abc125",
+          pushStatus: "verified",
+          filesChanged: "src/salvaged.ts",
+        },
+        blockers: [],
+        findings: [],
       },
     }));
     expect(automationClient.releaseSession).toHaveBeenCalledWith("session-456");
