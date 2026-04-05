@@ -266,7 +266,10 @@ export function applyTraeHeartbeat(
     state.workers.push(newWorker);
     worker = newWorker;
   }
+  const hasActiveTask = Boolean(worker.currentTaskId);
+  const previousStatus = worker.status;
   worker.lastHeartbeatAt = nowIso();
+  worker.status = hasActiveTask ? "busy" : (previousStatus === "offline" ? "idle" : previousStatus);
   return { state, worker };
 }
 
