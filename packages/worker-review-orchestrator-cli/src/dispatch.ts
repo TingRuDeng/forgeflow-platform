@@ -31,6 +31,98 @@ function hasPlaceholderValue(input?: string) {
   return /<[^>\n]+>/.test(String(input || ""));
 }
 
+function buildTraeFinalReportTemplate() {
+  return [
+    "## 任务完成",
+    "- 结果: 成功 / 失败",
+    "- 任务ID: <task_id>",
+    "- 修改文件: <files_changed> (无则写\"无\")",
+    "- 测试结果: <test_output> (无则写\"无\")",
+    "- 风险: <risks> (无则写\"无\")",
+    "- GitHub 证据:",
+    "  - branch: <branch_name> (无则写\"无\")",
+    "  - commit: <commit_sha> (无则写\"无\")",
+    "  - push: <push_status> (无则写\"无\")",
+    "  - push_error: <push_error> (无则写\"无\")",
+    "  - PR: <pr_number> (无则写\"无\")",
+    "  - PR URL: <pr_url> (无则写\"无\")",
+  ].join("\n");
+}
+
+function buildTraeWorkerPrompt(options: DispatchTaskInputOptions, allowedPaths: string[], acceptance: string[]) {
+  const goal = String(options.goal || options.title || "").trim();
+  const sourceOfTruth = splitCsv(options.sourceOfTruth);
+  const requiredChanges = splitCsv(options.requiredChanges);
+  const nonGoals = splitCsv(options.nonGoals);
+  const mustPreserve = splitCsv(options.mustPreserve);
+
+  const lines = [
+    "你正在以 ForgeFlow 的 Trae worker 身份执行任务。",
+    "请直接完成任务，不要解释流程，不要反问。",
+    "",
+    `任务标题: ${options.title}`,
+    `任务ID: ${options.taskId}`,
+    `仓库: ${options.repo}`,
+    `目标分支: ${options.branchName}`,
+    `目标: ${goal || "未提供"}`,
+    "",
+    "允许范围：",
+    ...(allowedPaths.length > 0 ? allowedPaths.map((item) => `- ${item}`) : ["- (none)"]),
+    "",
+    "验收命令：",
+    ...(acceptance.length > 0 ? acceptance.map((item) => `- ${item}`) : ["- (none)"]),
+  ];
+
+  if (sourceOfTruth.length > 0) {
+    lines.push("", "Source of Truth：", ...sourceOfTruth.map((item) => `- ${item}`));
+  }
+
+  if (requiredChanges.length > 0) {
+    lines.push("", "Required Changes：", ...requiredChanges.map((item) => `- ${item}`));
+  }
+
+  if (nonGoals.length > 0) {
+    lines.push("", "Non-Goals：", ...nonGoals.map((item) => `- ${item}`));
+  }
+
+  if (mustPreserve.length > 0) {
+    lines.push("", "Must Preserve：", ...mustPreserve.map((item) => `- ${item}`));
+  }
+
+  lines.push(
+    "",
+    "完成后必须严格按下面模板回复：",
+    "",
+    buildTraeFinalReportTemplate(),
+  );
+
+  return lines.join("\n").trim();
+}
+
+function validateTraePromptContract(prompt: string) {
+  const normalized = String(prompt || "");
+  const requiredTokens = ["任务完成", "结果", "任务ID"];
+  const missing = requiredTokens.filter((token) => !normalized.includes(token));
+  if (missing.length > 0) {
+    throw new Error(`Trae worker prompt is missing required final-report fields: ${missing.join(", ")}`);
+  }
+}
+
+function ensureTraePromptContract(prompt: string) {
+  try {
+    validateTraePromptContract(prompt);
+    return String(prompt || "");
+  } catch {
+    return [
+      String(prompt || "").trimEnd(),
+      "",
+      "完成后必须严格按下面模板回复：",
+      "",
+      buildTraeFinalReportTemplate(),
+    ].join("\n").trim();
+  }
+}
+
 function buildStructuredContextMarkdown(options: DispatchTaskInputOptions): string | undefined {
   const goal = String(options.goal || "").trim();
   const sourceOfTruth = splitCsv(options.sourceOfTruth);
@@ -144,9 +236,23 @@ export function buildSingleTaskDispatchInput(options: DispatchTaskInputOptions):
   const workerPromptFromFile = readFileContent(options.workerPromptFile);
   const contextMarkdownFromFile = readFileContent(options.contextMarkdownFile);
   const structuredContextMarkdown = buildStructuredContextMarkdown(options);
-
-  const workerPrompt = workerPromptFromFile || options.workerPrompt || "You are a ForgeFlow worker. Stay within allowedPaths and satisfy acceptance.";
+  const isTraePool = String(options.pool || "").trim() === "trae";
+  const customWorkerPrompt = workerPromptFromFile || options.workerPrompt;
+  const workerPromptMode = options.workerPromptMode
+    || (customWorkerPrompt ? "custom" : (isTraePool ? "auto" : undefined));
+  const reportSchemaVersion = options.reportSchemaVersion || (isTraePool ? "trae-v1" : undefined);
+  const rawWorkerPrompt = customWorkerPrompt
+    || (isTraePool
+      ? buildTraeWorkerPrompt(options, allowedPaths, acceptance)
+      : "You are a ForgeFlow worker. Stay within allowedPaths and satisfy acceptance.");
+  const workerPrompt = isTraePool && options.normalizeTraePromptContract
+    ? ensureTraePromptContract(rawWorkerPrompt)
+    : rawWorkerPrompt;
   const contextMarkdown = contextMarkdownFromFile || options.contextMarkdown || structuredContextMarkdown || "# Context\n\nComplete the assigned task within scope.";
+
+  if (isTraePool) {
+    validateTraePromptContract(workerPrompt);
+  }
 
   return {
     repo: options.repo,
@@ -191,6 +297,8 @@ export function buildSingleTaskDispatchInput(options: DispatchTaskInputOptions):
         },
         workerPrompt,
         contextMarkdown,
+        ...(workerPromptMode ? { workerPromptMode } : {}),
+        ...(reportSchemaVersion ? { reportSchemaVersion } : {}),
       },
     ],
   };

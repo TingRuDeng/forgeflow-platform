@@ -311,7 +311,11 @@ describe("dispatch", () => {
       acceptance: "pnpm typecheck,git diff --check",
       requestedBy: "codex-control",
       targetWorkerId: "trae-remote-forgeflow",
-      workerPrompt: "你是 trae-worker。",
+      workerPrompt: [
+        "## 任务完成",
+        "- 结果: 成功 / 失败",
+        "- 任务ID: <task_id>",
+      ].join("\n"),
       contextMarkdown: "# Context\n\nUpdate docs only.",
     });
 
@@ -342,17 +346,48 @@ describe("dispatch", () => {
             defaultBranch: "main",
             targetWorkerId: "trae-remote-forgeflow",
           },
-          workerPrompt: "你是 trae-worker。",
+          workerPrompt: [
+            "## 任务完成",
+            "- 结果: 成功 / 失败",
+            "- 任务ID: <task_id>",
+          ].join("\n"),
           contextMarkdown: "# Context\n\nUpdate docs only.",
+          workerPromptMode: "custom",
+          reportSchemaVersion: "trae-v1",
         },
       ],
     });
   });
 
+  it("auto-renders a Trae prompt with the final report contract when no custom prompt is provided", () => {
+    const payload = buildSingleTaskDispatchInput({
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      taskId: "dispatch-200:task-1",
+      title: "Auto prompt task",
+      pool: "trae",
+      branchName: "ai/trae/task-1",
+      allowedPaths: "packages/a.ts",
+      acceptance: "pnpm test",
+    });
+
+    expect(payload.packages[0]).toEqual(expect.objectContaining({
+      workerPromptMode: "auto",
+      reportSchemaVersion: "trae-v1",
+    }));
+    expect(String(payload.packages[0].workerPrompt)).toContain("## 任务完成");
+    expect(String(payload.packages[0].workerPrompt)).toContain("- 任务ID: <task_id>");
+    expect(String(payload.packages[0].workerPrompt)).toContain("任务ID: dispatch-200:task-1");
+  });
+
   it("reads worker prompt from file when workerPromptFile is provided", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-prompt-"));
     const promptFile = path.join(dir, "worker-prompt.md");
-    fs.writeFileSync(promptFile, "Custom worker prompt from file.\n");
+    fs.writeFileSync(promptFile, [
+      "## 任务完成",
+      "- 结果: 成功 / 失败",
+      "- 任务ID: <task_id>",
+    ].join("\n"));
 
     const payload = buildSingleTaskDispatchInput({
       repo: "TingRuDeng/ForgeFlow",
@@ -364,7 +399,8 @@ describe("dispatch", () => {
       workerPromptFile: promptFile,
     });
 
-    expect(payload.packages[0].workerPrompt).toBe("Custom worker prompt from file.");
+    expect(payload.packages[0].workerPrompt).toContain("- 任务ID: <task_id>");
+    expect(payload.packages[0].workerPromptMode).toBe("custom");
   });
 
   it("reads context markdown from file when contextMarkdownFile is provided", () => {
@@ -445,7 +481,11 @@ describe("dispatch", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-both-"));
     const promptFile = path.join(dir, "worker-prompt.md");
     const contextFile = path.join(dir, "context.md");
-    fs.writeFileSync(promptFile, "Prompt from file.\n");
+    fs.writeFileSync(promptFile, [
+      "## 任务完成",
+      "- 结果: 成功 / 失败",
+      "- 任务ID: <task_id>",
+    ].join("\n"));
     fs.writeFileSync(contextFile, "Context from file.\n");
 
     const payload = buildSingleTaskDispatchInput({
@@ -461,7 +501,7 @@ describe("dispatch", () => {
       contextMarkdownFile: contextFile,
     });
 
-    expect(payload.packages[0].workerPrompt).toBe("Prompt from file.");
+    expect(payload.packages[0].workerPrompt).toContain("- 任务ID: <task_id>");
     expect(payload.packages[0].contextMarkdown).toBe("Context from file.");
   });
 
@@ -471,8 +511,8 @@ describe("dispatch", () => {
       defaultBranch: "main",
       taskId: "task-1",
       title: "Test task",
-      pool: "trae",
-      branchName: "ai/trae/task-1",
+      pool: "codex",
+      branchName: "ai/codex/task-1",
       workerPrompt: "Inline prompt used",
       contextMarkdown: "Inline context used",
       workerPromptFile: "/nonexistent/prompt.md",
@@ -481,6 +521,56 @@ describe("dispatch", () => {
 
     expect(payload.packages[0].workerPrompt).toBe("Inline prompt used");
     expect(payload.packages[0].contextMarkdown).toBe("Inline context used");
+  });
+
+  it("rejects custom Trae prompts that do not include the final report task id field", () => {
+    expect(() => buildSingleTaskDispatchInput({
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      taskId: "task-1",
+      title: "Broken custom trae prompt",
+      pool: "trae",
+      branchName: "ai/trae/task-1",
+      workerPrompt: [
+        "## 任务完成",
+        "- 结果: 成功",
+        "- 修改文件: 无",
+      ].join("\n"),
+    })).toThrow("Trae worker prompt is missing required final-report fields: 任务ID");
+  });
+
+  it("allows custom Trae prompts that satisfy the final report contract", () => {
+    const payload = buildSingleTaskDispatchInput({
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      taskId: "task-1",
+      title: "Valid custom trae prompt",
+      pool: "trae",
+      branchName: "ai/trae/task-1",
+      workerPrompt: [
+        "## 任务完成",
+        "- 结果: 成功 / 失败",
+        "- 任务ID: <task_id>",
+      ].join("\n"),
+    });
+
+    expect(payload.packages[0].workerPromptMode).toBe("custom");
+    expect(payload.packages[0].workerPrompt).toContain("- 任务ID: <task_id>");
+  });
+
+  it("does not force the Trae final report contract on non-Trae pools", () => {
+    const payload = buildSingleTaskDispatchInput({
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      taskId: "task-1",
+      title: "Codex custom prompt",
+      pool: "codex",
+      branchName: "ai/codex/task-1",
+      workerPrompt: "Custom codex prompt without trae report fields.",
+    });
+
+    expect(payload.packages[0].workerPrompt).toBe("Custom codex prompt without trae report fields.");
+    expect(payload.packages[0].reportSchemaVersion).toBeUndefined();
   });
 
   it("falls back to curl when fetch fails for local dispatcher URL", async () => {

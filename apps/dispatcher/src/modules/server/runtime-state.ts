@@ -114,6 +114,8 @@ export interface Assignment {
   assignment: AssignmentPayload;
   workerPrompt?: string;
   contextMarkdown?: string;
+  workerPromptMode?: "auto" | "custom";
+  reportSchemaVersion?: "trae-v1";
   assignedAt?: string | null;
   claimedAt?: string | null;
 }
@@ -221,6 +223,8 @@ export interface CreateDispatchInput {
     assignment: AssignmentPayload;
     workerPrompt?: string;
     contextMarkdown?: string;
+    workerPromptMode?: "auto" | "custom";
+    reportSchemaVersion?: "trae-v1";
   }>;
   createdAt?: string;
 }
@@ -241,6 +245,8 @@ export interface GetAssignedTaskResult {
   assignment: AssignmentPayload;
   workerPrompt?: string;
   contextMarkdown?: string;
+  workerPromptMode?: "auto" | "custom";
+  reportSchemaVersion?: "trae-v1";
   chatMode?: string;
   continuationMode?: string;
   continueFromTaskId?: string | null;
@@ -812,6 +818,8 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
       },
       workerPrompt: sourcePackage.workerPrompt,
       contextMarkdown: sourcePackage.contextMarkdown,
+      workerPromptMode: sourcePackage.workerPromptMode,
+      reportSchemaVersion: sourcePackage.reportSchemaVersion,
       assignedAt: worker ? createdAt : null,
       claimedAt: null,
     };
@@ -898,6 +906,8 @@ export function getAssignedTaskForWorker(state: RuntimeState, workerId: string):
     assignment: assignment.assignment,
     workerPrompt: assignment.workerPrompt,
     contextMarkdown: assignment.contextMarkdown,
+    workerPromptMode: assignment.workerPromptMode,
+    reportSchemaVersion: assignment.reportSchemaVersion,
     chatMode: (assignment as { chatMode?: string }).chatMode ?? task.chatMode ?? "new_chat",
     continuationMode: (assignment as { continuationMode?: string }).continuationMode ?? task.continuationMode,
     continueFromTaskId: (assignment as { continueFromTaskId?: string | null }).continueFromTaskId ?? task.continueFromTaskId ?? null,
@@ -1098,6 +1108,8 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
       },
       workerPrompt: assignment.workerPrompt,
       contextMarkdown: assignment.contextMarkdown,
+      workerPromptMode: assignment.workerPromptMode,
+      reportSchemaVersion: assignment.reportSchemaVersion,
     },
   };
 }

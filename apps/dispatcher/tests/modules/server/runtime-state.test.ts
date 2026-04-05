@@ -100,6 +100,50 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(dispatch.state.updatedAt.endsWith("Z")).toBe(false);
   });
 
+  it("persists worker prompt metadata from dispatch packages into assignments", () => {
+    const state = createEmptyRuntimeState();
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/forgeflow-platform",
+      defaultBranch: "main",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-prompt-meta",
+          title: "Persist prompt metadata",
+          pool: "trae",
+          branchName: "codex/task-prompt-meta",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-prompt-meta",
+          assignment: {
+            taskId: "task-prompt-meta",
+            workerId: null,
+            pool: "trae",
+            status: "pending",
+            branchName: "codex/task-prompt-meta",
+            repo: "TingRuDeng/forgeflow-platform",
+            defaultBranch: "main",
+          },
+          workerPrompt: "## 任务完成\n- 结果: 成功 / 失败\n- 任务ID: <task_id>",
+          contextMarkdown: "# Context\n\nPrompt metadata test.",
+          workerPromptMode: "auto",
+          reportSchemaVersion: "trae-v1",
+        },
+      ],
+    });
+
+    expect(dispatch.state.assignments[0]).toMatchObject({
+      workerPrompt: "## 任务完成\n- 结果: 成功 / 失败\n- 任务ID: <task_id>",
+      contextMarkdown: "# Context\n\nPrompt metadata test.",
+      workerPromptMode: "auto",
+      reportSchemaVersion: "trae-v1",
+    });
+  });
+
   it("orders mixed UTC and local-offset ready tasks by actual time instead of lexical order", () => {
     let state = createEmptyRuntimeState();
 

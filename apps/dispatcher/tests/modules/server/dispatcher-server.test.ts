@@ -341,6 +341,8 @@ describe("dispatcher server", () => {
               defaultBranch: "main",
             },
             workerPrompt: "Test prompt",
+            workerPromptMode: "auto",
+            reportSchemaVersion: "trae-v1",
           },
         ],
       },
@@ -358,6 +360,8 @@ describe("dispatcher server", () => {
     expect(response.json.task.default_branch).toBe("main");
     expect(response.json.task.worktree_dir).toBe(`${repoDir}/.worktrees/dispatch-1-task-1`);
     expect(response.json.task.assignment_dir).toBe(`${repoDir}/.worktrees/dispatch-1-task-1/.orchestrator/assignments/dispatch-1-task-1`);
+    expect(response.json.task.worker_prompt_mode).toBe("auto");
+    expect(response.json.task.report_schema_version).toBe("trae-v1");
     expect(response.json.task.constraints).toContain("allowedPaths: docs/**");
     expect(response.json.task.constraints).toContain("must run acceptance: pnpm test");
     expect(fs.existsSync(response.json.task.assignment_dir)).toBe(false);

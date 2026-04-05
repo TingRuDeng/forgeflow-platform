@@ -1,0 +1,39 @@
+{"type":"server-started","port":53299,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:53299","screen_dir":"/Volumes/Data/WorkSpace/forgeflow-trae/forgeflow-platform/.superpowers/brainstorm/45115-1775293096/content","state_dir":"/Volumes/Data/WorkSpace/forgeflow-trae/forgeflow-platform/.superpowers/brainstorm/45115-1775293096/state"}
+{"type":"screen-added","file":"/Volumes/Data/WorkSpace/forgeflow-trae/forgeflow-platform/.superpowers/brainstorm/45115-1775293096/content/design-directions.html"}
+{"source":"user-event","type":"click","text":"C\n    \n      玻璃拟态风格\n      现代感强，有层次","choice":"glassmorphism","id":null,"timestamp":1775293922962}
+{"type":"screen-added","file":"/Volumes/Data/WorkSpace/forgeflow-trae/forgeflow-platform/.superpowers/brainstorm/45115-1775293096/content/glassmorphism-details.html"}
+{"source":"user-event","type":"click","text":"深紫渐变\n        \n      \n      \n        深紫渐变\n        神秘优雅，适合夜间使用","choice":"gradient-1","id":null,"timestamp":1775294086349}
+{"source":"user-event","type":"click","text":"深蓝渐变\n        \n      \n      \n        深蓝渐变（推荐）\n        专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294087252}
+{"source":"user-event","type":"click","text":"科技蓝渐变\n        \n      \n      \n        科技蓝渐变\n        保留科技感，现代升级","choice":"gradient-3","id":null,"timestamp":1775294088076}
+{"source":"user-event","type":"click","text":"深紫渐变\n        \n      \n      \n        深紫渐变\n        神秘优雅，适合夜间使用","choice":"gradient-1","id":null,"timestamp":1775294089068}
+{"source":"user-event","type":"click","text":"深蓝渐变\n        \n      \n      \n        深蓝渐变（推荐）\n        专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294089668}
+{"source":"user-event","type":"click","text":"深紫渐变\n        \n      \n      \n        深紫渐变\n        神秘优雅，适合夜间使用","choice":"gradient-1","id":null,"timestamp":1775294177199}
+{"source":"user-event","type":"click","text":"深蓝渐变\n        \n      \n      \n        深蓝渐变（推荐）\n        专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294178229}
+{"source":"user-event","type":"click","text":"科技蓝渐变\n        \n      \n      \n        科技蓝渐变\n        保留科技感，现代升级","choice":"gradient-3","id":null,"timestamp":1775294178965}
+{"source":"user-event","type":"click","text":"深蓝渐变\n        \n      \n      \n        深蓝渐变（推荐）\n        专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294179790}
+{"source":"user-event","type":"click","text":"科技蓝渐变\n        \n      \n      \n        科技蓝渐变\n        保留科技感，现代升级","choice":"gradient-3","id":null,"timestamp":1775294180181}
+{"source":"user-event","type":"click","text":"深蓝渐变\n        \n      \n      \n        深蓝渐变（推荐）\n        专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294181590}
+{"source":"user-event","type":"click","text":"深紫渐变\n        \n      \n      \n        深紫渐变\n        神秘优雅，适合夜间使用","choice":"gradient-1","id":null,"timestamp":1775294182125}
+{"source":"user-event","type":"click","text":"深蓝渐变\n        \n      \n      \n        深蓝渐变（推荐）\n        专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294183454}
+{"source":"user-event","type":"click","text":"B\n    \n      深蓝渐变（推荐）\n      专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294190534}
+{"source":"user-event","type":"click","text":"A\n    \n      深紫渐变\n      神秘优雅，适合夜间","choice":"gradient-1","id":null,"timestamp":1775294193213}
+{"source":"user-event","type":"click","text":"B\n    \n      深蓝渐变（推荐）\n      专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294195004}
+{"source":"user-event","type":"click","text":"C\n    \n      科技蓝渐变\n      保留科技感，现代升级","choice":"gradient-3","id":null,"timestamp":1775294196645}
+{"source":"user-event","type":"click","text":"B\n    \n      深蓝渐变（推荐）\n      专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294196973}
+{"source":"user-event","type":"click","text":"A\n    \n      深紫渐变\n      神秘优雅，适合夜间","choice":"gradient-1","id":null,"timestamp":1775294197749}
+{"source":"user-event","type":"click","text":"B\n    \n      深蓝渐变（推荐）\n      专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294198134}
+{"source":"user-event","type":"click","text":"C\n    \n      科技蓝渐变\n      保留科技感，现代升级","choice":"gradient-3","id":null,"timestamp":1775294198494}
+{"source":"user-event","type":"click","text":"B\n    \n      深蓝渐变（推荐）\n      专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294198886}
+{"source":"user-event","type":"click","text":"深紫渐变\n        \n      \n      \n        深紫渐变\n        神秘优雅，适合夜间使用","choice":"gradient-1","id":null,"timestamp":1775294201221}
+{"source":"user-event","type":"click","text":"深蓝渐变\n        \n      \n      \n        深蓝渐变（推荐）\n        专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294201561}
+{"source":"user-event","type":"click","text":"科技蓝渐变\n        \n      \n      \n        科技蓝渐变\n        保留科技感，现代升级","choice":"gradient-3","id":null,"timestamp":1775294201949}
+{"source":"user-event","type":"click","text":"深蓝渐变\n        \n      \n      \n        深蓝渐变（推荐）\n        专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294202301}
+{"source":"user-event","type":"click","text":"深紫渐变\n        \n      \n      \n        深紫渐变\n        神秘优雅，适合夜间使用","choice":"gradient-1","id":null,"timestamp":1775294202717}
+{"source":"user-event","type":"click","text":"深蓝渐变\n        \n      \n      \n        深蓝渐变（推荐）\n        专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294203061}
+{"source":"user-event","type":"click","text":"科技蓝渐变\n        \n      \n      \n        科技蓝渐变\n        保留科技感，现代升级","choice":"gradient-3","id":null,"timestamp":1775294203437}
+{"source":"user-event","type":"click","text":"深蓝渐变\n        \n      \n      \n        深蓝渐变（推荐）\n        专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294204164}
+{"source":"user-event","type":"click","text":"深紫渐变\n        \n      \n      \n        深紫渐变\n        神秘优雅，适合夜间使用","choice":"gradient-1","id":null,"timestamp":1775294204549}
+{"source":"user-event","type":"click","text":"深蓝渐变\n        \n      \n      \n        深蓝渐变（推荐）\n        专业稳重，适合开发者","choice":"gradient-2","id":null,"timestamp":1775294204933}
+{"type":"screen-added","file":"/Volumes/Data/WorkSpace/forgeflow-trae/forgeflow-platform/.superpowers/brainstorm/45115-1775293096/content/complete-layout.html"}
+{"source":"user-event","type":"click","text":"✓\n    \n      确认设计方案\n      开始实现这个设计方案","choice":"confirm","id":null,"timestamp":1775294392576}
+{"type":"server-stopped","reason":"idle timeout"}

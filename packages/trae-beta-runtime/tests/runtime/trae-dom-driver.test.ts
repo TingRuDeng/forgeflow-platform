@@ -479,7 +479,7 @@ describe("runtime/trae-dom-driver", () => {
       },
     });
 
-    expect(captureResponseSnapshot).toHaveBeenCalledWith(session, expect.any(Object));
+    expect(captureResponseSnapshot).toHaveBeenCalledWith(session, expect.any(Object), undefined);
     expect(captureResponseSnapshot).toHaveBeenCalledWith(
       session,
       expect.any(Object),
@@ -806,5 +806,168 @@ describe("runtime/trae-dom-driver", () => {
         text: finalReportText,
       },
     });
+  });
+
+  it("limits new_chat snapshots to the last visible chat root when collecting baseline and responses", async () => {
+    const discoverTarget = vi.fn(async () => ({
+      target: {
+        id: "target-1",
+        title: "ForgeFlow — new chat root limit",
+        url: "vscode-file://workbench",
+      },
+      version: {},
+      targets: [],
+    }));
+    const session = {
+      close: vi.fn(async () => undefined),
+    };
+    const connectToTarget = vi.fn(async () => session);
+    const inspectReadiness = vi.fn(async () => ({
+      ready: true,
+      title: "ForgeFlow — new chat root limit",
+      url: "vscode-file://workbench",
+      composerFound: true,
+      composerSelector: ".chat-input-v2-input-box-editable",
+      sendButtonFound: true,
+      sendButtonSelector: "button.chat-input-v2-send-button",
+      newChatFound: true,
+      responseFound: false,
+      readyState: "complete",
+    }));
+    const prepareSession = vi.fn(async () => ({ ok: true, clicked: true }));
+    const finalReportText = [
+      "## 任务完成",
+      "- 结果: 成功",
+      "- 任务ID: dispatch-190:new-chat-root",
+    ].join("\n");
+    let responsePollIndex = 0;
+    const captureResponseSnapshot = vi.fn(async (_session, _config, options) => {
+      if (Array.isArray(options?.selectors)) {
+        return [];
+      }
+      const snapshots = [
+        [],
+        [{ index: 0, text: finalReportText, descriptor: {} }],
+        [{ index: 0, text: finalReportText, descriptor: {} }],
+      ];
+      const next = snapshots[Math.min(responsePollIndex, snapshots.length - 1)];
+      responsePollIndex += 1;
+      return next;
+    });
+    const submitPrompt = vi.fn(async () => ({ ok: true }));
+    const domAdapter = {
+      inspectReadiness,
+      prepareSession,
+      captureResponseSnapshot,
+      submitPrompt,
+    };
+    let nowValue = 0;
+
+    const { createTraeAutomationDriver } = await import("../../src/runtime/trae-dom-driver.js");
+    const driver = createTraeAutomationDriver({
+      discoverTarget,
+      connectToTarget,
+      domAdapter: domAdapter as never,
+      now: () => {
+        nowValue += 700;
+        return nowValue;
+      },
+      responsePollIntervalMs: 0,
+      responseIdleMs: 600,
+      responseTimeoutMs: 5000,
+      postActionDelayMs: 0,
+    });
+
+    await expect(driver.sendPrompt({
+      content: "Please start a fresh task",
+      prepare: true,
+      chatMode: "new_chat",
+      expectedTaskId: "dispatch-190:new-chat-root",
+      responseRequiredPrefix: "任务完成",
+    })).resolves.toMatchObject({
+      status: "ok",
+      response: {
+        text: finalReportText,
+      },
+    });
+
+    expect(captureResponseSnapshot).toHaveBeenCalledWith(
+      session,
+      expect.any(Object),
+      expect.objectContaining({
+        rootSelectors: expect.any(Array),
+        rootPick: "last",
+      }),
+    );
+  });
+
+  it("fails fast when new_chat baseline still contains a different completed task id", async () => {
+    const discoverTarget = vi.fn(async () => ({
+      target: {
+        id: "target-1",
+        title: "ForgeFlow — stale baseline",
+        url: "vscode-file://workbench",
+      },
+      version: {},
+      targets: [],
+    }));
+    const session = {
+      close: vi.fn(async () => undefined),
+    };
+    const connectToTarget = vi.fn(async () => session);
+    const inspectReadiness = vi.fn(async () => ({
+      ready: true,
+      title: "ForgeFlow — stale baseline",
+      url: "vscode-file://workbench",
+      composerFound: true,
+      composerSelector: ".chat-input-v2-input-box-editable",
+      sendButtonFound: true,
+      sendButtonSelector: "button.chat-input-v2-send-button",
+      newChatFound: true,
+      responseFound: true,
+      readyState: "complete",
+    }));
+    const prepareSession = vi.fn(async () => ({ ok: true, clicked: true }));
+    const staleReportText = [
+      "## 任务完成",
+      "- 结果: 成功",
+      "- 任务ID: dispatch-186:old-task",
+      "- 修改文件: 无",
+    ].join("\n");
+    const captureResponseSnapshot = vi.fn(async (_session, _config, options) => {
+      if (Array.isArray(options?.selectors)) {
+        return [];
+      }
+      return [{ index: 0, text: staleReportText, descriptor: {} }];
+    });
+    const submitPrompt = vi.fn(async () => ({ ok: true }));
+    const domAdapter = {
+      inspectReadiness,
+      prepareSession,
+      captureResponseSnapshot,
+      submitPrompt,
+    };
+
+    const { createTraeAutomationDriver } = await import("../../src/runtime/trae-dom-driver.js");
+    const driver = createTraeAutomationDriver({
+      discoverTarget,
+      connectToTarget,
+      domAdapter: domAdapter as never,
+      responsePollIntervalMs: 0,
+      responseIdleMs: 600,
+      responseTimeoutMs: 5000,
+      postActionDelayMs: 0,
+    });
+
+    await expect(driver.sendPrompt({
+      content: "Please start a fresh task",
+      prepare: true,
+      chatMode: "new_chat",
+      expectedTaskId: "dispatch-187:new-task",
+      responseRequiredPrefix: "任务完成",
+    })).rejects.toThrow('Prepared new chat but still reading stale task content for "dispatch-186:old-task"');
+
+    expect(submitPrompt).not.toHaveBeenCalled();
+    expect(session.close).toHaveBeenCalledTimes(1);
   });
 });
