@@ -29,8 +29,10 @@ This package is meant to pair with the `worker-review-orchestrator` skill, but i
 - `dispatch-task`
   - Build and POST a single-task dispatch payload from CLI flags
   - Preferred when the control layer wants to send one focused task without hand-writing `dispatch.json`
+  - When `--pool trae` is used without a custom prompt, the CLI auto-renders a Trae worker prompt from the structured task fields and appends the required final-report contract
   - Supports `--worker-prompt` and `--context-markdown` for inline string inputs
   - Supports `--worker-prompt-file` and `--context-markdown-file` for file-backed prompt/context inputs
+  - Custom Trae prompts must still include `任务完成` / `结果` / `任务ID`; otherwise dispatch fails before posting
   - Supports `--require-existing-worker` to reject dispatch when no matching online worker exists
 - `continue-task`
   - Continue an existing task via the redrive flow instead of creating a brand new dispatch
@@ -72,6 +74,8 @@ When `--target-worker-id` is set, the CLI injects that worker id into every task
 When `--require-existing-worker` is set, the CLI fetches `/api/dashboard/snapshot` before dispatch and hard-fails if the pinned target worker is offline or if no online worker exists for the required task pool. Use this when the control layer must reuse an already running dispatcher + worker runtime instead of implicitly relying on a later bootstrap step.
 
 Use `dispatch-task` for the common case of one worker task with one branch, one `allowedPaths` list, and one `acceptance` list. Keep `dispatch --input` for more complex multi-task or prebuilt payloads.
+
+For Trae tasks, prefer structured flags (`--goal`, `--source-of-truth`, `--required-changes`, `--non-goals`, `--must-preserve`, `--acceptance`) over hand-written prompt files. The CLI now treats the final report contract as part of dispatch validation, not just a runtime convention.
 
 Use `continue-task` when you need to resume an existing task. It preserves the original task lineage and routes through the redrive flow instead of creating a new dispatch.
 

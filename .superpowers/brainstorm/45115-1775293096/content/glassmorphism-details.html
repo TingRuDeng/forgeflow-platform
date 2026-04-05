@@ -1,0 +1,188 @@
+<h2>玻璃拟态风格 - 详细设计方案</h2>
+<p class="subtitle">为 ForgeFlow Console 打造现代、有层次感的视觉体验</p>
+
+<div class="section">
+  <h3>配色方案</h3>
+  <div class="cards">
+    <div class="card" data-choice="gradient-1" onclick="toggleSelect(this)">
+      <div class="card-image" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); height: 120px; display: flex; align-items: center; justify-content: center;">
+        <div style="background: rgba(255,255,255,0.15); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; padding: 16px 24px; color: white; font-weight: 600;">
+          深紫渐变
+        </div>
+      </div>
+      <div class="card-body">
+        <h3>深紫渐变</h3>
+        <p>神秘优雅，适合夜间使用</p>
+      </div>
+    </div>
+    
+    <div class="card" data-choice="gradient-2" onclick="toggleSelect(this)">
+      <div class="card-image" style="background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%); height: 120px; display: flex; align-items: center; justify-content: center;">
+        <div style="background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; padding: 16px 24px; color: white; font-weight: 600;">
+          深蓝渐变
+        </div>
+      </div>
+      <div class="card-body">
+        <h3>深蓝渐变（推荐）</h3>
+        <p>专业稳重，适合开发者</p>
+      </div>
+    </div>
+    
+    <div class="card" data-choice="gradient-3" onclick="toggleSelect(this)">
+      <div class="card-image" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); height: 120px; display: flex; align-items: center; justify-content: center;">
+        <div style="background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 16px 24px; color: #00d9ff; font-weight: 600;">
+          科技蓝渐变
+        </div>
+      </div>
+      <div class="card-body">
+        <h3>科技蓝渐变</h3>
+        <p>保留科技感，现代升级</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>组件设计细节</h3>
+  
+  <div class="mockup">
+    <div class="mockup-header">指标卡片设计</div>
+    <div class="mockup-body" style="background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%); padding: 24px;">
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+        <div style="background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 16px; transition: 'all 0.3s';">
+          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+            <span style="font-size: 11px; color: rgba(255,255,255,0.7); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">活跃节点</span>
+            <div style="width: 32px; height: 32px; background: rgba(59, 130, 246, 0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+              <span style="color: #60a5fa; font-size: 14px;">●</span>
+            </div>
+          </div>
+          <div style="font-size: 32px; color: white; font-weight: 700; line-height: 1;">12</div>
+          <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px;">总容量: 20</div>
+        </div>
+        
+        <div style="background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+            <span style="font-size: 11px; color: rgba(255,255,255,0.7); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">空闲 / 繁忙</span>
+            <div style="width: 32px; height: 32px; background: rgba(16, 185, 129, 0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+              <span style="color: #34d399; font-size: 14px;">●</span>
+            </div>
+          </div>
+          <div style="font-size: 32px; color: white; font-weight: 700; line-height: 1;">4 <span style="font-size: 20px; color: rgba(255,255,255,0.4);">/</span> 8</div>
+          <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px;">使用率 67%</div>
+        </div>
+        
+        <div style="background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+            <span style="font-size: 11px; color: rgba(255,255,255,0.7); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">总任务数</span>
+            <div style="width: 32px; height: 32px; background: rgba(168, 85, 247, 0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+              <span style="color: #c084fc; font-size: 14px;">●</span>
+            </div>
+          </div>
+          <div style="font-size: 32px; color: white; font-weight: 700; line-height: 1;">156</div>
+          <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px;">本周 +23</div>
+        </div>
+        
+        <div style="background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+            <span style="font-size: 11px; color: rgba(255,255,255,0.7); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">待审 / 已合并</span>
+            <div style="width: 32px; height: 32px; background: rgba(251, 146, 60, 0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+              <span style="color: #fb923c; font-size: 14px;">●</span>
+            </div>
+          </div>
+          <div style="font-size: 32px; color: white; font-weight: 700; line-height: 1;">12 <span style="font-size: 20px; color: rgba(255,255,255,0.4);">/</span> 89</div>
+          <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 4px;">完成率 57%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">任务列表设计</div>
+    <div class="mockup-body" style="background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%); padding: 24px;">
+      <div style="background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; overflow: hidden;">
+        <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
+          <h3 style="font-size: 14px; color: white; font-weight: 600; margin: 0;">任务列表</h3>
+          <div style="display: flex; gap: 8px;">
+            <button style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); color: white; padding: 6px 12px; border-radius: 8px; font-size: 11px; cursor: pointer;">全部</button>
+            <button style="background: transparent; border: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); padding: 6px 12px; border-radius: 8px; font-size: 11px; cursor: pointer;">进行中</button>
+            <button style="background: transparent; border: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); padding: 6px 12px; border-radius: 8px; font-size: 11px; cursor: pointer;">已完成</button>
+          </div>
+        </div>
+        
+        <div style="padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; transition: 'background 0.2s';">
+          <div style="flex: 1;">
+            <div style="color: white; font-size: 13px; font-weight: 500; margin-bottom: 4px;">codex/feat-auth-system</div>
+            <div style="color: rgba(255,255,255,0.5); font-size: 11px;">Worker: gemini-worker-01</div>
+          </div>
+          <span style="background: rgba(6, 182, 212, 0.2); color: #22d3ee; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600; border: 1px solid rgba(6, 182, 212, 0.3);">进行中</span>
+        </div>
+        
+        <div style="padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center;">
+          <div style="flex: 1;">
+            <div style="color: white; font-size: 13px; font-weight: 500; margin-bottom: 4px;">codex/optimize-performance</div>
+            <div style="color: rgba(255,255,255,0.5); font-size: 11px;">Worker: codex-worker-03</div>
+          </div>
+          <span style="background: rgba(217, 70, 239, 0.2); color: #e879f9; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600; border: 1px solid rgba(217, 70, 239, 0.3);">待审核</span>
+        </div>
+        
+        <div style="padding: 12px 20px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="flex: 1;">
+            <div style="color: white; font-size: 13px; font-weight: 500; margin-bottom: 4px;">codex/add-unit-tests</div>
+            <div style="color: rgba(255,255,255,0.5); font-size: 11px;">Worker: trae-worker-02</div>
+          </div>
+          <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600; border: 1px solid rgba(16, 185, 129, 0.3);">已合并</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>动效设计</h3>
+  <div style="background: rgba(255,255,255,0.05); padding: 16px; border-radius: 12px; border-left: 4px solid #60a5fa;">
+    <ul style="color: rgba(255,255,255,0.8); line-height: 1.8; font-size: 13px; margin: 0; padding-left: 20px;">
+      <li><strong>卡片悬停</strong>：轻微上浮 + 发光边框增强（0.3s ease-out）</li>
+      <li><strong>状态切换</strong>：平滑颜色过渡 + 淡入淡出（0.2s ease）</li>
+      <li><strong>列表项悬停</strong>：背景色渐变高亮（0.15s ease）</li>
+      <li><strong>按钮点击</strong>：缩放反馈（scale: 0.98, 0.1s）</li>
+      <li><strong>加载状态</strong>：脉冲动画 + 渐变流动效果</li>
+      <li><strong>页面切换</strong>：淡入淡出 + 轻微位移（0.3s ease-out）</li>
+    </ul>
+  </div>
+</div>
+
+<div class="section" style="background: rgba(16, 185, 129, 0.1); padding: 16px; border-radius: 8px; border-left: 4px solid #10b981;">
+  <h3 style="color: #059669; margin-bottom: 8px;">✨ 玻璃拟态风格优势</h3>
+  <ul style="color: #047857; line-height: 1.8; font-size: 13px; margin: 0; padding-left: 20px;">
+    <li><strong>现代感强</strong>：符合当前设计趋势，视觉吸引力高</li>
+    <li><strong>层次丰富</strong>：通过透明度和模糊创造深度感</li>
+    <li><strong>柔和舒适</strong>：减少视觉疲劳，适合长时间使用</li>
+    <li><strong>灵活性高</strong>：可以轻松调整透明度和模糊程度</li>
+  </ul>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="gradient-1" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>深紫渐变</h3>
+      <p>神秘优雅，适合夜间</p>
+    </div>
+  </div>
+  <div class="option" data-choice="gradient-2" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>深蓝渐变（推荐）</h3>
+      <p>专业稳重，适合开发者</p>
+    </div>
+  </div>
+  <div class="option" data-choice="gradient-3" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>科技蓝渐变</h3>
+      <p>保留科技感，现代升级</p>
+    </div>
+  </div>
+</div>

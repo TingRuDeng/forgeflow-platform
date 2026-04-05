@@ -9,10 +9,10 @@
 
 这两个问题叠加后，会出现如下现象：
 
-- Trae 实际已经输出“任务完成”
+- Trae 实际已经输出"任务完成"
 - worker 已经正常 claim task 并发送 prompt
 - gateway 仍然把结果判为 `canFinish: false`
-- dispatcher 看起来像“任务没有完成”或“worker 没拿到任务”
+- dispatcher 看起来像"任务没有完成"或"worker 没拿到任务"
 
 本设计只解决这两类问题，不修改 dispatcher 主状态机，也不重做 Trae worker 架构。
 
@@ -22,14 +22,14 @@
 2. 为自定义 Trae prompt 增加最小完成协议门禁，至少保证最终回执可被 runtime 正确识别。
 3. 将最终渲染后的 prompt 作为任务记录的一部分持久化，方便审计、review 和 redrive。
 4. 收窄 `new_chat` 后的 DOM 采样范围，避免 gateway 误读旧任务内容。
-5. 只增加轻量 stale guard：检测“是否仍在读取前一个任务的内容”，不去猜测新 chat 的完整 UI 形态。
+5. 只增加轻量 stale guard：检测"是否仍在读取前一个任务的内容"，不去猜测新 chat 的完整 UI 形态。
 
 ## 非目标
 
 - 不新增 dispatcher 状态
 - 不修改 worker result / review decision 的结构化 evidence 契约
 - 不重写 Trae DOM driver 的整体架构
-- 不引入复杂的“新 chat 正常形态识别”逻辑
+- 不引入复杂的"新 chat 正常形态识别"逻辑
 - 不禁止所有自定义 prompt
 
 ## 核心判断
@@ -47,7 +47,7 @@ Trae runtime 默认模板本身已经要求最终回执包含：
 
 但控制层通过自定义 `workerPrompt` 或 `workerPromptFile` 可以绕过这层默认模板。现有 `strictTaskSpec` 只校验任务结构字段，不校验最终 prompt 是否满足 Trae 完成协议。
 
-因此，应该把“prompt 如何生成”和“最终 prompt 是否满足最小完成协议”前移到 CLI，而不是等 gateway 在 `/v1/chat` 结束时才发现回执不可接受。
+因此，应该把"prompt 如何生成"和"最终 prompt 是否满足最小完成协议"前移到 CLI，而不是等 gateway 在 `/v1/chat` 结束时才发现回执不可接受。
 
 ### 2. Session 问题的本质
 
@@ -58,7 +58,7 @@ Trae runtime 默认模板本身已经要求最终回执包含：
 因此，核心修复不应只是 `sleep`，而是：
 
 - 缩窄采样范围
-- 再加一个只针对“旧任务仍被读取”的轻量守卫
+- 再加一个只针对"旧任务仍被读取"的轻量守卫
 
 ## 方案
 
@@ -127,7 +127,7 @@ Trae runtime 默认模板本身已经要求最终回执包含：
 
 用途：
 
-- 审计时明确“当时发给 worker 的最终 prompt 是什么”
+- 审计时明确"当时发给 worker 的最终 prompt 是什么"
 - 识别 prompt 是 CLI 自动生成还是控制层自定义
 - 为 redrive / continuation 保留稳定输入
 
@@ -140,7 +140,7 @@ Trae runtime 不应再只依赖页面级全局选择器去读取响应。
 原则：
 
 - 优先修复读取边界，而不是增加更多 UI 猜测逻辑
-- 不要求完全识别“新 chat 页面长什么样”
+- 不要求完全识别"新 chat 页面长什么样"
 - 只要求不要继续把整个页面里残留的旧对话当成当前响应源
 
 如果当前版本无法稳定定位精确会话根节点，也至少应做到：
@@ -150,7 +150,7 @@ Trae runtime 不应再只依赖页面级全局选择器去读取响应。
 
 ### 5. 轻量 Stale Guard
 
-本设计不尝试判断“新 chat 是否已经完整就绪”，只判断“是否仍在持续读取旧任务内容”。
+本设计不尝试判断"新 chat 是否已经完整就绪"，只判断"是否仍在持续读取旧任务内容"。
 
 建议做法：
 
@@ -245,7 +245,7 @@ assignment 记录继续保存：
 2. 增加旧 task id stale guard
 3. 补 DOM driver / worker 测试
 
-顺序上先堵住“再犯”，再修“当前会话误读”，避免一开始就扩大改动面。
+顺序上先堵住"再犯"，再修"当前会话误读"，避免一开始就扩大改动面。
 
 ## 测试建议
 
@@ -272,9 +272,9 @@ assignment 记录继续保存：
 ## 风险与边界
 
 - 如果当前 Trae DOM 结构变化过快，精确 root 定位可能需要跟进选择器维护。
-- stale guard 只处理“旧任务污染”这类强信号，不覆盖所有 UI 异常。
-- 自定义 prompt 仍然允许存在，因此门禁必须足够明确，否则会再次回到“控制层手写 prompt 破坏 runtime 契约”的问题。
-- 本设计不解决“Trae 已完成但输出本身不符合业务要求”的 review 问题；它只解决 prompt 协议和会话串读问题。
+- stale guard 只处理"旧任务污染"这类强信号，不覆盖所有 UI 异常。
+- 自定义 prompt 仍然允许存在，因此门禁必须足够明确，否则会再次回到"控制层手写 prompt 破坏 runtime 契约"的问题。
+- 本设计不解决"Trae 已完成但输出本身不符合业务要求"的 review 问题；它只解决 prompt 协议和会话串读问题。
 
 ## 最小验收
 

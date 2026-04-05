@@ -193,6 +193,7 @@ function buildRedrivePayload(
     targetWorkerId: fields.targetWorkerId ?? undefined,
     workerPrompt,
     contextMarkdown,
+    normalizeTraePromptContract: fields.pool === "trae",
     continuationMode: "continue",
     continueFromTaskId: originalTaskId,
   });

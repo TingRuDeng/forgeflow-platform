@@ -69,6 +69,9 @@ Current endpoint families:
   - Create a dispatch, task records, assignment records, and initial review placeholders.
   - Review-memory injection may mutate assignment context during this call.
   - Task payloads can also carry continuation metadata such as `continuationMode` and `continueFromTaskId`.
+  - Assignment packages may additionally persist prompt metadata such as:
+    - `workerPromptMode`
+    - `reportSchemaVersion`
 - `POST /api/reviews/:taskId/decision`
   - Submit `merge` or `block` and move task from `review` to `merged` or `blocked`.
   - Request body may include additive structured decision evidence:
@@ -89,6 +92,8 @@ Current endpoint families:
     - `chat_mode`
     - `continuation_mode`
     - `continue_from_task_id`
+    - `worker_prompt_mode`
+    - `report_schema_version`
 - `POST /api/trae/start-task`
   - Mark Trae task as started.
 - `POST /api/trae/report-progress`
@@ -112,6 +117,7 @@ Common verified endpoints across both gateway implementations:
   - Prepare a reusable session and optional session id.
 - `POST /v1/chat`
   - Send prompt content to the automation driver and return the final response.
+  - In `new_chat` flows, the packaged runtime now scopes baseline sampling to the last visible chat root and may fail early when the baseline still exposes a different completed task id.
 
 ### Current implementation divergence
 

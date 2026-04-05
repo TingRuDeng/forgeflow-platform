@@ -433,11 +433,14 @@ describe("redrive", () => {
     expect(payload.packages).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          workerPrompt: "Custom worker prompt for this task",
           contextMarkdown: "# Task Context\n\nThis is the custom context for the redrive task.",
         }),
       ]),
     );
+    const preservedPackage = (payload.packages as unknown[])[0] as Record<string, unknown>;
+    expect(String(preservedPackage.workerPrompt ?? "")).toContain("Custom worker prompt for this task");
+    expect(String(preservedPackage.workerPrompt ?? "")).toContain("## 任务完成");
+    expect(String(preservedPackage.workerPrompt ?? "")).toContain("任务ID");
 
     const originalBranchName = "feature/test";
     const redriveTask = (payload.tasks as unknown[]).find((t: unknown) => {
@@ -1079,7 +1082,9 @@ describe("redrive", () => {
     expect(pkg).toBeDefined();
 
     const workerPrompt = pkg?.workerPrompt as string;
-    expect(workerPrompt).toBe("Custom worker prompt for this task");
+    expect(workerPrompt).toContain("Custom worker prompt for this task");
+    expect(workerPrompt).toContain("## 任务完成");
+    expect(workerPrompt).toContain("任务ID");
     expect(workerPrompt).not.toContain("Rework Notes");
 
     const contextMarkdown = pkg?.contextMarkdown as string;
@@ -1172,7 +1177,9 @@ describe("redrive", () => {
     expect(pkg).toBeDefined();
 
     const workerPrompt = pkg?.workerPrompt as string;
-    expect(workerPrompt).toBe("Original prompt");
+    expect(workerPrompt).toContain("Original prompt");
+    expect(workerPrompt).toContain("## 任务完成");
+    expect(workerPrompt).toContain("任务ID");
     expect(workerPrompt).not.toContain("Rework Notes");
 
     const contextMarkdown = pkg?.contextMarkdown as string;
