@@ -191,6 +191,18 @@ describe("runtime/worker", () => {
         prNumber: 42,
         prUrl: "https://example.com/pr/42",
       },
+      evidence: {
+        blockers: [],
+        findings: [],
+        artifacts: {
+          source: "chat_completion",
+          conclusionType: "repo_fix",
+          branchName: "codex/trae-beta-self-contained-runtime",
+          commitSha: "abc123",
+          pushStatus: "success",
+          filesChanged: "src/runtime/worker.ts,src/runtime/task-worktree.ts",
+        },
+      },
     });
     expect(result).toEqual({
       status: "review_ready",
@@ -2058,6 +2070,180 @@ describe("runtime/worker", () => {
       status: "failed",
       taskId: "dispatch-203:completed-placeholder",
       error: expect.stringContaining("template placeholder"),
+    });
+
+    runtime.stop();
+  });
+
+  it("accepts explicit environment_only success and preserves environment evidence", async () => {
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      fetchTask: vi.fn(async () => ({
+        status: "task",
+        task: {
+          task_id: "dispatch-300:environment-only",
+          repo: "repo",
+          branch: "feature/environment-only",
+          default_branch: "main",
+          scope: ["packages/**"],
+          acceptance: ["pnpm --filter @tingrudeng/trae-beta-runtime typecheck"],
+          constraints: [],
+          prompt: "Diagnose whether the typecheck issue is environment-only",
+          chat_mode: "new_chat",
+        },
+      })),
+      startTask: vi.fn(async () => ({})),
+      reportProgress: vi.fn(async () => ({})),
+      submitResult: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => ({})),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-environment-only" } })),
+      sendChat: vi.fn(async () => ({
+        response: {
+          text: [
+            "## 任务完成",
+            "- 结果: 成功",
+            "- 任务ID: dispatch-300:environment-only",
+            "- 结论类型: environment_only",
+            "- 修改文件: 无",
+            "- 测试结果: pnpm --filter @tingrudeng/trae-beta-runtime typecheck",
+            "- 风险: 无",
+            "- 环境证据: pnpm install fixed the missing workspace dependency",
+            "same checkout now resolves @forgeflow/result-contracts",
+            "- GitHub 证据:",
+            "  - branch: 无",
+            "  - commit: 无",
+            "  - push: 无",
+            "  - push_error: 无",
+            "  - PR: 无",
+            "  - PR URL: 无",
+            "- 备注: no repo code change",
+          ].join("\n"),
+        },
+      })),
+      releaseSession: vi.fn(async () => ({ data: { sessionId: "session-environment-only", released: true } })),
+    };
+
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-remote",
+      repoDir: "/tmp/project",
+      logger: { warn: vi.fn(), log: vi.fn() },
+      sleep: vi.fn(async () => undefined),
+      setIntervalImpl: vi.fn(() => ({}) as never),
+      clearIntervalImpl: vi.fn(),
+    });
+
+    const result = await runtime.runOnce();
+
+    expect(dispatcherClient.submitResult).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "dispatch-300:environment-only",
+      status: "review_ready",
+      summary: "no repo code change",
+      filesChanged: [],
+      github: expect.objectContaining({
+        branchName: null,
+        commitSha: null,
+        pushStatus: "not_attempted",
+      }),
+      evidence: {
+        blockers: [],
+        findings: [],
+        artifacts: expect.objectContaining({
+          source: "chat_completion",
+          conclusionType: "environment_only",
+          environmentEvidence: "pnpm install fixed the missing workspace dependency\nsame checkout now resolves @forgeflow/result-contracts",
+          noRepoCodeChange: "true",
+        }),
+      },
+    }));
+    expect(result).toEqual({
+      status: "review_ready",
+      taskId: "dispatch-300:environment-only",
+      responseText: expect.stringContaining("## 任务完成"),
+    });
+
+    runtime.stop();
+  });
+
+  it("fails parsed success without code-change evidence or explicit environment_only proof", async () => {
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      fetchTask: vi.fn(async () => ({
+        status: "task",
+        task: {
+          task_id: "dispatch-301:invalid-success",
+          repo: "repo",
+          branch: "feature/invalid-success",
+          default_branch: "main",
+          scope: ["packages/**"],
+          acceptance: ["pnpm --filter @tingrudeng/trae-beta-runtime typecheck"],
+          constraints: [],
+          prompt: "Do not accept an empty success report",
+          chat_mode: "new_chat",
+        },
+      })),
+      startTask: vi.fn(async () => ({})),
+      reportProgress: vi.fn(async () => ({})),
+      submitResult: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => ({})),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-invalid-success" } })),
+      sendChat: vi.fn(async () => ({
+        response: {
+          text: [
+            "## 任务完成",
+            "- 结果: 成功",
+            "- 任务ID: dispatch-301:invalid-success",
+            "- 修改文件: 无",
+            "- 测试结果: pnpm --filter @tingrudeng/trae-beta-runtime typecheck",
+            "- 风险: 无",
+            "- GitHub 证据:",
+            "  - branch: 无",
+            "  - commit: 无",
+            "  - push: 无",
+            "  - push_error: 无",
+            "  - PR: 无",
+            "  - PR URL: 无",
+            "- 备注: no further details",
+          ].join("\n"),
+        },
+      })),
+      releaseSession: vi.fn(async () => ({ data: { sessionId: "session-invalid-success", released: true } })),
+    };
+
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-remote",
+      repoDir: "/tmp/project",
+      logger: { warn: vi.fn(), log: vi.fn() },
+      sleep: vi.fn(async () => undefined),
+      setIntervalImpl: vi.fn(() => ({}) as never),
+      clearIntervalImpl: vi.fn(),
+    });
+
+    const result = await runtime.runOnce();
+
+    expect(dispatcherClient.submitResult).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "dispatch-301:invalid-success",
+      status: "failed",
+      summary: expect.stringContaining("missing code-change evidence"),
+      evidence: expect.objectContaining({
+        failureType: "unknown",
+      }),
+    }));
+    expect(result).toEqual({
+      status: "failed",
+      taskId: "dispatch-301:invalid-success",
+      responseText: expect.stringContaining("## 任务完成"),
     });
 
     runtime.stop();

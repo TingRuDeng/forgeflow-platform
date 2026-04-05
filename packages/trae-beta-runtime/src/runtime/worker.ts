@@ -87,9 +87,11 @@ export interface WorkerRuntimeTask {
 export interface WorkerRuntimeReport {
   result: string;
   taskId: string;
+  conclusionType: "repo_fix" | "environment_only" | null;
   filesChanged: string[];
   testOutput: string;
   risks: string[];
+  environmentEvidence: string;
   notes: string;
   github: {
     branchName: string | null;
@@ -143,9 +145,11 @@ export function buildFinalReportTemplate() {
     "## 任务完成",
     "- 结果: 成功 / 失败",
     "- 任务ID: <task_id>",
+    "- 结论类型: <repo_fix / environment_only；默认 repo_fix，无环境结论时也可写\"无\">",
     "- 修改文件: <files_changed> (无则写\"无\")",
     "- 测试结果: <test_output> (无则写\"无\")",
     "- 风险: <risks> (无则写\"无\")",
+    "- 环境证据: <仅 environment_only 时填写；否则写\"无\">",
     "- GitHub 证据:",
     "  - branch: <branch_name> (无则写\"无\")",
     "  - commit: <commit_sha> (无则写\"无\")",
@@ -188,6 +192,20 @@ export function normalizePushStatus(value: unknown) {
     return "failed";
   }
   return "not_attempted";
+}
+
+function normalizeConclusionType(value: unknown): WorkerRuntimeReport["conclusionType"] {
+  const normalized = normalizeFieldValue(value).toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === "repo_fix") {
+    return "repo_fix";
+  }
+  if (normalized === "environment_only") {
+    return "environment_only";
+  }
+  return null;
 }
 
 function basenameFromPath(value: unknown) {
@@ -253,9 +271,11 @@ export function parseFinalReport(text: string): WorkerRuntimeReport {
   const fields = {
     result: "",
     taskId: "",
+    conclusionType: "",
     filesChanged: "",
     testOutput: "",
     risks: "",
+    environmentEvidence: "",
     notes: "",
     branch: "",
     commit: "",
@@ -284,6 +304,8 @@ export function parseFinalReport(text: string): WorkerRuntimeReport {
     if (!match) {
       if (section === "test" && fields.testOutput) {
         fields.testOutput += `\n${line.trim()}`;
+      } else if (section === "environment" && fields.environmentEvidence) {
+        fields.environmentEvidence += `\n${line.trim()}`;
       }
       continue;
     }
@@ -299,6 +321,10 @@ export function parseFinalReport(text: string): WorkerRuntimeReport {
         fields.taskId = value;
         section = "";
         break;
+      case "结论类型":
+        fields.conclusionType = value;
+        section = "";
+        break;
       case "修改文件":
         fields.filesChanged = value;
         section = "";
@@ -310,6 +336,10 @@ export function parseFinalReport(text: string): WorkerRuntimeReport {
       case "风险":
         fields.risks = value;
         section = "";
+        break;
+      case "环境证据":
+        fields.environmentEvidence = value;
+        section = "environment";
         break;
       case "备注":
         fields.notes = value;
@@ -345,9 +375,11 @@ export function parseFinalReport(text: string): WorkerRuntimeReport {
   return {
     result: fields.result,
     taskId: fields.taskId,
+    conclusionType: normalizeConclusionType(fields.conclusionType),
     filesChanged: splitListValue(fields.filesChanged),
     testOutput: normalizeFieldValue(fields.testOutput),
     risks: splitListValue(fields.risks),
+    environmentEvidence: normalizeFieldValue(fields.environmentEvidence),
     notes: normalizeFieldValue(fields.notes),
     github: {
       branchName: normalizeFieldValue(fields.branch) || null,
@@ -357,6 +389,52 @@ export function parseFinalReport(text: string): WorkerRuntimeReport {
       prNumber: normalizeFieldValue(fields.pr) ? Number(normalizeFieldValue(fields.pr)) : null,
       prUrl: normalizeFieldValue(fields.prUrl) || null,
     },
+  };
+}
+
+function hasCodeChangeEvidence(parsed: WorkerRuntimeReport) {
+  return parsed.filesChanged.length > 0
+    || Boolean(parsed.github.commitSha)
+    || parsed.github.pushStatus === "success"
+    || parsed.github.pushStatus === "verified"
+    || Boolean(parsed.github.prNumber)
+    || Boolean(parsed.github.prUrl);
+}
+
+function isEnvironmentOnlySuccess(parsed: WorkerRuntimeReport) {
+  return parsed.conclusionType === "environment_only" && Boolean(parsed.environmentEvidence);
+}
+
+function buildSuccessEvidence(parsed: WorkerRuntimeReport, source = "chat_completion"): WorkerEvidence {
+  const artifacts: Record<string, string> = {
+    source,
+    conclusionType: parsed.conclusionType || "repo_fix",
+    branchName: parsed.github.branchName || "unknown",
+    commitSha: parsed.github.commitSha || "unknown",
+    pushStatus: parsed.github.pushStatus,
+    filesChanged: parsed.filesChanged.join(","),
+  };
+
+  if (parsed.environmentEvidence) {
+    artifacts.environmentEvidence = parsed.environmentEvidence;
+  }
+  if (parsed.conclusionType === "environment_only") {
+    artifacts.noRepoCodeChange = "true";
+  }
+
+  return {
+    blockers: [],
+    findings: [],
+    artifacts,
+  };
+}
+
+function buildInvalidSuccessFailureEvidence(message: string): WorkerEvidence {
+  return {
+    failureType: "unknown",
+    failureSummary: message,
+    blockers: [],
+    findings: [],
   };
 }
 
@@ -636,7 +714,21 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
   }
 
   async function submitParsedResult(task: WorkerRuntimeTask, parsed: WorkerRuntimeReport, sessionId: string | null) {
-    const status = parsed.result === "成功" ? "review_ready" : "failed";
+    const successRequested = parsed.result === "成功";
+    const successAllowed = hasCodeChangeEvidence(parsed) || isEnvironmentOnlySuccess(parsed);
+    const status = successRequested && successAllowed ? "review_ready" : "failed";
+    const invalidSuccessMessage = successRequested && !successAllowed
+      ? "success report missing code-change evidence or explicit environment_only proof"
+      : null;
+    const evidence = status === "review_ready"
+      ? buildSuccessEvidence(parsed)
+      : invalidSuccessMessage
+        ? buildInvalidSuccessFailureEvidence(invalidSuccessMessage)
+        : undefined;
+    const summary = invalidSuccessMessage
+      ? invalidSuccessMessage
+      : parsed.notes || parsed.environmentEvidence || parsed.result;
+
     debugLog("dispatcher.submit_result.start", {
       taskId: task.task_id,
       status,
@@ -644,16 +736,19 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       filesChangedCount: parsed.filesChanged.length,
       hasCommit: Boolean(parsed.github.commitSha),
       pushStatus: parsed.github.pushStatus,
+      conclusionType: parsed.conclusionType,
+      hasEnvironmentEvidence: Boolean(parsed.environmentEvidence),
     });
     try {
       await dispatcherClient.submitResult({
         taskId: task.task_id,
         status,
-        summary: parsed.notes || parsed.result,
+        summary,
         testOutput: parsed.testOutput || "",
         risks: parsed.risks,
         filesChanged: parsed.filesChanged,
         github: parsed.github,
+        ...(evidence ? { evidence } : {}),
       });
       debugLog("dispatcher.submit_result.done", { taskId: task.task_id, status });
     } finally {
@@ -1117,9 +1212,11 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
             await submitParsedResult(task, {
               result: "成功",
               taskId: task.task_id,
+              conclusionType: null,
               notes: `Recovered via artifact check: ${artifactCheck.reason}`,
               testOutput: "",
               risks: ["Session timeout, recovered from git artifacts"],
+              environmentEvidence: "",
               filesChanged: artifactCheck.evidence.filesChanged,
               github: {
                 branchName: artifactCheck.evidence.branchName,
@@ -1159,9 +1256,11 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           await submitParsedResult(task, {
             result: "成功",
             taskId: task.task_id,
+            conclusionType: null,
             notes: `Recovered via artifact check after error: ${artifactCheck.reason}`,
             testOutput: "",
             risks: [`Error: ${error instanceof Error ? error.message : String(error)}`],
+            environmentEvidence: "",
             filesChanged: artifactCheck.evidence.filesChanged,
             github: {
               branchName: artifactCheck.evidence.branchName,
