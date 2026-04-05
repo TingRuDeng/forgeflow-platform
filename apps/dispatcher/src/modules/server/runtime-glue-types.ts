@@ -155,6 +155,7 @@ export interface TraeSubmitResultRequest {
   push_error?: string;
   pr_number?: number;
   pr_url?: string;
+  evidence?: WorkerEvidence;
 }
 
 export interface TraeHeartbeatRequest {

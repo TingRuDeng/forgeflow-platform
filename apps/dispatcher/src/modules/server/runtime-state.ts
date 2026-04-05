@@ -415,7 +415,7 @@ function upsertTask(tasks: Task[], task: Task): Task[] {
   return next;
 }
 
-function upsertReview(reviews: Review[], review: Review): Review[] {
+export function upsertReview(reviews: Review[], review: Review): Review[] {
   const existingIndex = reviews.findIndex((candidate) => candidate.taskId === review.taskId);
   if (existingIndex === -1) {
     return [...reviews, review];

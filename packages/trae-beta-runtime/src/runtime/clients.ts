@@ -1,6 +1,8 @@
 import * as http from "node:http";
 import * as https from "node:https";
 
+import type { WorkerEvidence } from "@forgeflow/result-contracts";
+
 const DEFAULT_DISPATCHER_URL = "http://127.0.0.1:8787";
 const DEFAULT_AUTOMATION_URL = "http://127.0.0.1:8790";
 const DEFAULT_DISPATCHER_REQUEST_TIMEOUT_MS = Number(process.env.TRAE_AUTOMATION_DISPATCHER_TIMEOUT_MS || 30000);
@@ -203,6 +205,7 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
         prNumber?: number | null;
         prUrl?: string | null;
       };
+      evidence?: WorkerEvidence;
     }) {
       return http.request("/api/trae/submit-result", {
         method: "POST",
@@ -219,6 +222,7 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
           push_error: input.github?.pushError,
           pr_number: input.github?.prNumber,
           pr_url: input.github?.prUrl,
+          evidence: input.evidence,
         },
         timeoutMs: requestTimeoutMs,
       });

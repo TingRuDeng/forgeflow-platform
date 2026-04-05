@@ -7,6 +7,8 @@ import {
   isPlaceholderTaskId,
 } from "@tingrudeng/automation-gateway-core";
 
+import type { WorkerEvidence } from "@forgeflow/result-contracts";
+
 import {
   createAutomationGatewayClient,
   createDispatcherClient,
@@ -662,11 +664,20 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
   }
 
   async function submitFailure(task: WorkerRuntimeTask, error: Error, rawOutput = "", sessionId: string | null = null) {
+    const failureType = /test|vitest|jest|pnpm test/i.test(error.message) ? "verification" : "execution";
+    const evidence: WorkerEvidence = {
+      failureType,
+      failureSummary: error.message,
+      blockers: [],
+      findings: [],
+    };
+
     debugLog("dispatcher.submit_result.start", {
       taskId: task.task_id,
       status: "failed",
       sessionId,
       summary: error.message,
+      failureType,
     });
     try {
       await dispatcherClient.submitResult({
@@ -684,6 +695,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           prNumber: null,
           prUrl: null,
         },
+        evidence,
       });
       debugLog("dispatcher.submit_result.done", { taskId: task.task_id, status: "failed" });
     } finally {

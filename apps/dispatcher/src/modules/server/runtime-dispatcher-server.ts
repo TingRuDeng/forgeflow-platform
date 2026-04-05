@@ -4,12 +4,14 @@ import type {
   Task,
   Assignment,
   Event,
+  Review,
 } from "./runtime-state.js";
 import {
   beginTaskForWorker,
   claimAssignedTaskForWorker,
   registerWorker as registerWorkerFn,
   reconcileRuntimeState as reconcileRuntimeStateFn,
+  upsertReview,
 } from "./runtime-state.js";
 
 import type {
@@ -20,6 +22,7 @@ import type {
   TraeReportProgressRequest,
   TraeRegisterRequest,
   TraeStartTaskRequest,
+  WorkerEvidence,
 } from "./runtime-glue-types.js";
 import { formatLocalTimestamp } from "../time.js";
 
@@ -207,6 +210,7 @@ export function applyTraeSubmitResult(
     pushError?: string;
     prNumber?: number;
     prUrl?: string;
+    evidence?: WorkerEvidence;
   }
 ): { state: RuntimeState; ok: boolean; error?: string } {
   const task = state.tasks.find((t) => t.id === input.taskId);
@@ -216,7 +220,9 @@ export function applyTraeSubmitResult(
 
   const assignment = state.assignments.find((item) => item.taskId === input.taskId);
   const worker = state.workers.find((w) => w.currentTaskId === input.taskId);
+  const review = state.reviews.find((item) => item.taskId === input.taskId) ?? null;
   const newStatus = input.status === "review_ready" ? "review" : "failed";
+  const now = nowIso();
 
   task.status = newStatus;
   if (assignment) {
@@ -228,7 +234,7 @@ export function applyTraeSubmitResult(
   if (worker) {
     worker.status = "idle";
     worker.currentTaskId = undefined;
-    worker.lastHeartbeatAt = nowIso();
+    worker.lastHeartbeatAt = now;
   }
 
   const github =
@@ -243,19 +249,71 @@ export function applyTraeSubmitResult(
         }
       : null;
 
+  const reviewMaterial = input.status === "review_ready"
+    ? {
+        repo: task.repo,
+        title: task.title,
+        changedFiles: input.filesChanged || [],
+        selfTestPassed: true,
+        checks: [],
+        pullRequest: input.prNumber && input.prUrl && input.branchName
+          ? {
+              number: input.prNumber,
+              url: input.prUrl,
+              headBranch: input.branchName,
+              baseBranch: task.defaultBranch,
+            }
+          : null,
+      }
+    : review?.reviewMaterial ?? null;
+
+  const eventPayload: Record<string, unknown> = {
+    from: "in_progress",
+    to: newStatus,
+    summary: input.summary,
+    test_output: input.testOutput,
+    risks: input.risks || [],
+    files_changed: input.filesChanged || [],
+    github,
+  };
+
+  if (input.status === "failed" && input.evidence) {
+    eventPayload.failureType = input.evidence.failureType ?? null;
+    eventPayload.failureSummary = input.evidence.failureSummary ?? input.summary ?? null;
+  }
+
   appendRuntimeEvent(state, {
     taskId: input.taskId,
     type: "status_changed",
-    at: nowIso(),
-    payload: {
-      from: "in_progress",
-      to: newStatus,
-      summary: input.summary,
-      test_output: input.testOutput,
-      risks: input.risks || [],
-      files_changed: input.filesChanged || [],
-      github,
+    at: now,
+    payload: eventPayload,
+  });
+
+  state.reviews = upsertReview(state.reviews, {
+    taskId: input.taskId,
+    decision: review?.decision ?? "pending",
+    actor: review?.actor ?? null,
+    notes: review?.notes ?? "",
+    decidedAt: review?.decidedAt ?? null,
+    reviewMaterial,
+    latestWorkerResult: {
+      taskId: input.taskId,
+      workerId: worker?.id ?? review?.latestWorkerResult?.workerId ?? "trae",
+      provider: "trae",
+      pool: "trae",
+      branchName: input.branchName ?? review?.latestWorkerResult?.branchName ?? "",
+      repo: task.repo,
+      defaultBranch: task.defaultBranch,
+      mode: "run",
+      output: input.summary ?? "",
+      generatedAt: now,
+      verification: {
+        allPassed: input.status === "review_ready",
+        commands: [],
+      },
+      evidence: input.evidence,
     },
+    evidence: review?.evidence ?? null,
   });
 
   return { state, ok: true };
@@ -566,6 +624,7 @@ function handleTraeRouteImpl(
       push_error: pushError,
       pr_number: prNumber,
       pr_url: prUrl,
+      evidence,
     } = body as unknown as TraeSubmitResultRequest;
 
     if (!taskId || !status) {
@@ -599,6 +658,7 @@ function handleTraeRouteImpl(
       pushError,
       prNumber,
       prUrl,
+      evidence,
     });
 
     if (!result.ok) {
