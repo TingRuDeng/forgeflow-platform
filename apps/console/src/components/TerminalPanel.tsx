@@ -66,11 +66,11 @@ export const TerminalPanel: React.FC<{ events: Event[] }> = ({ events }) => {
                   
                   <div className="text-[#94a3b8] break-all overflow-hidden rounded-lg bg-black/30 p-3 border border-white/[0.05]">
                     {isString ? (
-                      <div className="whitespace-pre-wrap text-sm">{ev.payload}</div>
+                      <div className="whitespace-pre-wrap text-sm">{String(ev.payload ?? '')}</div>
                     ) : (
                       <div className="text-xs">
                         <JsonView 
-                          value={ev.payload} 
+                          value={ev.payload as object} 
                           style={darkTheme}
                           collapsed={2}
                           displayDataTypes={false}

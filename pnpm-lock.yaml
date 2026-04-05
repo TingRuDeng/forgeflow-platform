@@ -178,8 +178,8 @@ importers:
         specifier: workspace:*
         version: link:../result-contracts
       '@tingrudeng/automation-gateway-core':
-        specifier: workspace:*
-        version: link:../automation-gateway-core
+        specifier: 0.1.0-beta.2
+        version: 0.1.0-beta.2
 
   packages/worker-review-orchestrator-cli: {}
 
@@ -837,6 +837,10 @@ packages:
         optional: true
       '@types/react-dom':
         optional: true
+
+  '@tingrudeng/automation-gateway-core@0.1.0-beta.2':
+    resolution: {integrity: sha512-Qc5QMu9aJNESpnZWjVUi0BXQIui3WRBdAVypSFcT8kLDM0/7jAyk0SvVRdv3nb2qMSuopB6TzWNJims3nU2iCA==}
+    engines: {node: '>=22'}
 
   '@tsconfig/node10@1.0.12':
     resolution: {integrity: sha512-UCYBaeFvM11aU2y3YPZ//O5Rhj+xKyzy7mvcIoAjASbigy8mHMryP5cK7dgjlz2hWxh1g5pLw084E0a/wlUSFQ==}
@@ -2793,6 +2797,8 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.14
       '@types/react-dom': 19.2.3(@types/react@19.2.14)
+
+  '@tingrudeng/automation-gateway-core@0.1.0-beta.2': {}
 
   '@tsconfig/node10@1.0.12': {}
 
