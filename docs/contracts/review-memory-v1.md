@@ -65,8 +65,53 @@ interface InjectionCriteria {
 |---------|------|------|
 | `review` (blocked) | severity 为 critical/warning，且 recommendation 具有通用性 | "避免在 auth 模块使用 eval" |
 | `review` (merge) | category 为 structure/behavior，且对后续任务有参考价值 | "API 路由统一使用 REST 风格" |
-| `failed` | verification 失败原因可抽象为可避免的模式 | "测试未 mock 外部 API 导致 flaky" |
-| `rework` | 同一个任务被 rework 2次以上，提取根本原因 | "需求理解偏差导致返工" |
+| `failed` | `latestWorkerResult.evidence.failureType` 和 `failureSummary` 存在且可抽象 | "测试未 mock 外部 API 导致 flaky" |
+| `rework` | `review.evidence.mustFix` 或 `reasonCode` 存在 | "补充失败场景覆盖; 修复类型错误" |
+
+### 结构化 Evidence 字段
+
+提取函数现在直接消费 dispatcher 存储的结构化字段：
+
+**Worker Evidence** (`latestWorkerResult.evidence`):
+```typescript
+interface WorkerEvidence {
+  failureType?: string;      // 失败类型，如 "verification"
+  failureSummary?: string;   // 失败摘要
+  blockers?: Array<{ reason: string }>;
+  findings?: Array<{ title: string; recommendation: string }>;
+  artifacts?: Record<string, unknown>;
+}
+```
+
+**Review Evidence** (`review.evidence`):
+```typescript
+interface ReviewEvidence {
+  reasonCode?: string;       // 原因代码，如 "test_gap"
+  mustFix?: string[];        // 必须修复项列表
+  canRedrive?: boolean;      // 是否允许 redrive
+  redriveStrategy?: string;  // redrive 策略
+}
+```
+
+### 提取函数签名
+
+```typescript
+// 从 failed 任务提取 lesson
+function extractLessonFromFailed(
+  taskId: string,
+  workerType: string,
+  repo: string,
+  evidence: WorkerEvidence
+): Lesson | null;
+
+// 从 rework 决定提取 lesson
+function extractLessonFromRework(
+  taskId: string,
+  workerType: string,
+  repo: string,
+  evidence: ReviewEvidence
+): Lesson | null;
+```
 
 ### 哪些事件不会进入 Memory
 

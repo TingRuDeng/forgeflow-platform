@@ -31,11 +31,23 @@ export interface VerificationCommand {
     exitCode: number;
     output: string;
 }
-export interface WorkerResult {
-    status: string;
-    verification: {
-        commands: VerificationCommand[];
-    };
+export interface WorkerEvidence {
+    failureType?: string;
+    failureSummary?: string;
+    blockers?: Array<{
+        reason: string;
+    }>;
+    findings?: Array<{
+        title: string;
+        recommendation: string;
+    }>;
+    artifacts?: Record<string, unknown>;
+}
+export interface ReviewEvidence {
+    reasonCode?: string;
+    mustFix?: string[];
+    canRedrive?: boolean;
+    redriveStrategy?: string;
 }
 export interface LessonCriteria {
     repo?: string;
@@ -45,8 +57,8 @@ export interface LessonCriteria {
 }
 export declare function createMemoryStore(lessons?: Lesson[]): MemoryStore;
 export declare function extractLessonFromReview(taskId: string, workerType: string, repo: string, finding: Finding, decision: string): Lesson | null;
-export declare function extractLessonFromFailed(taskId: string, workerType: string, repo: string, result: WorkerResult): Lesson | null;
-export declare function extractLessonFromRework(taskId: string, workerType: string, repo: string, reworkCount: number, rootCause: string): Lesson | null;
+export declare function extractLessonFromFailed(taskId: string, workerType: string, repo: string, evidence: WorkerEvidence): Lesson | null;
+export declare function extractLessonFromRework(taskId: string, workerType: string, repo: string, evidence: ReviewEvidence): Lesson | null;
 export declare function shouldInjectLesson(lesson: Lesson, criteria: LessonCriteria): boolean;
 export declare function filterLessonsForInjection(lessons: Lesson[], criteria: LessonCriteria): Lesson[];
 export declare function loadMemoryStore(stateDir: string | null): MemoryStore | null;
