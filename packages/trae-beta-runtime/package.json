@@ -1,7 +1,7 @@
 {
   "name": "@tingrudeng/trae-beta-runtime",
   "description": "Self-contained remote Trae beta runtime CLI for ForgeFlow launch, gateway, and worker orchestration.",
-  "version": "0.1.0-beta.43",
+  "version": "0.1.0-beta.46",
   "private": false,
   "license": "Apache-2.0",
   "repository": {
@@ -55,7 +55,6 @@
     "test": "pnpm --filter @tingrudeng/automation-gateway-core build && vitest run"
   },
   "dependencies": {
-    "@forgeflow/result-contracts": "workspace:*",
-    "@tingrudeng/automation-gateway-core": "workspace:*"
+    "@tingrudeng/automation-gateway-core": "0.1.0-beta.2"
   }
 }

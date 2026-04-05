@@ -130,6 +130,7 @@ interface WorkerResult {
 interface Task {
   id: string;
   status: string;
+  title?: string;
 }
 
 interface TaskLedger {
@@ -189,7 +190,7 @@ function main(): void {
     task.status = "review";
     reviewMaterial = {
       repo: workerResult.repo,
-      title: (ledger as any).tasks.find((t: any) => t.id === task.id)?.title || "",
+      title: ledger.tasks.find((t) => t.id === task.id)?.title || "",
       changedFiles: args.changedFiles,
       selfTestPassed: true,
       checks: workerResult.verification.commands.map((item) => item.command),
