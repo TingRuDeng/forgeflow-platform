@@ -283,6 +283,119 @@ describe("runtime-dispatcher-server foundation", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toBe("task_not_found");
     });
+
+    it("writes evidence to reviews on review_ready", () => {
+      const state = createEmptyRuntimeState();
+      const task = makeTask({ id: "task-3", status: "in_progress" });
+      state.tasks.push(task);
+      state.workers.push({
+        id: "trae-01",
+        pool: "trae",
+        hostname: "",
+        labels: [],
+        repoDir: "/repo",
+        status: "busy",
+        lastHeartbeatAt: new Date().toISOString(),
+        currentTaskId: "task-3",
+      });
+
+      const result = applyTraeSubmitResult(state, {
+        taskId: "task-3",
+        status: "review_ready",
+        summary: "Done!",
+        filesChanged: ["src/a.ts"],
+        branchName: "ai/trae/task-3",
+        prNumber: 42,
+        prUrl: "https://github.com/test/repo/pull/42",
+        evidence: {
+          failureType: undefined,
+          failureSummary: undefined,
+          blockers: [],
+          findings: [],
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.state.reviews).toHaveLength(1);
+      expect(result.state.reviews[0].taskId).toBe("task-3");
+      expect(result.state.reviews[0].latestWorkerResult).toBeDefined();
+      expect(result.state.reviews[0].latestWorkerResult?.evidence).toBeDefined();
+      expect(result.state.reviews[0].latestWorkerResult?.verification?.allPassed).toBe(true);
+      expect(result.state.reviews[0].reviewMaterial).toBeDefined();
+      expect(result.state.reviews[0].reviewMaterial?.pullRequest?.number).toBe(42);
+    });
+
+    it("includes failureType and failureSummary in failed event payload", () => {
+      const state = createEmptyRuntimeState();
+      const task = makeTask({ id: "task-4", status: "in_progress" });
+      state.tasks.push(task);
+      state.workers.push({
+        id: "trae-01",
+        pool: "trae",
+        hostname: "",
+        labels: [],
+        repoDir: "/repo",
+        status: "busy",
+        lastHeartbeatAt: new Date().toISOString(),
+        currentTaskId: "task-4",
+      });
+
+      const result = applyTraeSubmitResult(state, {
+        taskId: "task-4",
+        status: "failed",
+        summary: "pnpm test failed",
+        evidence: {
+          failureType: "verification",
+          failureSummary: "pnpm test failed",
+          blockers: [],
+          findings: [],
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.state.tasks[0].status).toBe("failed");
+      const event = result.state.events.find((e) => e.taskId === "task-4");
+      expect(event).toBeDefined();
+      expect(event!.payload).toMatchObject({
+        to: "failed",
+        failureType: "verification",
+        failureSummary: "pnpm test failed",
+      });
+      expect(result.state.reviews[0].latestWorkerResult?.evidence?.failureType).toBe("verification");
+    });
+
+    it("works without evidence for backward compatibility", () => {
+      const state = createEmptyRuntimeState();
+      const task = makeTask({ id: "task-5", status: "in_progress" });
+      state.tasks.push(task);
+      state.workers.push({
+        id: "trae-01",
+        pool: "trae",
+        hostname: "",
+        labels: [],
+        repoDir: "/repo",
+        status: "busy",
+        lastHeartbeatAt: new Date().toISOString(),
+        currentTaskId: "task-5",
+      });
+
+      const result = applyTraeSubmitResult(state, {
+        taskId: "task-5",
+        status: "failed",
+        summary: "Something went wrong",
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.state.tasks[0].status).toBe("failed");
+      const event = result.state.events.find((e) => e.taskId === "task-5");
+      expect(event).toBeDefined();
+      expect(event!.payload).toMatchObject({
+        to: "failed",
+        summary: "Something went wrong",
+      });
+      expect((event!.payload as Record<string, unknown>).failureType).toBeUndefined();
+      expect(result.state.reviews[0].latestWorkerResult?.evidence).toBeUndefined();
+    });
   });
 
   describe("applyTraeHeartbeat", () => {

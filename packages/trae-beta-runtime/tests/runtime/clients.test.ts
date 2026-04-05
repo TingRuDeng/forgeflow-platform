@@ -198,4 +198,87 @@ describe("runtime/clients", () => {
       "manual /slow failed: request timeout: /slow",
     );
   }, 1000);
+
+  it("sends evidence in submitResult request", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await dispatcher.submitResult({
+      taskId: "task-1",
+      status: "failed",
+      summary: "pnpm test failed",
+      testOutput: "FAIL",
+      risks: [],
+      filesChanged: [],
+      github: {
+        branchName: null,
+        commitSha: null,
+        pushStatus: "not_attempted",
+        pushError: null,
+        prNumber: null,
+        prUrl: null,
+      },
+      evidence: {
+        failureType: "verification",
+        failureSummary: "pnpm test failed",
+        blockers: [],
+        findings: [],
+      },
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((fetchImpl.mock.calls[0] as unknown as [string, { body: string }])[1].body);
+    expect(body).toMatchObject({
+      task_id: "task-1",
+      status: "failed",
+      summary: "pnpm test failed",
+      evidence: {
+        failureType: "verification",
+        failureSummary: "pnpm test failed",
+        blockers: [],
+        findings: [],
+      },
+    });
+  });
+
+  it("sends submitResult without evidence for backward compatibility", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await dispatcher.submitResult({
+      taskId: "task-2",
+      status: "review_ready",
+      summary: "Done",
+      testOutput: "PASS",
+      risks: [],
+      filesChanged: ["src/a.ts"],
+      github: {
+        branchName: "ai/trae/task-2",
+        commitSha: "abc123",
+        pushStatus: "success",
+        pushError: null,
+        prNumber: 42,
+        prUrl: "https://github.com/test/repo/pull/42",
+      },
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((fetchImpl.mock.calls[0] as unknown as [string, { body: string }])[1].body);
+    expect(body).toMatchObject({
+      task_id: "task-2",
+      status: "review_ready",
+      summary: "Done",
+    });
+    expect(body.evidence).toBeUndefined();
+  });
 });
