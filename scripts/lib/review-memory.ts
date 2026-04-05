@@ -56,11 +56,19 @@ export interface VerificationCommand {
   output: string;
 }
 
-export interface WorkerResult {
-  status: string;
-  verification: {
-    commands: VerificationCommand[];
-  };
+export interface WorkerEvidence {
+  failureType?: string;
+  failureSummary?: string;
+  blockers?: Array<{ reason: string }>;
+  findings?: Array<{ title: string; recommendation: string }>;
+  artifacts?: Record<string, unknown>;
+}
+
+export interface ReviewEvidence {
+  reasonCode?: string;
+  mustFix?: string[];
+  canRedrive?: boolean;
+  redriveStrategy?: string;
 }
 
 export interface LessonCriteria {
@@ -117,22 +125,15 @@ function isExtractableFromReview(finding: Finding, decision: string): boolean {
   return false;
 }
 
-function isExtractableFromFailed(result: WorkerResult): boolean {
-  if (result.status !== 'failed') {
-    return false;
-  }
-  if (!result.verification.commands || result.verification.commands.length === 0) {
-    return false;
-  }
-  const failedCommands = result.verification.commands.filter(c => c.exitCode !== 0);
-  if (failedCommands.length === 0) {
+function isExtractableFromFailed(evidence: WorkerEvidence): boolean {
+  if (!evidence.failureType || !evidence.failureSummary) {
     return false;
   }
   const abstractablePatterns = [
     'test', 'mock', 'timeout', 'flaky', 'race condition',
-    'undefined', 'null', 'permission', 'not found'
+    'undefined', 'null', 'permission', 'not found', 'verification'
   ];
-  const errorText = failedCommands.map(c => c.output).join(' ').toLowerCase();
+  const errorText = evidence.failureSummary.toLowerCase();
   return abstractablePatterns.some(p => errorText.includes(p));
 }
 
@@ -186,13 +187,13 @@ export function extractLessonFromReview(taskId: string, workerType: string, repo
   };
 }
 
-export function extractLessonFromFailed(taskId: string, workerType: string, repo: string, result: WorkerResult): Lesson | null {
-  if (!isExtractableFromFailed(result)) {
+export function extractLessonFromFailed(taskId: string, workerType: string, repo: string, evidence: WorkerEvidence): Lesson | null {
+  if (!isExtractableFromFailed(evidence)) {
     return null;
   }
 
-  const failedCommand = result.verification.commands.find(c => c.exitCode !== 0);
-  const isTestError = failedCommand?.output.toLowerCase().includes('test');
+  const isTestError = evidence.failureSummary?.toLowerCase().includes('test') ||
+    evidence.failureSummary?.toLowerCase().includes('verification');
   const category = isTestError ? 'testing' : 'runtime';
 
   return {
@@ -204,7 +205,7 @@ export function extractLessonFromFailed(taskId: string, workerType: string, repo
     scope: '',
     category,
     rule: `Handle ${category} errors gracefully`,
-    rationale: failedCommand?.output || 'Unknown error',
+    rationale: evidence.failureSummary || 'Unknown error',
     trigger_paths: [],
     trigger_tags: [category],
     severity: 'warning',
@@ -212,10 +213,16 @@ export function extractLessonFromFailed(taskId: string, workerType: string, repo
   };
 }
 
-export function extractLessonFromRework(taskId: string, workerType: string, repo: string, reworkCount: number, rootCause: string): Lesson | null {
-  if (reworkCount < 2) {
-    return null;
+export function extractLessonFromRework(taskId: string, workerType: string, repo: string, evidence: ReviewEvidence): Lesson | null {
+  if (!evidence.mustFix || evidence.mustFix.length === 0) {
+    if (!evidence.reasonCode) {
+      return null;
+    }
   }
+
+  const rationale = evidence.mustFix && evidence.mustFix.length > 0
+    ? evidence.mustFix.join('; ')
+    : evidence.reasonCode || 'No rationale provided';
 
   return {
     id: generateLessonId(),
@@ -226,7 +233,7 @@ export function extractLessonFromRework(taskId: string, workerType: string, repo
     scope: '',
     category: 'process',
     rule: 'Reduce rework through better requirements',
-    rationale: rootCause,
+    rationale,
     trigger_paths: [],
     trigger_tags: ['rework'],
     severity: 'info',

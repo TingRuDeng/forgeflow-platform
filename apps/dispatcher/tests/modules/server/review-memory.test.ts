@@ -246,26 +246,37 @@ describe("review memory - lesson extraction from failed/rework", () => {
   it("extracts lesson from failed task with test error", async () => {
     const mod = await import(memoryModulePath);
 
-    const result = {
-      taskId: "dispatch-1:task-1",
-      workerId: "codex-worker",
-      provider: "codex",
-      pool: "codex",
-      repo: "org/repo",
-      status: "failed",
-      verification: {
-        allPassed: false,
-        commands: [
-          { command: "pnpm test", exitCode: 1, output: "Test failed: undefined is not a function" },
-        ],
-      },
+    const evidence = {
+      failureType: "verification",
+      failureSummary: "Test failed: undefined is not a function",
     };
 
     const lesson = mod.extractLessonFromFailed(
       "dispatch-1:task-1",
       "codex",
       "org/repo",
-      result
+      evidence
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.source_type).toBe("failed");
+    expect(lesson.category).toBe("testing");
+    expect(lesson.rationale).toBe("Test failed: undefined is not a function");
+  });
+
+  it("extracts lesson from failed task with verification error", async () => {
+    const mod = await import(memoryModulePath);
+
+    const evidence = {
+      failureType: "verification",
+      failureSummary: "Verification failed: typecheck error",
+    };
+
+    const lesson = mod.extractLessonFromFailed(
+      "dispatch-1:task-2",
+      "codex",
+      "org/repo",
+      evidence
     );
 
     expect(lesson).not.toBeNull();
@@ -273,57 +284,129 @@ describe("review memory - lesson extraction from failed/rework", () => {
     expect(lesson.category).toBe("testing");
   });
 
-  it("does not extract lesson from passed verification", async () => {
+  it("does not extract lesson when failureType is missing", async () => {
     const mod = await import(memoryModulePath);
 
-    const result = {
-      taskId: "dispatch-1:task-1",
-      workerId: "codex-worker",
-      provider: "codex",
-      pool: "codex",
-      repo: "org/repo",
-      status: "review",
-      verification: {
-        allPassed: true,
-        commands: [{ command: "pnpm test", exitCode: 0, output: "ok" }],
-      },
+    const evidence = {
+      failureSummary: "Some error",
     };
 
     const lesson = mod.extractLessonFromFailed(
       "dispatch-1:task-1",
       "codex",
       "org/repo",
-      result
+      evidence
     );
 
     expect(lesson).toBeNull();
   });
 
-  it("extracts lesson from rework when count >= 2", async () => {
+  it("does not extract lesson when failureSummary is missing", async () => {
     const mod = await import(memoryModulePath);
+
+    const evidence = {
+      failureType: "verification",
+    };
+
+    const lesson = mod.extractLessonFromFailed(
+      "dispatch-1:task-1",
+      "codex",
+      "org/repo",
+      evidence
+    );
+
+    expect(lesson).toBeNull();
+  });
+
+  it("does not extract lesson when failureSummary does not match abstractable patterns", async () => {
+    const mod = await import(memoryModulePath);
+
+    const evidence = {
+      failureType: "unknown",
+      failureSummary: "Something random happened",
+    };
+
+    const lesson = mod.extractLessonFromFailed(
+      "dispatch-1:task-1",
+      "codex",
+      "org/repo",
+      evidence
+    );
+
+    expect(lesson).toBeNull();
+  });
+
+  it("extracts lesson from rework with mustFix", async () => {
+    const mod = await import(memoryModulePath);
+
+    const evidence = {
+      mustFix: ["Fix the type error", "Add missing test coverage"],
+      reasonCode: "test_gap",
+      canRedrive: true,
+    };
 
     const lesson = mod.extractLessonFromRework(
       "dispatch-1:task-1",
       "codex",
       "org/repo",
-      3,
-      "Requirements were unclear"
+      evidence
     );
 
     expect(lesson).not.toBeNull();
     expect(lesson.source_type).toBe("rework");
-    expect(lesson.rationale).toBe("Requirements were unclear");
+    expect(lesson.rationale).toBe("Fix the type error; Add missing test coverage");
   });
 
-  it("does not extract lesson from rework when count < 2", async () => {
+  it("extracts lesson from rework with reasonCode only", async () => {
     const mod = await import(memoryModulePath);
+
+    const evidence = {
+      reasonCode: "requirements_unclear",
+      canRedrive: true,
+    };
+
+    const lesson = mod.extractLessonFromRework(
+      "dispatch-1:task-2",
+      "codex",
+      "org/repo",
+      evidence
+    );
+
+    expect(lesson).not.toBeNull();
+    expect(lesson.source_type).toBe("rework");
+    expect(lesson.rationale).toBe("requirements_unclear");
+  });
+
+  it("does not extract lesson from rework without mustFix or reasonCode", async () => {
+    const mod = await import(memoryModulePath);
+
+    const evidence = {
+      canRedrive: true,
+    };
 
     const lesson = mod.extractLessonFromRework(
       "dispatch-1:task-1",
       "codex",
       "org/repo",
-      1,
-      "Minor adjustment"
+      evidence
+    );
+
+    expect(lesson).toBeNull();
+  });
+
+  it("does not extract lesson from rework with empty mustFix", async () => {
+    const mod = await import(memoryModulePath);
+
+    const evidence = {
+      mustFix: [],
+      canRedrive: true,
+    };
+
+    const lesson = mod.extractLessonFromRework(
+      "dispatch-1:task-1",
+      "codex",
+      "org/repo",
+      evidence
     );
 
     expect(lesson).toBeNull();
