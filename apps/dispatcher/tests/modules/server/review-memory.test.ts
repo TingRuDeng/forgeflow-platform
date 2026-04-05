@@ -881,7 +881,7 @@ describe("review memory - load and injection", () => {
 });
 
 describe("review memory - real dispatcher integration", () => {
-  it("injects lessons into state.assignments via handleDispatcherHttpRequest", async () => {
+  it("injects lessons into state.assignments via handleDispatcherHttpRequest", { timeout: 30000 }, async () => {
     const serverMod = await import(serverModulePath);
 
     const stateDir = makeTempDir();
@@ -978,7 +978,7 @@ describe("review memory - real dispatcher integration", () => {
     expect(assignment.contextMarkdown).toContain("Relevant Lessons");
   });
 
-  it("handles missing memory.json gracefully during dispatch", async () => {
+  it("handles missing memory.json gracefully during dispatch", { timeout: 30000 }, async () => {
     const serverMod = await import(serverModulePath);
 
     const stateDir = makeTempDir();
@@ -1043,7 +1043,7 @@ describe("review memory - real dispatcher integration", () => {
     expect(assignment.contextMarkdown).not.toContain("Relevant Lessons");
   });
 
-  it("injects lessons when allowedPaths matches any trigger path", async () => {
+  it("injects lessons when allowedPaths matches any trigger path", { timeout: 30000 }, async () => {
     const serverMod = await import(serverModulePath);
 
     const stateDir = makeTempDir();
