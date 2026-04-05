@@ -309,6 +309,25 @@ describe("runtime-dispatcher-server foundation", () => {
       const result = applyTraeHeartbeat(state, "trae-01");
       expect(result.state.workers[0].lastHeartbeatAt).not.toBe(before);
     });
+
+    it("returns an offline idle worker to idle on heartbeat", () => {
+      const state = createEmptyRuntimeState();
+      state.workers.push({
+        id: "trae-offline",
+        pool: "trae",
+        hostname: "",
+        labels: [],
+        repoDir: "/repo",
+        status: "offline",
+        lastHeartbeatAt: "2024-01-01T00:00:00.000Z",
+      });
+
+      const result = applyTraeHeartbeat(state, "trae-offline");
+
+      expect(result.worker).not.toBeNull();
+      expect(result.worker!.status).toBe("idle");
+      expect(result.state.workers[0].status).toBe("idle");
+    });
   });
 
   describe("applyTraeReportProgress", () => {
