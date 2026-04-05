@@ -91,6 +91,8 @@ export interface FindTraeTaskResult {
   assignment: Assignment | null;
   workerPrompt: string;
   contextMarkdown: string;
+  workerPromptMode?: "auto" | "custom";
+  reportSchemaVersion?: "trae-v1";
   constraints: string[];
   dirs: BuildTraeWorktreeDirsResult;
   chatMode: string;
@@ -174,6 +176,8 @@ export function findTraeTaskForWorker(
   const assignment = state.assignments.find((a) => a.taskId === task!.id) ?? null;
   const workerPrompt = assignment?.workerPrompt ?? "";
   const contextMarkdown = assignment?.contextMarkdown ?? "";
+  const workerPromptMode = assignment?.workerPromptMode;
+  const reportSchemaVersion = assignment?.reportSchemaVersion;
 
   const constraints = buildTraeConstraints(task);
 
@@ -192,7 +196,19 @@ export function findTraeTaskForWorker(
     ?? (task as Task & { continueFromTaskId?: string | null })?.continueFromTaskId
     ?? null;
 
-  return { task, assignment, workerPrompt, contextMarkdown, constraints, dirs, chatMode, continuationMode, continueFromTaskId };
+  return {
+    task,
+    assignment,
+    workerPrompt,
+    contextMarkdown,
+    workerPromptMode,
+    reportSchemaVersion,
+    constraints,
+    dirs,
+    chatMode,
+    continuationMode,
+    continueFromTaskId,
+  };
 }
 
 export function applyTraeSubmitResult(
@@ -525,6 +541,8 @@ function handleTraeRouteImpl(
           chat_mode: result.chatMode,
           continuation_mode: result.continuationMode,
           continue_from_task_id: result.continueFromTaskId,
+          worker_prompt_mode: result.workerPromptMode,
+          report_schema_version: result.reportSchemaVersion,
         },
       },
       text: JSON.stringify({
@@ -544,6 +562,8 @@ function handleTraeRouteImpl(
           chat_mode: result.chatMode,
           continuation_mode: result.continuationMode,
           continue_from_task_id: result.continueFromTaskId,
+          worker_prompt_mode: result.workerPromptMode,
+          report_schema_version: result.reportSchemaVersion,
         },
       }),
     };

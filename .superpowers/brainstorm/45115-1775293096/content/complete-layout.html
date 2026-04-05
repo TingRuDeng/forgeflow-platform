@@ -1,0 +1,217 @@
+<h2>完整页面布局设计</h2>
+<p class="subtitle">深蓝渐变 + 玻璃拟态风格 - 完整设计方案</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">完整页面预览</div>
+    <div class="mockup-body" style="background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%); padding: 0; min-height: 600px;">
+      <!-- Header -->
+      <div style="background: rgba(0, 0, 0, 0.2); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="width: 36px; height: 36px; background: rgba(59, 130, 246, 0.3); border: 1px solid rgba(59, 130, 246, 0.5); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 18px;">F</div>
+          <div>
+            <div style="color: white; font-size: 16px; font-weight: 700; letter-spacing: -0.02em;">FORGEFLOW</div>
+            <div style="color: rgba(255,255,255,0.5); font-size: 10px; letter-spacing: 0.1em;">CONSOLE</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <button style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); color: white; padding: 6px 12px; border-radius: 8px; font-size: 11px; cursor: pointer; font-weight: 600;">EN</button>
+          <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 20px; display: flex; align-items: center; gap: 8px;">
+            <div style="width: 6px; height: 6px; background: #10b981; border-radius: 50%; box-shadow: 0 0 8px rgba(16,185,129,0.6);"></div>
+            <span style="color: rgba(255,255,255,0.7); font-size: 10px;">最后更新 @ 14:32:15.234</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Main Content -->
+      <div style="padding: 24px;">
+        <!-- Metrics Grid -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px;">
+          <div style="background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+              <span style="font-size: 11px; color: rgba(255,255,255,0.7); font-weight: 600; text-transform: uppercase;">活跃节点</span>
+              <div style="width: 28px; height: 28px; background: rgba(59, 130, 246, 0.2); border-radius: 6px; display: flex; align-items: center; justify-content: center;">
+                <span style="color: #60a5fa; font-size: 12px;">●</span>
+              </div>
+            </div>
+            <div style="font-size: 28px; color: white; font-weight: 700;">12</div>
+          </div>
+          
+          <div style="background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+              <span style="font-size: 11px; color: rgba(255,255,255,0.7); font-weight: 600; text-transform: uppercase;">空闲 / 繁忙</span>
+              <div style="width: 28px; height: 28px; background: rgba(16, 185, 129, 0.2); border-radius: 6px; display: flex; align-items: center; justify-content: center;">
+                <span style="color: #34d399; font-size: 12px;">●</span>
+              </div>
+            </div>
+            <div style="font-size: 28px; color: white; font-weight: 700;">4 <span style="font-size: 18px; color: rgba(255,255,255,0.4);">/</span> 8</div>
+          </div>
+          
+          <div style="background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+              <span style="font-size: 11px; color: rgba(255,255,255,0.7); font-weight: 600; text-transform: uppercase;">总任务数</span>
+              <div style="width: 28px; height: 28px; background: rgba(168, 85, 247, 0.2); border-radius: 6px; display: flex; align-items: center; justify-content: center;">
+                <span style="color: #c084fc; font-size: 12px;">●</span>
+              </div>
+            </div>
+            <div style="font-size: 28px; color: white; font-weight: 700;">156</div>
+          </div>
+          
+          <div style="background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+              <span style="font-size: 11px; color: rgba(255,255,255,0.7); font-weight: 600; text-transform: uppercase;">待审 / 已合并</span>
+              <div style="width: 28px; height: 28px; background: rgba(251, 146, 60, 0.2); border-radius: 6px; display: flex; align-items: center; justify-content: center;">
+                <span style="color: #fb923c; font-size: 12px;">●</span>
+              </div>
+            </div>
+            <div style="font-size: 28px; color: white; font-weight: 700;">12 <span style="font-size: 18px; color: rgba(255,255,255,0.4);">/</span> 89</div>
+          </div>
+        </div>
+        
+        <!-- Main Grid -->
+        <div style="display: grid; grid-template-columns: 3fr 1fr; gap: 24px;">
+          <!-- Left Column -->
+          <div style="display: flex; flex-direction: column; gap: 24px;">
+            <!-- Tasks Panel -->
+            <div style="background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; overflow: hidden;">
+              <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="font-size: 13px; color: white; font-weight: 600; margin: 0;">任务列表</h3>
+                <div style="display: flex; gap: 6px;">
+                  <button style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); color: white; padding: 4px 10px; border-radius: 6px; font-size: 10px; cursor: pointer;">全部</button>
+                  <button style="background: transparent; border: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); padding: 4px 10px; border-radius: 6px; font-size: 10px; cursor: pointer;">进行中</button>
+                </div>
+              </div>
+              <div style="padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center;">
+                <div style="flex: 1;">
+                  <div style="color: white; font-size: 12px; font-weight: 500; margin-bottom: 2px;">codex/feat-auth-system</div>
+                  <div style="color: rgba(255,255,255,0.5); font-size: 10px;">Worker: gemini-worker-01</div>
+                </div>
+                <span style="background: rgba(6, 182, 212, 0.2); color: #22d3ee; padding: 3px 10px; border-radius: 10px; font-size: 10px; font-weight: 600; border: 1px solid rgba(6, 182, 212, 0.3);">进行中</span>
+              </div>
+              <div style="padding: 12px 20px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="flex: 1;">
+                  <div style="color: white; font-size: 12px; font-weight: 500; margin-bottom: 2px;">codex/add-unit-tests</div>
+                  <div style="color: rgba(255,255,255,0.5); font-size: 10px;">Worker: trae-worker-02</div>
+                </div>
+                <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 3px 10px; border-radius: 10px; font-size: 10px; font-weight: 600; border: 1px solid rgba(16, 185, 129, 0.3);">已合并</span>
+              </div>
+            </div>
+            
+            <!-- Terminal Panel -->
+            <div style="background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; overflow: hidden;">
+              <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                <h3 style="font-size: 13px; color: white; font-weight: 600; margin: 0;">事件日志</h3>
+              </div>
+              <div style="padding: 12px 20px; font-family: 'Courier New', monospace; font-size: 11px; color: rgba(255,255,255,0.7); line-height: 1.6;">
+                <div><span style="color: #60a5fa;">[14:32:15]</span> Task assigned to gemini-worker-01</div>
+                <div><span style="color: #34d399;">[14:32:10]</span> Worker gemini-worker-01 is now busy</div>
+                <div><span style="color: #fb923c;">[14:31:58]</span> New task created: codex/feat-auth</div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Right Column - Workers -->
+          <div style="background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; overflow: hidden; height: fit-content;">
+            <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+              <h3 style="font-size: 13px; color: white; font-weight: 600; margin: 0;">工作节点</h3>
+            </div>
+            <div style="padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.05);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="color: white; font-size: 11px; font-weight: 500;">gemini-worker-01</span>
+                <span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; padding: 2px 8px; border-radius: 8px; font-size: 9px; font-weight: 600;">繁忙</span>
+              </div>
+              <div style="color: rgba(255,255,255,0.5); font-size: 10px;">Pool: default</div>
+            </div>
+            <div style="padding: 12px 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="color: white; font-size: 11px; font-weight: 500;">codex-worker-03</span>
+                <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 2px 8px; border-radius: 8px; font-size: 9px; font-weight: 600;">空闲</span>
+              </div>
+              <div style="color: rgba(255,255,255,0.5); font-size: 10px;">Pool: default</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>设计规范总结</h3>
+  
+  <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
+    <div style="background: rgba(59, 130, 246, 0.1); padding: 16px; border-radius: 12px; border-left: 4px solid #3b82f6;">
+      <h4 style="color: #1e40af; margin-bottom: 8px; font-size: 14px;">🎨 配色方案</h4>
+      <ul style="color: #1e3a8a; line-height: 1.6; font-size: 12px; margin: 0; padding-left: 16px;">
+        <li><strong>背景</strong>：深蓝渐变 (#0f2027 → #203a43 → #2c5364)</li>
+        <li><strong>玻璃卡片</strong>：rgba(255,255,255,0.1) + blur(10px)</li>
+        <li><strong>边框</strong>：rgba(255,255,255,0.15)</li>
+        <li><strong>文字</strong>：白色主文字 + 半透明次要文字</li>
+        <li><strong>强调色</strong>：蓝、绿、紫、橙（状态色）</li>
+      </ul>
+    </div>
+    
+    <div style="background: rgba(16, 185, 129, 0.1); padding: 16px; border-radius: 12px; border-left: 4px solid #10b981;">
+      <h4 style="color: #059669; margin-bottom: 8px; font-size: 14px;">📐 布局规范</h4>
+      <ul style="color: #047857; line-height: 1.6; font-size: 12px; margin: 0; padding-left: 16px;">
+        <li><strong>容器宽度</strong>：max-width 1600px</li>
+        <li><strong>间距</strong>：16px / 24px（卡片间距）</li>
+        <li><strong>圆角</strong>：16px（大卡片）/ 8px（小元素）</li>
+        <li><strong>内边距</strong>：16px / 20px（卡片内部）</li>
+        <li><strong>网格</strong>：4列指标卡 + 3:1主内容布局</li>
+      </ul>
+    </div>
+    
+    <div style="background: rgba(168, 85, 247, 0.1); padding: 16px; border-radius: 12px; border-left: 4px solid #a855f7;">
+      <h4 style="color: #7c3aed; margin-bottom: 8px; font-size: 14px;">✨ 动效规范</h4>
+      <ul style="color: #6d28d9; line-height: 1.6; font-size: 12px; margin: 0; padding-left: 16px;">
+        <li><strong>悬停</strong>：背景色变化 (0.2s ease)</li>
+        <li><strong>卡片</strong>：上浮 + 发光边框 (0.3s ease-out)</li>
+        <li><strong>按钮</strong>：缩放反馈 (0.1s)</li>
+        <li><strong>状态</strong>：颜色过渡 (0.2s ease)</li>
+        <li><strong>加载</strong>：脉冲 + 渐变流动</li>
+      </ul>
+    </div>
+    
+    <div style="background: rgba(251, 146, 60, 0.1); padding: 16px; border-radius: 12px; border-left: 4px solid #fb923c;">
+      <h4 style="color: #ea580c; margin-bottom: 8px; font-size: 14px;">🔧 技术实现</h4>
+      <ul style="color: #c2410c; line-height: 1.6; font-size: 12px; margin: 0; padding-left: 16px;">
+        <li><strong>CSS</strong>：Tailwind CSS + 自定义类</li>
+        <li><strong>玻璃效果</strong>：backdrop-filter: blur()</li>
+        <li><strong>渐变</strong>：linear-gradient + 多色停止</li>
+        <li><strong>动画</strong>：transition + @keyframes</li>
+        <li><strong>响应式</strong>：保持移动端可用性</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="background: rgba(16, 185, 129, 0.1); padding: 20px; border-radius: 12px; border: 2px solid #10b981;">
+  <h3 style="color: #059669; margin-bottom: 12px;">✅ 设计方案确认</h3>
+  <p style="color: #047857; line-height: 1.6; font-size: 13px; margin-bottom: 12px;">
+    您已选择<strong>玻璃拟态风格</strong> + <strong>深蓝渐变配色</strong>。这个方案将为 ForgeFlow Console 带来：
+  </p>
+  <ul style="color: #047857; line-height: 1.8; font-size: 13px; margin: 0; padding-left: 20px;">
+    <li>现代、专业的视觉体验</li>
+    <li>清晰的层次感和可读性</li>
+    <li>流畅的交互动效</li>
+    <li>适合长时间使用的舒适感</li>
+  </ul>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="confirm" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>确认设计方案</h3>
+      <p>开始实现这个设计方案</p>
+    </div>
+  </div>
+  <div class="option" data-choice="adjust" onclick="toggleSelect(this)">
+    <div class="letter">✎</div>
+    <div class="content">
+      <h3>需要调整</h3>
+      <p>我想修改一些细节</p>
+    </div>
+  </div>
+</div>

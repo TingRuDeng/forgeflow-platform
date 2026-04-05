@@ -126,6 +126,8 @@ Trae MCP fallback 维护：
 - Trae MCP worker 已降级为 deprecated/fallback 接入。
 - review memory 已进入主线的 dispatch 注入路径，但仍不是完整知识库系统。
 - `blocked + rework -> continuation` 已进入主线协议与 Trae consumer 链路，并已完成远程 smoke 验证。
+- Trae dispatch prompt 现在优先由 `worker-review-orchestrator-cli` 基于结构化任务字段自动渲染；dispatcher assignment 会保留最终 `workerPrompt`，并附带 `workerPromptMode/reportSchemaVersion` 元信息。
+- `new_chat` 模式下的 Trae 采样现在会缩到最后一个可见 chat root，并在读取到上一个已完成任务的 `任务ID` 时提前报 stale-session 错误，而不是继续把旧对话当成本次任务基线。
 
 ## Supporting Docs
 

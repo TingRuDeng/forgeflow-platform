@@ -43,6 +43,9 @@ export interface DispatchTaskInputOptions {
   nonGoals?: string;
   mustPreserve?: string;
   reworkMapping?: string;
+  workerPromptMode?: "auto" | "custom";
+  reportSchemaVersion?: "trae-v1";
+  normalizeTraePromptContract?: boolean;
 }
 
 export interface WatchOptions {

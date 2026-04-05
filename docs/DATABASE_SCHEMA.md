@@ -103,6 +103,8 @@ Assignment records wrap the assignment package plus dispatcher tracking metadata
 - `assignment`
 - `workerPrompt`
 - `contextMarkdown`
+- `workerPromptMode`
+- `reportSchemaVersion`
 - `assignedAt`
 - `claimedAt`
 - `continuationMode` / `continueFromTaskId` / `chatMode` inside `assignment`

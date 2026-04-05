@@ -17,6 +17,10 @@ This package is self-contained for the remote Trae runtime path:
 This package is now structured for **public beta npm publishing**, but it is still beta-oriented and is not published automatically from this repository.
 It depends on `@tingrudeng/automation-gateway-core` for shared final-report parsing and task-id validation logic.
 
+Current unattended runtime guards:
+- `new_chat` sampling is narrowed to the last visible chat root instead of scanning the whole page by default
+- when baseline sampling still exposes a different completed task id, the runtime fails early with a stale-session error instead of continuing to read the old chat
+
 ## Commands
 
 Repository-local execution:
@@ -189,6 +193,7 @@ It is no longer a ForgeFlow runtime root.
 
 - This package is for the remote Trae runtime only; it is not a replacement for the full ForgeFlow control plane.
 - Dispatcher still runs separately on the control-plane machine.
+- The runtime expects Trae task prompts to preserve the final-report contract, including `任务完成` / `结果` / `任务ID`; the preferred path is to let `worker-review-orchestrator-cli` auto-render Trae prompts instead of hand-writing them.
 - The repository is licensed under Apache-2.0.
 - `forgeflow-trae-beta update` performs a direct self-update of the installed runtime package and reports the command it ran.
 - Current beta operating guidance:

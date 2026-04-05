@@ -140,6 +140,7 @@ function serialize(value) {
 
 const BROWSER_HELPERS_SOURCE = `
 function traeAutomationQueryAll(selectors) {
+  const root = arguments.length > 1 && arguments[1] ? arguments[1] : document;
   const seen = new Set();
   const elements = [];
   for (const selector of selectors) {
@@ -148,7 +149,7 @@ function traeAutomationQueryAll(selectors) {
     }
     let matched = [];
     try {
-      matched = Array.from(document.querySelectorAll(selector));
+      matched = Array.from(root.querySelectorAll(selector));
     } catch {
       continue;
     }
@@ -223,8 +224,11 @@ function traeAutomationFilterTopLevel(elements) {
 }
 
 function traeAutomationSnapshotResponses(selectors, options = {}) {
+  const root = Array.isArray(options.rootSelectors) && options.rootSelectors.length > 0
+    ? traeAutomationPickVisible(options.rootSelectors, { pick: options.rootPick || "first" })
+    : null;
   return traeAutomationFilterTopLevel(
-    traeAutomationQueryAll(selectors).filter((element) => traeAutomationIsVisible(element, options))
+    traeAutomationQueryAll(selectors, root || document).filter((element) => traeAutomationIsVisible(element, options))
   )
     .map((element, index) => ({
       index,
@@ -763,6 +767,36 @@ function normalizeComparableText(value) {
   return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function isPlaceholderTaskId(taskId) {
+  return /^<[^>]+>$/.test(String(taskId || "").trim());
+}
+
+function detectMismatchedTaskId(snapshot = [], expectedTaskId = "") {
+  const expected = String(expectedTaskId || "").trim();
+  if (!expected || !Array.isArray(snapshot)) {
+    return null;
+  }
+
+  for (const entry of snapshot) {
+    const text = String(entry?.text || "").trim();
+    if (!text) {
+      continue;
+    }
+    const reportedTaskId = getLastReportFieldValue(text, "任务ID");
+    if (!reportedTaskId || isPlaceholderTaskId(reportedTaskId)) {
+      continue;
+    }
+    if (!isEquivalentReportedTaskId(expected, reportedTaskId)) {
+      return {
+        taskId: reportedTaskId,
+        preview: text.slice(0, 200),
+      };
+    }
+  }
+
+  return null;
+}
+
 function buildActivityState(text, prompt) {
   const rawText = String(text || "");
   const sanitizedText = sanitizeActivityText(rawText, prompt);
@@ -812,6 +846,8 @@ async function collectAutomationResponse({
   let finalSnapshot = baselineSnapshot;
   const requiredPrefix = String(config.responseRequiredPrefix || "").trim();
   const expectedTaskId = String(config.expectedTaskId || "").trim();
+  const snapshotRootSelectors = Array.isArray(config.snapshotRootSelectors) ? config.snapshotRootSelectors : [];
+  const snapshotRootPick = String(config.snapshotRootPick || "first");
 
   const normalizePrefixComparableText = (value) => String(value || "")
     .trimStart()
@@ -825,7 +861,10 @@ async function collectAutomationResponse({
   });
 
   while (now() - startedAt < config.responseTimeoutMs) {
-    const snapshot = await domAdapter.captureResponseSnapshot(session, config);
+    const responseSnapshotOptions = snapshotRootSelectors.length > 0
+      ? { rootSelectors: snapshotRootSelectors, rootPick: snapshotRootPick }
+      : undefined;
+    const snapshot = await domAdapter.captureResponseSnapshot(session, config, responseSnapshotOptions);
     finalSnapshot = snapshot;
     const extracted = extractAutomationResponse(snapshot, baselineSnapshot, {
       requiredPrefix,
@@ -839,6 +878,9 @@ async function collectAutomationResponse({
       const activitySnapshot = await domAdapter.captureResponseSnapshot(session, config, {
         selectors: config.activitySelectors,
         allowHiddenText: true,
+        ...(snapshotRootSelectors.length > 0
+          ? { rootSelectors: snapshotRootSelectors, rootPick: snapshotRootPick }
+          : {}),
       });
       const extractedActivity = extractAutomationResponse(activitySnapshot, baselineActivitySnapshot, {
         requiredPrefix,
@@ -1092,13 +1134,39 @@ export function createTraeAutomationDriver(options = {}) {
           }
         }
 
-        const baselineSnapshot = await domAdapter.captureResponseSnapshot(session, config);
+        const snapshotRootSelectors = payload.chatMode === "new_chat" && Array.isArray(config.activitySelectors)
+          ? [...config.activitySelectors]
+          : [];
+        const snapshotRootPick = "last";
+
+        const baselineSnapshot = await domAdapter.captureResponseSnapshot(session, config, snapshotRootSelectors.length > 0
+          ? { rootSelectors: snapshotRootSelectors, rootPick: snapshotRootPick }
+          : undefined);
         const baselineActivitySnapshot = Array.isArray(config.activitySelectors) && config.activitySelectors.length > 0
           ? await domAdapter.captureResponseSnapshot(session, config, {
             selectors: config.activitySelectors,
             allowHiddenText: true,
+            ...(snapshotRootSelectors.length > 0
+              ? { rootSelectors: snapshotRootSelectors, rootPick: snapshotRootPick }
+              : {}),
           })
           : [];
+        if (payload.chatMode === "new_chat") {
+          const staleBaselineMatch = detectMismatchedTaskId(
+            [...baselineSnapshot, ...baselineActivitySnapshot],
+            payload.expectedTaskId ?? null,
+          );
+          if (staleBaselineMatch) {
+            throw new TraeAutomationError(
+              "AUTOMATION_PREPARE_STALE_SESSION",
+              `Prepared new chat but still reading stale task content for "${staleBaselineMatch.taskId}"`,
+              {
+                staleTaskId: staleBaselineMatch.taskId,
+                stalePreview: staleBaselineMatch.preview,
+              },
+            );
+          }
+        }
         debugLog("prompt submitted", {
           targetTitle: discovery.target.title,
           baselineCount: Array.isArray(baselineSnapshot) ? baselineSnapshot.length : 0,
@@ -1124,6 +1192,8 @@ export function createTraeAutomationDriver(options = {}) {
             expectedTaskId: payload.expectedTaskId ?? null,
             responseRequiredPrefix: payload.responseRequiredPrefix ?? config.responseRequiredPrefix,
             responseTimeoutMs: Number(payload.responseTimeoutMs || config.responseTimeoutMs),
+            snapshotRootSelectors,
+            snapshotRootPick,
           },
           baselineSnapshot,
           baselineActivitySnapshot,
