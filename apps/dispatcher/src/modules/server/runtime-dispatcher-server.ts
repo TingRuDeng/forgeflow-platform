@@ -5,7 +5,12 @@ import type {
   Assignment,
   Event,
 } from "./runtime-state.js";
-import { registerWorker as registerWorkerFn, reconcileRuntimeState as reconcileRuntimeStateFn } from "./runtime-state.js";
+import {
+  beginTaskForWorker,
+  claimAssignedTaskForWorker,
+  registerWorker as registerWorkerFn,
+  reconcileRuntimeState as reconcileRuntimeStateFn,
+} from "./runtime-state.js";
 
 import type {
   JsonResponse,
@@ -29,6 +34,19 @@ function appendRuntimeEvent(state: RuntimeState, event: Event): void {
   if (state.events.length > RUNTIME_EVENTS_RETENTION_LIMIT) {
     state.events.splice(0, state.events.length - RUNTIME_EVENTS_RETENTION_LIMIT);
   }
+}
+
+function overwriteRuntimeState(target: RuntimeState, source: RuntimeState): void {
+  target.version = source.version;
+  target.updatedAt = source.updatedAt;
+  target.sequence = source.sequence;
+  target.workers = source.workers;
+  target.tasks = source.tasks;
+  target.events = source.events;
+  target.assignments = source.assignments;
+  target.reviews = source.reviews;
+  target.pullRequests = source.pullRequests;
+  target.dispatches = source.dispatches;
 }
 
 export type { WorkerStatus } from "./runtime-glue-types.js";
@@ -171,11 +189,6 @@ export function findTraeTaskForWorker(
     ?? (task as Task & { continueFromTaskId?: string | null })?.continueFromTaskId
     ?? null;
 
-  if (!worker.currentTaskId) {
-    worker.currentTaskId = task.id;
-    worker.lastHeartbeatAt = nowIso();
-  }
-
   return { task, assignment, workerPrompt, contextMarkdown, constraints, dirs, chatMode, continuationMode, continueFromTaskId };
 }
 
@@ -292,19 +305,60 @@ export function applyTraeStartTask(
   state: RuntimeState,
   workerId: string,
   taskId: string
-): { state: RuntimeState; worker: Worker | null } {
-  const task = state.tasks.find((t) => t.id === taskId);
-  if (task) {
-    task.status = "in_progress";
-    task.assignedWorkerId = workerId;
+): { state: RuntimeState; worker: Worker | null; ok: boolean; error?: string } {
+  const worker = state.workers.find((candidate) => candidate.id === workerId);
+  if (!worker) {
+    return { state, worker: null, ok: false, error: "worker_not_found" };
   }
-  const worker = state.workers.find((w) => w.id === workerId);
-  if (worker) {
-    worker.currentTaskId = taskId;
-    worker.status = "busy";
-    worker.lastHeartbeatAt = nowIso();
+
+  const task = state.tasks.find((candidate) => candidate.id === taskId);
+  if (!task) {
+    return { state, worker, ok: false, error: "task_not_found" };
   }
-  return { state, worker: worker ?? null };
+
+  const claimed = claimAssignedTaskForWorker(state, {
+    workerId,
+    at: nowIso(),
+  });
+  overwriteRuntimeState(state, claimed.state);
+  if (!claimed.assignment) {
+    return {
+      state,
+      worker: state.workers.find((candidate) => candidate.id === workerId) ?? null,
+      ok: false,
+      error: "no_assigned_task",
+    };
+  }
+
+  if (claimed.assignment.task.id !== taskId) {
+    return {
+      state,
+      worker: state.workers.find((candidate) => candidate.id === workerId) ?? null,
+      ok: false,
+      error: "assigned_task_mismatch",
+    };
+  }
+
+  try {
+    const nextState = beginTaskForWorker(state, {
+      workerId,
+      taskId,
+      at: nowIso(),
+    });
+    overwriteRuntimeState(state, nextState);
+    return {
+      state,
+      worker: state.workers.find((candidate) => candidate.id === workerId) ?? null,
+      ok: true,
+    };
+  } catch (error) {
+    return {
+      state,
+      worker: state.workers.find((candidate) => candidate.id === workerId) ?? null,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export type TraeRouteInput = {
@@ -449,7 +503,16 @@ function handleTraeRouteImpl(
       };
     }
 
-    const { state: nextState, worker } = applyTraeStartTask(state, workerId, taskId);
+    const result = applyTraeStartTask(state, workerId, taskId);
+    if (!result.ok) {
+      const status = result.error === "worker_not_found" || result.error === "task_not_found" ? 404 : 409;
+      return {
+        status,
+        headers: { "content-type": "application/json" },
+        json: { ok: false, error: result.error },
+        text: JSON.stringify({ ok: false, error: result.error }),
+      };
+    }
 
     return {
       status: 200,
@@ -457,12 +520,12 @@ function handleTraeRouteImpl(
       json: {
         ok: true,
         status: "started",
-        worker,
+        worker: result.worker,
       },
       text: JSON.stringify({
         ok: true,
         status: "started",
-        worker,
+        worker: result.worker,
       }),
     };
   }

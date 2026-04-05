@@ -127,6 +127,9 @@ describe("runtime-dispatcher-server foundation", () => {
       expect(result.task).not.toBeNull();
       expect(result.task!.id).toBe("task-ready");
       expect(result.task!.assignedWorkerId).toBe("trae-01");
+      const worker = state.workers.find((candidate) => candidate.id === "trae-01");
+      expect(worker).toBeDefined();
+      expect(worker!.currentTaskId).toBeUndefined();
     });
 
     it("returns in_progress task to same worker", () => {
@@ -347,10 +350,25 @@ describe("runtime-dispatcher-server foundation", () => {
   });
 
   describe("applyTraeStartTask", () => {
-    it("updates task and worker status", () => {
+    it("claims then starts an assigned task", () => {
       const state = createEmptyRuntimeState();
-      const task = makeTask({ id: "task-1", status: "assigned" });
+      const task = makeTask({ id: "task-1", status: "assigned", assignedWorkerId: "trae-01" });
       state.tasks.push(task);
+      state.assignments.push(makeAssignment("task-1", {
+        status: "assigned",
+        workerId: "trae-01",
+        assignedAt: new Date().toISOString(),
+        assignment: {
+          taskId: "task-1",
+          workerId: "trae-01",
+          pool: "trae",
+          status: "assigned",
+          branchName: "ai/trae/test-task-1",
+          allowedPaths: ["src/**", "tests/**"],
+          repo: "test/repo",
+          defaultBranch: "main",
+        },
+      }));
       state.workers.push({
         id: "trae-01",
         pool: "trae",
@@ -362,14 +380,22 @@ describe("runtime-dispatcher-server foundation", () => {
       });
 
       const result = applyTraeStartTask(state, "trae-01", "task-1");
+      expect(result.ok).toBe(true);
       expect(result.state.tasks[0].status).toBe("in_progress");
+      expect(result.state.assignments[0].status).toBe("in_progress");
+      expect(result.state.assignments[0].claimedAt).toBeTruthy();
       expect(result.state.workers[0].status).toBe("busy");
       expect(result.state.workers[0].currentTaskId).toBe("task-1");
+      const eventTypes = result.state.events.map((event) => event.type);
+      expect(eventTypes).toContain("assignment_claimed");
+      expect(eventTypes).toContain("status_changed");
     });
 
-    it("returns null worker when not found", () => {
+    it("returns error when worker not found", () => {
       const state = createEmptyRuntimeState();
       const result = applyTraeStartTask(state, "unknown-worker", "task-1");
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe("worker_not_found");
       expect(result.worker).toBeNull();
     });
   });

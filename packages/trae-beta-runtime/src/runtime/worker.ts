@@ -692,6 +692,14 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     }
   }
 
+  function classifyPreStartFailure(error: Error): string {
+    const message = String(error?.message || "");
+    const isWorkspaceError = /(worktree|branch .*already checked out|failed to create worktree|failed to fetch origin|default branch ref|taskId is required|repoDir is required|branchName is required)/i
+      .test(message);
+    const code = isWorkspaceError ? "workspace_prepare_failed" : "task_start_failed";
+    return `${code}: ${message}`;
+  }
+
   function getResponseText(response: unknown) {
     return (response as {
       data?: { response?: { text?: string }; result?: { response?: { text?: string } } };
@@ -863,11 +871,27 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         branch: task.branch || null,
         repo: task.repo || null,
       });
-      materializeTaskWorkspace(task, repoDir);
-      task.execution_dir = repoDir;
-      await dispatcherClient.startTask(workerId, task.task_id);
-      heartbeat.start("high");
-      await dispatcherClient.reportProgress(task.task_id, "Trae automation worker started task", workerId);
+      try {
+        materializeTaskWorkspace(task, repoDir);
+        task.execution_dir = repoDir;
+        await dispatcherClient.startTask(workerId, task.task_id);
+        heartbeat.start("high");
+        await dispatcherClient.reportProgress(task.task_id, "Trae automation worker started task", workerId);
+      } catch (error) {
+        const normalizedError = error instanceof Error ? error : new Error(String(error));
+        const summary = classifyPreStartFailure(normalizedError);
+        try {
+          await dispatcherClient.reportProgress(task.task_id, `Task bootstrap failed: ${summary}`, workerId);
+        } catch {
+          // progress reporting failure should not block terminal failure submission
+        }
+        await submitFailure(task, new Error(summary), "");
+        return {
+          status: "failed",
+          taskId: task.task_id,
+          error: summary,
+        };
+      }
 
       const prompt = buildAutomationPrompt(task);
       debugLog("worker.task.prompt_built", {
