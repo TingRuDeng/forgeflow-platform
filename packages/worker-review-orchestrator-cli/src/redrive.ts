@@ -53,6 +53,10 @@ function extractFailedSummaryFromEvents(events: Array<Record<string, unknown>>):
 
   const latestStatusChanged = statusChangedEvents[statusChangedEvents.length - 1];
   const payload = latestStatusChanged.payload as Record<string, unknown> | undefined;
+  const structuredFailureSummary = extractStringValue(payload ?? null, "failureSummary");
+  if (structuredFailureSummary) {
+    return structuredFailureSummary;
+  }
   return extractStringValue(payload ?? null, "summary");
 }
 
@@ -83,13 +87,39 @@ function extractLatestReviewDecision(
   };
 }
 
+function extractLatestWorkerResultEvidenceFailureSummary(
+  reviews: Array<Record<string, unknown>>,
+  taskId: string,
+): string | null {
+  const taskReview = reviews.find((r) => extractStringValue(r, "taskId") === taskId);
+  if (!taskReview) return null;
+
+  const latestWorkerResult = taskReview.latestWorkerResult as Record<string, unknown> | undefined;
+  if (!latestWorkerResult) return null;
+
+  const evidence = latestWorkerResult.evidence as Record<string, unknown> | undefined;
+  if (!evidence) return null;
+
+  return extractStringValue(evidence, "failureSummary");
+}
+
 function extractTaskFailureInfo(
   task: Record<string, unknown>,
   events: Array<Record<string, unknown>>,
+  reviews: Array<Record<string, unknown>>,
 ): { status: string | null; failureSummary: string | null } {
   const status = extractStringValue(task, "status");
-  const failureSummary = extractFailedSummaryFromEvents(events);
-  return { status, failureSummary };
+  const taskId = extractStringValue(task, "id");
+
+  const evidenceFailureSummary = taskId
+    ? extractLatestWorkerResultEvidenceFailureSummary(reviews, taskId)
+    : null;
+  if (evidenceFailureSummary) {
+    return { status, failureSummary: evidenceFailureSummary };
+  }
+
+  const eventFailureSummary = extractFailedSummaryFromEvents(events);
+  return { status, failureSummary: eventFailureSummary };
 }
 
 interface RecoverableTaskFields {
@@ -190,7 +220,7 @@ export async function runRedrive(options: RedriveOptions): Promise<RedriveResult
 
   const reviews = (snapshot.reviews as Array<Record<string, unknown>>) ?? [];
 
-  const { status, failureSummary } = extractTaskFailureInfo(task, events);
+  const { status, failureSummary } = extractTaskFailureInfo(task, events, reviews);
 
   let redriveReason: string;
   let latestReview: { decision: string | null; notes: string | null; reviewRecord: Record<string, unknown> | null } | null = null;

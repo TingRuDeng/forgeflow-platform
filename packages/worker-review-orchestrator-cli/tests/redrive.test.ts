@@ -1415,4 +1415,347 @@ describe("redrive", () => {
       }),
     ).rejects.toThrow("task dispatch-1:task-no-redrive latest review explicitly disabled redrive");
   });
+
+  it("failed redrive prefers latestWorkerResult.evidence.failureSummary over event payload", async () => {
+    const snapshot = {
+      tasks: [
+        {
+          id: "dispatch-1:task-evidence-priority",
+          status: "failed",
+          title: "Evidence Priority Task",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/evidence-priority",
+          pool: "trae",
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-1:task-evidence-priority",
+          workerId: "worker-1",
+          pool: "trae",
+          status: "failed",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/evidence-priority",
+          targetWorkerId: "trae-remote-forgeflow",
+        },
+      ],
+      reviews: [
+        {
+          taskId: "dispatch-1:task-evidence-priority",
+          decision: "pending",
+          notes: "",
+          latestWorkerResult: {
+            taskId: "dispatch-1:task-evidence-priority",
+            workerId: "worker-1",
+            evidence: {
+              failureType: "preflight",
+              failureSummary: "worktree_mismatch: structured evidence summary from latestWorkerResult",
+            },
+          },
+        },
+      ],
+      events: [
+        {
+          taskId: "dispatch-1:task-evidence-priority",
+          type: "status_changed",
+          at: "2026-03-29T02:00:00Z",
+          payload: {
+            from: "in_progress",
+            to: "failed",
+            failureSummary: "worktree_mismatch: event payload failureSummary should be ignored",
+            summary: "worktree_mismatch: event summary should be ignored",
+          },
+        },
+      ],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(snapshot)),
+    });
+
+    const dispatchMockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            dispatchId: "dispatch-redrive-evidence",
+            taskIds: ["dispatch-80:redrive-evidence"],
+            assignments: [],
+          }),
+        ),
+    });
+
+    let fetchCallCount = 0;
+    const combinedFetch = async (url: string, init?: RequestInit) => {
+      fetchCallCount++;
+      if (fetchCallCount === 1) {
+        return mockFetch(url, init);
+      }
+      return dispatchMockFetch(url, init);
+    };
+
+    const result = await runRedrive({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-evidence-priority",
+      fetchImpl: combinedFetch as typeof globalThis.fetch,
+    });
+
+    expect(result.failureSummary).toContain("structured evidence summary from latestWorkerResult");
+    expect(result.failureSummary).not.toContain("event payload failureSummary");
+    expect(result.failureSummary).not.toContain("event summary");
+  });
+
+  it("failed redrive falls back to event payload failureSummary when latestWorkerResult.evidence.failureSummary is absent", async () => {
+    const snapshot = {
+      tasks: [
+        {
+          id: "dispatch-1:task-payload-fallback",
+          status: "failed",
+          title: "Payload Fallback Task",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/payload-fallback",
+          pool: "trae",
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-1:task-payload-fallback",
+          workerId: "worker-1",
+          pool: "trae",
+          status: "failed",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/payload-fallback",
+          targetWorkerId: "trae-remote-forgeflow",
+        },
+      ],
+      reviews: [
+        {
+          taskId: "dispatch-1:task-payload-fallback",
+          decision: "pending",
+          notes: "",
+          latestWorkerResult: {
+            taskId: "dispatch-1:task-payload-fallback",
+            workerId: "worker-1",
+          },
+        },
+      ],
+      events: [
+        {
+          taskId: "dispatch-1:task-payload-fallback",
+          type: "status_changed",
+          at: "2026-03-29T02:00:00Z",
+          payload: {
+            from: "in_progress",
+            to: "failed",
+            failureSummary: "worktree_mismatch: event payload failureSummary should be used",
+            summary: "worktree_mismatch: event summary should be ignored",
+          },
+        },
+      ],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(snapshot)),
+    });
+
+    const dispatchMockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            dispatchId: "dispatch-redrive-payload",
+            taskIds: ["dispatch-81:redrive-payload"],
+            assignments: [],
+          }),
+        ),
+    });
+
+    let fetchCallCount = 0;
+    const combinedFetch = async (url: string, init?: RequestInit) => {
+      fetchCallCount++;
+      if (fetchCallCount === 1) {
+        return mockFetch(url, init);
+      }
+      return dispatchMockFetch(url, init);
+    };
+
+    const result = await runRedrive({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-payload-fallback",
+      fetchImpl: combinedFetch as typeof globalThis.fetch,
+    });
+
+    expect(result.failureSummary).toContain("event payload failureSummary should be used");
+    expect(result.failureSummary).not.toContain("event summary");
+  });
+
+  it("failed redrive falls back to event summary when both evidence and payload failureSummary are absent", async () => {
+    const snapshot = {
+      tasks: [
+        {
+          id: "dispatch-1:task-summary-fallback",
+          status: "failed",
+          title: "Summary Fallback Task",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/summary-fallback",
+          pool: "trae",
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-1:task-summary-fallback",
+          workerId: "worker-1",
+          pool: "trae",
+          status: "failed",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/summary-fallback",
+          targetWorkerId: "trae-remote-forgeflow",
+        },
+      ],
+      reviews: [],
+      events: [
+        {
+          taskId: "dispatch-1:task-summary-fallback",
+          type: "status_changed",
+          at: "2026-03-29T02:00:00Z",
+          payload: {
+            from: "in_progress",
+            to: "failed",
+            summary: "worktree_mismatch: legacy event summary should be used",
+          },
+        },
+      ],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(snapshot)),
+    });
+
+    const dispatchMockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            dispatchId: "dispatch-redrive-summary",
+            taskIds: ["dispatch-82:redrive-summary"],
+            assignments: [],
+          }),
+        ),
+    });
+
+    let fetchCallCount = 0;
+    const combinedFetch = async (url: string, init?: RequestInit) => {
+      fetchCallCount++;
+      if (fetchCallCount === 1) {
+        return mockFetch(url, init);
+      }
+      return dispatchMockFetch(url, init);
+    };
+
+    const result = await runRedrive({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-summary-fallback",
+      fetchImpl: combinedFetch as typeof globalThis.fetch,
+    });
+
+    expect(result.failureSummary).toContain("legacy event summary should be used");
+  });
+
+  it("failed redrive with empty evidence.failureSummary falls back to event payload", async () => {
+    const snapshot = {
+      tasks: [
+        {
+          id: "dispatch-1:task-empty-evidence",
+          status: "failed",
+          title: "Empty Evidence Task",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/empty-evidence",
+          pool: "trae",
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-1:task-empty-evidence",
+          workerId: "worker-1",
+          pool: "trae",
+          status: "failed",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/empty-evidence",
+          targetWorkerId: "trae-remote-forgeflow",
+        },
+      ],
+      reviews: [
+        {
+          taskId: "dispatch-1:task-empty-evidence",
+          decision: "pending",
+          notes: "",
+          latestWorkerResult: {
+            taskId: "dispatch-1:task-empty-evidence",
+            workerId: "worker-1",
+            evidence: {
+              failureType: "preflight",
+              failureSummary: "",
+            },
+          },
+        },
+      ],
+      events: [
+        {
+          taskId: "dispatch-1:task-empty-evidence",
+          type: "status_changed",
+          at: "2026-03-29T02:00:00Z",
+          payload: {
+            from: "in_progress",
+            to: "failed",
+            failureSummary: "worktree_mismatch: payload failureSummary used when evidence is empty",
+          },
+        },
+      ],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(snapshot)),
+    });
+
+    const dispatchMockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            dispatchId: "dispatch-redrive-empty",
+            taskIds: ["dispatch-83:redrive-empty"],
+            assignments: [],
+          }),
+        ),
+    });
+
+    let fetchCallCount = 0;
+    const combinedFetch = async (url: string, init?: RequestInit) => {
+      fetchCallCount++;
+      if (fetchCallCount === 1) {
+        return mockFetch(url, init);
+      }
+      return dispatchMockFetch(url, init);
+    };
+
+    const result = await runRedrive({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-empty-evidence",
+      fetchImpl: combinedFetch as typeof globalThis.fetch,
+    });
+
+    expect(result.failureSummary).toContain("payload failureSummary used when evidence is empty");
+  });
 });
