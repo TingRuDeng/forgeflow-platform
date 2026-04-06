@@ -1,10 +1,10 @@
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
 
-export interface ConsoleConfig {
+interface ConsoleConfig {
   dispatcherToken?: string;
   dispatcherUrl?: string;
 }
@@ -31,39 +31,29 @@ function loadConfig(): ConsoleConfig {
   }
 }
 
-const dispatcherProxy = (): ReturnType<typeof import('vite').defineConfig> => {
-  const config = loadConfig();
+const config = loadConfig();
 
-  return defineConfig({
-    plugins: [react()],
-    resolve: {
-      alias: {
-        "@": "/src",
-      },
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      "@": "/src",
     },
-    test: {
-      globals: true,
-      environment: 'jsdom',
-      setupFiles: './src/test/setup.ts',
-      css: true,
-    },
-    server: {
-      port: 8788,
-      proxy: {
-        '/api': {
-          target: config.dispatcherUrl || 'http://127.0.0.1:8787',
-          changeOrigin: true,
-          configure(proxy) {
-            if (config.dispatcherToken) {
-              proxy.on('proxyReq', (proxyReq) => {
-                proxyReq.setHeader('authorization', `Bearer ${config.dispatcherToken}`);
-              });
-            }
-          },
+  },
+  server: {
+    port: 8788,
+    proxy: {
+      '/api': {
+        target: config.dispatcherUrl || 'http://127.0.0.1:8787',
+        changeOrigin: true,
+        configure(proxy) {
+          if (config.dispatcherToken) {
+            proxy.on('proxyReq', (proxyReq) => {
+              proxyReq.setHeader('authorization', `Bearer ${config.dispatcherToken}`);
+            });
+          }
         },
       },
     },
-  });
-};
-
-export default dispatcherProxy;
+  },
+});
