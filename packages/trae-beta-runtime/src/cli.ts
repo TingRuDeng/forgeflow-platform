@@ -572,6 +572,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
       overwrite: parsed.options.overwrite === true,
       projectPath: typeof parsed.options.projectPath === "string" ? parsed.options.projectPath : undefined,
       dispatcherUrl: typeof parsed.options.dispatcherUrl === "string" ? parsed.options.dispatcherUrl : undefined,
+      dispatcherToken: typeof parsed.options.token === "string" ? parsed.options.token : undefined,
       automationUrl: typeof parsed.options.automationUrl === "string" ? parsed.options.automationUrl : undefined,
       workerId: typeof parsed.options.workerId === "string" ? parsed.options.workerId : undefined,
       traeBin: typeof parsed.options.traeBin === "string" ? parsed.options.traeBin : undefined,

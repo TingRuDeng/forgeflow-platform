@@ -14,6 +14,7 @@ import {
   logTaskFailed,
 } from "./logger.js";
 import { recordTaskMetric } from "./metrics.js";
+import { getDispatcherAuthHeader } from "./dispatcher-auth.js";
 
 function resolveDispatcherDist(): { repoRoot: string; distPath: string } {
   const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
@@ -504,12 +505,14 @@ export function createDispatcherClient(dispatcherUrl: string): DispatcherClient 
     const timeoutMs = options.timeout ?? 10_000;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const authHeaders = getDispatcherAuthHeader();
 
     try {
       const response = await fetch(url, {
         method,
         headers: {
           "content-type": "application/json",
+          ...authHeaders,
         },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,

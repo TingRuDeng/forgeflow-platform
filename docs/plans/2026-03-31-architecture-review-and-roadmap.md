@@ -4,9 +4,10 @@
 > 二次核实：`main` 分支 `a8406bb` (2026-04-04)
 > 三次核实：`main` 分支 `b8f4fb6` (2026-04-05)
 > 四次核实：`main` 分支 `3a36727` (2026-04-06)
-> 五次核实：`main` 分支 `3026df7` (2026-04-06) ← 本次更新
+> 五次核实：`main` 分支 `3026df7` (2026-04-06)
+> 六次核实：`main` 分支 `ff2988c` (2026-04-06) ← 本次更新
 > 代码规模：核心运行时 `scripts/lib/` 共 6,215 行 (.mjs→.ts 迁移中)，`apps/dispatcher/` 含 TypeScript 领域层，`packages/` 下 11 个子包
-> 状态更新：本文档已在 `2026-04-02`、`2026-04-04`、`2026-04-05` 与 `2026-04-06` 四次按 `main` 实现做过收口标注；本文件仍然是 `plan/review`，不是权威实现说明。权威状态以 `README.md`、`docs/README.md`、`docs/ARCHITECTURE.md` 与代码为准。
+> 状态更新：本文档已在 `2026-04-02`、`2026-04-04`、`2026-04-05`、`2026-04-06` 五次按 `main` 实现做过收口标注；本文件仍然是 `plan/review`，不是权威实现说明。权威状态以 `README.md`、`docs/README.md`、`docs/ARCHITECTURE.md` 与代码为准。
 
 ---
 
@@ -492,8 +493,11 @@ packages/trae-beta-runtime/
 ```
 
 > [!IMPORTANT]
-> 截至 `2026-04-06`，**Phase 1 全部完成**，QW-1~10 全部完成。**Phase 2 结构化日志 + Metrics 已完成**。Trae Gateway 双实现已完成主体收敛（两套实现均支持 `/release` 端点）。
->
-> **本次新增完成（2026-04-06）**：Phase 2 结构化日志（pino + JSON 日志）+ Metrics 收集（任务耗时、p50/p95/p99 统计）。
->
+> 截至 `2026-04-06`，**Phase 1 全部完成**，QW-1~10 全部完成。**Phase 2 结构化日志 + Metrics 已完成**。Trae Gateway 双实现已完成主体收敛（两套实现均支持 `/release` 端点）。**Dispatcher 认证客户端已全面适配**（worker-daemon、trae-beta-runtime、worker-review-orchestrator-cli、console）。
+
+> **本次新增完成（2026-04-06）**：
+> - Phase 2 结构化日志（pino + JSON 日志）+ Metrics 收集（任务耗时、p50/p95/p99 统计）
+> - Dispatcher auth 客户端适配（所有 CLI 和前端支持 token 认证）
+> - 配置文件支持（dispatcher: `~/.forgeflow-dispatcher.json`，console: `~/.forgeflow-console.json`）
+
 > 当前更紧迫的剩余项：Phase 2 WebSocket 实时通信、Worker Daemon 健壮性增强、scripts/lib .mjs→.ts 完全迁移（部分迁移状态，.ts 源文件已存在）。

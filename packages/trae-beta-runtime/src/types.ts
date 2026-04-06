@@ -2,6 +2,7 @@ export interface TraeBetaConfig {
   version: 2;
   projectPath: string;
   dispatcherUrl: string;
+  dispatcherToken?: string;
   automationUrl: string;
   workerId: string;
   traeBin: string;
@@ -11,6 +12,7 @@ export interface TraeBetaConfig {
 export interface TraeBetaConfigInput {
   projectPath?: string;
   dispatcherUrl?: string;
+  dispatcherToken?: string;
   automationUrl?: string;
   workerId?: string;
   traeBin?: string;

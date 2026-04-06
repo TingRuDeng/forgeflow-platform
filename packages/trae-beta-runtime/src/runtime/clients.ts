@@ -1,7 +1,20 @@
 import * as http from "node:http";
 import * as https from "node:https";
 
-import type { WorkerEvidence } from "@forgeflow/result-contracts";
+import { readDispatcherTokenFromConfig } from "../config.js";
+
+interface WorkerFailure {
+  type: string;
+  message: string;
+}
+
+interface WorkerEvidence {
+  failureType?: string;
+  failureSummary?: string;
+  blockers?: WorkerFailure[];
+  findings?: unknown[];
+  artifacts?: Record<string, string>;
+}
 
 const DEFAULT_DISPATCHER_URL = "http://127.0.0.1:8787";
 const DEFAULT_AUTOMATION_URL = "http://127.0.0.1:8790";
@@ -15,6 +28,7 @@ export interface JsonHttpClientOptions {
   fetchImpl?: typeof globalThis.fetch;
   requestTimeoutMs?: number;
   sourceLabel?: string;
+  dispatcherToken?: string;
   nodeRequestImpl?: (
     url: string,
     init: {
@@ -109,9 +123,14 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
 
     try {
       const method = init.method || "GET";
-      const headers = init.body ? { "content-type": "application/json" } : undefined;
-      const body = init.body ? JSON.stringify(init.body) : undefined;
-      const response = fetchImpl
+      const authToken = typeof process !== "undefined" ? process.env.DISPATCHER_API_TOKEN : undefined;
+      const configToken = !authToken ? (options.dispatcherToken || readDispatcherTokenFromConfig()) : undefined;
+      const headers: Record<string, string> = {};
+      if (init.body) headers["content-type"] = "application/json";
+      if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+      else if (configToken) headers["Authorization"] = `Bearer ${configToken}`;
+    const body = init.body ? JSON.stringify(init.body) : undefined;
+    const response = fetchImpl
         ? await fetchImpl(`${base}${path}`, {
           method,
           headers,

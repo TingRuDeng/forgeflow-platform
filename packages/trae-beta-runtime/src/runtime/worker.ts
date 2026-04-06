@@ -7,7 +7,18 @@ import {
   isPlaceholderTaskId,
 } from "@tingrudeng/automation-gateway-core";
 
-import type { WorkerEvidence } from "@forgeflow/result-contracts";
+interface WorkerFailure {
+  type: string;
+  message: string;
+}
+
+interface WorkerEvidence {
+  failureType?: string;
+  failureSummary?: string;
+  blockers?: WorkerFailure[];
+  findings?: unknown[];
+  artifacts?: Record<string, string>;
+}
 
 import {
   createAutomationGatewayClient,
