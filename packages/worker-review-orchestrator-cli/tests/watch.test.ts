@@ -37,7 +37,7 @@ describe("watch", () => {
       intervalMs: 10,
       timeoutMs: 5000,
       summary: true,
-      fetchImpl: fetchImpl as typeof globalThis.fetch,
+      fetchImpl: fetchImpl as unknown as typeof globalThis.fetch,
     });
 
     expect(result).toMatchObject({
@@ -60,7 +60,7 @@ describe("watch", () => {
       intervalMs: 10,
       timeoutMs: 5000,
       summary: false,
-      fetchImpl: fetchImpl as typeof globalThis.fetch,
+      fetchImpl: fetchImpl as unknown as typeof globalThis.fetch,
     });
 
     expect(result).toMatchObject({
@@ -79,6 +79,7 @@ describe("watch", () => {
       writeState(stateDir, { tasks: [{ id: "dispatch-1:task-1", status: "merged" }] });
 
       const result = await watchTask({
+        dispatcherUrl: "http://127.0.0.1:8787",
         stateDir,
         taskId: "dispatch-1:task-1",
         intervalMs: 10,
@@ -100,6 +101,7 @@ describe("watch", () => {
       writeState(stateDir, { tasks: [{ id: "dispatch-1:task-1", status: "blocked" }] });
 
       const result = await watchTask({
+        dispatcherUrl: "http://127.0.0.1:8787",
         stateDir,
         taskId: "dispatch-1:task-1",
         intervalMs: 10,
