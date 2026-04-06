@@ -22,12 +22,26 @@ This package is meant to pair with the `worker-review-orchestrator` skill, but i
 
 ## Authentication
 
-If the dispatcher requires authentication (`DISPATCHER_AUTH_MODE=token`), set the same token:
-
+### Option 1: Environment variable (recommended for CI/CD)
 ```bash
 export DISPATCHER_API_TOKEN="your-secret-token"
 forgeflow-review-orchestrator dispatch ...
 ```
+
+### Option 2: Init command (recommended for local development)
+```bash
+# First time setup - save your credentials
+forgeflow-review-orchestrator init --token your-secret-token --url http://127.0.0.1:8787
+
+# Check current config
+forgeflow-review-orchestrator init
+
+# After setup, commands work without --dispatcher-url
+forgeflow-review-orchestrator dispatch --input dispatch.json
+forgeflow-review-orchestrator watch --task-id dispatch-1:task-1
+```
+
+Config is saved to `~/.forgeflow-review-orchestrator.json`.
 
 The CLI automatically includes `Authorization: Bearer <token>` in all dispatcher HTTP requests.
 

@@ -9,8 +9,16 @@ import { runInspect } from "./inspect.js";
 import { runRedrive } from "./redrive.js";
 import { runUpdate } from "./update.js";
 import { watchTask } from "./watch.js";
+import { loadConfig } from "./config.js";
 
 import packageJson from "../package.json" with { type: "json" };
+
+function getDispatcherUrl(options: Record<string, string | number | boolean>): string | undefined {
+  const config = loadConfig();
+  return typeof options.dispatcherUrl === "string"
+    ? options.dispatcherUrl
+    : config.dispatcherUrl;
+}
 
 export interface CliDeps {
   runDispatch: typeof runDispatch;
@@ -23,7 +31,7 @@ export interface CliDeps {
 }
 
 export interface ParsedCliArgs {
-  command: "dispatch" | "dispatch-task" | "continue-task" | "watch" | "decide" | "inspect" | "redrive" | "update" | "version";
+  command: "dispatch" | "dispatch-task" | "continue-task" | "watch" | "decide" | "inspect" | "redrive" | "update" | "version" | "init";
   options: Record<string, string | number | boolean>;
 }
 
@@ -45,7 +53,7 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
   if (!command) {
     throw new Error("command is required");
   }
-  if (!["dispatch", "dispatch-task", "continue-task", "watch", "decide", "inspect", "redrive", "update", "version"].includes(command)) {
+  if (!["dispatch", "dispatch-task", "continue-task", "watch", "decide", "inspect", "redrive", "update", "version", "init"].includes(command)) {
     throw new Error(`unknown command: ${command}`);
   }
 
@@ -96,6 +104,8 @@ Usage:
   forgeflow-review-orchestrator redrive --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1
   forgeflow-review-orchestrator update
   forgeflow-review-orchestrator update --help
+  forgeflow-review-orchestrator init --token <token> --url <dispatcher-url>
+  forgeflow-review-orchestrator init
 `);
 }
 
@@ -140,7 +150,7 @@ Examples:
   }
 
   if (parsed.command === "dispatch") {
-    const dispatcherUrl = typeof options.dispatcherUrl === "string" ? options.dispatcherUrl : undefined;
+    const dispatcherUrl = getDispatcherUrl(options);
     const input = typeof options.input === "string" ? options.input : "-";
     if (!dispatcherUrl) {
       throw new Error("--dispatcher-url is required");
@@ -164,7 +174,7 @@ Examples:
   }
 
   if (parsed.command === "dispatch-task") {
-    const dispatcherUrl = typeof options.dispatcherUrl === "string" ? options.dispatcherUrl : undefined;
+    const dispatcherUrl = getDispatcherUrl(options);
     const repo = typeof options.repo === "string" ? options.repo : undefined;
     const defaultBranch = typeof options.defaultBranch === "string" ? options.defaultBranch : undefined;
     const taskId = typeof options.taskId === "string" ? options.taskId : undefined;
@@ -235,7 +245,7 @@ Examples:
   }
 
   if (parsed.command === "continue-task") {
-    const dispatcherUrl = typeof options.dispatcherUrl === "string" ? options.dispatcherUrl : undefined;
+    const dispatcherUrl = getDispatcherUrl(options);
     const taskId = typeof options.taskId === "string" ? options.taskId : undefined;
     if (!dispatcherUrl) {
       throw new Error("--dispatcher-url is required");
@@ -253,7 +263,7 @@ Examples:
   }
 
   if (parsed.command === "watch") {
-    const dispatcherUrl = typeof options.dispatcherUrl === "string" ? options.dispatcherUrl : undefined;
+    const dispatcherUrl = getDispatcherUrl(options);
     const taskId = typeof options.taskId === "string" ? options.taskId : undefined;
     if (!dispatcherUrl) {
       throw new Error("--dispatcher-url is required");
@@ -287,7 +297,7 @@ Examples:
       actor: typeof options.actor === "string" ? options.actor : undefined,
       notes: typeof options.notes === "string" ? options.notes : undefined,
       at: typeof options.at === "string" ? options.at : undefined,
-      dispatcherUrl: typeof options.dispatcherUrl === "string" ? options.dispatcherUrl : undefined,
+      dispatcherUrl: getDispatcherUrl(options),
       stateDir: typeof options.stateDir === "string" ? options.stateDir : undefined,
     });
     deps.log(JSON.stringify(result, null, 2));
@@ -295,7 +305,7 @@ Examples:
   }
 
   if (parsed.command === "inspect") {
-    const dispatcherUrl = typeof options.dispatcherUrl === "string" ? options.dispatcherUrl : undefined;
+    const dispatcherUrl = getDispatcherUrl(options);
     const taskId = typeof options.taskId === "string" ? options.taskId : undefined;
     const stateDir = typeof options.stateDir === "string" ? options.stateDir : undefined;
     if (!dispatcherUrl && !stateDir) {
@@ -315,7 +325,7 @@ Examples:
   }
 
   if (parsed.command === "redrive") {
-    const dispatcherUrl = typeof options.dispatcherUrl === "string" ? options.dispatcherUrl : undefined;
+    const dispatcherUrl = getDispatcherUrl(options);
     const taskId = typeof options.taskId === "string" ? options.taskId : undefined;
     if (!dispatcherUrl) {
       throw new Error("--dispatcher-url is required");
@@ -352,6 +362,31 @@ Examples:
 
   if (parsed.command === "version") {
     deps.log(packageJson.version);
+    return null;
+  }
+
+  if (parsed.command === "init") {
+    const { loadConfig, saveConfig } = await import("./config.js");
+    const token = typeof options.token === "string" ? options.token : undefined;
+    const url = typeof options.url === "string" ? options.url : undefined;
+    const config = loadConfig();
+    if (token) {
+      config.dispatcherToken = token;
+      deps.log("Token saved.");
+    }
+    if (url) {
+      config.dispatcherUrl = url;
+      deps.log("Dispatcher URL saved.");
+    }
+    if (!token && !url) {
+      const savedToken = config.dispatcherToken ? "(set)" : "(not set)";
+      const savedUrl = config.dispatcherUrl || "(not set)";
+      deps.log(`Current config: dispatcher-url=${savedUrl} dispatcher-token=${savedToken}`);
+      deps.log("Usage: forgeflow-review-orchestrator init --token <token> --url <dispatcher-url>");
+      return null;
+    }
+    saveConfig(config);
+    deps.log("Configuration saved to ~/.forgeflow-review-orchestrator.json");
     return null;
   }
 
