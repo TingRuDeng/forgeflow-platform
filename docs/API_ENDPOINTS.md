@@ -22,12 +22,12 @@ Base role: task state, worker coordination, review decisions, dashboard snapshot
 The dispatcher server supports three authentication modes controlled by the `DISPATCHER_AUTH_MODE` environment variable:
 
 - **Environment variables**:
-  - `DISPATCHER_AUTH_MODE`: One of `legacy`, `token`, or `open` (default: `legacy`)
+  - `DISPATCHER_AUTH_MODE`: One of `token`, `legacy`, or `open` (default: `token`)
   - `DISPATCHER_API_TOKEN`: The token to use for authentication (required in `token` mode)
 
 - **Auth modes**:
-  - `legacy` (default): When `DISPATCHER_API_TOKEN` is not set, all endpoints are accessible without authentication (backward compatible). When set, requires `Authorization: Bearer <token>` header for all endpoints except `/health`.
-  - `token`: All endpoints except `/health` require `Authorization: Bearer <DISPATCHER_API_TOKEN>` header. Returns `500` if `DISPATCHER_API_TOKEN` is not set.
+  - `token` (default): All endpoints except `/health` require `Authorization: Bearer <DISPATCHER_API_TOKEN>` header. Returns `500` if `DISPATCHER_API_TOKEN` is not set.
+  - `legacy`: When `DISPATCHER_API_TOKEN` is not set, only loopback addresses (127.0.0.1, ::1, ::ffff:127.0.0.1) can access endpoints without authentication. When set, requires `Authorization: Bearer <token>` header for all endpoints except `/health`.
   - `open`: All endpoints are accessible without authentication. Useful for local development.
 
 - **Whitelist**: `/health` endpoint is always accessible without authentication in all modes.

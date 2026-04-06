@@ -123,13 +123,12 @@ Dispatcher 支持三种认证模式，通过 `DISPATCHER_AUTH_MODE` 环境变量
 
 | 模式 | 描述 |
 |------|------|
-| `legacy` (默认) | 当 `DISPATCHER_API_TOKEN` 未设置时，所有接口可匿名访问（向后兼容）; 设置后，除 `/health` 外需认证 |
-| `token` | 强制认证模式，除 `/health` 外所有接口需要 `Authorization: Bearer <token>`，必须设置 `DISPATCHER_API_TOKEN` |
+| `token` (默认) | 强制认证模式，除 `/health` 外所有接口需要 `Authorization: Bearer <token>`，必须设置 `DISPATCHER_API_TOKEN` |
+| `legacy` | 兼容模式，当 `DISPATCHER_API_TOKEN` 未设置时，只允许 loopback 地址访问；设置后，除 `/health` 外需认证 |
 | `open` | 完全开放模式，所有接口可匿名访问，适合本地开发 |
 
 ```bash
-# 示例：使用 token 模式（推荐生产环境）
-export DISPATCHER_AUTH_MODE="token"
+# 示例：使用默认 token 模式（推荐生产环境）
 export DISPATCHER_API_TOKEN="your-secret-token"
 node scripts/run-dispatcher-server.js \
   --host 0.0.0.0 \
@@ -146,11 +145,11 @@ node scripts/run-dispatcher-server.js \
 
 各模式行为说明：
 
-- **open 模式**: 所有 endpoint 均可匿名访问，包括 `/health` 和其他所有接口
-- **legacy 模式** (默认):
-  - 当 `DISPATCHER_API_TOKEN` 未设置时，所有接口可匿名访问
+- **token 模式** (默认): 除 `/health` 外所有 endpoint 需要 `Authorization: Bearer <DISPATCHER_API_TOKEN>`，必须设置 `DISPATCHER_API_TOKEN` 否则返回 500
+- **legacy 模式**:
+  - 当 `DISPATCHER_API_TOKEN` 未设置时，只允许 loopback 地址（127.0.0.1、::1、::ffff:127.0.0.1）访问
   - 当 `DISPATCHER_API_TOKEN` 设置后，除 `/health` 外其他 endpoint 需要 `Authorization: Bearer <token>`
-- **token 模式**: 除 `/health` 外所有 endpoint 需要 `Authorization: Bearer <DISPATCHER_API_TOKEN>`，必须设置 `DISPATCHER_API_TOKEN` 否则返回 500
+- **open 模式**: 所有 endpoint 均可匿名访问，包括 `/health` 和其他所有接口
 
 通用行为：
 - `/health` 在所有模式下均可匿名访问

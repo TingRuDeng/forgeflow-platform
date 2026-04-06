@@ -1,4 +1,5 @@
 // @ts-nocheck
+import crypto from "node:crypto";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -36,6 +37,32 @@ const AUTH_WHITELIST_PATHS = ["/health"];
 
 type AuthMode = "legacy" | "token" | "open";
 
+function isLoopbackAddress(clientAddress?: string): boolean {
+  if (!clientAddress) {
+    return false;
+  }
+  const normalized = clientAddress.toLowerCase();
+  return (
+    normalized === "127.0.0.1"
+    || normalized === "::1"
+    || normalized === "::ffff:127.0.0.1"
+    || normalized === "localhost"
+  );
+}
+
+function safeTokenCompare(a: string, b: string): boolean {
+  try {
+    const aBuf = Buffer.from(a, "utf8");
+    const bBuf = Buffer.from(b, "utf8");
+    if (aBuf.length !== bBuf.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(aBuf, bBuf);
+  } catch {
+    return false;
+  }
+}
+
 function checkAuthToken(authHeader: string | undefined, apiToken: string): boolean {
   if (!authHeader) {
     return false;
@@ -45,10 +72,10 @@ function checkAuthToken(authHeader: string | undefined, apiToken: string): boole
     return false;
   }
   const token = match[1];
-  return token === apiToken;
+  return safeTokenCompare(token, apiToken);
 }
 
-function createAuthMiddleware(input: { method: string; pathname: string; authHeader?: string }): null | { status: number; error: string } {
+function createAuthMiddleware(input: { method: string; pathname: string; authHeader?: string; clientAddress?: string }): null | { status: number; error: string } {
   const authMode = getDispatcherAuthMode();
 
   if (authMode === "open") {
@@ -78,7 +105,17 @@ function createAuthMiddleware(input: { method: string; pathname: string; authHea
   }
 
   const apiToken = getDispatcherApiToken();
-  if (!apiToken) {
+  if (apiToken) {
+    if (AUTH_WHITELIST_PATHS.includes(input.pathname)) {
+      return null;
+    }
+
+    if (!checkAuthToken(input.authHeader, apiToken)) {
+      return {
+        status: 401,
+        error: "unauthorized",
+      };
+    }
     return null;
   }
 
@@ -86,7 +123,7 @@ function createAuthMiddleware(input: { method: string; pathname: string; authHea
     return null;
   }
 
-  if (!checkAuthToken(input.authHeader, apiToken)) {
+  if (!isLoopbackAddress(input.clientAddress)) {
     return {
       status: 401,
       error: "unauthorized",
@@ -243,9 +280,9 @@ function routeNotFound(response) {
 }
 
 export function handleDispatcherHttpRequest(input) {
-  const { stateDir, method, pathname, body = {}, authHeader } = input;
+  const { stateDir, method, pathname, body = {}, authHeader, clientAddress } = input;
 
-  const authError = createAuthMiddleware({ method, pathname, authHeader });
+  const authError = createAuthMiddleware({ method, pathname, authHeader, clientAddress });
   if (authError) {
     return createJsonResponse(authError.status, { error: authError.error });
   }
@@ -505,6 +542,7 @@ export async function startDispatcherServer(input) {
 
   const server = http.createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? `${host}:${port}`}`);
+    const clientAddress = request.socket.remoteAddress;
 
     try {
       const body = request.method === "POST" ? await readJsonBody(request) : undefined;
@@ -515,6 +553,7 @@ export async function startDispatcherServer(input) {
         pathname: requestUrl.pathname,
         body,
         authHeader,
+        clientAddress,
       });
       if (handled.headers["content-type"]?.startsWith("text/html")) {
         sendHtml(response, handled.text);
