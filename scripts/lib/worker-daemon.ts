@@ -6,6 +6,14 @@ import { spawn, spawnSync, execSync, ChildProcess } from "node:child_process";
 import { handleDispatcherHttpRequest } from "./dispatcher-server.js";
 import { prepareTaskWorktree, safeTaskDirName } from "./task-worktree.js";
 import { formatLocalTimestamp } from "./time.js";
+import {
+  logger,
+  createChildLogger,
+  logWorkerHeartbeat,
+  logTaskCompleted,
+  logTaskFailed,
+} from "./logger.js";
+import { recordTaskMetric } from "./metrics.js";
 
 function resolveDispatcherDist(): { repoRoot: string; distPath: string } {
   const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
@@ -333,7 +341,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
       try {
         await heartbeatClient.heartbeat(workerId, { at: nowIso() });
       } catch (error) {
-        console.error(`heartbeat failed for task ${taskId}:`, error instanceof Error ? error.message : String(error));
+        logger.error({ operation: "heartbeat", taskId, error: error instanceof Error ? error.message : String(error), event: "heartbeat_failed" });
       }
     }, HEARTBEAT_INTERVAL_MS);
   };
@@ -346,6 +354,8 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
   };
 
   try {
+    const startTime = Date.now();
+
     await input.client.startTask(input.workerId, {
       taskId: input.payload.task.id,
       at: input.at ?? nowIso(),
@@ -384,7 +394,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
         break;
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
-        console.error(`submitResult attempt ${attempt}/${SUBMIT_RESULT_MAX_RETRIES} failed for task ${taskId}:`, lastError);
+        logger.error({ operation: "submitResult", taskId, attempt, maxRetries: SUBMIT_RESULT_MAX_RETRIES, error: lastError, event: "submitResult_retry_failed" });
         if (attempt < SUBMIT_RESULT_MAX_RETRIES) {
           await sleep(SUBMIT_RESULT_RETRY_DELAY_MS);
         }
@@ -392,8 +402,19 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
     }
 
     if (lastError) {
-      console.error(`all submitResult retries failed for task ${taskId}, worker may need manual recovery:`, lastError);
+      logger.error({ operation: "submitResult", taskId, error: lastError, event: "submitResult_all_retries_failed" });
     }
+
+    const durationMs = Date.now() - startTime;
+    logTaskCompleted(input.payload.task.id, input.workerId, durationMs, true);
+    recordTaskMetric({
+      taskId: input.payload.task.id,
+      workerId: input.workerId,
+      repo: input.payload.assignment.repo,
+      status: "completed",
+      durationMs,
+      startedAt: new Date(Date.now() - durationMs).toISOString(),
+    });
 
     return {
       status: "completed",
@@ -408,7 +429,16 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
     stopHeartbeat();
 
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`task execution failed for ${taskId}:`, errorMessage);
+    logTaskFailed(input.payload.task.id, input.workerId, errorMessage);
+    recordTaskMetric({
+      taskId: input.payload.task.id,
+      workerId: input.workerId,
+      repo: input.payload.assignment.repo,
+      status: "failed",
+      durationMs: Date.now() - startTime,
+      startedAt: new Date(startTime).toISOString(),
+    });
+    logger.error({ operation: "taskExecution", taskId, error: errorMessage, event: "task_execution_failed" });
 
     try {
       const failedResult: WorkerResult = {
@@ -441,17 +471,17 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
             changedFiles: [],
             pullRequest: null,
           });
-          console.error(`submitted failed result for ${taskId} after catch`);
+          logger.warn({ operation: "submitResult", taskId, event: "failed_result_submitted" });
           break;
         } catch (submitError) {
-          console.error(`submitResult in catch attempt ${attempt} failed:`, submitError instanceof Error ? submitError.message : String(submitError));
+          logger.error({ operation: "submitResult", taskId, attempt, error: submitError instanceof Error ? submitError.message : String(submitError), event: "submitResult_catch_failed" });
           if (attempt < SUBMIT_RESULT_MAX_RETRIES) {
             await sleep(SUBMIT_RESULT_RETRY_DELAY_MS);
           }
         }
       }
     } catch (fallbackError) {
-      console.error(`failed to submit error result for ${taskId}:`, fallbackError instanceof Error ? fallbackError.message : String(fallbackError));
+      logger.error({ operation: "submitResult", taskId, error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError), event: "submitResult_fallback_failed" });
     }
 
     throw error;

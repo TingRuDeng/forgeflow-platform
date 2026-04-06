@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { logger } from "./logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,7 +11,7 @@ const DISPATCHER_DIST_BUILT = Symbol.for("forgeflow.dispatcher.state.distBuilt")
 const buildState = globalThis as unknown as Record<string | symbol, boolean>;
 
 if (!buildState[DISPATCHER_DIST_BUILT]) {
-  console.error("[dispatcher-state.ts] building apps/dispatcher to ensure fresh dist...");
+  logger.info({ event: "dispatcher_build_triggered", message: "Building apps/dispatcher to ensure fresh dist" });
   execSync("pnpm --filter @forgeflow/dispatcher build", {
     cwd: repoRoot,
     stdio: ["ignore", "ignore", "inherit"],
