@@ -20,6 +20,17 @@ node packages/worker-review-orchestrator-cli/dist/cli.js --help
 
 This package is meant to pair with the `worker-review-orchestrator` skill, but it is installed separately from the skill itself.
 
+## Authentication
+
+If the dispatcher requires authentication (`DISPATCHER_AUTH_MODE=token`), set the same token:
+
+```bash
+export DISPATCHER_API_TOKEN="your-secret-token"
+forgeflow-review-orchestrator dispatch ...
+```
+
+The CLI automatically includes `Authorization: Bearer <token>` in all dispatcher HTTP requests.
+
 ## Commands
 
 - `dispatch`
