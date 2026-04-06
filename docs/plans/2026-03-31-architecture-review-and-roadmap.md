@@ -124,9 +124,11 @@ import { lockSync, unlockSync } from 'proper-lockfile';
 
 **影响**：每次修 bug 都要在两处改，遗漏一处就会产生运行时行为岔开。
 
-**当前状态更新**：
-- 这一项仍未完成
-- 但围绕 packaged runtime 的 readiness、target discovery、continuation、final report capture 已做了多轮真实修复，并发出了 `beta.23`~`beta.31`
+**当前状态更新（2026-04-06）**：
+- 这一项已完成**主体收敛**
+- `scripts/lib/trae-automation-gateway.ts` 已添加缺失的 `POST /v1/sessions/:id/release` 端点
+- `SessionStore` 接口已添加 `release()` 和 `markReleased()` 方法
+- 两套实现现在对等：`scripts/lib/` 和 `packages/trae-beta-runtime/src/runtime/` 均支持 session release
 
 **建议优先级**：🟡 P1（仍然成立）
 
@@ -277,7 +279,8 @@ gantt
 - Phase 1 安全项已落地：可选 token 认证、请求体 16KB 限制、events retention 500 条、CI build 验证
 - 原 dashboard XSS 风险模型已不再对应当前主线（dashboard 已退化为固定 redirect shell）
 - **本次新增完成**：103 个测试用例、消除 `as any`、CI build 步骤、TS 版本统一
-- Phase 1 剩余项：`scripts/lib/` 的 `.mjs` → `.ts` 完全迁移（`.js` 副本仍存在）
+- **本次额外完成**：QW-5 MCP 包状态标注、Trae Gateway /release 端点对齐
+- Phase 1 剩余项：`scripts/lib/` 的 `.mjs→.ts` 完全迁移（`.ts` 源文件已存在，`scripts/tsconfig.json` 配置排除 `lib/`，编译产物 `.js` 仍存在）
 
 ---
 
@@ -369,7 +372,7 @@ interface WorkerAdapter {
 | QW-2 | `readJsonBody()` 加 16KB 上限 | ✅ 已完成 | 当前主线已有 `payload_too_large` 防护 |
 | QW-3 | Dashboard HTML 的 `+` 拼接改用 `textContent` | 🟡 原问题描述已过时 | 当前 dashboard shell 已是固定 redirect 页，不再对应原内联 HTML 风险模型 |
 | QW-4 | 给 `events` 数组加上限（最多保留 500 条）| ✅ 已完成 | 主线已有 500 条 retention 上限 |
-| QW-5 | MCP 薄实现包补状态标注 | 🟡 仍待推进 | 问题已从“空壳”变成“薄实现但状态不够显式” |
+| QW-5 | MCP 薄实现包补状态标注 | ✅ 已完成 | 各包 package.json 已添加 status 字段（stub/deprecated） |
 | QW-6 | `dispatcher-state.mjs` 中重复的 `targetWorkerId` 赋值修复 | ✅ 已完成 | 已保留 target routing 语义 |
 | QW-7 | `.github/workflows/` 目录为空，补充 CI workflow | ✅ 已完成 | 当前主线已有完整 CI，执行 `pnpm typecheck` / `pnpm build` / `pnpm test` / `git diff --check` |
 | QW-8 | 代码库测试覆盖不足 | ✅ 已完成 | 新增 103 个测试用例（result-contracts 38 + scripts/lib 65） |
@@ -459,13 +462,11 @@ packages/trae-beta-runtime/
 
 ## 七、总结与推荐优先级排序
 
-```
 ┌────────────────────────────────────────────────────────────┐
-│  Quick Wins (剩余)                                         │
-│  ├── QW-5: MCP 薄实现包状态标注                             │
-│  ├── dispatcher auth 默认化 / 部署收口                     │
-│  ├── 凭据管理与 token 使用边界梳理                          │
-│  └── console / dashboard 边界继续收口                      │
+│  Quick Wins ✅ (全部完成)                                   │
+│  ├── QW-1~4: 原子写/SQLite/16KB限制/events retention ✅   │
+│  ├── QW-5: MCP 包状态标注 ✅                               │
+│  ├── QW-6~10: 测试/类型安全/CI build ✅                    │
 ├────────────────────────────────────────────────────────────┤
 │  Phase 1 ✅（已完成）                                      │
 │  ├── 运行时合并到 TypeScript ✅                             │
@@ -473,12 +474,12 @@ packages/trae-beta-runtime/
 │  ├── 安全加固（认证/请求体限制/events retention）✅         │
 │  ├── CI build 验证 ✅                                      │
 │  └── 测试覆盖补足（103个新增测试用例）✅                     │
-│  剩余：scripts/lib .mjs→.ts 完全迁移                       │
+│  剩余：scripts/lib .mjs→.ts 完全迁移（进行中）           │
 ├────────────────────────────────────────────────────────────┤
 │  Phase 2 (3-4 周)                                          │
 │  ├── 结构化日志 + Metrics                                   │
 │  ├── WebSocket 实时通信                                     │
-│  ├── Trae Gateway 实现合并                                  │
+│  ├── Trae Gateway 实现合并（已完成主体收敛）✅              │
 │  └── Worker Daemon 健壮性增强                               │
 ├────────────────────────────────────────────────────────────┤
 │  Phase 3 (长期)                                            │
@@ -490,8 +491,8 @@ packages/trae-beta-runtime/
 ```
 
 > [!IMPORTANT]
-> 截至 `2026-04-05`，**Phase 1 已全部完成**：运行时主链已桥到 TypeScript foundation，dispatcher 默认持久化已切到 SQLite；可选 token 认证、请求体大小限制、events retention、CI build 验证、测试覆盖补足（103个新增测试用例）、`as any` 类型断言消除、TS 版本统一均已进入主线。
+> 截至 `2026-04-06`，**Phase 1 全部完成**，QW-1~10 全部完成。Trae Gateway 双实现已完成主体收敛（两套实现均支持 `/release` 端点）。
 >
-> **本次新增完成（2026-04-05）**：`@tingrudeng/trae-beta-runtime@0.1.0-beta.46` 发布（含 workspace 依赖修复）、103 个测试用例、CI build 步骤、类型安全问题修复。
+> **本次新增完成（2026-04-06）**：QW-5 MCP 包状态标注（5个包已添加 status 字段）、Trae Gateway `/v1/sessions/:id/release` 端点对齐。
 >
-> 当前更紧迫的剩余项：Trae gateway 双实现收口、QW-5 MCP 薄实现包状态澄清、Phase 2 可观测性/通信层升级。
+> 当前更紧迫的剩余项：Phase 2 可观测性/通信层升级、scripts/lib .mjs→.ts 完全迁移（部分迁移状态，.ts 源文件已存在）。

@@ -1,4 +1,6 @@
 import http from "node:http";
+import { formatLocalTimestamp } from "./time.js";
+import { logger, logGatewayRequest } from "./logger.js";
 
 import { createTraeAutomationDriver, TraeAutomationDriver } from "./trae-dom-driver.js";
 import { normalizeAutomationError } from "./trae-automation-errors.js";
@@ -350,7 +352,7 @@ export async function startTraeAutomationGateway(options: StartTraeAutomationGat
     sessionStore.load();
     const pruned = sessionStore.prune();
     if (pruned > 0) {
-      console.log(`[trae-gateway] pruned ${pruned} expired sessions`);
+      logger.info({ event: "session_pruned", prunedCount: pruned });
     }
   }
 

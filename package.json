@@ -3,6 +3,7 @@
   "private": true,
   "packageManager": "pnpm@10.23.0",
   "dependencies": {
+    "pino": "^9.6.0",
     "ws": "^8.18.3"
   },
   "scripts": {
