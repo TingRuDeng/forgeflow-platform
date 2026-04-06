@@ -1,7 +1,7 @@
 {
   "name": "@tingrudeng/trae-beta-runtime",
   "description": "Self-contained remote Trae beta runtime CLI for ForgeFlow launch, gateway, and worker orchestration.",
-  "version": "0.1.0-beta.47",
+  "version": "0.1.0-beta.50",
   "private": false,
   "license": "Apache-2.0",
   "repository": {
@@ -51,11 +51,11 @@
   "scripts": {
     "build": "pnpm --filter @tingrudeng/automation-gateway-core build && tsc -p tsconfig.build.json && node ./scripts/verify-build.mjs",
     "prepack": "pnpm run build",
+    "prepublishOnly": "node scripts/remove-workspace-deps.mjs",
     "typecheck": "pnpm --filter @tingrudeng/automation-gateway-core build && tsc -p tsconfig.json --noEmit",
     "test": "pnpm --filter @tingrudeng/automation-gateway-core build && vitest run"
   },
   "dependencies": {
-    "@forgeflow/result-contracts": "workspace:*",
     "@tingrudeng/automation-gateway-core": "0.1.0-beta.2"
   }
 }

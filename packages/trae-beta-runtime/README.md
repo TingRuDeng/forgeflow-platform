@@ -170,6 +170,16 @@ Set this before running `forgeflow-trae-beta start worker` or any other runtime 
 - This only changes how SSH connects; if the remote baseline cannot be fetched (network unreachable, auth failed), the worker will still hard-fail.
 - The override applies to git operations during task execution (e.g., fetching baseline, creating worktrees).
 
+## Dispatcher Authentication
+
+If the dispatcher requires authentication (`DISPATCHER_AUTH_MODE=token`), set the same token:
+
+```bash
+export DISPATCHER_API_TOKEN="your-secret-token"
+```
+
+This environment variable is automatically included in all dispatcher HTTP requests as `Authorization: Bearer <token>`.
+
 ## Config
 
 The runtime reads and writes config at:
