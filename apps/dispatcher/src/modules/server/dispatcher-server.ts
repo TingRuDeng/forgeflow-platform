@@ -28,24 +28,13 @@ import {
 } from "../../../../../scripts/lib/review-memory.js";
 import { safeTaskDirName } from "../../../../../scripts/lib/task-worktree.js";
 import { formatLocalTimestamp } from "../time.js";
+import { getDispatcherAuthMode, getDispatcherApiToken } from "./dispatcher-config.js";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
 
 const AUTH_WHITELIST_PATHS = ["/health"];
 
 type AuthMode = "legacy" | "token" | "open";
-
-function getAuthMode(): AuthMode {
-  const mode = process.env.DISPATCHER_AUTH_MODE?.toLowerCase();
-  if (mode === "token" || mode === "open") {
-    return mode as AuthMode;
-  }
-  return "legacy";
-}
-
-function getApiToken(): string | null {
-  return process.env.DISPATCHER_API_TOKEN ?? null;
-}
 
 function checkAuthToken(authHeader: string | undefined, apiToken: string): boolean {
   if (!authHeader) {
