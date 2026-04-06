@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Thin MCP wrapper exposing scheduler task management tools. Delegates to dispatcher-scheduler implementation injected via deps. Behavior is intentionally limited to the tool definitions; actual scheduling logic lives in the dispatcher layer.",
+  "status": "stub",
   "type": "module",
   "exports": {
     ".": "./src/server.ts"
