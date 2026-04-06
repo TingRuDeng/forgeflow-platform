@@ -3,7 +3,8 @@
 > 审查基线：`main` 分支 `5608917` (2026-03-31)
 > 二次核实：`main` 分支 `a8406bb` (2026-04-04)
 > 三次核实：`main` 分支 `b8f4fb6` (2026-04-05)
-> 四次核实：`main` 分支 `3a36727` (2026-04-06) ← 本次更新
+> 四次核实：`main` 分支 `3a36727` (2026-04-06)
+> 五次核实：`main` 分支 `3026df7` (2026-04-06) ← 本次更新
 > 代码规模：核心运行时 `scripts/lib/` 共 6,215 行 (.mjs→.ts 迁移中)，`apps/dispatcher/` 含 TypeScript 领域层，`packages/` 下 11 个子包
 > 状态更新：本文档已在 `2026-04-02`、`2026-04-04`、`2026-04-05` 与 `2026-04-06` 四次按 `main` 实现做过收口标注；本文件仍然是 `plan/review`，不是权威实现说明。权威状态以 `README.md`、`docs/README.md`、`docs/ARCHITECTURE.md` 与代码为准。
 
@@ -477,7 +478,7 @@ packages/trae-beta-runtime/
 │  剩余：scripts/lib .mjs→.ts 完全迁移（进行中）           │
 ├────────────────────────────────────────────────────────────┤
 │  Phase 2 (3-4 周)                                          │
-│  ├── 结构化日志 + Metrics                                   │
+│  ├── 结构化日志 + Metrics ✅                               │
 │  ├── WebSocket 实时通信                                     │
 │  ├── Trae Gateway 实现合并（已完成主体收敛）✅              │
 │  └── Worker Daemon 健壮性增强                               │
@@ -491,8 +492,8 @@ packages/trae-beta-runtime/
 ```
 
 > [!IMPORTANT]
-> 截至 `2026-04-06`，**Phase 1 全部完成**，QW-1~10 全部完成。Trae Gateway 双实现已完成主体收敛（两套实现均支持 `/release` 端点）。
+> 截至 `2026-04-06`，**Phase 1 全部完成**，QW-1~10 全部完成。**Phase 2 结构化日志 + Metrics 已完成**。Trae Gateway 双实现已完成主体收敛（两套实现均支持 `/release` 端点）。
 >
-> **本次新增完成（2026-04-06）**：QW-5 MCP 包状态标注（5个包已添加 status 字段）、Trae Gateway `/v1/sessions/:id/release` 端点对齐。
+> **本次新增完成（2026-04-06）**：Phase 2 结构化日志（pino + JSON 日志）+ Metrics 收集（任务耗时、p50/p95/p99 统计）。
 >
-> 当前更紧迫的剩余项：Phase 2 可观测性/通信层升级、scripts/lib .mjs→.ts 完全迁移（部分迁移状态，.ts 源文件已存在）。
+> 当前更紧迫的剩余项：Phase 2 WebSocket 实时通信、Worker Daemon 健壮性增强、scripts/lib .mjs→.ts 完全迁移（部分迁移状态，.ts 源文件已存在）。
