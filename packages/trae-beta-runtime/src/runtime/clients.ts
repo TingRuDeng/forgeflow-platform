@@ -109,9 +109,12 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
 
     try {
       const method = init.method || "GET";
-      const headers = init.body ? { "content-type": "application/json" } : undefined;
-      const body = init.body ? JSON.stringify(init.body) : undefined;
-      const response = fetchImpl
+      const authToken = typeof process !== "undefined" ? process.env.DISPATCHER_API_TOKEN : undefined;
+    const headers: Record<string, string> = {};
+    if (init.body) headers["content-type"] = "application/json";
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+    const body = init.body ? JSON.stringify(init.body) : undefined;
+    const response = fetchImpl
         ? await fetchImpl(`${base}${path}`, {
           method,
           headers,

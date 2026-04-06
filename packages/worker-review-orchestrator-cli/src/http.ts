@@ -73,10 +73,14 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const url = `${base}${pathname}`;
 
+    const authToken = typeof process !== "undefined" ? process.env.DISPATCHER_API_TOKEN : undefined;
+    const headers: Record<string, string> = {};
+    if (init.body) headers["content-type"] = "application/json";
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
     try {
       const response = await fetchImpl(url, {
         method: init.method || "GET",
-        headers: init.body ? { "content-type": "application/json" } : undefined,
+        headers,
         body: init.body ? JSON.stringify(init.body) : undefined,
         signal: controller.signal,
       });
