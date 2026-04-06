@@ -182,6 +182,12 @@ export DISPATCHER_API_TOKEN="your-secret-token"
 ### Option 2: Init command (recommended for local setup)
 ```bash
 forgeflow-trae-beta init --token your-secret-token --dispatcher-url http://127.0.0.1:8787
+
+# Token can be string or number
+forgeflow-trae-beta init --token 123456 --dispatcher-url http://127.0.0.1:8787
+
+# View help
+forgeflow-trae-beta init --help
 ```
 
 The token is automatically included in all dispatcher HTTP requests as `Authorization: Bearer <token>`.

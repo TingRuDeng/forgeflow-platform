@@ -181,6 +181,28 @@ Examples:
   forgeflow-trae-beta restart all --detach --debug --log-file-dir /tmp/forgeflow-logs`;
 }
 
+function getInitHelpText(): string {
+  return `forgeflow-trae-beta init - Initialize runtime configuration
+
+Usage: forgeflow-trae-beta init [options]
+
+Options:
+  -h, --help                     Show this help message
+  --project-path <path>          Path to project repository
+  --dispatcher-url <url>          Dispatcher server URL
+  --token <token>                Dispatcher authentication token (string or number)
+  --automation-url <url>         Automation gateway URL
+  --worker-id <id>               Worker identifier
+  --trae-bin <path>              Path to Trae binary
+  --remote-debugging-port <port> Remote debugging port
+  --overwrite                    Overwrite existing config file
+  --cwd <path>                   Working directory for the project
+
+Examples:
+  forgeflow-trae-beta init --project-path /path/to/repo
+  forgeflow-trae-beta init --token 123456 --dispatcher-url http://localhost:3000`;
+}
+
 function readPackageVersion() {
   const packageJsonPath = new URL("../package.json", import.meta.url);
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as { version: string };
@@ -556,6 +578,11 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
     return;
   }
 
+  if (parsed.command === "init" && parsed.options.help === true) {
+    deps.log(getInitHelpText());
+    return;
+  }
+
   const configPath = typeof parsed.options.configPath === "string" ? parsed.options.configPath : undefined;
   const config = deps.readConfig({ configPath });
   const jsonOutput = parsed.options.json === true;
@@ -572,7 +599,9 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
       overwrite: parsed.options.overwrite === true,
       projectPath: typeof parsed.options.projectPath === "string" ? parsed.options.projectPath : undefined,
       dispatcherUrl: typeof parsed.options.dispatcherUrl === "string" ? parsed.options.dispatcherUrl : undefined,
-      dispatcherToken: typeof parsed.options.token === "string" ? parsed.options.token : undefined,
+      dispatcherToken: typeof parsed.options.token === "string" || typeof parsed.options.token === "number"
+        ? String(parsed.options.token)
+        : undefined,
       automationUrl: typeof parsed.options.automationUrl === "string" ? parsed.options.automationUrl : undefined,
       workerId: typeof parsed.options.workerId === "string" ? parsed.options.workerId : undefined,
       traeBin: typeof parsed.options.traeBin === "string" ? parsed.options.traeBin : undefined,
