@@ -124,6 +124,28 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
   const parsed = parseCliArgs(argv);
   const options = parsed.options;
 
+  if (parsed.command === "init" && options.help === true) {
+    deps.log(`forgeflow-review-orchestrator init - Initialize configuration
+
+Usage: forgeflow-review-orchestrator init [options]
+
+Description:
+  Initialize or update the configuration for forgeflow-review-orchestrator.
+  Stores dispatcher URL and authentication token locally.
+
+Options:
+  -h, --help              Show this help message
+  --token <token>         Authentication token for the dispatcher (string or number)
+  --url <dispatcher-url>  URL of the dispatcher service
+
+Examples:
+  forgeflow-review-orchestrator init --token 123456 --url http://127.0.0.1:8787
+  forgeflow-review-orchestrator init --token "my-secret-token"
+  forgeflow-review-orchestrator init
+`);
+    return null;
+  }
+
   if (parsed.command === "update" && options.help === true) {
     deps.log(`forgeflow-review-orchestrator update - Update the globally installed CLI package
 
@@ -146,6 +168,33 @@ Examples:
 
   if (options.help === true) {
     printHelp();
+    return null;
+  }
+
+  if (parsed.command === "init") {
+    const { loadConfig, saveConfig } = await import("./config.js");
+    const token = typeof options.token === "string" || typeof options.token === "number" 
+      ? String(options.token) 
+      : undefined;
+    const url = typeof options.url === "string" ? options.url : undefined;
+    const config = loadConfig();
+    if (token) {
+      config.dispatcherToken = token;
+      deps.log("Token saved.");
+    }
+    if (url) {
+      config.dispatcherUrl = url;
+      deps.log("Dispatcher URL saved.");
+    }
+    if (!token && !url) {
+      const savedToken = config.dispatcherToken ? "(set)" : "(not set)";
+      const savedUrl = config.dispatcherUrl || "(not set)";
+      deps.log(`Current config: dispatcher-url=${savedUrl} dispatcher-token=${savedToken}`);
+      deps.log("Usage: forgeflow-review-orchestrator init --token <token> --url <dispatcher-url>");
+      return null;
+    }
+    saveConfig(config);
+    deps.log("Configuration saved to ~/.forgeflow-review-orchestrator.json");
     return null;
   }
 
@@ -362,31 +411,6 @@ Examples:
 
   if (parsed.command === "version") {
     deps.log(packageJson.version);
-    return null;
-  }
-
-  if (parsed.command === "init") {
-    const { loadConfig, saveConfig } = await import("./config.js");
-    const token = typeof options.token === "string" ? options.token : undefined;
-    const url = typeof options.url === "string" ? options.url : undefined;
-    const config = loadConfig();
-    if (token) {
-      config.dispatcherToken = token;
-      deps.log("Token saved.");
-    }
-    if (url) {
-      config.dispatcherUrl = url;
-      deps.log("Dispatcher URL saved.");
-    }
-    if (!token && !url) {
-      const savedToken = config.dispatcherToken ? "(set)" : "(not set)";
-      const savedUrl = config.dispatcherUrl || "(not set)";
-      deps.log(`Current config: dispatcher-url=${savedUrl} dispatcher-token=${savedToken}`);
-      deps.log("Usage: forgeflow-review-orchestrator init --token <token> --url <dispatcher-url>");
-      return null;
-    }
-    saveConfig(config);
-    deps.log("Configuration saved to ~/.forgeflow-review-orchestrator.json");
     return null;
   }
 
