@@ -65,6 +65,7 @@ export function createDefaultTraeBetaConfig(
     version: TRAE_BETA_CONFIG_VERSION,
     projectPath,
     dispatcherUrl: normalizeUrl(input.dispatcherUrl || "", "http://127.0.0.1:8787"),
+    dispatcherToken: input.dispatcherToken,
     automationUrl: normalizeUrl(input.automationUrl || "", "http://127.0.0.1:8790"),
     workerId: normalizeWorkerId(input.workerId || "", projectPath),
     traeBin: normalizeDirectory(input.traeBin || "/Applications/Trae CN.app"),
@@ -80,6 +81,7 @@ export function normalizeTraeBetaConfig(
     {
       projectPath: input.projectPath,
       dispatcherUrl: input.dispatcherUrl,
+      dispatcherToken: input.dispatcherToken,
       automationUrl: input.automationUrl,
       workerId: input.workerId,
       traeBin: input.traeBin,
@@ -110,4 +112,9 @@ export function writeTraeBetaConfig(
   fs.mkdirSync(paths.configDir, { recursive: true });
   fs.writeFileSync(paths.configPath, `${JSON.stringify(config, null, 2)}\n`);
   return paths;
+}
+
+export function readDispatcherTokenFromConfig(): string | undefined {
+  const config = readTraeBetaConfig();
+  return config?.dispatcherToken;
 }

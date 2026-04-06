@@ -172,13 +172,21 @@ Set this before running `forgeflow-trae-beta start worker` or any other runtime 
 
 ## Dispatcher Authentication
 
-If the dispatcher requires authentication (`DISPATCHER_AUTH_MODE=token`), set the same token:
+If the dispatcher requires authentication (`DISPATCHER_AUTH_MODE=token`), you can configure the token in two ways:
 
+### Option 1: Environment variable (recommended for CI/CD)
 ```bash
 export DISPATCHER_API_TOKEN="your-secret-token"
 ```
 
-This environment variable is automatically included in all dispatcher HTTP requests as `Authorization: Bearer <token>`.
+### Option 2: Init command (recommended for local setup)
+```bash
+forgeflow-trae-beta init --token your-secret-token --dispatcher-url http://127.0.0.1:8787
+```
+
+The token is automatically included in all dispatcher HTTP requests as `Authorization: Bearer <token>`.
+
+Priority: `DISPATCHER_API_TOKEN` env var > config file > no auth
 
 ## Config
 
