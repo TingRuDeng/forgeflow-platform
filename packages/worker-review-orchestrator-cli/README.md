@@ -33,6 +33,12 @@ forgeflow-review-orchestrator dispatch ...
 # First time setup - save your credentials
 forgeflow-review-orchestrator init --token your-secret-token --url http://127.0.0.1:8787
 
+# Token can be string or number
+forgeflow-review-orchestrator init --token 123456 --url http://127.0.0.1:8787
+
+# View help
+forgeflow-review-orchestrator init --help
+
 # Check current config
 forgeflow-review-orchestrator init
 
