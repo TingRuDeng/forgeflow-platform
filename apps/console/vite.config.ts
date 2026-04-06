@@ -1,14 +1,11 @@
-/// <reference types="vitest" />
-import path from "path"
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": "/src",
     },
   },
   // @ts-ignore: test config is valid for vitest
@@ -24,6 +21,14 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:8787',
         changeOrigin: true,
+        configure(proxy) {
+          proxy.on('proxyReq', (proxyReq) => {
+            const token = process.env.DISPATCHER_API_TOKEN;
+            if (token) {
+              proxyReq.setHeader('authorization', `Bearer ${token}`);
+            }
+          });
+        },
       },
     },
   },
