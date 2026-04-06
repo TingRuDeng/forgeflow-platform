@@ -49,14 +49,14 @@ function checkAuthToken(authHeader: string | undefined, apiToken: string): boole
 }
 
 function createAuthMiddleware(input: { method: string; pathname: string; authHeader?: string }): null | { status: number; error: string } {
-  const authMode = getAuthMode();
+  const authMode = getDispatcherAuthMode();
 
   if (authMode === "open") {
     return null;
   }
 
   if (authMode === "token") {
-    const apiToken = getApiToken();
+    const apiToken = getDispatcherApiToken();
     if (!apiToken) {
       return {
         status: 500,
@@ -77,7 +77,7 @@ function createAuthMiddleware(input: { method: string; pathname: string; authHea
     return null;
   }
 
-  const apiToken = getApiToken();
+  const apiToken = getDispatcherApiToken();
   if (!apiToken) {
     return null;
   }

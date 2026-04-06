@@ -1,8 +1,20 @@
 import * as http from "node:http";
 import * as https from "node:https";
 
-import type { WorkerEvidence } from "@forgeflow/result-contracts";
 import { readDispatcherTokenFromConfig } from "../config.js";
+
+interface WorkerFailure {
+  type: string;
+  message: string;
+}
+
+interface WorkerEvidence {
+  failureType?: string;
+  failureSummary?: string;
+  blockers?: WorkerFailure[];
+  findings?: unknown[];
+  artifacts?: Record<string, string>;
+}
 
 const DEFAULT_DISPATCHER_URL = "http://127.0.0.1:8787";
 const DEFAULT_AUTOMATION_URL = "http://127.0.0.1:8790";
