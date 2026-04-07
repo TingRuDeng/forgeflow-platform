@@ -30,6 +30,9 @@
 - `onboarding.md`
   - 业务仓接入与最小 smoke 流程。
   - 不是仓库架构总览。
+- `CONTRIBUTING.md`
+  - 主链贡献约束、ADR 触发条件、兼容性规则与契约变更 checklist。
+  - 不替代仓库规则。
 - `AGENT_STARTER_PROMPT.md`
   - 新 agent 会话的短启动提示。
   - 只做入口 shim，不重复定义规则。
@@ -79,6 +82,13 @@
 2. `e2e-smoke-checklist.md`
 3. `../templates/`
 4. 收尾时检查 `DOC_SYNC_CHECKLIST.md`
+
+阶段二主链运维 / 演练：
+
+1. `STATE_MACHINE.md`
+2. `runbooks/phase2-mainline-operations.md`
+3. `API_ENDPOINTS.md`
+4. `CONTRIBUTING.md`
 
 dispatcher / worker / runtime 变更：
 
@@ -189,8 +199,13 @@ Trae MCP fallback 维护：
   - GitHub 侧操作约束与命令参考。
 - `runbooks/trae-remote-beta.md`
   - 远程 Trae beta 试运行顺序、观察点与问题记录入口。
+- `runbooks/phase2-mainline-operations.md`
+  - 阶段二主链操作入口。
+  - 包含 `dependsOn`、claim POST、redrive / continuation、worker result canonicalization 和 `/api/metrics` 最小检查方式。
 - `runbooks/trae-issue-template.md`
   - 远程 Trae 试运行的结构化问题记录模板。
+- `CONTRIBUTING.md`
+  - 主链贡献与契约变更 checklist。
 
 ## Non-Authoritative Material
 

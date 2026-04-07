@@ -52,6 +52,7 @@ Current endpoint families:
   - Liveness probe.
 - `GET /dashboard`
   - HTML dashboard view.
+  - Current GET response sets `Cache-Control: no-store`.
 - `GET /api/dashboard/snapshot`
   - Returns a JSON snapshot of workers, tasks, assignments, reviews, PRs, recent events, and stats.
   - Current GET response sets `Cache-Control: no-store`.
@@ -61,6 +62,18 @@ Current endpoint families:
     - `metrics.reviewBacklog`
     - `metrics.avgAssignmentLagMs`
     - `metrics.maxAssignmentLagMs`
+- `GET /api/metrics`
+  - Returns a small control-plane metrics document for automation, dashboards, and alerts.
+  - Current GET response sets `Cache-Control: no-store`.
+  - Current payload includes:
+    - `updatedAt`
+    - `queueDepth`
+    - `plannedTasks`
+    - `reviewBacklog`
+    - `avgAssignmentLagMs`
+    - `maxAssignmentLagMs`
+    - `workers`
+    - `tasks`
 - `GET /api/workers`
   - Returns worker list from the current snapshot.
   - Current GET response sets `Cache-Control: no-store`.

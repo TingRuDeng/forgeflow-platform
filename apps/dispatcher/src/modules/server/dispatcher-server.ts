@@ -373,20 +373,22 @@ function validateWorkerResultBody(body) {
   return body;
 }
 
-function createHtmlResponse(status, html) {
+function createHtmlResponse(status, html, extraHeaders = {}) {
   return {
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
+      ...extraHeaders,
     },
     html,
     text: html,
   };
 }
 
-function sendHtml(response, html) {
+function sendHtml(response, html, headers = {}) {
   response.writeHead(200, {
     "content-type": "text/html; charset=utf-8",
+    ...headers,
   });
   response.end(html);
 }
@@ -555,7 +557,9 @@ export function handleDispatcherHttpRequest(input) {
     }
 
     if (method === "GET" && pathname === "/dashboard") {
-      return createHtmlResponse(200, buildDashboardHtml());
+      return createHtmlResponse(200, buildDashboardHtml(), {
+        "cache-control": "no-store",
+      });
     }
 
     if (method === "GET" && pathname === "/api/dashboard/snapshot") {
@@ -567,6 +571,27 @@ export function handleDispatcherHttpRequest(input) {
         };
       });
       return createNoStoreJsonResponse(200, snapshot.snapshot);
+    }
+
+    if (method === "GET" && pathname === "/api/metrics") {
+      const payload = withState(stateDir, (state) => {
+        const nextState = reconcileRuntimeState(state);
+        const snapshot = buildDashboardSnapshot(nextState);
+        return {
+          state: nextState,
+          metrics: {
+            updatedAt: snapshot.updatedAt,
+            queueDepth: snapshot.metrics.queueDepth,
+            plannedTasks: snapshot.metrics.plannedTasks,
+            reviewBacklog: snapshot.metrics.reviewBacklog,
+            avgAssignmentLagMs: snapshot.metrics.avgAssignmentLagMs,
+            maxAssignmentLagMs: snapshot.metrics.maxAssignmentLagMs,
+            workers: snapshot.stats.workers,
+            tasks: snapshot.stats.tasks,
+          },
+        };
+      });
+      return createNoStoreJsonResponse(200, payload.metrics);
     }
 
     if (method === "GET" && pathname === "/api/workers") {
@@ -845,7 +870,7 @@ export async function startDispatcherServer(input) {
         clientAddress,
       });
       if (handled.headers["content-type"]?.startsWith("text/html")) {
-        sendHtml(response, handled.text);
+        sendHtml(response, handled.text, handled.headers);
       } else {
         sendJson(response, handled.status, handled.json, handled.headers);
       }

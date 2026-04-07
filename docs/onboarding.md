@@ -88,6 +88,8 @@
 
 如果接入流程、主链路定位或运行方式发生变化，收尾时还要检查 `DOC_SYNC_CHECKLIST.md`，同步更新受影响的入口文档。
 
+阶段二主链的最小运维 / redrive / metrics 检查入口见 `runbooks/phase2-mainline-operations.md`。
+
 ## 4. 运行时接入模式
 
 在当前主线路径里，推荐把“控制层启动”、“control-layer skill 安装”和“远程 Trae npm 包安装”分开看：
@@ -155,6 +157,7 @@ node scripts/run-dispatcher-server.js \
 - `/health` 在所有模式下均可匿名访问
 - 认证失败返回 `401` + `{ "error": "unauthorized" }`
 - dispatcher 当前会在状态目录下维护 `.runtime-state.lock`；锁竞争超时返回 `503`，调用方应重试。相关环境变量为 `DISPATCHER_STATE_LOCK_TIMEOUT_MS`、`DISPATCHER_STATE_LOCK_RETRY_MS`、`DISPATCHER_STATE_LOCK_STALE_MS`
+- 阶段二新增只读 `GET /api/metrics`，适合脚本直接获取 `queueDepth/reviewBacklog/assignment lag`
 
 调用方连通性检查示例：
 
