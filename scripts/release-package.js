@@ -146,8 +146,8 @@ if (isDryRun) {
     console.log(`     "version": "${currentVersion}" → "${newVersion}"`);
     console.log(`  2. Build the package:`);
     console.log(`     pnpm --filter @tingrudeng/${packageName} build`);
-    console.log(`  3. Publish to npm:`);
-    console.log(`     pnpm --filter @tingrudeng/${packageName} publish --access public --provenance${distTag ? ` --tag ${distTag}` : ""} --no-git-checks`);
+    console.log(`  3. Publish to npm (with Trusted Publishing):`);
+    console.log(`     npm publish ${packagePath} --access public --provenance${distTag ? ` --tag ${distTag}` : ""}`);
     console.log('\nTo actually publish, add --publish flag');
     process.exit(0);
 }
@@ -174,11 +174,12 @@ catch (error) {
     console.error('Error: Build failed');
     process.exit(1);
 }
-console.log('\nPublishing to npm...');
+console.log('\nPublishing to npm with Trusted Publishing (OIDC)...');
 try {
-    execSync(`pnpm --filter @tingrudeng/${packageName} publish --access public --provenance${distTag ? ` --tag ${distTag}` : ""} --no-git-checks`, {
+    execSync(`npm publish ${packagePath} --access public --provenance${distTag ? ` --tag ${distTag}` : ""}`, {
         stdio: 'inherit',
-        cwd: workspacePath
+        cwd: workspacePath,
+        env: { ...process.env, GITHUB_ACTIONS: "true" }
     });
     console.log(`✓ Successfully published @tingrudeng/${packageName}@${newVersion}`);
 }
