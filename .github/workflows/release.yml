@@ -110,6 +110,11 @@ jobs:
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Upgrade npm for Trusted Publishing
+        run: |
+          npm install -g npm@11.12.1
+          npm --version
+
       - name: Release preflight
         env:
           NPM_TRUSTED_PUBLISHING_ENABLED: ${{ vars.NPM_TRUSTED_PUBLISHING_ENABLED }}
@@ -209,6 +214,11 @@ jobs:
           node-version: "22.14.0"
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm for Trusted Publishing
+        run: |
+          npm install -g npm@11.12.1
+          npm --version
 
       - name: Release preflight
         id: preflight
