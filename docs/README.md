@@ -87,8 +87,20 @@
 
 1. `STATE_MACHINE.md`
 2. `runbooks/phase2-mainline-operations.md`
-3. `API_ENDPOINTS.md`
-4. `CONTRIBUTING.md`
+3. `runbooks/observability-and-alerting.md`
+4. `API_ENDPOINTS.md`
+5. `CONTRIBUTING.md`
+
+阶段一恢复 / 故障 / 发布节奏：
+
+1. `runbooks/single-machine-deployment.md`
+2. `runbooks/auth-and-state-lock.md`
+3. `runbooks/runtime-state-backup-restore-repair.md`
+4. `runbooks/worktree-cleanup.md`
+5. `runbooks/delivery-failed-recovery.md`
+6. `runbooks/release-cadence.md`
+7. `../.github/ISSUE_TEMPLATE/*`
+8. `../.github/PULL_REQUEST_TEMPLATE.md`
 
 dispatcher / worker / runtime 变更：
 
@@ -146,6 +158,7 @@ Trae MCP fallback 维护：
 - review decision 现在显式支持 `merge`、`block`、`rework`、`changes_requested`，其中后两者都会把任务落到 `blocked`，但保留原始 decision 供 redrive 和审计使用。
 - dispatcher 现在会 canonicalize worker result 的 `workerId/pool/repo/defaultBranch/branchName`，worker 不能再覆盖这些 dispatcher-owned 字段。
 - dashboard snapshot 现在附带最小控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`。
+- dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`。
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - Trae 的首选无人值守路径是 `automation gateway` + `automation worker`。
 - Trae MCP worker 已降级为 deprecated/fallback 接入。
@@ -202,10 +215,28 @@ Trae MCP fallback 维护：
 - `runbooks/phase2-mainline-operations.md`
   - 阶段二主链操作入口。
   - 包含 `dependsOn`、claim POST、redrive / continuation、worker result canonicalization 和 `/api/metrics` 最小检查方式。
+- `runbooks/observability-and-alerting.md`
+  - 阶段二 metrics / runtime events / alert 说明入口。
+- `runbooks/single-machine-deployment.md`
+  - 阶段一单机控制面部署与恢复入口。
+- `runbooks/auth-and-state-lock.md`
+  - 阶段一认证与状态锁排障入口。
+- `runbooks/runtime-state-backup-restore-repair.md`
+  - SQLite 备份、恢复和显式救援入口。
+- `runbooks/worktree-cleanup.md`
+  - worktree 巡检与清理入口。
+- `runbooks/delivery-failed-recovery.md`
+  - `submitResult` / push / PR 失败后的排障与 redrive 入口。
+- `runbooks/release-cadence.md`
+  - patch / hotfix / minor 发布节奏说明。
 - `runbooks/trae-issue-template.md`
   - 远程 Trae 试运行的结构化问题记录模板。
 - `CONTRIBUTING.md`
   - 主链贡献与契约变更 checklist。
+- `../.github/ISSUE_TEMPLATE/*`
+  - 阶段一最小 Bug / P0-P1 回归模板。
+- `../.github/PULL_REQUEST_TEMPLATE.md`
+  - 主链 PR 风险、验证和文档同步检查项。
 
 ## Non-Authoritative Material
 

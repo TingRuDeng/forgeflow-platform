@@ -1,0 +1,41 @@
+name: P0 / P1 Regression
+description: Report a high-risk regression in the mainline control plane
+title: "[p0/p1] "
+labels:
+  - regression
+body:
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - P0
+        - P1
+    validations:
+      required: true
+  - type: input
+    id: component
+    attributes:
+      label: Component
+      description: dispatcher / worker-daemon / trae runtime / release
+    validations:
+      required: true
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Symptom
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Temporary Mitigation / Rollback
+    validations:
+      required: true
+

@@ -147,14 +147,22 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `reviewBacklog`
 - `avgAssignmentLagMs`
 - `maxAssignmentLagMs`
+- `submitResultRetryCount`
+- `deliveryFailedCount`
+- `cleanupFailureCount`
+- `sessionInterruptionCount`
+- `stateLockTimeoutCount`
 - `workers`
 - `tasks`
+
+详细的 metrics / alert 说明见 `observability-and-alerting.md`。
 
 ## 7. Failure Handling Notes
 
 - `submitResult` / push / 自动 draft PR 失败，不应再当成 completed 成功
 - worker 失败结果会显式回写 failed 语义，控制层再决定 redrive / rework
-- worktree cleanup 失败当前仍以日志为主，排障时先看 worker 侧日志和 `.worktrees/`
+- worktree cleanup 失败现在会尽力回写 worker event，并体现在 `/api/metrics.cleanupFailureCount`
+- 排障时仍要联合 worker 侧日志和 `.worktrees/failed/` 证据查看
 
 ## 8. 收尾检查
 

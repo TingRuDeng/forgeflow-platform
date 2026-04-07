@@ -1,0 +1,48 @@
+name: Bug Report
+description: Report a bug in forgeflow-platform
+title: "[bug] "
+labels:
+  - bug
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version / Commit
+      description: forgeflow-platform version or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: pool
+    attributes:
+      label: Pool
+      description: trae / codex / gemini
+    validations:
+      required: true
+  - type: input
+    id: dispatcher
+    attributes:
+      label: Dispatcher Mode
+      description: auth mode, state backend, deployment shape
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Key Logs
+      description: dispatcher / worker / gateway logs
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction Steps
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Delivery Impact
+      description: whether real delivery was blocked or corrupted
+    validations:
+      required: true
+

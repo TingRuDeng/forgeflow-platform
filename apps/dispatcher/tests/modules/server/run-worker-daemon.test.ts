@@ -438,6 +438,7 @@ describe("worker daemon cycle", () => {
     const daemonMod = await import(daemonModulePath);
     process.env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS = "1";
     let submitAttempts = 0;
+    const reportedEvents: Array<{ type: string; taskId?: string }> = [];
     const client = {
       registerWorker: async () => ({ ok: true }),
       heartbeat: async () => ({ ok: true }),
@@ -447,6 +448,10 @@ describe("worker daemon cycle", () => {
       submitResult: async () => {
         submitAttempts += 1;
         throw new Error("dispatcher unavailable");
+      },
+      reportEvent: async (_workerId: string, payload: { type: string; taskId?: string }) => {
+        reportedEvents.push(payload);
+        return { ok: true };
       },
     };
 
@@ -461,6 +466,8 @@ describe("worker daemon cycle", () => {
     })).rejects.toThrow("submitResult failed after 3 attempts");
 
     expect(submitAttempts).toBe(6);
+    expect(reportedEvents.some((event) => event.type === "submit_result_retry_failed")).toBe(true);
+    expect(reportedEvents.some((event) => event.type === "delivery_failed")).toBe(true);
   });
 
   it("fails explicitly and submits a failed result when git push fails", async () => {

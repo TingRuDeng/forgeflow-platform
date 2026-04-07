@@ -77,8 +77,9 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
 5. Worker daemon creates a per-task worktree from the latest fetched default branch.
 6. Worker executes assignment scripts inside the worktree.
 7. Worker reports verification results, changed files, and optional PR metadata back to dispatcher.
-8. Dispatcher moves the task to `review` or `failed`.
-9. Control layer submits `merge` or `block`.
+8. Worker may additionally report best-effort runtime events such as delivery failure, cleanup failure, or session interruption back to dispatcher metrics.
+9. Dispatcher moves the task to `review` or `failed`.
+10. Control layer submits `merge` or `block`.
 
 ### 4.2 Trae unattended flow
 

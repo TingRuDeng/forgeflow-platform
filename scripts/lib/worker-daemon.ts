@@ -55,6 +55,33 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function reportWorkerEventBestEffort(
+  client: DispatcherClient,
+  workerId: string,
+  event: { type: string; taskId?: string; payload?: unknown; at?: string },
+): Promise<void> {
+  if (typeof client.reportEvent !== "function") {
+    return;
+  }
+  try {
+    await client.reportEvent(workerId, {
+      type: event.type,
+      taskId: event.taskId,
+      payload: event.payload,
+      at: event.at ?? nowIso(),
+    });
+  } catch (error) {
+    logger.warn({
+      operation: "reportWorkerEvent",
+      workerId,
+      taskId: event.taskId,
+      eventType: event.type,
+      error: error instanceof Error ? error.message : String(error),
+      event: "worker_event_report_failed",
+    });
+  }
+}
+
 function readJson(filePath: string): unknown {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
@@ -477,6 +504,15 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
         logger.error({ operation: "submitResult", taskId, attempt, maxRetries: submitResultMaxRetries, error: lastError, event: "submitResult_retry_failed" });
+        await reportWorkerEventBestEffort(input.client, input.workerId, {
+          type: "submit_result_retry_failed",
+          taskId,
+          payload: {
+            attempt,
+            maxRetries: submitResultMaxRetries,
+            error: lastError,
+          },
+        });
         if (attempt < submitResultMaxRetries) {
           await sleep(submitResultRetryDelayMs);
         }
@@ -485,6 +521,14 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
 
     if (lastError) {
       logger.error({ operation: "submitResult", taskId, error: lastError, event: "submitResult_all_retries_failed" });
+      await reportWorkerEventBestEffort(input.client, input.workerId, {
+        type: "delivery_failed",
+        taskId,
+        payload: {
+          stage: "submit_result",
+          error: lastError,
+        },
+      });
       throw new Error(`submitResult failed after ${submitResultMaxRetries} attempts: ${lastError}`);
     }
 
@@ -560,6 +604,16 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
           break;
         } catch (submitError) {
           logger.error({ operation: "submitResult", taskId, attempt, error: submitError instanceof Error ? submitError.message : String(submitError), event: "submitResult_catch_failed" });
+          await reportWorkerEventBestEffort(input.client, input.workerId, {
+            type: "submit_result_retry_failed",
+            taskId,
+            payload: {
+              attempt,
+              maxRetries: submitResultMaxRetries,
+              error: submitError instanceof Error ? submitError.message : String(submitError),
+              fallback: true,
+            },
+          });
           if (attempt < submitResultMaxRetries) {
             await sleep(submitResultRetryDelayMs);
           }
@@ -567,6 +621,14 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
       }
     } catch (fallbackError) {
       logger.error({ operation: "submitResult", taskId, error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError), event: "submitResult_fallback_failed" });
+      await reportWorkerEventBestEffort(input.client, input.workerId, {
+        type: "delivery_failed",
+        taskId,
+        payload: {
+          stage: "failed_result_fallback",
+          error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+        },
+      });
     }
 
     throw error;
@@ -581,6 +643,13 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
           error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
           event: "worktree_cleanup_failed",
         });
+        await reportWorkerEventBestEffort(input.client, input.workerId, {
+          type: "worktree_cleanup_failed",
+          taskId,
+          payload: {
+            error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          },
+        });
       }
     }
   }
@@ -593,6 +662,7 @@ export interface DispatcherClient {
   claimTask: (workerId: string, payload?: { at?: string }) => Promise<TaskPayload | null>;
   startTask: (workerId: string, payload: { taskId: string; at: string }) => Promise<unknown>;
   submitResult: (workerId: string, payload: { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }) => Promise<unknown>;
+  reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }) => Promise<unknown>;
 }
 
 export function createDispatcherClient(dispatcherUrl: string): DispatcherClient {
@@ -670,6 +740,9 @@ export function createDispatcherClient(dispatcherUrl: string): DispatcherClient 
     submitResult(workerId, payload) {
       return call("POST", `/api/workers/${encodeURIComponent(workerId)}/result`, payload);
     },
+    reportEvent(workerId, payload) {
+      return call("POST", `/api/workers/${encodeURIComponent(workerId)}/events`, payload);
+    },
   };
 }
 
@@ -734,6 +807,17 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         stateDir,
         method: "POST",
         pathname: `/api/workers/${encodeURIComponent(workerId)}/result`,
+        body: payload,
+        clientAddress: "127.0.0.1",
+        internalCall: true,
+      });
+      return Promise.resolve(response.json);
+    },
+    reportEvent(workerId, payload) {
+      const response = handleDispatcherHttpRequest({
+        stateDir,
+        method: "POST",
+        pathname: `/api/workers/${encodeURIComponent(workerId)}/events`,
         body: payload,
         clientAddress: "127.0.0.1",
         internalCall: true,
