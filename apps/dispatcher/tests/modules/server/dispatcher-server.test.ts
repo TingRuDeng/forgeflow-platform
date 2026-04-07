@@ -310,6 +310,11 @@ describe("dispatcher server", () => {
       queueDepth: 1,
       plannedTasks: 1,
       reviewBacklog: 0,
+      submitResultRetryCount: 0,
+      deliveryFailedCount: 0,
+      cleanupFailureCount: 0,
+      sessionInterruptionCount: 0,
+      stateLockTimeoutCount: 0,
       workers: {
         total: 1,
       },
@@ -317,6 +322,80 @@ describe("dispatcher server", () => {
         total: 2,
         ready: 1,
       },
+    });
+  });
+
+  it("accepts worker events and rolls them into dispatcher metrics", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-events",
+        pool: "codex",
+        hostname: "events-host",
+        labels: [],
+        repoDir: "/repo",
+      },
+    });
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-events/events",
+      body: {
+        type: "submit_result_retry_failed",
+        taskId: "dispatch-1:task-1",
+        payload: { attempt: 1 },
+      },
+    });
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-events/events",
+      body: {
+        type: "delivery_failed",
+        taskId: "dispatch-1:task-1",
+        payload: { reason: "push failed" },
+      },
+    });
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-events/events",
+      body: {
+        type: "worktree_cleanup_failed",
+        taskId: "dispatch-1:task-1",
+      },
+    });
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-events/events",
+      body: {
+        type: "session_interrupted",
+        payload: { sessionId: "session-1" },
+      },
+    });
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/metrics",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.json).toMatchObject({
+      submitResultRetryCount: 1,
+      deliveryFailedCount: 1,
+      cleanupFailureCount: 1,
+      sessionInterruptionCount: 1,
     });
   });
 
@@ -408,6 +487,15 @@ describe("dispatcher server", () => {
 
     expect(response.status).toBe(503);
     expect(response.json.error).toContain("state lock timeout");
+
+    fs.rmSync(lockPath, { force: true });
+    const metricsResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/metrics",
+    });
+    expect(metricsResponse.status).toBe(200);
+    expect(metricsResponse.json.stateLockTimeoutCount).toBeGreaterThanOrEqual(1);
   });
 
   it("applies the same runtime lock to Trae write routes", async () => {

@@ -18,6 +18,7 @@ import {
   loadRuntimeState,
   reconcileRuntimeState,
   recordReviewDecision,
+  recordWorkerEvent,
   recordWorkerResult,
   registerWorker,
   saveRuntimeState,
@@ -38,6 +39,7 @@ const DEFAULT_STATE_LOCK_TIMEOUT_MS = 2000;
 const DEFAULT_STATE_LOCK_RETRY_MS = 25;
 const DEFAULT_STATE_LOCK_STALE_MS = 30000;
 const STATE_LOCK_SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
+let stateLockTimeoutCount = 0;
 
 const AUTH_WHITELIST_PATHS = ["/health"];
 
@@ -271,6 +273,22 @@ function classifyWorkerResultError(error) {
   return 500;
 }
 
+function classifyWorkerEventError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith("worker not found:")) {
+    return 404;
+  }
+  if (
+    message === "worker event body must be a JSON object"
+    || message === "worker event type is required"
+    || message === "worker event taskId must be a string"
+    || message === "worker event at must be a string"
+  ) {
+    return 400;
+  }
+  return 500;
+}
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -371,6 +389,28 @@ function validateWorkerResultBody(body) {
   }
 
   return body;
+}
+
+function validateWorkerEventBody(body) {
+  if (!isPlainObject(body)) {
+    throw new Error("worker event body must be a JSON object");
+  }
+  const type = typeof body.type === "string" ? body.type.trim() : "";
+  if (!type) {
+    throw new Error("worker event type is required");
+  }
+  if (body.taskId !== undefined && body.taskId !== null && typeof body.taskId !== "string") {
+    throw new Error("worker event taskId must be a string");
+  }
+  if (body.at !== undefined && typeof body.at !== "string") {
+    throw new Error("worker event at must be a string");
+  }
+  return {
+    type,
+    taskId: body.taskId ?? null,
+    at: body.at,
+    payload: body.payload,
+  };
 }
 
 function createHtmlResponse(status, html, extraHeaders = {}) {
@@ -586,6 +626,11 @@ export function handleDispatcherHttpRequest(input) {
             reviewBacklog: snapshot.metrics.reviewBacklog,
             avgAssignmentLagMs: snapshot.metrics.avgAssignmentLagMs,
             maxAssignmentLagMs: snapshot.metrics.maxAssignmentLagMs,
+            submitResultRetryCount: snapshot.metrics.submitResultRetryCount,
+            deliveryFailedCount: snapshot.metrics.deliveryFailedCount,
+            cleanupFailureCount: snapshot.metrics.cleanupFailureCount,
+            sessionInterruptionCount: snapshot.metrics.sessionInterruptionCount,
+            stateLockTimeoutCount: snapshot.metrics.stateLockTimeoutCount + stateLockTimeoutCount,
             workers: snapshot.stats.workers,
             tasks: snapshot.stats.tasks,
           },
@@ -703,6 +748,32 @@ export function handleDispatcherHttpRequest(input) {
         });
       } catch (error) {
         return createJsonResponse(classifyWorkerResultError(error), {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const workerEventMatch = method === "POST"
+      ? pathname.match(/^\/api\/workers\/([^/]+)\/events$/)
+      : null;
+    if (workerEventMatch) {
+      try {
+        const validatedBody = validateWorkerEventBody(body);
+        const result = withState(stateDir, (state) => ({
+          state: recordWorkerEvent(state, {
+            workerId: decodeURIComponent(workerEventMatch[1]),
+            type: validatedBody.type,
+            taskId: validatedBody.taskId,
+            at: validatedBody.at,
+            payload: validatedBody.payload,
+          }),
+        }));
+        return createJsonResponse(200, {
+          status: "event_recorded",
+          events: result.state.events.slice(-5),
+        });
+      } catch (error) {
+        return createJsonResponse(classifyWorkerEventError(error), {
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -842,6 +913,9 @@ export function handleDispatcherHttpRequest(input) {
       error: "not_found",
     });
   } catch (error) {
+    if (error?.code === "state_lock_timeout") {
+      stateLockTimeoutCount += 1;
+    }
     const status = typeof error?.status === "number" ? error.status : 500;
     return createJsonResponse(status, {
       error: error instanceof Error ? error.message : String(error),

@@ -40,6 +40,24 @@ function appendRuntimeEvent(state: RuntimeState, event: Event): void {
   }
 }
 
+function isSessionInterrupted(input: {
+  summary?: string;
+  testOutput?: string;
+  evidence?: WorkerEvidence;
+}): boolean {
+  const text = [
+    input.summary,
+    input.testOutput,
+    input.evidence?.failureSummary,
+    ...(input.evidence?.blockers ?? []).map((blocker) => blocker.message),
+  ]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join("\n")
+    .toLowerCase();
+
+  return text.includes("interrupted") || text.includes("session interrupted");
+}
+
 function upsertWorkerRepoDir(
   state: RuntimeState,
   workerId: string,
@@ -317,6 +335,16 @@ export function applyTraeSubmitResult(
           }
         : null,
     });
+    if (input.status === "failed" && isSessionInterrupted(input)) {
+      appendRuntimeEvent(nextState, {
+        taskId: input.taskId,
+        type: "session_interrupted",
+        at: nowIso(),
+        payload: {
+          workerId,
+        },
+      });
+    }
     overwriteRuntimeState(state, nextState);
     return { state, ok: true };
   } catch (error) {

@@ -72,6 +72,11 @@ Current endpoint families:
     - `reviewBacklog`
     - `avgAssignmentLagMs`
     - `maxAssignmentLagMs`
+    - `submitResultRetryCount`
+    - `deliveryFailedCount`
+    - `cleanupFailureCount`
+    - `sessionInterruptionCount`
+    - `stateLockTimeoutCount`
     - `workers`
     - `tasks`
 - `GET /api/workers`
@@ -113,6 +118,18 @@ Current endpoint families:
     - `blockers[]`
     - `findings[]`
     - `artifacts`
+- `POST /api/workers/:workerId/events`
+  - Best-effort worker telemetry path for control-plane metrics and audit hints.
+  - Current request body validates:
+    - `type` required, non-empty string
+    - `taskId` optional string
+    - `at` optional string
+    - `payload` optional object or primitive
+  - Current mainline producers include:
+    - `submit_result_retry_failed`
+    - `delivery_failed`
+    - `worktree_cleanup_failed`
+    - `session_interrupted`
 
 ### Dispatch and review endpoints
 

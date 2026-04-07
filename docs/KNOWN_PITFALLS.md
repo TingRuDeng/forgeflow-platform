@@ -132,3 +132,26 @@ The repository now keeps push-triggered auto release behind the explicit variabl
 
 Do not treat a green OIDC/provenance setup in GitHub Actions as proof that npm-side trusted
 publisher configuration is complete.
+
+## 13. Control-plane failure metrics are event-backed and some worker-side signals are best-effort
+
+`/api/metrics` now exposes counts such as:
+
+- `submitResultRetryCount`
+- `deliveryFailedCount`
+- `cleanupFailureCount`
+- `sessionInterruptionCount`
+- `stateLockTimeoutCount`
+
+These counts are built from dispatcher runtime events plus a small in-process timeout counter.
+
+Implications:
+
+- dispatcher-side events are durable enough for control-plane diagnosis
+- worker-side event reporting is still best-effort
+- a zero count does not prove that no worker-side failure happened anywhere outside dispatcher reachability
+
+When debugging suspected delivery problems, check both:
+
+- dispatcher `/api/metrics` and recent events
+- worker-side logs / failed artifacts under `.worktrees/failed/`

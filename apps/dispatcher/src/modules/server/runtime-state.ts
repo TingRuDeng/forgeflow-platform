@@ -317,6 +317,14 @@ export interface RecordReviewDecisionInput {
   evidence?: ReviewDecisionEvidence;
 }
 
+export interface RecordWorkerEventInput {
+  workerId: string;
+  type: string;
+  taskId?: string | null;
+  at?: string;
+  payload?: unknown;
+}
+
 export interface ReconcileOptions {
   now?: string;
   heartbeatTimeoutMs?: number;
@@ -349,6 +357,11 @@ export interface DashboardSnapshot {
     reviewBacklog: number;
     avgAssignmentLagMs: number;
     maxAssignmentLagMs: number;
+    submitResultRetryCount: number;
+    deliveryFailedCount: number;
+    cleanupFailureCount: number;
+    sessionInterruptionCount: number;
+    stateLockTimeoutCount: number;
   };
   workers: Worker[];
   tasks: Task[];
@@ -573,6 +586,10 @@ function appendEvent(state: RuntimeState, event: Event): RuntimeState {
       ? nextEvents.slice(-RUNTIME_EVENTS_RETENTION_LIMIT)
       : nextEvents,
   };
+}
+
+function countEventsByType(events: Event[], type: string): number {
+  return events.filter((event) => event.type === type).length;
 }
 
 function upsertWorker(workers: Worker[], worker: Worker): Worker[] {
@@ -1638,6 +1655,25 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
   return nextState;
 }
 
+export function recordWorkerEvent(state: RuntimeState, input: RecordWorkerEventInput): RuntimeState {
+  const worker = state.workers.find((candidate) => candidate.id === input.workerId);
+  if (!worker) {
+    throw new Error(`worker not found: ${input.workerId}`);
+  }
+
+  const taskId = input.taskId ?? worker.currentTaskId ?? "system";
+  const at = input.at ?? nowIso();
+  return appendEvent(state, {
+    taskId,
+    type: input.type,
+    at,
+    payload: {
+      workerId: input.workerId,
+      ...(input.payload === undefined ? {} : { data: clone(input.payload) }),
+    },
+  });
+}
+
 function resolveWorkerStatuses(workers: Worker[], options: ReconcileOptions = {}): Worker[] {
   return clone(workers).map((worker) => {
     const resolvedStatus = resolveWorkerStatus(worker, options);
@@ -1712,6 +1748,11 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
       reviewBacklog: reconciledState.tasks.filter((task) => task.status === "review").length,
       avgAssignmentLagMs: assignmentLag.avgAssignmentLagMs,
       maxAssignmentLagMs: assignmentLag.maxAssignmentLagMs,
+      submitResultRetryCount: countEventsByType(reconciledState.events, "submit_result_retry_failed"),
+      deliveryFailedCount: countEventsByType(reconciledState.events, "delivery_failed"),
+      cleanupFailureCount: countEventsByType(reconciledState.events, "worktree_cleanup_failed"),
+      sessionInterruptionCount: countEventsByType(reconciledState.events, "session_interrupted"),
+      stateLockTimeoutCount: countEventsByType(reconciledState.events, "state_lock_timeout"),
     },
     workers,
     tasks: clone([...reconciledState.tasks].reverse()),
