@@ -47,6 +47,8 @@ const MAX_HARD_CHAT_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_SESSION_POLL_INTERVAL_MS = Number(process.env.TRAE_AUTOMATION_SESSION_POLL_INTERVAL_MS || 10000);
 const DEFAULT_ACTIVITY_IDLE_THRESHOLD_MS = Number(process.env.TRAE_AUTOMATION_ACTIVITY_IDLE_THRESHOLD_MS || 5 * 60 * 1000);
 const SESSION_EXTENSION_INTERVAL_MS = 5 * 60 * 1000;
+const DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS = Number(process.env.TRAE_AUTOMATION_REMOTE_SHA_RETRY_ATTEMPTS || 3);
+const DEFAULT_REMOTE_SHA_RETRY_MS = Number(process.env.TRAE_AUTOMATION_REMOTE_SHA_RETRY_MS || 10000);
 
 export interface WorkerRuntimeOptions {
   dispatcherClient: ReturnType<typeof createDispatcherClient>;
@@ -199,6 +201,9 @@ export function normalizePushStatus(value: unknown) {
   if (normalized === "success" || normalized === "成功") {
     return "success";
   }
+  if (normalized === "verified") {
+    return "verified";
+  }
   if (normalized === "failed" || normalized === "failure" || normalized === "失败") {
     return "failed";
   }
@@ -271,6 +276,14 @@ export function buildAutomationPrompt(task: WorkerRuntimeTask) {
     "- 只在允许范围内修改文件",
     "- 运行验收命令",
     "- 如果可以，提交并推送变更",
+    "",
+    "Draft PR Gate：",
+    "- 仅当以下条件全部满足时，才允许自动创建 draft PR：",
+    "- 所有验收命令已运行并通过",
+    "- 远端分支 HEAD 与最终回执 commit SHA 完全一致",
+    "- push 必须成功且 push_error 为空",
+    "- 变更仍在允许范围内",
+    "- PR 必须保持 draft，worker 不得自行 merge",
     "- 最终必须严格按下面模板回复",
     "",
     buildFinalReportTemplate(),
@@ -416,7 +429,19 @@ function isEnvironmentOnlySuccess(parsed: WorkerRuntimeReport) {
   return parsed.conclusionType === "environment_only" && Boolean(parsed.environmentEvidence);
 }
 
-function buildSuccessEvidence(parsed: WorkerRuntimeReport, source = "chat_completion"): WorkerEvidence {
+function isPushVerifiedStatus(value: string) {
+  return value === "success" || value === "verified";
+}
+
+function isRetryableRemoteCheckFailure(reason: string) {
+  return /not found on remote|failed to check remote branch|could not determine remote head|head is .* expected/i.test(reason);
+}
+
+function buildSuccessEvidence(
+  parsed: WorkerRuntimeReport,
+  source = "chat_completion",
+  verification: { remoteVerified?: boolean; remoteHeadSha?: string | null } = {},
+): WorkerEvidence {
   const artifacts: Record<string, string> = {
     source,
     conclusionType: parsed.conclusionType || "repo_fix",
@@ -431,6 +456,12 @@ function buildSuccessEvidence(parsed: WorkerRuntimeReport, source = "chat_comple
   }
   if (parsed.conclusionType === "environment_only") {
     artifacts.noRepoCodeChange = "true";
+  }
+  if (verification.remoteVerified === true) {
+    artifacts.remoteVerified = "true";
+  }
+  if (verification.remoteHeadSha) {
+    artifacts.remoteHeadSha = verification.remoteHeadSha;
   }
 
   return {
@@ -727,12 +758,60 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
   async function submitParsedResult(task: WorkerRuntimeTask, parsed: WorkerRuntimeReport, sessionId: string | null) {
     const successRequested = parsed.result === "成功";
     const successAllowed = hasCodeChangeEvidence(parsed) || isEnvironmentOnlySuccess(parsed);
-    const status = successRequested && successAllowed ? "review_ready" : "failed";
-    const invalidSuccessMessage = successRequested && !successAllowed
+    let status = successRequested && successAllowed ? "review_ready" : "failed";
+    let invalidSuccessMessage = successRequested && !successAllowed
       ? "success report missing code-change evidence or explicit environment_only proof"
       : null;
+    let artifactCheck: ReturnType<typeof checkArtifactReviewability> | null = null;
+
+    if (!invalidSuccessMessage && status === "review_ready" && !isEnvironmentOnlySuccess(parsed)) {
+      if (!parsed.github.branchName || !parsed.github.commitSha) {
+        invalidSuccessMessage = "success report missing branch/commit evidence";
+        status = "failed";
+      } else if (!isPushVerifiedStatus(parsed.github.pushStatus)) {
+        invalidSuccessMessage = "success report missing pushed remote artifact evidence";
+        status = "failed";
+      } else {
+        for (let attempt = 1; attempt <= DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS; attempt += 1) {
+          artifactCheck = checkArtifactReviewability({
+            ...task,
+            execution_dir: task.execution_dir || repoDir,
+            branch: parsed.github.branchName,
+            commit_sha: parsed.github.commitSha,
+          });
+
+          if (artifactCheck.reviewable && artifactCheck.evidence.remoteVerified) {
+            break;
+          }
+
+          const remoteReason = artifactCheck.evidence.remoteCheckReason || artifactCheck.reason || "remote artifact verification failed";
+          if (attempt >= DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS || !isRetryableRemoteCheckFailure(remoteReason)) {
+            invalidSuccessMessage = `Artifact not reviewable: ${remoteReason}`;
+            status = "failed";
+            break;
+          }
+
+          await dispatcherClient.reportProgress(
+            task.task_id,
+            `Push reported, waiting for remote SHA verification (${attempt}/${DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS}): ${remoteReason}`,
+            workerId,
+          );
+          await sleep(DEFAULT_REMOTE_SHA_RETRY_MS);
+        }
+
+        if (status === "review_ready" && artifactCheck && (!artifactCheck.reviewable || !artifactCheck.evidence.remoteVerified)) {
+          const remoteReason = artifactCheck.evidence.remoteCheckReason || artifactCheck.reason || "remote artifact verification failed";
+          invalidSuccessMessage = `Artifact not reviewable: ${remoteReason}`;
+          status = "failed";
+        }
+      }
+    }
+
     const evidence = status === "review_ready"
-      ? buildSuccessEvidence(parsed)
+      ? buildSuccessEvidence(parsed, "chat_completion", {
+          remoteVerified: artifactCheck?.evidence.remoteVerified,
+          remoteHeadSha: artifactCheck?.evidence.remoteHeadSha ?? null,
+        })
       : invalidSuccessMessage
         ? buildInvalidSuccessFailureEvidence(invalidSuccessMessage)
         : undefined;

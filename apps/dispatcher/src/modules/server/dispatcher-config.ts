@@ -28,7 +28,7 @@ export function loadDispatcherConfig(): DispatcherConfig {
 
 export function getDispatcherAuthMode(): string {
   const config = loadDispatcherConfig();
-  return process.env.DISPATCHER_AUTH_MODE || config.authMode || "legacy";
+  return process.env.DISPATCHER_AUTH_MODE || config.authMode || "token";
 }
 
 export function getDispatcherApiToken(): string | null {

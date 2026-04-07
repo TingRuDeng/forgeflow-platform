@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
@@ -12,16 +12,52 @@ const repoRoot = path.resolve(
 const serverModulePath = path.join(repoRoot, "scripts/lib/dispatcher-server.js");
 const tempRoots: string[] = [];
 
+const originalEnv = process.env.DISPATCHER_API_TOKEN;
+const originalAuthMode = process.env.DISPATCHER_AUTH_MODE;
+const originalStateLockTimeout = process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS;
+const originalStateLockRetry = process.env.DISPATCHER_STATE_LOCK_RETRY_MS;
+const originalStateLockStale = process.env.DISPATCHER_STATE_LOCK_STALE_MS;
+
 function makeTempDir() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-dispatcher-server-"));
   tempRoots.push(tempDir);
   return tempDir;
 }
 
+beforeAll(() => {
+  process.env.DISPATCHER_AUTH_MODE = "open";
+});
+
 afterEach(() => {
   for (const tempDir of tempRoots.splice(0)) {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+  if (originalEnv === undefined) {
+    delete process.env.DISPATCHER_API_TOKEN;
+  } else {
+    process.env.DISPATCHER_API_TOKEN = originalEnv;
+  }
+  if (originalAuthMode === undefined) {
+    delete process.env.DISPATCHER_AUTH_MODE;
+  } else {
+    process.env.DISPATCHER_AUTH_MODE = originalAuthMode;
+  }
+  if (originalStateLockTimeout === undefined) {
+    delete process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS;
+  } else {
+    process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS = originalStateLockTimeout;
+  }
+  if (originalStateLockRetry === undefined) {
+    delete process.env.DISPATCHER_STATE_LOCK_RETRY_MS;
+  } else {
+    process.env.DISPATCHER_STATE_LOCK_RETRY_MS = originalStateLockRetry;
+  }
+  if (originalStateLockStale === undefined) {
+    delete process.env.DISPATCHER_STATE_LOCK_STALE_MS;
+  } else {
+    process.env.DISPATCHER_STATE_LOCK_STALE_MS = originalStateLockStale;
+  }
+  process.env.DISPATCHER_AUTH_MODE = "open";
 });
 
 describe("dispatcher server", () => {
@@ -203,6 +239,93 @@ describe("dispatcher server", () => {
     expect(response.json).toEqual({
       error: "task not found: nonexistent-task",
     });
+  });
+
+  it("returns 503 when a state mutation route cannot acquire the runtime lock", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS = "1";
+    process.env.DISPATCHER_STATE_LOCK_RETRY_MS = "1";
+
+    const lockPath = mod.getStateLockFilePath
+      ? mod.getStateLockFilePath(stateDir)
+      : path.join(stateDir, ".runtime-state.lock");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(lockPath, "held");
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-lock",
+        pool: "codex",
+        hostname: "host",
+        labels: [],
+        repoDir: "/repo",
+      },
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.json.error).toContain("state lock timeout");
+  });
+
+  it("applies the same runtime lock to Trae write routes", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS = "1";
+    process.env.DISPATCHER_STATE_LOCK_RETRY_MS = "1";
+
+    const lockPath = mod.getStateLockFilePath
+      ? mod.getStateLockFilePath(stateDir)
+      : path.join(stateDir, ".runtime-state.lock");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(lockPath, "held");
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/heartbeat",
+      body: {
+        worker_id: "trae-lock",
+      },
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.json.error).toContain("state lock timeout");
+  });
+
+  it("reclaims a stale runtime lock before mutating state", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS = "25";
+    process.env.DISPATCHER_STATE_LOCK_RETRY_MS = "1";
+    process.env.DISPATCHER_STATE_LOCK_STALE_MS = "1";
+
+    const lockPath = mod.getStateLockFilePath
+      ? mod.getStateLockFilePath(stateDir)
+      : path.join(stateDir, ".runtime-state.lock");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(lockPath, "stale");
+    const staleAt = new Date(Date.now() - 10_000);
+    fs.utimesSync(lockPath, staleAt, staleAt);
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-stale-lock",
+        pool: "codex",
+        hostname: "host",
+        labels: [],
+        repoDir: "/repo",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.json.status).toBe("registered");
+    expect(fs.existsSync(lockPath)).toBe(false);
   });
 
   it("returns 409 when review decision task is not in review", async () => {
@@ -1182,7 +1305,7 @@ describe("dispatcher server", () => {
       }
     });
 
-    it("allows all requests when DISPATCHER_API_TOKEN is not set (legacy mode)", async () => {
+    it("returns 500 when DISPATCHER_API_TOKEN is not set (default token mode)", async () => {
       delete process.env.DISPATCHER_API_TOKEN;
       delete process.env.DISPATCHER_AUTH_MODE;
       const stateDir = makeTempDir();
@@ -1193,10 +1316,11 @@ describe("dispatcher server", () => {
         method: "GET",
         pathname: "/api/workers",
       });
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(500);
+      expect(response.json.error).toBe("DISPATCHER_API_TOKEN is required when auth mode is 'token'");
     });
 
-    it("returns 401 when token is required but missing (legacy mode)", async () => {
+    it("returns 401 when token is required but missing (default token mode)", async () => {
       process.env.DISPATCHER_API_TOKEN = "test-secret-token";
       delete process.env.DISPATCHER_AUTH_MODE;
       const stateDir = makeTempDir();
@@ -1211,7 +1335,7 @@ describe("dispatcher server", () => {
       expect(response.json.error).toBe("unauthorized");
     });
 
-    it("returns 401 when token is required but incorrect (legacy mode)", async () => {
+    it("returns 401 when token is required but incorrect (default token mode)", async () => {
       process.env.DISPATCHER_API_TOKEN = "test-secret-token";
       delete process.env.DISPATCHER_AUTH_MODE;
       const stateDir = makeTempDir();
@@ -1227,7 +1351,7 @@ describe("dispatcher server", () => {
       expect(response.json.error).toBe("unauthorized");
     });
 
-    it("allows access with correct token (legacy mode)", async () => {
+    it("allows access with correct token (default token mode)", async () => {
       process.env.DISPATCHER_API_TOKEN = "test-secret-token";
       delete process.env.DISPATCHER_AUTH_MODE;
       const stateDir = makeTempDir();
@@ -1242,7 +1366,7 @@ describe("dispatcher server", () => {
       expect(response.status).toBe(200);
     });
 
-    it("allows /health without authentication (legacy mode)", async () => {
+    it("allows /health without authentication (default token mode)", async () => {
       process.env.DISPATCHER_API_TOKEN = "test-secret-token";
       delete process.env.DISPATCHER_AUTH_MODE;
       const stateDir = makeTempDir();
@@ -1257,7 +1381,7 @@ describe("dispatcher server", () => {
       expect(response.json.status).toBe("ok");
     });
 
-    it("rejects malformed authorization header (legacy mode)", async () => {
+    it("rejects malformed authorization header (default token mode)", async () => {
       process.env.DISPATCHER_API_TOKEN = "test-secret-token";
       delete process.env.DISPATCHER_AUTH_MODE;
       const stateDir = makeTempDir();
@@ -1361,6 +1485,115 @@ describe("dispatcher server", () => {
       });
       expect(response.status).toBe(200);
       expect(response.json.status).toBe("ok");
+    });
+
+    it("allows loopback requests in legacy mode without token", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "legacy";
+      delete process.env.DISPATCHER_API_TOKEN;
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/workers",
+        clientAddress: "127.0.0.1",
+      });
+      expect(response.status).toBe(200);
+    });
+
+    it("allows IPv6 loopback requests in legacy mode without token", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "legacy";
+      delete process.env.DISPATCHER_API_TOKEN;
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/workers",
+        clientAddress: "::1",
+      });
+      expect(response.status).toBe(200);
+    });
+
+    it("allows IPv4-mapped IPv6 loopback requests in legacy mode without token", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "legacy";
+      delete process.env.DISPATCHER_API_TOKEN;
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/workers",
+        clientAddress: "::ffff:127.0.0.1",
+      });
+      expect(response.status).toBe(200);
+    });
+
+    it("rejects non-loopback requests in legacy mode without token", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "legacy";
+      delete process.env.DISPATCHER_API_TOKEN;
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/workers",
+        clientAddress: "192.168.1.100",
+      });
+      expect(response.status).toBe(401);
+      expect(response.json.error).toBe("unauthorized");
+    });
+
+    it("allows /health in legacy mode without token for non-loopback", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "legacy";
+      delete process.env.DISPATCHER_API_TOKEN;
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/health",
+        clientAddress: "192.168.1.100",
+      });
+      expect(response.status).toBe(200);
+      expect(response.json.status).toBe("ok");
+    });
+
+    it("requires token in legacy mode when token is set", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "legacy";
+      process.env.DISPATCHER_API_TOKEN = "test-secret-token";
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/workers",
+        clientAddress: "127.0.0.1",
+      });
+      expect(response.status).toBe(401);
+      expect(response.json.error).toBe("unauthorized");
+    });
+
+    it("allows access with correct token in legacy mode", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "legacy";
+      process.env.DISPATCHER_API_TOKEN = "test-secret-token";
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+
+      const response = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/workers",
+        authHeader: "Bearer test-secret-token",
+        clientAddress: "192.168.1.100",
+      });
+      expect(response.status).toBe(200);
     });
   });
 });

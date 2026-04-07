@@ -82,9 +82,7 @@ describe("runtime/trae-automation-artifact-checks", () => {
       "diff --cached --name-only": { status: 0, stdout: "" },
       "diff --name-only": { status: 0, stdout: "" },
       "ls-files --others --exclude-standard": { status: 0, stdout: "" },
-      "ls-remote --heads origin feature/runtime": { status: 0, stdout: "abc123\trefs/heads/feature/runtime" },
-      "fetch --quiet origin feature/runtime": { status: 0, stdout: "" },
-      "merge-base --is-ancestor abc123 FETCH_HEAD": { status: 1, stderr: "" },
+      "ls-remote --heads origin feature/runtime": { status: 0, stdout: "" },
     });
 
     const result = checkArtifactReviewability({
@@ -95,11 +93,68 @@ describe("runtime/trae-automation-artifact-checks", () => {
     }, { runGit });
 
     expect(result.reviewable).toBe(false);
-    expect(result.reason).toContain("Commit abc123 not pushed to remote branch feature/runtime");
+    expect(result.reason).toContain("Branch feature/runtime not found on remote");
     expect(result.evidence.filesChanged).toEqual(["src/runtime/worker.ts"]);
     expect(result.evidence.outOfScopeFiles).toEqual([]);
     expect(result.evidence.uncommittedFiles).toEqual([]);
     expect(result.evidence.remoteVerified).toBe(false);
+    expect(result.evidence.remoteHeadSha).toBeNull();
+  });
+
+  it("blocks reviewability when the reported commit does not match remote HEAD", async () => {
+    const { checkArtifactReviewability } = await import("../src/runtime/trae-automation-artifact-checks.js");
+    const worktreeDir = createWorktreeDir();
+    const runGit = createRunGitMock({
+      "rev-parse --is-inside-work-tree": { status: 0, stdout: "true" },
+      "branch --show-current": { status: 0, stdout: "feature/runtime" },
+      "rev-parse HEAD": { status: 0, stdout: "abc123" },
+      "merge-base origin/main HEAD": { status: 0, stdout: "base123" },
+      "diff --name-only base123": { status: 0, stdout: "src/runtime/worker.ts" },
+      "diff --cached --name-only": { status: 0, stdout: "" },
+      "diff --name-only": { status: 0, stdout: "" },
+      "ls-files --others --exclude-standard": { status: 0, stdout: "" },
+      "ls-remote --heads origin feature/runtime": { status: 0, stdout: "def456\trefs/heads/feature/runtime" },
+    });
+
+    const result = checkArtifactReviewability({
+      worktree_dir: worktreeDir,
+      branch: "feature/runtime",
+      default_branch: "main",
+      scope: ["src/runtime/**"],
+      commit_sha: "abc123",
+    }, { runGit });
+
+    expect(result.reviewable).toBe(false);
+    expect(result.reason).toContain("Remote branch feature/runtime HEAD is def456, expected abc123");
+    expect(result.evidence.remoteVerified).toBe(false);
+    expect(result.evidence.remoteHeadSha).toBe("def456");
+  });
+
+  it("blocks reviewability when the reported commit does not match local HEAD", async () => {
+    const { checkArtifactReviewability } = await import("../src/runtime/trae-automation-artifact-checks.js");
+    const worktreeDir = createWorktreeDir();
+    const runGit = createRunGitMock({
+      "rev-parse --is-inside-work-tree": { status: 0, stdout: "true" },
+      "branch --show-current": { status: 0, stdout: "feature/runtime" },
+      "rev-parse HEAD": { status: 0, stdout: "abc123" },
+      "merge-base origin/main HEAD": { status: 0, stdout: "base123" },
+      "diff --name-only base123": { status: 0, stdout: "src/runtime/worker.ts" },
+      "diff --cached --name-only": { status: 0, stdout: "" },
+      "diff --name-only": { status: 0, stdout: "" },
+      "ls-files --others --exclude-standard": { status: 0, stdout: "" },
+    });
+
+    const result = checkArtifactReviewability({
+      worktree_dir: worktreeDir,
+      branch: "feature/runtime",
+      default_branch: "main",
+      scope: ["src/runtime/**"],
+      commit_sha: "def456",
+    }, { runGit });
+
+    expect(result.reviewable).toBe(false);
+    expect(result.reason).toContain("Local HEAD is abc123, expected reported commit def456");
+    expect(result.evidence.commitSha).toBe("def456");
   });
 
   it("blocks reviewability when changed files are outside scope", async () => {
@@ -144,8 +199,6 @@ describe("runtime/trae-automation-artifact-checks", () => {
       "diff --name-only": { status: 0, stdout: "" },
       "ls-files --others --exclude-standard": { status: 0, stdout: "" },
       "ls-remote --heads origin feature/runtime": { status: 0, stdout: "abc123\trefs/heads/feature/runtime" },
-      "fetch --quiet origin feature/runtime": { status: 0, stdout: "" },
-      "merge-base --is-ancestor abc123 FETCH_HEAD": { status: 0, stdout: "" },
     });
 
     const result = checkArtifactReviewability({
@@ -164,6 +217,7 @@ describe("runtime/trae-automation-artifact-checks", () => {
         hasChanges: true,
         allChangesInScope: true,
         remoteVerified: true,
+        remoteHeadSha: "abc123",
         branchName: "feature/runtime",
         commitSha: "abc123",
         filesChanged: ["src/runtime/worker.ts", "src/runtime/clients.ts"],

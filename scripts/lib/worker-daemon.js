@@ -94,9 +94,7 @@ function maybeCommitAndPush(worktreeDir, payload, changedFiles) {
         "origin",
         payload.assignment.branchName,
     ], worktreeDir);
-    if ((pushResult.status ?? 1) !== 0) {
-        return;
-    }
+    ensureSuccess(pushResult, `failed to push changes for ${payload.assignment.taskId}`);
 }
 async function maybeCreatePullRequest(payload, changedFiles) {
     if (!process.env.GITHUB_TOKEN || changedFiles.length === 0) {
@@ -125,7 +123,11 @@ async function maybeCreatePullRequest(payload, changedFiles) {
     const text = await response.text();
     const json = text ? JSON.parse(text) : {};
     if (!response.ok) {
-        return null;
+        const message = json.message
+            || json.error
+            || text
+            || `failed to create pull request for ${payload.assignment.taskId}`;
+        throw new Error(message);
     }
     return {
         number: json.number || 0,
@@ -208,6 +210,12 @@ const HEARTBEAT_MAX_RETRIES = 3;
 const HEARTBEAT_RETRY_DELAY_MS = 1_000;
 const SUBMIT_RESULT_MAX_RETRIES = 3;
 const SUBMIT_RESULT_RETRY_DELAY_MS = 2_000;
+function getSubmitResultMaxRetries() {
+    return Number(process.env.WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES || SUBMIT_RESULT_MAX_RETRIES);
+}
+function getSubmitResultRetryDelayMs() {
+    return Number(process.env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS || SUBMIT_RESULT_RETRY_DELAY_MS);
+}
 async function processTaskAssignment(input) {
     const heartbeatClient = input.client;
     const taskId = input.payload.task.id;
@@ -251,7 +259,9 @@ async function processTaskAssignment(input) {
         const pullRequest = input.dryRunExecution ? null : await maybeCreatePullRequest(input.payload, changedFiles);
         stopHeartbeat();
         let lastError = null;
-        for (let attempt = 1; attempt <= SUBMIT_RESULT_MAX_RETRIES; attempt++) {
+        const submitResultMaxRetries = getSubmitResultMaxRetries();
+        const submitResultRetryDelayMs = getSubmitResultRetryDelayMs();
+        for (let attempt = 1; attempt <= submitResultMaxRetries; attempt++) {
             try {
                 await input.client.submitResult(input.workerId, {
                     result: workerResult,
@@ -263,14 +273,15 @@ async function processTaskAssignment(input) {
             }
             catch (error) {
                 lastError = error instanceof Error ? error.message : String(error);
-                console.error(`submitResult attempt ${attempt}/${SUBMIT_RESULT_MAX_RETRIES} failed for task ${taskId}:`, lastError);
-                if (attempt < SUBMIT_RESULT_MAX_RETRIES) {
-                    await sleep(SUBMIT_RESULT_RETRY_DELAY_MS);
+                console.error(`submitResult attempt ${attempt}/${submitResultMaxRetries} failed for task ${taskId}:`, lastError);
+                if (attempt < submitResultMaxRetries) {
+                    await sleep(submitResultRetryDelayMs);
                 }
             }
         }
         if (lastError) {
             console.error(`all submitResult retries failed for task ${taskId}, worker may need manual recovery:`, lastError);
+            throw new Error(`submitResult failed after ${submitResultMaxRetries} attempts: ${lastError}`);
         }
         return {
             status: "completed",
@@ -308,7 +319,9 @@ async function processTaskAssignment(input) {
             writeJson(path.join(failedOutputDir, "worker-result.json"), failedResult);
             writeJson(path.join(failedOutputDir, "worker-verification.json"), failedResult.verification);
             fs.writeFileSync(path.join(failedOutputDir, "worker-output.raw.txt"), `ERROR: ${errorMessage}\n`);
-            for (let attempt = 1; attempt <= SUBMIT_RESULT_MAX_RETRIES; attempt++) {
+            const submitResultMaxRetries = getSubmitResultMaxRetries();
+            const submitResultRetryDelayMs = getSubmitResultRetryDelayMs();
+            for (let attempt = 1; attempt <= submitResultMaxRetries; attempt++) {
                 try {
                     await input.client.submitResult(input.workerId, {
                         result: failedResult,
@@ -320,8 +333,8 @@ async function processTaskAssignment(input) {
                 }
                 catch (submitError) {
                     console.error(`submitResult in catch attempt ${attempt} failed:`, submitError instanceof Error ? submitError.message : String(submitError));
-                    if (attempt < SUBMIT_RESULT_MAX_RETRIES) {
-                        await sleep(SUBMIT_RESULT_RETRY_DELAY_MS);
+                    if (attempt < submitResultMaxRetries) {
+                        await sleep(submitResultRetryDelayMs);
                     }
                 }
             }
@@ -409,6 +422,7 @@ export function createStateDirDispatcherClient(stateDir) {
                 method: "POST",
                 pathname: "/api/workers/register",
                 body: worker,
+                clientAddress: "127.0.0.1",
             });
             return Promise.resolve(response.json);
         },
@@ -418,6 +432,7 @@ export function createStateDirDispatcherClient(stateDir) {
                 method: "POST",
                 pathname: `/api/workers/${encodeURIComponent(workerId)}/heartbeat`,
                 body: payload,
+                clientAddress: "127.0.0.1",
             });
             return Promise.resolve(response.json);
         },
@@ -426,6 +441,7 @@ export function createStateDirDispatcherClient(stateDir) {
                 stateDir,
                 method: "GET",
                 pathname: `/api/workers/${encodeURIComponent(workerId)}/assigned-task`,
+                clientAddress: "127.0.0.1",
             });
             return Promise.resolve(response.json);
         },
@@ -435,6 +451,7 @@ export function createStateDirDispatcherClient(stateDir) {
                 method: "POST",
                 pathname: `/api/workers/${encodeURIComponent(workerId)}/start-task`,
                 body: payload,
+                clientAddress: "127.0.0.1",
             });
             return Promise.resolve(response.json);
         },
@@ -444,6 +461,7 @@ export function createStateDirDispatcherClient(stateDir) {
                 method: "POST",
                 pathname: `/api/workers/${encodeURIComponent(workerId)}/result`,
                 body: payload,
+                clientAddress: "127.0.0.1",
             });
             return Promise.resolve(response.json);
         },

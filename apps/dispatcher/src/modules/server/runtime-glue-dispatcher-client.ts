@@ -156,6 +156,7 @@ export interface CreateDispatcherStateDirClientOptions {
     method: string;
     pathname: string;
     body?: unknown;
+    internalCall?: boolean;
   }) => { json: unknown };
 }
 
@@ -172,6 +173,7 @@ export function createDispatcherStateDirClientFactory(
           method: "POST",
           pathname: "/api/workers/register",
           body: worker,
+          internalCall: true,
         }).json;
       },
 
@@ -181,6 +183,7 @@ export function createDispatcherStateDirClientFactory(
           method: "POST",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/heartbeat`,
           body: payload,
+          internalCall: true,
         }).json;
       },
 
@@ -189,6 +192,7 @@ export function createDispatcherStateDirClientFactory(
           stateDir,
           method: "GET",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/assigned-task`,
+          internalCall: true,
         }).json;
       },
 
@@ -198,6 +202,7 @@ export function createDispatcherStateDirClientFactory(
           method: "POST",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/start-task`,
           body: payload,
+          internalCall: true,
         }).json;
       },
 
@@ -207,6 +212,7 @@ export function createDispatcherStateDirClientFactory(
           method: "POST",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/result`,
           body: payload,
+          internalCall: true,
         }).json;
       },
     };

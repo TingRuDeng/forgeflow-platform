@@ -22,16 +22,29 @@ Base role: task state, worker coordination, review decisions, dashboard snapshot
 The dispatcher server supports three authentication modes controlled by the `DISPATCHER_AUTH_MODE` environment variable:
 
 - **Environment variables**:
-  - `DISPATCHER_AUTH_MODE`: One of `legacy`, `token`, or `open` (default: `legacy`)
+  - `DISPATCHER_AUTH_MODE`: One of `token`, `legacy`, or `open` (default: `token`)
   - `DISPATCHER_API_TOKEN`: The token to use for authentication (required in `token` mode)
 
 - **Auth modes**:
-  - `legacy` (default): When `DISPATCHER_API_TOKEN` is not set, all endpoints are accessible without authentication (backward compatible). When set, requires `Authorization: Bearer <token>` header for all endpoints except `/health`.
-  - `token`: All endpoints except `/health` require `Authorization: Bearer <DISPATCHER_API_TOKEN>` header. Returns `500` if `DISPATCHER_API_TOKEN` is not set.
+  - `token` (default): All endpoints except `/health` require `Authorization: Bearer <DISPATCHER_API_TOKEN>` header. Returns `500` if `DISPATCHER_API_TOKEN` is not set.
+  - `legacy`: When `DISPATCHER_API_TOKEN` is not set, only loopback addresses (127.0.0.1, ::1, ::ffff:127.0.0.1) can access endpoints without authentication. When set, requires `Authorization: Bearer <token>` header for all endpoints except `/health`.
   - `open`: All endpoints are accessible without authentication. Useful for local development.
 
 - **Whitelist**: `/health` endpoint is always accessible without authentication in all modes.
 - **Authentication failure**: Returns `401` status code with `{ "error": "unauthorized" }` JSON response
+
+### State lock
+
+Dispatcher 当前会在状态目录下维护 `.runtime-state.lock`，状态型 endpoint 共用同一把文件锁。
+
+- Lock env:
+  - `DISPATCHER_STATE_LOCK_TIMEOUT_MS` (default `2000`)
+  - `DISPATCHER_STATE_LOCK_RETRY_MS` (default `25`)
+  - `DISPATCHER_STATE_LOCK_STALE_MS` (default `30000`)
+- Lock timeout response:
+  - `503` with `{ "error": "state lock timeout after ...: <lock-path>" }`
+- Caller expectation:
+  - 把它当作暂时性竞争错误并重试，不要误判成认证或 payload 问题
 
 Current endpoint families:
 
@@ -56,6 +69,7 @@ Current endpoint families:
   - Move task from `assigned` to `in_progress`.
 - `POST /api/workers/:workerId/result`
   - Submit execution result, changed files, and optional PR metadata.
+  - Caller should only treat the task as durably delivered after this endpoint returns success; `worker-daemon` no longer treats exhausted submission retries as a completed task.
   - `result` may now include additive structured worker evidence for dispatcher persistence:
     - `failureType`
     - `failureSummary`
@@ -100,6 +114,9 @@ Current endpoint families:
   - Append progress events.
 - `POST /api/trae/submit-result`
   - Accepts `review_ready` or `failed`, then maps to dispatcher task states.
+  - `review_ready` now assumes the runtime already verified that remote branch HEAD exactly matches the reported commit SHA.
+  - Packaged runtime may briefly retry remote verification after push before downgrading the report to `failed`.
+  - Delivery evidence may include a remote-verified push state plus `remoteHeadSha`.
 - `POST /api/trae/heartbeat`
   - Heartbeat endpoint for Trae workers.
 

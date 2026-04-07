@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-
 import type { RedriveOptions, RedriveResult, RedriveFailureType } from "./types.js";
 import { createJsonHttpClient } from "./http.js";
 import { buildSingleTaskDispatchInput, runDispatch } from "./dispatch.js";
@@ -158,8 +157,18 @@ function recoverFieldsFromTask(
 }
 
 function generateRedriveBranchName(originalBranchName: string): string {
-  const shortId = randomUUID().slice(0, 8);
-  return `${originalBranchName}-redrive-${shortId}`;
+  const match = originalBranchName.match(/^(.*?)-r(\d+)$/);
+  if (!match) {
+    return `${originalBranchName}-r2`;
+  }
+
+  const [, baseName, roundText] = match;
+  const round = Number(roundText);
+  if (!Number.isFinite(round) || round < 1) {
+    return `${originalBranchName}-r2`;
+  }
+
+  return `${baseName}-r${round + 1}`;
 }
 
 function buildRedrivePayload(

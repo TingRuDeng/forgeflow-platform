@@ -3,6 +3,19 @@ import path from "node:path";
 import { prepareTaskWorktree, safeTaskDirName } from "./task-worktree.js";
 import { checkArtifactReviewability } from "./trae-automation-artifact-checks.js";
 
+interface WorkerFailure {
+  type: string;
+  message: string;
+}
+
+interface WorkerEvidence {
+  failureType?: string;
+  failureSummary?: string;
+  blockers?: WorkerFailure[];
+  findings?: unknown[];
+  artifacts?: Record<string, string>;
+}
+
 const DEFAULT_DISPATCHER_URL = "http://127.0.0.1:8787";
 const DEFAULT_AUTOMATION_URL = "http://127.0.0.1:8790";
 const DEFAULT_POLL_INTERVAL_MS = Number(process.env.TRAE_AUTOMATION_POLL_INTERVAL_MS || 5000);
@@ -22,6 +35,8 @@ const DEFAULT_SOFT_CHAT_TIMEOUT_MS = Number(process.env.TRAE_AUTOMATION_SOFT_CHA
 const DEFAULT_HARD_CHAT_TIMEOUT_MS = Number(process.env.TRAE_AUTOMATION_HARD_CHAT_TIMEOUT_MS || 45 * 60 * 1000);
 const MAX_HARD_CHAT_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_SESSION_POLL_INTERVAL_MS = Number(process.env.TRAE_AUTOMATION_SESSION_POLL_INTERVAL_MS || 10000);
+const DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS = Number(process.env.TRAE_AUTOMATION_REMOTE_SHA_RETRY_ATTEMPTS || 3);
+const DEFAULT_REMOTE_SHA_RETRY_MS = Number(process.env.TRAE_AUTOMATION_REMOTE_SHA_RETRY_MS || 10000);
 
 export interface JsonHttpClient {
   request: (path: string, init?: { method?: string; body?: unknown; timeoutMs?: number }) => Promise<unknown>;
@@ -86,6 +101,7 @@ export interface TraeDispatcherClient {
       prNumber: number | null;
       prUrl: string | null;
     };
+    evidence?: WorkerEvidence;
   }) => Promise<unknown>;
   heartbeat: (workerId: string) => Promise<unknown>;
 }
@@ -144,6 +160,7 @@ export function createDispatcherClient(baseUrl: string = DEFAULT_DISPATCHER_URL,
           push_error: input.github?.pushError,
           pr_number: input.github?.prNumber,
           pr_url: input.github?.prUrl,
+          evidence: input.evidence,
         },
         timeoutMs: requestTimeoutMs,
       });
@@ -294,10 +311,27 @@ export function buildAutomationPrompt(task: Task): string {
     "任务说明：",
     task.prompt || task.goal || "",
     "",
+    "执行上下文预检要求：",
+    "在进行任何文件编辑之前，必须先完成执行上下文预检证明：",
+    "1. 报告当前仓库路径 (pwd 或 cwd)",
+    "2. 报告当前分支 (git branch --show-current)",
+    "3. 报告 git status --short 输出",
+    "",
+    "说明：以上信息仅供了解当前工作环境，不是失败条件。",
+    "",
     "完成要求：",
+    "- 先完成执行上下文预检证明",
     "- 只在允许范围内修改文件",
     "- 运行验收命令",
     "- 如果可以，提交并推送变更",
+    "",
+    "Draft PR Gate：",
+    "- 仅当以下条件全部满足时，才允许自动创建 draft PR：",
+    "- 所有验收命令已运行并通过",
+    "- 远端分支 HEAD 与最终回执 commit SHA 完全一致",
+    "- push 必须成功且 push_error 为空",
+    "- 变更仍在允许范围内",
+    "- PR 必须保持 draft，worker 不得自行 merge",
     "- 最终必须严格按下面模板回复",
     "",
     buildFinalReportTemplate(),
@@ -331,10 +365,66 @@ export function normalizePushStatus(value: string): string {
   if (normalized === "success" || normalized === "成功") {
     return "success";
   }
+  if (normalized === "verified") {
+    return "verified";
+  }
   if (normalized === "failed" || normalized === "failure" || normalized === "失败") {
     return "failed";
   }
   return "not_attempted";
+}
+
+function hasCodeChangeEvidence(parsed: ParsedFinalReport): boolean {
+  return parsed.filesChanged.length > 0
+    || Boolean(parsed.github.commitSha)
+    || parsed.github.pushStatus === "success"
+    || parsed.github.pushStatus === "verified"
+    || Boolean(parsed.github.prNumber)
+    || Boolean(parsed.github.prUrl);
+}
+
+function isPushVerifiedStatus(value: string): boolean {
+  return value === "success" || value === "verified";
+}
+
+function isRetryableRemoteCheckFailure(reason: string): boolean {
+  return /not found on remote|failed to check remote branch|could not determine remote head|head is .* expected/i.test(reason);
+}
+
+function buildSuccessEvidence(
+  parsed: ParsedFinalReport,
+  verification: { remoteVerified?: boolean; remoteHeadSha?: string | null } = {},
+): WorkerEvidence {
+  const artifacts: Record<string, string> = {
+    source: "chat_completion",
+    conclusionType: "repo_fix",
+    branchName: parsed.github.branchName || "unknown",
+    commitSha: parsed.github.commitSha || "unknown",
+    pushStatus: parsed.github.pushStatus,
+    filesChanged: parsed.filesChanged.join(","),
+  };
+
+  if (verification.remoteVerified === true) {
+    artifacts.remoteVerified = "true";
+  }
+  if (verification.remoteHeadSha) {
+    artifacts.remoteHeadSha = verification.remoteHeadSha;
+  }
+
+  return {
+    blockers: [],
+    findings: [],
+    artifacts,
+  };
+}
+
+function buildInvalidSuccessFailureEvidence(message: string): WorkerEvidence {
+  return {
+    failureType: "unknown",
+    failureSummary: message,
+    blockers: [],
+    findings: [],
+  };
 }
 
 function basenameFromPath(value: string): string {
@@ -706,6 +796,7 @@ export interface TraeAutomationWorkerRuntimeOptions {
   maxErrorBackoffMs?: number | string;
   setIntervalImpl?: typeof setInterval;
   clearIntervalImpl?: typeof clearInterval;
+  checkArtifactReviewabilityImpl?: typeof checkArtifactReviewability;
 }
 
 export interface TraeAutomationWorkerRuntime {
@@ -726,21 +817,81 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
   const errorBackoffMs = Number(options.errorBackoffMs || DEFAULT_ERROR_BACKOFF_MS);
   const maxErrorBackoffMs = Number(options.maxErrorBackoffMs || MAX_ERROR_BACKOFF_MS);
   const heartbeat = createHeartbeatController(dispatcherClient, workerId, logger, options);
+  const checkArtifactReviewabilityImpl = options.checkArtifactReviewabilityImpl || checkArtifactReviewability;
 
   if (!dispatcherClient || !automationClient || !workerId || !repoDir) {
     throw new Error("dispatcherClient, automationClient, workerId, and repoDir are required");
   }
 
   async function submitParsedResult(task: Task, parsed: ParsedFinalReport): Promise<string> {
-    const status = parsed.result === "成功" ? "review_ready" : "failed";
+    const successRequested = parsed.result === "成功";
+    const successAllowed = hasCodeChangeEvidence(parsed);
+    let status = successRequested && successAllowed ? "review_ready" : "failed";
+    let invalidSuccessMessage = successRequested && !successAllowed
+      ? "success report missing code-change evidence"
+      : null;
+    let artifactCheck: ReturnType<typeof checkArtifactReviewabilityImpl> | null = null;
+
+    if (!invalidSuccessMessage && status === "review_ready") {
+      if (!parsed.github.branchName || !parsed.github.commitSha) {
+        invalidSuccessMessage = "success report missing branch/commit evidence";
+        status = "failed";
+      } else if (!isPushVerifiedStatus(parsed.github.pushStatus)) {
+        invalidSuccessMessage = "success report missing pushed remote artifact evidence";
+        status = "failed";
+      } else {
+        for (let attempt = 1; attempt <= DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS; attempt += 1) {
+          artifactCheck = checkArtifactReviewabilityImpl({
+            ...task,
+            worktree_dir: task.worktree_dir || repoDir,
+            branch: parsed.github.branchName,
+            commit_sha: parsed.github.commitSha,
+          });
+
+          if (artifactCheck.reviewable && artifactCheck.evidence.remoteVerified) {
+            break;
+          }
+
+          const remoteReason = artifactCheck.evidence.remoteCheckReason || artifactCheck.reason || "remote artifact verification failed";
+          if (attempt >= DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS || !isRetryableRemoteCheckFailure(remoteReason)) {
+            invalidSuccessMessage = `Artifact not reviewable: ${remoteReason}`;
+            status = "failed";
+            break;
+          }
+
+          await dispatcherClient.reportProgress(
+            task.task_id,
+            `Push reported, waiting for remote SHA verification (${attempt}/${DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS}): ${remoteReason}`,
+            workerId,
+          );
+          await sleepImpl(DEFAULT_REMOTE_SHA_RETRY_MS);
+        }
+
+        if (status === "review_ready" && artifactCheck && (!artifactCheck.reviewable || !artifactCheck.evidence.remoteVerified)) {
+          const remoteReason = artifactCheck.evidence.remoteCheckReason || artifactCheck.reason || "remote artifact verification failed";
+          invalidSuccessMessage = `Artifact not reviewable: ${remoteReason}`;
+          status = "failed";
+        }
+      }
+    }
+
+    const evidence = status === "review_ready"
+      ? buildSuccessEvidence(parsed, {
+          remoteVerified: artifactCheck?.evidence.remoteVerified,
+          remoteHeadSha: artifactCheck?.evidence.remoteHeadSha ?? null,
+        })
+      : invalidSuccessMessage
+        ? buildInvalidSuccessFailureEvidence(invalidSuccessMessage)
+        : undefined;
     await dispatcherClient.submitResult({
       taskId: task.task_id,
       status,
-      summary: parsed.notes || parsed.result,
+      summary: invalidSuccessMessage || parsed.notes || parsed.result,
       testOutput: parsed.testOutput || "",
       risks: parsed.risks,
       filesChanged: parsed.filesChanged,
       github: parsed.github,
+      ...(evidence ? { evidence } : {}),
     });
     heartbeat.promoteToIdle();
     return status;

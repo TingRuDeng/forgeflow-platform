@@ -246,6 +246,24 @@ describe("trae automation worker runtime", () => {
       clearIntervalImpl: () => {},
       sleep: async () => {},
       logger: { warn: vi.fn() },
+      checkArtifactReviewabilityImpl: () => ({
+        reviewable: true,
+        reason: "Artifact is reviewable",
+        evidence: {
+          worktreeExists: true,
+          branchMatches: true,
+          hasChanges: true,
+          allChangesInScope: true,
+          remoteVerified: true,
+          remoteHeadSha: "abc123",
+          branchName: "ai/trae/task-1",
+          commitSha: "abc123",
+          filesChanged: ["src/auth.ts"],
+          outOfScopeFiles: [],
+          uncommittedFiles: [],
+          remoteCheckReason: "Remote branch HEAD matches reported commit",
+        },
+      }),
     });
 
     await runtime.register();
@@ -511,6 +529,24 @@ describe("trae automation worker runtime", () => {
       clearIntervalImpl: () => {},
       sleep: async () => {},
       logger: { warn: vi.fn() },
+      checkArtifactReviewabilityImpl: () => ({
+        reviewable: true,
+        reason: "Artifact is reviewable",
+        evidence: {
+          worktreeExists: true,
+          branchMatches: true,
+          hasChanges: true,
+          allChangesInScope: true,
+          remoteVerified: true,
+          remoteHeadSha: "abc123",
+          branchName: "ai/trae/task-1",
+          commitSha: "abc123",
+          filesChanged: ["src/recovered.js"],
+          outOfScopeFiles: [],
+          uncommittedFiles: [],
+          remoteCheckReason: "Remote branch HEAD matches reported commit",
+        },
+      }),
     });
 
     const result = await runtime.runOnce();

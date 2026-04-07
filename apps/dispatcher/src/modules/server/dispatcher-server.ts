@@ -1,4 +1,5 @@
 // @ts-nocheck
+import crypto from "node:crypto";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -31,10 +32,41 @@ import { formatLocalTimestamp } from "../time.js";
 import { getDispatcherAuthMode, getDispatcherApiToken } from "./dispatcher-config.js";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
+const STATE_LOCK_FILENAME = ".runtime-state.lock";
+const DEFAULT_STATE_LOCK_TIMEOUT_MS = 2000;
+const DEFAULT_STATE_LOCK_RETRY_MS = 25;
+const DEFAULT_STATE_LOCK_STALE_MS = 30000;
+const STATE_LOCK_SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 
 const AUTH_WHITELIST_PATHS = ["/health"];
 
 type AuthMode = "legacy" | "token" | "open";
+
+function isLoopbackAddress(clientAddress?: string): boolean {
+  if (!clientAddress) {
+    return false;
+  }
+  const normalized = clientAddress.toLowerCase();
+  return (
+    normalized === "127.0.0.1"
+    || normalized === "::1"
+    || normalized === "::ffff:127.0.0.1"
+    || normalized === "localhost"
+  );
+}
+
+function safeTokenCompare(a: string, b: string): boolean {
+  try {
+    const aBuf = Buffer.from(a, "utf8");
+    const bBuf = Buffer.from(b, "utf8");
+    if (aBuf.length !== bBuf.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(aBuf, bBuf);
+  } catch {
+    return false;
+  }
+}
 
 function checkAuthToken(authHeader: string | undefined, apiToken: string): boolean {
   if (!authHeader) {
@@ -45,10 +77,14 @@ function checkAuthToken(authHeader: string | undefined, apiToken: string): boole
     return false;
   }
   const token = match[1];
-  return token === apiToken;
+  return safeTokenCompare(token, apiToken);
 }
 
-function createAuthMiddleware(input: { method: string; pathname: string; authHeader?: string }): null | { status: number; error: string } {
+function createAuthMiddleware(input: { method: string; pathname: string; authHeader?: string; clientAddress?: string; internalCall?: boolean }): null | { status: number; error: string } {
+  if (input.internalCall) {
+    return null;
+  }
+
   const authMode = getDispatcherAuthMode();
 
   if (authMode === "open") {
@@ -78,7 +114,17 @@ function createAuthMiddleware(input: { method: string; pathname: string; authHea
   }
 
   const apiToken = getDispatcherApiToken();
-  if (!apiToken) {
+  if (apiToken) {
+    if (AUTH_WHITELIST_PATHS.includes(input.pathname)) {
+      return null;
+    }
+
+    if (!checkAuthToken(input.authHeader, apiToken)) {
+      return {
+        status: 401,
+        error: "unauthorized",
+      };
+    }
     return null;
   }
 
@@ -86,7 +132,7 @@ function createAuthMiddleware(input: { method: string; pathname: string; authHea
     return null;
   }
 
-  if (!checkAuthToken(input.authHeader, apiToken)) {
+  if (!isLoopbackAddress(input.clientAddress)) {
     return {
       status: 401,
       error: "unauthorized",
@@ -209,6 +255,109 @@ class PayloadTooLargeError extends Error {
   }
 }
 
+class StateLockTimeoutError extends Error {
+  constructor(lockPath, timeoutMs) {
+    super(`state lock timeout after ${timeoutMs}ms: ${lockPath}`);
+    this.name = "StateLockTimeoutError";
+    this.code = "state_lock_timeout";
+    this.status = 503;
+  }
+}
+
+function getStateLockTimeoutMs() {
+  return Number(process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS || DEFAULT_STATE_LOCK_TIMEOUT_MS);
+}
+
+function getStateLockRetryMs() {
+  return Number(process.env.DISPATCHER_STATE_LOCK_RETRY_MS || DEFAULT_STATE_LOCK_RETRY_MS);
+}
+
+function getStateLockStaleMs() {
+  return Number(process.env.DISPATCHER_STATE_LOCK_STALE_MS || DEFAULT_STATE_LOCK_STALE_MS);
+}
+
+function sleepSync(ms) {
+  if (ms <= 0) {
+    return;
+  }
+  Atomics.wait(STATE_LOCK_SLEEP_BUFFER, 0, 0, ms);
+}
+
+export function getStateLockFilePath(stateDir) {
+  return path.join(stateDir, STATE_LOCK_FILENAME);
+}
+
+function isLockStale(lockPath, staleMs) {
+  try {
+    const stats = fs.statSync(lockPath);
+    return Date.now() - stats.mtimeMs >= staleMs;
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function acquireStateLock(stateDir) {
+  fs.mkdirSync(stateDir, { recursive: true });
+  const lockPath = getStateLockFilePath(stateDir);
+  const timeoutMs = getStateLockTimeoutMs();
+  const retryMs = getStateLockRetryMs();
+  const staleMs = getStateLockStaleMs();
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    let fd = null;
+    try {
+      fd = fs.openSync(lockPath, "wx");
+      const metadata = JSON.stringify({
+        pid: process.pid,
+        createdAt: nowIso(),
+      });
+      fs.writeFileSync(fd, metadata);
+      fs.closeSync(fd);
+
+      return () => {
+        try {
+          fs.unlinkSync(lockPath);
+        } catch (error) {
+          if (error?.code !== "ENOENT") {
+            throw error;
+          }
+        }
+      };
+    } catch (error) {
+      if (fd !== null) {
+        try {
+          fs.closeSync(fd);
+        } catch {}
+      }
+
+      if (error?.code !== "EEXIST") {
+        throw error;
+      }
+
+      if (isLockStale(lockPath, staleMs)) {
+        try {
+          fs.unlinkSync(lockPath);
+          continue;
+        } catch (unlinkError) {
+          if (unlinkError?.code === "ENOENT") {
+            continue;
+          }
+        }
+      }
+
+      if (Date.now() >= deadline) {
+        throw new StateLockTimeoutError(lockPath, timeoutMs);
+      }
+
+      sleepSync(retryMs);
+    }
+  }
+}
+
 export async function readJsonBody(request, maxBytes = MAX_REQUEST_BODY_BYTES) {
   const chunks = [];
   let totalBytes = 0;
@@ -228,12 +377,17 @@ export async function readJsonBody(request, maxBytes = MAX_REQUEST_BODY_BYTES) {
 }
 
 function withState(stateDir, callback) {
-  const state = loadRuntimeState(stateDir);
-  const result = callback(state);
-  if (result?.state) {
-    saveRuntimeState(stateDir, result.state);
+  const releaseLock = acquireStateLock(stateDir);
+  try {
+    const state = loadRuntimeState(stateDir);
+    const result = callback(state);
+    if (result?.state) {
+      saveRuntimeState(stateDir, result.state);
+    }
+    return result;
+  } finally {
+    releaseLock();
   }
-  return result;
 }
 
 function routeNotFound(response) {
@@ -243,9 +397,9 @@ function routeNotFound(response) {
 }
 
 export function handleDispatcherHttpRequest(input) {
-  const { stateDir, method, pathname, body = {}, authHeader } = input;
+  const { stateDir, method, pathname, body = {}, authHeader, clientAddress, internalCall } = input;
 
-  const authError = createAuthMiddleware({ method, pathname, authHeader });
+  const authError = createAuthMiddleware({ method, pathname, authHeader, clientAddress, internalCall });
   if (authError) {
     return createJsonResponse(authError.status, { error: authError.error });
   }
@@ -478,13 +632,15 @@ export function handleDispatcherHttpRequest(input) {
     ];
     if (method === "POST" && traeRoutes.includes(pathname)) {
       try {
-        const state = loadRuntimeState(stateDir);
-        const handled = handleTraeRoute(state, { method, pathname, body });
-        saveRuntimeState(stateDir, state);
-        return handled;
+        const result = withState(stateDir, (state) => ({
+          state,
+          handled: handleTraeRoute(state, { method, pathname, body }),
+        }));
+        return result.handled;
       } catch (err) {
         console.error("[dispatcher-server] handleTraeRoute error:", err);
-        return createJsonResponse(500, { error: err instanceof Error ? err.message : String(err) });
+        const status = typeof err?.status === "number" ? err.status : 500;
+        return createJsonResponse(status, { error: err instanceof Error ? err.message : String(err) });
       }
     }
 
@@ -492,7 +648,8 @@ export function handleDispatcherHttpRequest(input) {
       error: "not_found",
     });
   } catch (error) {
-    return createJsonResponse(500, {
+    const status = typeof error?.status === "number" ? error.status : 500;
+    return createJsonResponse(status, {
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -505,6 +662,7 @@ export async function startDispatcherServer(input) {
 
   const server = http.createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? `${host}:${port}`}`);
+    const clientAddress = request.socket.remoteAddress;
 
     try {
       const body = request.method === "POST" ? await readJsonBody(request) : undefined;
@@ -515,6 +673,7 @@ export async function startDispatcherServer(input) {
         pathname: requestUrl.pathname,
         body,
         authHeader,
+        clientAddress,
       });
       if (handled.headers["content-type"]?.startsWith("text/html")) {
         sendHtml(response, handled.text);

@@ -5,10 +5,13 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 let originalBackend: string | undefined;
+let originalAuthMode: string | undefined;
 
 beforeEach(() => {
   originalBackend = process.env.RUNTIME_STATE_BACKEND;
+  originalAuthMode = process.env.DISPATCHER_AUTH_MODE;
   process.env.RUNTIME_STATE_BACKEND = "json";
+  process.env.DISPATCHER_AUTH_MODE = "open";
 });
 
 const repoRoot = path.resolve(
@@ -30,6 +33,11 @@ afterEach(() => {
     delete process.env.RUNTIME_STATE_BACKEND;
   } else {
     process.env.RUNTIME_STATE_BACKEND = originalBackend;
+  }
+  if (originalAuthMode === undefined) {
+    delete process.env.DISPATCHER_AUTH_MODE;
+  } else {
+    process.env.DISPATCHER_AUTH_MODE = originalAuthMode;
   }
   for (const tempDir of tempRoots.splice(0)) {
     fs.rmSync(tempDir, { recursive: true, force: true });

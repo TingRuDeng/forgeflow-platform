@@ -91,6 +91,14 @@ function buildTraeWorkerPrompt(options: DispatchTaskInputOptions, allowedPaths: 
 
   lines.push(
     "",
+    "Draft PR Gate：",
+    "- 仅当以下条件全部满足时，才允许自动创建 draft PR：",
+    "- 所有验收命令已运行并通过",
+    "- 远端分支 HEAD 与最终回执 commit SHA 完全一致",
+    "- push 必须成功且 push_error 为空",
+    "- 变更仍在允许范围内",
+    "- PR 必须保持 draft，worker 不得自行 merge",
+    "",
     "完成后必须严格按下面模板回复：",
     "",
     buildTraeFinalReportTemplate(),
@@ -359,6 +367,82 @@ function formatWorkerInventory(workers: SnapshotWorkerRecord[]) {
 interface SourceTaskInfo {
   taskId: string;
   originalWorkerId: string | null;
+  originalBranchName: string | null;
+  deliveryEvidence: {
+    branchName: string | null;
+    commitSha: string | null;
+    pushStatus: string | null;
+    prNumber: number | null;
+    prUrl: string | null;
+  };
+}
+
+function extractNumber(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
+}
+
+function extractDeliveryEvidence(
+  taskId: string,
+  reviews: Array<Record<string, unknown>>,
+  events: Array<Record<string, unknown>>,
+) {
+  const latestReview = reviews
+    .filter((review) => normalizeString(review.taskId) === taskId)
+    .at(-1) ?? null;
+  const latestWorkerResult = latestReview?.latestWorkerResult as Record<string, unknown> | null;
+  const artifacts = latestWorkerResult?.evidence && typeof latestWorkerResult.evidence === "object"
+    ? ((latestWorkerResult.evidence as Record<string, unknown>).artifacts as Record<string, unknown> | null)
+    : null;
+  if (artifacts) {
+    return {
+      branchName: normalizeString(artifacts.branchName) ?? null,
+      commitSha: normalizeString(artifacts.commitSha) ?? null,
+      pushStatus: normalizeString(artifacts.pushStatus) ?? null,
+      prNumber: extractNumber(artifacts.prNumber),
+      prUrl: normalizeString(artifacts.prUrl) ?? null,
+    };
+  }
+
+  const latestStatusEvent = events
+    .filter((event) => normalizeString(event.taskId) === taskId && normalizeString(event.type) === "status_changed")
+    .at(-1) ?? null;
+  const payload = latestStatusEvent?.payload as Record<string, unknown> | undefined;
+  const github = payload?.github as Record<string, unknown> | undefined;
+  return {
+    branchName: normalizeString(github?.branch_name) ?? null,
+    commitSha: normalizeString(github?.commit_sha) ?? null,
+    pushStatus: normalizeString(github?.push_status) ?? null,
+    prNumber: extractNumber(github?.pr_number),
+    prUrl: normalizeString(github?.pr_url) ?? null,
+  };
+}
+
+function canReuseDeliveredBranch(deliveryEvidence: SourceTaskInfo["deliveryEvidence"]) {
+  return Boolean(
+    deliveryEvidence.branchName
+    && deliveryEvidence.commitSha
+    && (
+      deliveryEvidence.pushStatus === "success"
+      || deliveryEvidence.pushStatus === "verified"
+      || deliveryEvidence.prNumber !== null
+      || deliveryEvidence.prUrl
+    )
+  );
+}
+
+function buildSuggestedFollowUpBranch(originalBranchName: string) {
+  const match = originalBranchName.match(/^(.*?)-r(\d+)$/);
+  if (!match) {
+    return `${originalBranchName}-r2`;
+  }
+
+  const [, baseName, roundText] = match;
+  const round = Number(roundText);
+  if (!Number.isFinite(round) || round < 1) {
+    return `${originalBranchName}-r2`;
+  }
+
+  return `${baseName}-r${round + 1}`;
 }
 
 async function ensureExistingWorkersAvailable(
@@ -434,6 +518,8 @@ async function fetchSourceTask(
   const assignmentRecord = assignment && typeof assignment.assignment === "object" && assignment.assignment
     ? assignment.assignment as Record<string, unknown>
     : null;
+  const reviews = Array.isArray(snapshot.reviews) ? snapshot.reviews as Array<Record<string, unknown>> : [];
+  const events = Array.isArray(snapshot.events) ? snapshot.events as Array<Record<string, unknown>> : [];
 
   const originalWorkerId = normalizeString(sourceTask.lastAssignedWorkerId)
     ?? normalizeString(sourceTask.assignedWorkerId)
@@ -441,10 +527,16 @@ async function fetchSourceTask(
     ?? normalizeString(assignmentRecord?.workerId)
     ?? normalizeString(assignment?.workerId)
     ?? null;
+  const originalBranchName = normalizeString(sourceTask.branchName)
+    ?? normalizeString(assignmentRecord?.branchName)
+    ?? normalizeString(assignment?.branchName)
+    ?? null;
 
   return {
     taskId: followUpOfTaskId,
     originalWorkerId,
+    originalBranchName,
+    deliveryEvidence: extractDeliveryEvidence(followUpOfTaskId, reviews, events),
   };
 }
 
@@ -486,18 +578,51 @@ function verifyDispatchAssignment(
   }
 }
 
-export async function runDispatch(options: DispatchOptions): Promise<DispatchResult> {
-  if (options.followUpOfTaskId) {
-    const sourceTaskInfo = await fetchSourceTask(options.followUpOfTaskId, options);
-    verifyTargetWorkerMatch(sourceTaskInfo, options.targetWorkerId, options.workerChangeReason);
+function verifyFollowUpBranchReuse(
+  payload: DispatchInput,
+  sourceTaskInfo: SourceTaskInfo,
+  targetWorkerId: string | undefined,
+): void {
+  const requestedBranches = [...new Set(
+    (payload.tasks ?? [])
+      .map((task) => normalizeString((task as Record<string, unknown>).branchName))
+      .filter((value): value is string => Boolean(value)),
+  )];
+  if (requestedBranches.length === 0 || !sourceTaskInfo.originalBranchName) {
+    return;
   }
 
+  const reusesSourceBranch = requestedBranches.includes(sourceTaskInfo.originalBranchName);
+  if (!reusesSourceBranch) {
+    return;
+  }
+
+  if (targetWorkerId && sourceTaskInfo.originalWorkerId && targetWorkerId !== sourceTaskInfo.originalWorkerId) {
+    throw new Error(
+      `follow-up branch reuse is not allowed when changing workers. Source branch "${sourceTaskInfo.originalBranchName}" belongs to worker "${sourceTaskInfo.originalWorkerId}". Choose a fresh branch such as "${buildSuggestedFollowUpBranch(sourceTaskInfo.originalBranchName)}".`,
+    );
+  }
+
+  if (!canReuseDeliveredBranch(sourceTaskInfo.deliveryEvidence)) {
+    throw new Error(
+      `follow-up branch reuse requires a previously delivered remote artifact on branch "${sourceTaskInfo.originalBranchName}". Choose a fresh branch such as "${buildSuggestedFollowUpBranch(sourceTaskInfo.originalBranchName)}".`,
+    );
+  }
+}
+
+export async function runDispatch(options: DispatchOptions): Promise<DispatchResult> {
   const payload = options.payload
     ? applyDispatchTargetWorker(options.payload, options.targetWorkerId)
     : applyDispatchTargetWorker(
         await loadDispatchInput(options.input, options.readStdin),
         options.targetWorkerId,
       );
+
+  if (options.followUpOfTaskId) {
+    const sourceTaskInfo = await fetchSourceTask(options.followUpOfTaskId, options);
+    verifyTargetWorkerMatch(sourceTaskInfo, options.targetWorkerId, options.workerChangeReason);
+    verifyFollowUpBranchReuse(payload, sourceTaskInfo, options.targetWorkerId);
+  }
 
   if (options.requireExistingWorker) {
     await ensureExistingWorkersAvailable(payload, options);
