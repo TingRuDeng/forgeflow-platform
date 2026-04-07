@@ -217,9 +217,108 @@ describe("dispatcher server", () => {
       pathname: "/dashboard",
     });
     expect(dashboardResponse.status).toBe(200);
+    expect(dashboardResponse.headers["cache-control"]).toBe("no-store");
     const dashboardHtml = dashboardResponse.text;
     expect(dashboardHtml).toContain("ForgeFlow");
   }, 15_000);
+
+  it("exports control-plane metrics via a dedicated no-store endpoint", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/repo",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [
+          {
+            id: "task-ready",
+            title: "Ready task",
+            pool: "codex",
+            allowedPaths: ["docs/**"],
+            acceptance: [],
+            dependsOn: [],
+            branchName: "ai/codex/task-ready",
+          },
+          {
+            id: "task-planned",
+            title: "Planned task",
+            pool: "codex",
+            allowedPaths: ["docs/**"],
+            acceptance: [],
+            dependsOn: ["dispatch-1:task-ready"],
+            branchName: "ai/codex/task-planned",
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-ready",
+            assignment: {
+              taskId: "task-ready",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/task-ready",
+              allowedPaths: ["docs/**"],
+              repo: "test/repo",
+              defaultBranch: "main",
+            },
+          },
+          {
+            taskId: "task-planned",
+            assignment: {
+              taskId: "task-planned",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/task-planned",
+              allowedPaths: ["docs/**"],
+              repo: "test/repo",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-metrics",
+        pool: "codex",
+        hostname: "metrics-host",
+        labels: [],
+        repoDir: "/repo",
+      },
+    });
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/metrics",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json).toMatchObject({
+      queueDepth: 1,
+      plannedTasks: 1,
+      reviewBacklog: 0,
+      workers: {
+        total: 1,
+      },
+      tasks: {
+        total: 2,
+        ready: 1,
+      },
+    });
+  });
 
   it("returns 404 when review decision task does not exist", async () => {
     const stateDir = makeTempDir();

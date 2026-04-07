@@ -4,6 +4,21 @@ const LOG_LEVEL = process.env.LOG_LEVEL || "info";
 
 export const logger = pino({
   level: LOG_LEVEL,
+  redact: {
+    paths: [
+      "authorization",
+      "authHeader",
+      "headers.authorization",
+      "req.headers.authorization",
+      "*.authorization",
+      "*.authHeader",
+      "*.token",
+      "*.apiToken",
+      "*.DISPATCHER_API_TOKEN",
+      "*.GITHUB_TOKEN",
+    ],
+    censor: "[REDACTED]",
+  },
   formatters: {
     level: (label) => ({ level: label }),
   },
