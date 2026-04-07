@@ -86,6 +86,7 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -96,6 +97,7 @@ jobs:
       - name: Publish to npm with provenance
         env:
           GITHUB_ACTIONS: "true"
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           pnpm --filter @tingrudeng/${{ matrix.package.name }} publish --access public --provenance --no-git-checks
           echo "✅ Published @tingrudeng/${{ matrix.package.name }}@${{ matrix.package.version }}"
