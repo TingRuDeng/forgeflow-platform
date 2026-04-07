@@ -78,6 +78,8 @@ function createStateDirReviewClient(
     method: string;
     pathname: string;
     body: unknown;
+    clientAddress?: string;
+    internalCall?: boolean;
   }) => { json: unknown },
   stateDir: string,
 ): StateDirReviewClient {
@@ -88,6 +90,8 @@ function createStateDirReviewClient(
         method: "POST",
         pathname: `/api/reviews/${encodeURIComponent(taskId)}/decision`,
         body: payload,
+        clientAddress: "127.0.0.1",
+        internalCall: true,
       });
       return result.json;
     },
@@ -106,6 +110,8 @@ export function createStateDirReviewClientFactory(
     method: string;
     pathname: string;
     body: unknown;
+    clientAddress?: string;
+    internalCall?: boolean;
   }) => { json: unknown },
 ): (stateDir: string) => StateDirReviewClient {
   return (stateDir: string) => createStateDirReviewClient(handleRequest, stateDir);

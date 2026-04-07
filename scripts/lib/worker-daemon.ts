@@ -596,6 +596,7 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         pathname: "/api/workers/register",
         body: worker,
         clientAddress: "127.0.0.1",
+        internalCall: true,
       });
       return Promise.resolve(response.json);
     },
@@ -606,6 +607,7 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         pathname: `/api/workers/${encodeURIComponent(workerId)}/heartbeat`,
         body: payload,
         clientAddress: "127.0.0.1",
+        internalCall: true,
       });
       return Promise.resolve(response.json);
     },
@@ -615,6 +617,7 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         method: "GET",
         pathname: `/api/workers/${encodeURIComponent(workerId)}/assigned-task`,
         clientAddress: "127.0.0.1",
+        internalCall: true,
       });
       return Promise.resolve(response.json) as Promise<TaskPayload | null>;
     },
@@ -625,6 +628,7 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         pathname: `/api/workers/${encodeURIComponent(workerId)}/start-task`,
         body: payload,
         clientAddress: "127.0.0.1",
+        internalCall: true,
       });
       return Promise.resolve(response.json);
     },
@@ -635,6 +639,7 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         pathname: `/api/workers/${encodeURIComponent(workerId)}/result`,
         body: payload,
         clientAddress: "127.0.0.1",
+        internalCall: true,
       });
       return Promise.resolve(response.json);
     },

@@ -80,7 +80,11 @@ function checkAuthToken(authHeader: string | undefined, apiToken: string): boole
   return safeTokenCompare(token, apiToken);
 }
 
-function createAuthMiddleware(input: { method: string; pathname: string; authHeader?: string; clientAddress?: string }): null | { status: number; error: string } {
+function createAuthMiddleware(input: { method: string; pathname: string; authHeader?: string; clientAddress?: string; internalCall?: boolean }): null | { status: number; error: string } {
+  if (input.internalCall) {
+    return null;
+  }
+
   const authMode = getDispatcherAuthMode();
 
   if (authMode === "open") {
@@ -393,9 +397,9 @@ function routeNotFound(response) {
 }
 
 export function handleDispatcherHttpRequest(input) {
-  const { stateDir, method, pathname, body = {}, authHeader, clientAddress } = input;
+  const { stateDir, method, pathname, body = {}, authHeader, clientAddress, internalCall } = input;
 
-  const authError = createAuthMiddleware({ method, pathname, authHeader, clientAddress });
+  const authError = createAuthMiddleware({ method, pathname, authHeader, clientAddress, internalCall });
   if (authError) {
     return createJsonResponse(authError.status, { error: authError.error });
   }

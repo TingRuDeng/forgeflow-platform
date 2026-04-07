@@ -313,6 +313,8 @@ describe("runtime-glue state-dir review client", () => {
       stateDir: "/tmp/state-dir",
       method: "POST",
       pathname: "/api/reviews/task-1/decision",
+      clientAddress: "127.0.0.1",
+      internalCall: true,
       body: {
         actor: "tester",
         decision: "rework",
