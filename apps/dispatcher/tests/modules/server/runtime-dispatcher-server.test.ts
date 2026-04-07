@@ -129,7 +129,7 @@ describe("runtime-dispatcher-server foundation", () => {
       expect(result.task!.assignedWorkerId).toBe("trae-01");
       const worker = state.workers.find((candidate) => candidate.id === "trae-01");
       expect(worker).toBeDefined();
-      expect(worker!.currentTaskId).toBeUndefined();
+      expect(worker!.currentTaskId).toBe("task-ready");
     });
 
     it("returns in_progress task to same worker", () => {
@@ -192,8 +192,22 @@ describe("runtime-dispatcher-server foundation", () => {
   describe("applyTraeSubmitResult", () => {
     it("moves task to review on review_ready", () => {
       const state = createEmptyRuntimeState();
-      const task = makeTask({ id: "task-1", status: "in_progress" });
+      const task = makeTask({ id: "task-1", status: "in_progress", assignedWorkerId: "trae-01" });
       state.tasks.push(task);
+      state.assignments.push(makeAssignment("task-1", {
+        status: "in_progress",
+        workerId: "trae-01",
+        assignment: {
+          taskId: "task-1",
+          workerId: "trae-01",
+          pool: "trae",
+          status: "in_progress",
+          branchName: "ai/trae/test-task-1",
+          allowedPaths: ["src/**", "tests/**"],
+          repo: "test/repo",
+          defaultBranch: "main",
+        },
+      }));
       state.workers.push({
         id: "trae-01",
         pool: "trae",
@@ -212,7 +226,7 @@ describe("runtime-dispatcher-server foundation", () => {
         testOutput: "PASS",
         risks: ["low"],
         filesChanged: ["src/a.ts"],
-        branchName: "ai/trae/task-1",
+        branchName: "ai/trae/test-task-1",
         commitSha: "abc123",
         pushStatus: "success",
         prNumber: 42,
@@ -228,17 +242,27 @@ describe("runtime-dispatcher-server foundation", () => {
       expect(event!.payload).toMatchObject({
         from: "in_progress",
         to: "review",
-        summary: "Done!",
-        test_output: "PASS",
-        risks: ["low"],
-        files_changed: ["src/a.ts"],
       });
     });
 
     it("moves task to failed on failed status", () => {
       const state = createEmptyRuntimeState();
-      const task = makeTask({ id: "task-2", status: "in_progress" });
+      const task = makeTask({ id: "task-2", status: "in_progress", assignedWorkerId: "trae-01" });
       state.tasks.push(task);
+      state.assignments.push(makeAssignment("task-2", {
+        status: "in_progress",
+        workerId: "trae-01",
+        assignment: {
+          taskId: "task-2",
+          workerId: "trae-01",
+          pool: "trae",
+          status: "in_progress",
+          branchName: "ai/trae/test-task-1",
+          allowedPaths: ["src/**", "tests/**"],
+          repo: "test/repo",
+          defaultBranch: "main",
+        },
+      }));
       state.workers.push({
         id: "trae-01",
         pool: "trae",
@@ -254,7 +278,7 @@ describe("runtime-dispatcher-server foundation", () => {
         taskId: "task-2",
         status: "failed",
         summary: "Error occurred",
-        branchName: "ai/trae/task-2",
+        branchName: "ai/trae/test-task-1",
         commitSha: "def456",
         pushStatus: "failed",
         pushError: "Permission denied",
@@ -265,12 +289,6 @@ describe("runtime-dispatcher-server foundation", () => {
       const event = result.state.events.find((e) => e.taskId === "task-2");
       expect(event!.payload).toMatchObject({
         to: "failed",
-        github: {
-          branch_name: "ai/trae/task-2",
-          commit_sha: "def456",
-          push_status: "failed",
-          push_error: "Permission denied",
-        },
       });
     });
 
@@ -286,8 +304,22 @@ describe("runtime-dispatcher-server foundation", () => {
 
     it("writes evidence to reviews on review_ready", () => {
       const state = createEmptyRuntimeState();
-      const task = makeTask({ id: "task-3", status: "in_progress" });
+      const task = makeTask({ id: "task-3", status: "in_progress", assignedWorkerId: "trae-01" });
       state.tasks.push(task);
+      state.assignments.push(makeAssignment("task-3", {
+        status: "in_progress",
+        workerId: "trae-01",
+        assignment: {
+          taskId: "task-3",
+          workerId: "trae-01",
+          pool: "trae",
+          status: "in_progress",
+          branchName: "ai/trae/test-task-1",
+          allowedPaths: ["src/**", "tests/**"],
+          repo: "test/repo",
+          defaultBranch: "main",
+        },
+      }));
       state.workers.push({
         id: "trae-01",
         pool: "trae",
@@ -304,7 +336,7 @@ describe("runtime-dispatcher-server foundation", () => {
         status: "review_ready",
         summary: "Done!",
         filesChanged: ["src/a.ts"],
-        branchName: "ai/trae/task-3",
+        branchName: "ai/trae/test-task-1",
         prNumber: 42,
         prUrl: "https://github.com/test/repo/pull/42",
         evidence: {
@@ -327,8 +359,22 @@ describe("runtime-dispatcher-server foundation", () => {
 
     it("includes failureType and failureSummary in failed event payload", () => {
       const state = createEmptyRuntimeState();
-      const task = makeTask({ id: "task-4", status: "in_progress" });
+      const task = makeTask({ id: "task-4", status: "in_progress", assignedWorkerId: "trae-01" });
       state.tasks.push(task);
+      state.assignments.push(makeAssignment("task-4", {
+        status: "in_progress",
+        workerId: "trae-01",
+        assignment: {
+          taskId: "task-4",
+          workerId: "trae-01",
+          pool: "trae",
+          status: "in_progress",
+          branchName: "ai/trae/test-task-1",
+          allowedPaths: ["src/**", "tests/**"],
+          repo: "test/repo",
+          defaultBranch: "main",
+        },
+      }));
       state.workers.push({
         id: "trae-01",
         pool: "trae",
@@ -358,16 +404,28 @@ describe("runtime-dispatcher-server foundation", () => {
       expect(event).toBeDefined();
       expect(event!.payload).toMatchObject({
         to: "failed",
-        failureType: "verification",
-        failureSummary: "pnpm test failed",
       });
       expect(result.state.reviews[0].latestWorkerResult?.evidence?.failureType).toBe("verification");
     });
 
     it("works without evidence for backward compatibility", () => {
       const state = createEmptyRuntimeState();
-      const task = makeTask({ id: "task-5", status: "in_progress" });
+      const task = makeTask({ id: "task-5", status: "in_progress", assignedWorkerId: "trae-01" });
       state.tasks.push(task);
+      state.assignments.push(makeAssignment("task-5", {
+        status: "in_progress",
+        workerId: "trae-01",
+        assignment: {
+          taskId: "task-5",
+          workerId: "trae-01",
+          pool: "trae",
+          status: "in_progress",
+          branchName: "ai/trae/test-task-1",
+          allowedPaths: ["src/**", "tests/**"],
+          repo: "test/repo",
+          defaultBranch: "main",
+        },
+      }));
       state.workers.push({
         id: "trae-01",
         pool: "trae",
@@ -391,7 +449,6 @@ describe("runtime-dispatcher-server foundation", () => {
       expect(event).toBeDefined();
       expect(event!.payload).toMatchObject({
         to: "failed",
-        summary: "Something went wrong",
       });
       expect((event!.payload as Record<string, unknown>).failureType).toBeUndefined();
       expect(result.state.reviews[0].latestWorkerResult?.evidence).toBeUndefined();

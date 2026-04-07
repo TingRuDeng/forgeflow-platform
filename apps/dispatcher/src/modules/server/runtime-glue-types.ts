@@ -55,6 +55,7 @@ export interface DispatcherWorkerClient {
   registerWorker(worker: WorkerRegistration): Promise<unknown>;
   heartbeat(workerId: string, payload: HeartbeatPayload): Promise<unknown>;
   getAssignedTask(workerId: string): Promise<AssignedTaskResponse>;
+  claimTask(workerId: string, payload?: { at?: string }): Promise<AssignedTaskResponse>;
   startTask(workerId: string, payload: StartTaskPayload): Promise<unknown>;
   submitResult(workerId: string, payload: SubmitResultPayload): Promise<unknown>;
 }

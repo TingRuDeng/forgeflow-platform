@@ -141,6 +141,7 @@ describe("dispatcher server", () => {
       pathname: "/api/workers/codex-mac-mini/assigned-task",
     });
     expect(assignedTaskResponse.status).toBe(200);
+    expect(assignedTaskResponse.headers["cache-control"]).toBe("no-store");
     const assignedTaskBody = assignedTaskResponse.json;
     expect(assignedTaskBody.assignment.workerId).toBe("codex-mac-mini");
 
@@ -443,6 +444,181 @@ describe("dispatcher server", () => {
     });
     expect(response.status).toBe(200);
     expect(response.json.status).toBe("no_task");
+  });
+
+  it("keeps GET assigned-task read-only and moves claim side effects to POST", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    const dispatchResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/repo",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [
+          {
+            id: "task-claim",
+            title: "Claim me",
+            pool: "codex",
+            allowedPaths: ["docs/**"],
+            acceptance: [],
+            dependsOn: [],
+            branchName: "ai/codex/task-claim",
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-claim",
+            assignment: {
+              taskId: "task-claim",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/task-claim",
+              allowedPaths: ["docs/**"],
+              repo: "test/repo",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+    const taskId = dispatchResponse.json.taskIds[0];
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-claim",
+        pool: "codex",
+        hostname: "claim-host",
+        labels: [],
+        repoDir: "/repo",
+      },
+    });
+
+    const peekResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/workers/codex-claim/assigned-task",
+    });
+    expect(peekResponse.status).toBe(200);
+    expect(peekResponse.json).toEqual({ assignment: null });
+
+    const beforeClaim = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dashboard/snapshot",
+    });
+    const readyTask = beforeClaim.json.tasks.find((item: { id: string }) => item.id === taskId);
+    expect(readyTask.status).toBe("ready");
+
+    const claimResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-claim/claim-task",
+      body: {},
+    });
+    expect(claimResponse.status).toBe(200);
+    expect(claimResponse.json.assignment.workerId).toBe("codex-claim");
+
+    const afterClaim = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dashboard/snapshot",
+    });
+    const assignedTask = afterClaim.json.tasks.find((item: { id: string }) => item.id === taskId);
+    expect(assignedTask.status).toBe("assigned");
+  });
+
+  it("rejects worker result metadata that does not match dispatcher truth", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-canonical",
+        pool: "codex",
+        hostname: "canonical-host",
+        labels: [],
+        repoDir: "/repo",
+      },
+    });
+
+    const dispatchResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/repo",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [
+          {
+            id: "task-result",
+            title: "Canonical result",
+            pool: "codex",
+            allowedPaths: ["src/**"],
+            acceptance: ["pnpm test"],
+            dependsOn: [],
+            branchName: "ai/codex/task-result",
+            verification: { mode: "run" },
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-result",
+            assignment: {
+              taskId: "task-result",
+              workerId: "codex-canonical",
+              pool: "codex",
+              status: "assigned",
+              branchName: "ai/codex/task-result",
+              allowedPaths: ["src/**"],
+              repo: "test/repo",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+    const taskId = dispatchResponse.json.taskIds[0];
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-canonical/result",
+      body: {
+        result: {
+          taskId,
+          workerId: "codex-canonical",
+          provider: "codex",
+          pool: "codex",
+          branchName: "ai/codex/task-result",
+          repo: "test/other-repo",
+          defaultBranch: "main",
+          mode: "run",
+          output: "done",
+          generatedAt: "2026-04-07T00:00:00.000Z",
+          verification: {
+            allPassed: true,
+            commands: [],
+          },
+        },
+        changedFiles: [],
+        pullRequest: null,
+      },
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.json.error).toBe(`worker result repo mismatch for ${taskId}`);
   });
 
   it("submit_result rejects invalid status", async () => {
@@ -1066,16 +1242,11 @@ describe("dispatcher server", () => {
       (e: { type: string; taskId: string }) => e.type === "status_changed" && e.taskId === taskId,
     );
     expect(submitEvent).toBeDefined();
-    expect(submitEvent.payload.summary).toBe("Done!");
-    expect(submitEvent.payload.test_output).toBe("PASS");
-    expect(submitEvent.payload.risks).toContain("Low risk");
-    expect(submitEvent.payload.files_changed).toContain("docs/test.md");
-    expect(submitEvent.payload.github).toBeDefined();
-    expect(submitEvent.payload.github.branch_name).toBe("ai/trae/task-2");
-    expect(submitEvent.payload.github.commit_sha).toBe("abc123def456");
-    expect(submitEvent.payload.github.push_status).toBe("success");
-    expect(submitEvent.payload.github.pr_number).toBe(42);
-    expect(submitEvent.payload.github.pr_url).toBe("https://github.com/test/repo/pull/42");
+    expect(submitEvent.payload.to).toBe("review");
+    const review = snapshot.json.reviews.find((item: { taskId: string }) => item.taskId === taskId);
+    expect(review.latestWorkerResult.output).toBe("Done!");
+    expect(review.latestWorkerResult.verification.commands[0].output).toBe("PASS");
+    expect(review.reviewMaterial.pullRequest.number).toBe(42);
   });
 
   it("submit_result with failed moves task to failed", async () => {
@@ -1166,11 +1337,9 @@ describe("dispatcher server", () => {
       (e: { type: string; taskId: string }) => e.type === "status_changed" && e.taskId === taskId,
     );
     expect(failedEvent).toBeDefined();
-    expect(failedEvent.payload.github).toBeDefined();
-    expect(failedEvent.payload.github.branch_name).toBe("ai/trae/task-3");
-    expect(failedEvent.payload.github.commit_sha).toBe("def789ghi012");
-    expect(failedEvent.payload.github.push_status).toBe("failed");
-    expect(failedEvent.payload.github.push_error).toBe("remote: Permission denied");
+    expect(failedEvent.payload.to).toBe("failed");
+    const review = snapshot.json.reviews.find((item: { taskId: string }) => item.taskId === taskId);
+    expect(review.latestWorkerResult.output).toBe("Something went wrong");
   });
 
   it("heartbeat updates worker lastHeartbeatAt", async () => {

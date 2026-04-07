@@ -442,6 +442,7 @@ describe("worker daemon cycle", () => {
       registerWorker: async () => ({ ok: true }),
       heartbeat: async () => ({ ok: true }),
       getAssignedTask: async () => buildAssignedTaskPayload(repoDir, "task-submit-fail", "ai/codex/task-submit-fail"),
+      claimTask: async () => buildAssignedTaskPayload(repoDir, "task-submit-fail", "ai/codex/task-submit-fail"),
       startTask: async () => ({ ok: true }),
       submitResult: async () => {
         submitAttempts += 1;
@@ -475,6 +476,7 @@ describe("worker daemon cycle", () => {
       registerWorker: async () => ({ ok: true }),
       heartbeat: async () => ({ ok: true }),
       getAssignedTask: async () => buildAssignedTaskPayload(repoDir, "task-push-fail", "ai/codex/task-push-fail"),
+      claimTask: async () => buildAssignedTaskPayload(repoDir, "task-push-fail", "ai/codex/task-push-fail"),
       startTask: async () => ({ ok: true }),
       submitResult: async (_workerId: string, payload: { result: { output: string }; changedFiles: string[] }) => {
         submittedPayloads.push(payload);
@@ -509,6 +511,7 @@ describe("worker daemon cycle", () => {
       registerWorker: async () => ({ ok: true }),
       heartbeat: async () => ({ ok: true }),
       getAssignedTask: async () => buildAssignedTaskPayload(repoDir, "task-branch-safety", "master"),
+      claimTask: async () => buildAssignedTaskPayload(repoDir, "task-branch-safety", "master"),
       startTask: async () => ({ ok: true }),
       submitResult: async (_workerId: string, payload: { result: { output: string } }) => {
         submittedPayloads.push(payload);
@@ -549,6 +552,7 @@ describe("worker daemon cycle", () => {
       registerWorker: async () => ({ ok: true }),
       heartbeat: async () => ({ ok: true }),
       getAssignedTask: async () => buildAssignedTaskPayload(repoDir, "task-pr-fail", "ai/codex/task-pr-fail"),
+      claimTask: async () => buildAssignedTaskPayload(repoDir, "task-pr-fail", "ai/codex/task-pr-fail"),
       startTask: async () => ({ ok: true }),
       submitResult: async (_workerId: string, payload: { result: { output: string } }) => {
         submittedPayloads.push(payload);

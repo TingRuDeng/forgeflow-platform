@@ -3109,4 +3109,103 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(worker).toBeDefined();
     expect(worker?.disabledAt).toBeDefined();
   });
+
+  it("buildDashboardSnapshot exposes queue depth, review backlog, and assignment lag metrics", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-metrics",
+      pool: "codex",
+      hostname: "metrics-host",
+      labels: [],
+      repoDir: "/repo",
+      at: "2026-04-07T10:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "org/repo",
+      defaultBranch: "main",
+      requestedBy: "tester",
+      tasks: [
+        {
+          id: "task-assigned",
+          title: "Assigned task",
+          pool: "codex",
+          allowedPaths: [],
+          acceptance: [],
+          dependsOn: [],
+          branchName: "ai/codex/task-assigned",
+          verification: { mode: "run" },
+        },
+        {
+          id: "task-planned",
+          title: "Planned task",
+          pool: "codex",
+          allowedPaths: [],
+          acceptance: [],
+          dependsOn: ["dispatch-1:task-assigned"],
+          branchName: "ai/codex/task-planned",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-assigned",
+          assignment: {
+            taskId: "task-assigned",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "ai/codex/task-assigned",
+            repo: "org/repo",
+            defaultBranch: "main",
+          },
+        },
+        {
+          taskId: "task-planned",
+          assignment: {
+            taskId: "task-planned",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "ai/codex/task-planned",
+            repo: "org/repo",
+            defaultBranch: "main",
+          },
+        },
+      ],
+      createdAt: "2026-04-07T10:00:00.000Z",
+    });
+
+    state = recordWorkerResult(dispatch.state, {
+      workerId: "codex-metrics",
+      result: {
+        taskId: dispatch.taskIds[0],
+        workerId: "codex-metrics",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-assigned",
+        repo: "org/repo",
+        defaultBranch: "main",
+        mode: "run",
+        output: "ok",
+        generatedAt: "2026-04-07T10:00:05.000Z",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+      },
+      changedFiles: [],
+      pullRequest: null,
+    });
+
+    const snapshot = buildDashboardSnapshot(state, {
+      now: "2026-04-07T10:00:06.000Z",
+    });
+
+    expect(snapshot.metrics.queueDepth).toBe(0);
+    expect(snapshot.metrics.plannedTasks).toBe(1);
+    expect(snapshot.metrics.reviewBacklog).toBe(1);
+    expect(snapshot.metrics.avgAssignmentLagMs).toBeGreaterThanOrEqual(0);
+    expect(snapshot.metrics.maxAssignmentLagMs).toBeGreaterThanOrEqual(snapshot.metrics.avgAssignmentLagMs);
+  });
 });

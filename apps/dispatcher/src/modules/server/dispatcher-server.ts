@@ -13,6 +13,7 @@ import {
   createDispatch,
   disableWorker,
   enableWorker,
+  getAssignedTaskForWorker,
   heartbeatWorker,
   loadRuntimeState,
   reconcileRuntimeState,
@@ -196,22 +197,30 @@ function normalizeDispatchBody(body) {
   };
 }
 
-function sendJson(response, statusCode, value) {
+function sendJson(response, statusCode, value, headers = {}) {
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
+    ...headers,
   });
   response.end(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-function createJsonResponse(status, value) {
+function createJsonResponse(status, value, extraHeaders = {}) {
   return {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
+      ...extraHeaders,
     },
     json: value,
     text: `${JSON.stringify(value, null, 2)}\n`,
   };
+}
+
+function createNoStoreJsonResponse(status, value) {
+  return createJsonResponse(status, value, {
+    "cache-control": "no-store",
+  });
 }
 
 function classifyReviewDecisionError(error) {
@@ -224,6 +233,40 @@ function classifyReviewDecisionError(error) {
   }
   if (message.startsWith("task not in review:")) {
     return 409;
+  }
+  return 500;
+}
+
+function classifyWorkerResultError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    message.startsWith("task not found:")
+    || message.startsWith("assignment not found for task:")
+    || message.startsWith("worker not found:")
+  ) {
+    return 404;
+  }
+  if (
+    message.startsWith("task not assigned to worker:")
+    || message.startsWith("task not executable:")
+    || message.includes("mismatch for ")
+  ) {
+    return 409;
+  }
+  if (
+    message === "worker result body must be a JSON object"
+    || message === "worker result.result must be a JSON object"
+    || message === "worker result taskId is required"
+    || message === "worker result verification.allPassed must be a boolean"
+    || message === "worker result verification.commands must be an array"
+    || message === "worker result changedFiles must be an array of strings when provided"
+    || message === "worker result pullRequest must be null or an object"
+    || message === "worker result pullRequest.number must be a positive integer"
+    || message === "worker result pullRequest.url must be a string"
+    || message === "worker result pullRequest.headBranch must be a string"
+    || message === "worker result pullRequest.baseBranch must be a string"
+  ) {
+    return 400;
   }
   return 500;
 }
@@ -277,6 +320,57 @@ function validateReviewDecisionBody(body) {
     actor,
     decision,
   };
+}
+
+function validateWorkerResultBody(body) {
+  if (!isPlainObject(body)) {
+    throw new Error("worker result body must be a JSON object");
+  }
+
+  if (!isPlainObject(body.result)) {
+    throw new Error("worker result.result must be a JSON object");
+  }
+
+  const taskId = typeof body.result.taskId === "string" ? body.result.taskId.trim() : "";
+  if (!taskId) {
+    throw new Error("worker result taskId is required");
+  }
+
+  const verification = body.result.verification;
+  if (!isPlainObject(verification) || typeof verification.allPassed !== "boolean") {
+    throw new Error("worker result verification.allPassed must be a boolean");
+  }
+
+  if (verification.commands !== undefined && !Array.isArray(verification.commands)) {
+    throw new Error("worker result verification.commands must be an array");
+  }
+
+  if (
+    body.changedFiles !== undefined
+    && (!Array.isArray(body.changedFiles) || body.changedFiles.some((item) => typeof item !== "string"))
+  ) {
+    throw new Error("worker result changedFiles must be an array of strings when provided");
+  }
+
+  if (body.pullRequest !== undefined && body.pullRequest !== null) {
+    if (!isPlainObject(body.pullRequest)) {
+      throw new Error("worker result pullRequest must be null or an object");
+    }
+    if (!Number.isInteger(body.pullRequest.number) || body.pullRequest.number <= 0) {
+      throw new Error("worker result pullRequest.number must be a positive integer");
+    }
+    if (typeof body.pullRequest.url !== "string") {
+      throw new Error("worker result pullRequest.url must be a string");
+    }
+    if (typeof body.pullRequest.headBranch !== "string") {
+      throw new Error("worker result pullRequest.headBranch must be a string");
+    }
+    if (typeof body.pullRequest.baseBranch !== "string") {
+      throw new Error("worker result pullRequest.baseBranch must be a string");
+    }
+  }
+
+  return body;
 }
 
 function createHtmlResponse(status, html) {
@@ -457,7 +551,7 @@ export function handleDispatcherHttpRequest(input) {
 
   try {
     if (method === "GET" && pathname === "/health") {
-      return createJsonResponse(200, { status: "ok" });
+      return createNoStoreJsonResponse(200, { status: "ok" });
     }
 
     if (method === "GET" && pathname === "/dashboard") {
@@ -472,7 +566,7 @@ export function handleDispatcherHttpRequest(input) {
           snapshot: buildDashboardSnapshot(nextState),
         };
       });
-      return createJsonResponse(200, snapshot.snapshot);
+      return createNoStoreJsonResponse(200, snapshot.snapshot);
     }
 
     if (method === "GET" && pathname === "/api/workers") {
@@ -483,7 +577,7 @@ export function handleDispatcherHttpRequest(input) {
           snapshot: buildDashboardSnapshot(nextState),
         };
       });
-      return createJsonResponse(200, snapshot.snapshot.workers);
+      return createNoStoreJsonResponse(200, snapshot.snapshot.workers);
     }
 
     if (method === "POST" && pathname === "/api/workers/register") {
@@ -526,8 +620,23 @@ export function handleDispatcherHttpRequest(input) {
       ? pathname.match(/^\/api\/workers\/([^/]+)\/assigned-task$/)
       : null;
     if (assignedMatch) {
+      const payload = withState(stateDir, (state) => {
+        const nextState = reconcileRuntimeState(state);
+        return {
+          state: nextState,
+          assignment: getAssignedTaskForWorker(nextState, decodeURIComponent(assignedMatch[1])),
+        };
+      });
+      return createNoStoreJsonResponse(200, payload.assignment ?? { assignment: null });
+    }
+
+    const claimMatch = method === "POST"
+      ? pathname.match(/^\/api\/workers\/([^/]+)\/claim-task$/)
+      : null;
+    if (claimMatch) {
       const payload = withState(stateDir, (state) => claimAssignedTaskForWorker(state, {
-        workerId: decodeURIComponent(assignedMatch[1]),
+        workerId: decodeURIComponent(claimMatch[1]),
+        at: body.at,
       }));
       return createJsonResponse(200, payload.assignment ?? { assignment: null });
     }
@@ -553,18 +662,25 @@ export function handleDispatcherHttpRequest(input) {
       ? pathname.match(/^\/api\/workers\/([^/]+)\/result$/)
       : null;
     if (resultMatch) {
-      const result = withState(stateDir, (state) => ({
-        state: recordWorkerResult(state, {
-          workerId: decodeURIComponent(resultMatch[1]),
-          result: body.result,
-          changedFiles: body.changedFiles,
-          pullRequest: body.pullRequest,
-        }),
-      }));
-      return createJsonResponse(200, {
-        status: "result_recorded",
-        tasks: result.state.tasks,
-      });
+      try {
+        const validatedBody = validateWorkerResultBody(body);
+        const result = withState(stateDir, (state) => ({
+          state: recordWorkerResult(state, {
+            workerId: decodeURIComponent(resultMatch[1]),
+            result: validatedBody.result,
+            changedFiles: validatedBody.changedFiles,
+            pullRequest: validatedBody.pullRequest,
+          }),
+        }));
+        return createJsonResponse(200, {
+          status: "result_recorded",
+          tasks: result.state.tasks,
+        });
+      } catch (error) {
+        return createJsonResponse(classifyWorkerResultError(error), {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     const disableMatch = method === "POST"
@@ -731,7 +847,7 @@ export async function startDispatcherServer(input) {
       if (handled.headers["content-type"]?.startsWith("text/html")) {
         sendHtml(response, handled.text);
       } else {
-        sendJson(response, handled.status, handled.json);
+        sendJson(response, handled.status, handled.json, handled.headers);
       }
     } catch (error) {
       if (error?.code === "payload_too_large") {

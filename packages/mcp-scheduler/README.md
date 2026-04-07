@@ -6,6 +6,12 @@ Thin MCP wrapper exposing scheduler task management tools.
 
 This is a **thin wrapper** package. All scheduling logic lives in the dispatcher layer. This package only exposes the tool definitions and delegates to `dispatcher-scheduler` implementation injected via `deps`.
 
+Current stage-two contract updates:
+
+- task `pool` is now a generic string, not codex/gemini-only
+- every tool now publishes an input schema
+- argument validation happens inside the wrapper before delegating to injected deps
+
 ## Tools
 
 - `create_tasks` — Create structured tasks in the scheduler

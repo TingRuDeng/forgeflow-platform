@@ -1,8 +1,10 @@
+import { z } from "zod";
+
 export interface SchedulerTaskInput {
   id: string;
   repo: string;
   title: string;
-  pool: "codex" | "gemini";
+  pool: string;
   allowedPaths: string[];
   acceptance: string[];
   dependsOn: string[];
@@ -32,17 +34,175 @@ export type SchedulerToolName =
 export interface McpToolDefinition {
   name: SchedulerToolName;
   description: string;
+  inputSchema: Record<string, unknown>;
 }
 
+const SchedulerTaskInputSchema = z.object({
+  id: z.string().min(1),
+  repo: z.string().min(1),
+  title: z.string().min(1),
+  pool: z.string().min(1),
+  allowedPaths: z.array(z.string()).default([]),
+  acceptance: z.array(z.string()).default([]),
+  dependsOn: z.array(z.string()).default([]),
+});
+
+const CreateTasksArgsSchema = z.object({
+  tasks: z.array(SchedulerTaskInputSchema).min(1),
+});
+
+const TaskIdArgsSchema = z.object({
+  taskId: z.string().min(1),
+});
+
+const HeartbeatArgsSchema = z.object({
+  workerId: z.string().min(1),
+  at: z.string().min(1),
+});
+
+const CompleteTaskArgsSchema = z.object({
+  taskId: z.string().min(1),
+  result: z.record(z.string(), z.unknown()).default({}),
+});
+
+const FailTaskArgsSchema = z.object({
+  taskId: z.string().min(1),
+  reason: z.string().min(1),
+});
+
+const GetAssignedTaskArgsSchema = z.object({
+  workerId: z.string().min(1),
+});
+
+const EmptyArgsSchema = z.object({});
+
+const TOOL_ARG_SCHEMAS = {
+  create_tasks: CreateTasksArgsSchema,
+  list_ready_tasks: EmptyArgsSchema,
+  assign_task: TaskIdArgsSchema,
+  heartbeat: HeartbeatArgsSchema,
+  start_task: TaskIdArgsSchema,
+  complete_task: CompleteTaskArgsSchema,
+  fail_task: FailTaskArgsSchema,
+  get_assigned_task: GetAssignedTaskArgsSchema,
+} as const satisfies Record<SchedulerToolName, z.ZodTypeAny>;
+
+const TASK_INPUT_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "repo", "title", "pool"],
+  properties: {
+    id: { type: "string", minLength: 1 },
+    repo: { type: "string", minLength: 1 },
+    title: { type: "string", minLength: 1 },
+    pool: { type: "string", minLength: 1 },
+    allowedPaths: { type: "array", items: { type: "string" } },
+    acceptance: { type: "array", items: { type: "string" } },
+    dependsOn: { type: "array", items: { type: "string" } },
+  },
+} as const;
+
 const TOOL_DEFINITIONS: McpToolDefinition[] = [
-  { name: "create_tasks", description: "Create structured tasks in the scheduler." },
-  { name: "list_ready_tasks", description: "List ready tasks that can be assigned." },
-  { name: "assign_task", description: "Assign a ready task to an available worker." },
-  { name: "heartbeat", description: "Record a worker heartbeat." },
-  { name: "start_task", description: "Mark an assigned task as in progress." },
-  { name: "complete_task", description: "Mark a task as completed." },
-  { name: "fail_task", description: "Mark a task as failed." },
-  { name: "get_assigned_task", description: "Get the task currently assigned to a worker." },
+  {
+    name: "create_tasks",
+    description: "Create structured tasks in the scheduler.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["tasks"],
+      properties: {
+        tasks: {
+          type: "array",
+          minItems: 1,
+          items: TASK_INPUT_JSON_SCHEMA,
+        },
+      },
+    },
+  },
+  {
+    name: "list_ready_tasks",
+    description: "List ready tasks that can be assigned.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+  {
+    name: "assign_task",
+    description: "Assign a ready task to an available worker.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["taskId"],
+      properties: {
+        taskId: { type: "string", minLength: 1 },
+      },
+    },
+  },
+  {
+    name: "heartbeat",
+    description: "Record a worker heartbeat.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["workerId", "at"],
+      properties: {
+        workerId: { type: "string", minLength: 1 },
+        at: { type: "string", minLength: 1 },
+      },
+    },
+  },
+  {
+    name: "start_task",
+    description: "Mark an assigned task as in progress.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["taskId"],
+      properties: {
+        taskId: { type: "string", minLength: 1 },
+      },
+    },
+  },
+  {
+    name: "complete_task",
+    description: "Mark a task as completed.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["taskId"],
+      properties: {
+        taskId: { type: "string", minLength: 1 },
+        result: { type: "object" },
+      },
+    },
+  },
+  {
+    name: "fail_task",
+    description: "Mark a task as failed.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["taskId", "reason"],
+      properties: {
+        taskId: { type: "string", minLength: 1 },
+        reason: { type: "string", minLength: 1 },
+      },
+    },
+  },
+  {
+    name: "get_assigned_task",
+    description: "Get the task currently assigned to a worker.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["workerId"],
+      properties: {
+        workerId: { type: "string", minLength: 1 },
+      },
+    },
+  },
 ];
 
 export function createSchedulerServer(deps: SchedulerServerDeps) {
@@ -53,24 +213,31 @@ export function createSchedulerServer(deps: SchedulerServerDeps) {
     async callTool(name: SchedulerToolName, args: Record<string, unknown>): Promise<unknown> {
       switch (name) {
         case "create_tasks":
-          return deps.createTasks(args.tasks as SchedulerTaskInput[]);
+          return deps.createTasks(TOOL_ARG_SCHEMAS.create_tasks.parse(args).tasks);
         case "list_ready_tasks":
+          TOOL_ARG_SCHEMAS.list_ready_tasks.parse(args);
           return deps.listReadyTasks();
         case "assign_task":
-          return deps.assignTask(args.taskId as string);
+          return deps.assignTask(TOOL_ARG_SCHEMAS.assign_task.parse(args).taskId);
         case "heartbeat":
-          return deps.heartbeat(args.workerId as string, args.at as string);
+          {
+            const parsed = TOOL_ARG_SCHEMAS.heartbeat.parse(args);
+            return deps.heartbeat(parsed.workerId, parsed.at);
+          }
         case "start_task":
-          return deps.startTask(args.taskId as string);
+          return deps.startTask(TOOL_ARG_SCHEMAS.start_task.parse(args).taskId);
         case "complete_task":
-          return deps.completeTask(
-            args.taskId as string,
-            (args.result as Record<string, unknown> | undefined) ?? {},
-          );
+          {
+            const parsed = TOOL_ARG_SCHEMAS.complete_task.parse(args);
+            return deps.completeTask(parsed.taskId, parsed.result);
+          }
         case "fail_task":
-          return deps.failTask(args.taskId as string, args.reason as string);
+          {
+            const parsed = TOOL_ARG_SCHEMAS.fail_task.parse(args);
+            return deps.failTask(parsed.taskId, parsed.reason);
+          }
         case "get_assigned_task":
-          return deps.getAssignedTask(args.workerId as string);
+          return deps.getAssignedTask(TOOL_ARG_SCHEMAS.get_assigned_task.parse(args).workerId);
       }
     },
   };
