@@ -56,6 +56,6 @@
     "test": "pnpm --filter @tingrudeng/automation-gateway-core build && vitest run"
   },
   "dependencies": {
-    "@tingrudeng/automation-gateway-core": "0.1.0-beta.3"
+    "@tingrudeng/automation-gateway-core": "workspace:*"
   }
 }
