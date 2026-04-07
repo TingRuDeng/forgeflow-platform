@@ -99,6 +99,41 @@ catch (error) {
     console.error(error.message);
     process.exit(1);
 }
+function validatePublishMetadata(pkgPath, pkgJson) {
+    const expectedRepo = process.env.GITHUB_REPOSITORY;
+    if (!expectedRepo) {
+        return;
+    }
+    const relativePath = pkgPath.replace(`${workspacePath}/`, "").replace(/\\/g, "/");
+    const expectedRepositoryUrl = `git+https://github.com/${expectedRepo}.git`;
+    const expectedHomepage = `https://github.com/${expectedRepo}/tree/main/${relativePath}`;
+    const expectedBugsUrl = `https://github.com/${expectedRepo}/issues`;
+    const mismatches = [];
+    if (pkgJson.repository?.url !== expectedRepositoryUrl) {
+        mismatches.push(`repository.url should be ${expectedRepositoryUrl}`);
+    }
+    if (pkgJson.repository?.directory !== relativePath) {
+        mismatches.push(`repository.directory should be ${relativePath}`);
+    }
+    if (pkgJson.homepage !== expectedHomepage) {
+        mismatches.push(`homepage should be ${expectedHomepage}`);
+    }
+    if (pkgJson.bugs?.url !== expectedBugsUrl) {
+        mismatches.push(`bugs.url should be ${expectedBugsUrl}`);
+    }
+    if (mismatches.length > 0) {
+        console.error("Error: package metadata is out of sync with the current GitHub repository:");
+        for (const mismatch of mismatches) {
+            console.error(`- ${mismatch}`);
+        }
+        process.exit(1);
+    }
+}
+if (shouldPublish && process.env.NPM_TRUSTED_PUBLISHING_ENABLED !== "true") {
+    console.error("Error: release-package publish requires NPM_TRUSTED_PUBLISHING_ENABLED=true after npm Trusted Publishing is configured for the current GitHub repository.");
+    process.exit(1);
+}
+validatePublishMetadata(packagePath, packageJson);
 const currentVersion = packageJson.version;
 const versionParts = currentVersion.split('.');
 let newVersion;

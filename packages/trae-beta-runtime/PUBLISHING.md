@@ -1,6 +1,12 @@
 # Publishing @tingrudeng/trae-beta-runtime
 
-This package is prepared for **public beta npm publishing**, but is not published automatically from this repository.
+This package is prepared for **public beta npm publishing**.
+
+The repository release path is GitHub Actions only:
+
+- workflow: `.github/workflows/release.yml`
+- auth model: npm Trusted Publishing via GitHub OIDC
+- repo-side enable gate: repository/org variable `NPM_TRUSTED_PUBLISHING_ENABLED=true`
 
 ## Preconditions
 
@@ -8,6 +14,7 @@ This package is prepared for **public beta npm publishing**, but is not publishe
 - pnpm installed
 - npm access to publish the `@tingrudeng` scope
 - a clean checkout of the ForgeFlow repository
+- npm must already trust GitHub repo `TingRuDeng/forgeflow-platform` as a Trusted Publisher for `@tingrudeng/trae-beta-runtime`
 
 ## Validate before publish
 
@@ -67,6 +74,14 @@ The package is configured for public publish:
 ```
 
 ## Publish flow
+
+Preferred path:
+
+1. Configure npm Trusted Publisher for `@tingrudeng/trae-beta-runtime` and repo `TingRuDeng/forgeflow-platform`
+2. Set repository/org variable `NPM_TRUSTED_PUBLISHING_ENABLED=true`
+3. Trigger `.github/workflows/release.yml`
+
+Local `publish` commands below are for debugging and package validation only; they are not the supported release path for this repository.
 
 From the repository root:
 

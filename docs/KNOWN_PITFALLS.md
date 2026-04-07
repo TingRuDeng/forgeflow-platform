@@ -117,3 +117,18 @@ should be treated as absent unless they are explicitly added to `FORGEFLOW_WORKE
 Automatic draft PR creation now requires explicit opt-in via `FORGEFLOW_WORKER_CREATE_PR=1`.
 
 If a worker should push changes but must not create PRs, leaving `GITHUB_TOKEN` set is no longer sufficient to trigger PR creation by accident.
+
+## 12. GitHub OIDC release workflow is not sufficient by itself to publish `@tingrudeng/*`
+
+`release.yml` now uses npm Trusted Publishing with GitHub OIDC, but npm still has to trust the
+current GitHub repository identity first.
+
+If npm has not been configured to trust `TingRuDeng/forgeflow-platform` for the target package,
+the release job can build successfully, sign provenance successfully, and still fail at the final
+`npm publish` step.
+
+The repository now keeps push-triggered auto release behind the explicit variable
+`NPM_TRUSTED_PUBLISHING_ENABLED=true` and validates package metadata before publish.
+
+Do not treat a green OIDC/provenance setup in GitHub Actions as proof that npm-side trusted
+publisher configuration is complete.

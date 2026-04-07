@@ -27,6 +27,10 @@ on:
     paths:
       - 'packages/*/package.json'
 
+concurrency:
+  group: release-${{ github.ref_name }}-${{ inputs.package || 'auto' }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write
@@ -105,6 +109,15 @@ jobs:
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Release preflight
+        env:
+          NPM_TRUSTED_PUBLISHING_ENABLED: ${{ vars.NPM_TRUSTED_PUBLISHING_ENABLED }}
+        run: >
+          node scripts/release-publish-preflight.mjs
+          --package-dir packages/${{ inputs.package }}
+          --expected-repo ${{ github.repository }}
+          --require-trusted-publishing
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -153,9 +166,27 @@ jobs:
           npm publish --access public --provenance --tag ${{ inputs.tag }}
           echo "✅ Published @tingrudeng/${{ inputs.package }}@${{ env.NEW_VERSION }}"
 
+  publish-disabled-summary:
+    needs: detect-changes
+    if: github.event_name == 'push' && needs.detect-changes.outputs.has-packages == 'true' && vars.NPM_TRUSTED_PUBLISHING_ENABLED != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Release disabled summary
+        run: |
+          echo "## Auto Release Skipped" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Detected package version changes, but trusted publishing is intentionally gated off." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "To enable auto publish:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- configure npm Trusted Publisher for repo \`${{ github.repository }}\` and the target \`@tingrudeng/*\` packages" >> "$GITHUB_STEP_SUMMARY"
+          echo "- set repository/org variable \`NPM_TRUSTED_PUBLISHING_ENABLED=true\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pending package set:" >> "$GITHUB_STEP_SUMMARY"
+          echo '${{ needs.detect-changes.outputs.packages }}' | jq -r '.[] | "- \(.name)@\(.version)"' >> "$GITHUB_STEP_SUMMARY"
+
   publish-auto:
     needs: detect-changes
-    if: needs.detect-changes.outputs.has-packages == 'true'
+    if: github.event_name == 'push' && needs.detect-changes.outputs.has-packages == 'true' && vars.NPM_TRUSTED_PUBLISHING_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: npm
     strategy:
@@ -178,6 +209,16 @@ jobs:
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Release preflight
+        id: preflight
+        env:
+          NPM_TRUSTED_PUBLISHING_ENABLED: ${{ vars.NPM_TRUSTED_PUBLISHING_ENABLED }}
+        run: >
+          node scripts/release-publish-preflight.mjs
+          --package-dir packages/${{ matrix.package.name }}
+          --expected-repo ${{ github.repository }}
+          --require-trusted-publishing
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -189,7 +230,7 @@ jobs:
           GITHUB_ACTIONS: "true"
         run: |
           cd packages/${{ matrix.package.name }}
-          npm publish --access public --provenance
+          npm publish --access public --provenance --tag ${{ steps.preflight.outputs.dist_tag }}
           echo "✅ Published @tingrudeng/${{ matrix.package.name }}@${{ matrix.package.version }}"
 
   scorecard:

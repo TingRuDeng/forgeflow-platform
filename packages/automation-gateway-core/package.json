@@ -6,12 +6,12 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TingRuDeng/ForgeFlow.git",
+    "url": "git+https://github.com/TingRuDeng/forgeflow-platform.git",
     "directory": "packages/automation-gateway-core"
   },
-  "homepage": "https://github.com/TingRuDeng/ForgeFlow/tree/main/packages/automation-gateway-core",
+  "homepage": "https://github.com/TingRuDeng/forgeflow-platform/tree/main/packages/automation-gateway-core",
   "bugs": {
-    "url": "https://github.com/TingRuDeng/ForgeFlow/issues"
+    "url": "https://github.com/TingRuDeng/forgeflow-platform/issues"
   },
   "type": "module",
   "main": "./dist/index.js",
