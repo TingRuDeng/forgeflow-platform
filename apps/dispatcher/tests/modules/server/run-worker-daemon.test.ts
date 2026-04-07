@@ -12,6 +12,11 @@ const repoRoot = path.resolve(
 const stateModulePath = path.join(repoRoot, "scripts/lib/dispatcher-state.js");
 const daemonModulePath = path.join(repoRoot, "scripts/lib/worker-daemon.js");
 const tempRoots: string[] = [];
+const originalGithubToken = process.env.GITHUB_TOKEN;
+const originalFetch = globalThis.fetch;
+const originalPath = process.env.PATH;
+const originalSubmitResultRetryDelay = process.env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS;
+const originalDispatcherAuthMode = process.env.DISPATCHER_AUTH_MODE;
 
 function makeTempDir() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-worker-daemon-"));
@@ -45,14 +50,125 @@ function createRepoWithOrigin(rootDir: string, defaultBranch = "master") {
   return repoDir;
 }
 
+function createFakeWorkerRepoRoot(rootDir: string) {
+  const fakeRoot = path.join(rootDir, "fake-worker-root");
+  const scriptsDir = path.join(fakeRoot, "scripts");
+  fs.mkdirSync(scriptsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(scriptsDir, "run-worker-assignment.js"),
+    [
+      'const fs = require("node:fs");',
+      'const path = require("node:path");',
+      'function arg(name) { const index = process.argv.indexOf(name); return index >= 0 ? process.argv[index + 1] : ""; }',
+      'const assignmentDir = arg("--assignment-dir");',
+      'const worktreeDir = arg("--worktree-dir");',
+      'const outputDir = arg("--output-dir");',
+      'const assignment = JSON.parse(fs.readFileSync(path.join(assignmentDir, "assignment.json"), "utf8"));',
+      'fs.mkdirSync(path.join(worktreeDir, "docs"), { recursive: true });',
+      'fs.writeFileSync(path.join(worktreeDir, "docs", "smoke.md"), "# smoke\\n");',
+      'fs.mkdirSync(outputDir, { recursive: true });',
+      'const result = {',
+      '  taskId: assignment.taskId,',
+      '  workerId: "",',
+      '  provider: assignment.pool,',
+      '  pool: assignment.pool,',
+      '  branchName: assignment.branchName,',
+      '  repo: assignment.repo,',
+      '  defaultBranch: assignment.defaultBranch,',
+      '  mode: "run",',
+      '  output: "worker ok",',
+      '  generatedAt: new Date().toISOString(),',
+      '  verification: {',
+      '    allPassed: true,',
+      '    commands: [{ command: "echo ok", exitCode: 0, output: "ok" }],',
+      '  },',
+      '};',
+      'fs.writeFileSync(path.join(outputDir, "worker-result.json"), JSON.stringify(result, null, 2));',
+      'fs.writeFileSync(path.join(outputDir, "worker-verification.json"), JSON.stringify(result.verification, null, 2));',
+      'fs.writeFileSync(path.join(outputDir, "worker-output.raw.txt"), "worker ok\\n");',
+    ].join("\n"),
+  );
+  return fakeRoot;
+}
+
+function buildAssignedTaskPayload(repoDir: string, taskId: string, branchName: string) {
+  return {
+    assignment: {
+      taskId,
+      workerId: null,
+      pool: "codex",
+      status: "pending",
+      branchName,
+      allowedPaths: ["docs/**"],
+      commands: {
+        test: "echo ok",
+      },
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+    },
+    task: {
+      id: taskId,
+      title: "worker daemon failure path",
+      repo: repoDir,
+    },
+  };
+}
+
+function createGitPushFailureShim(rootDir: string) {
+  const binDir = path.join(rootDir, "fake-bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  const whichGit = spawnSync("which", ["git"], { encoding: "utf8" });
+  const realGit = (whichGit.stdout || "").trim();
+  if (!realGit) {
+    throw new Error("failed to resolve git binary");
+  }
+
+  const shimPath = path.join(binDir, "git");
+  fs.writeFileSync(
+    shimPath,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "push" ]; then',
+      '  echo "simulated push failure" >&2',
+      "  exit 1",
+      "fi",
+      `exec "${realGit}" "$@"`,
+    ].join("\n"),
+  );
+  fs.chmodSync(shimPath, 0o755);
+  return binDir;
+}
+
 afterEach(() => {
   for (const tempDir of tempRoots.splice(0)) {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+  if (originalGithubToken === undefined) {
+    delete process.env.GITHUB_TOKEN;
+  } else {
+    process.env.GITHUB_TOKEN = originalGithubToken;
+  }
+  if (originalSubmitResultRetryDelay === undefined) {
+    delete process.env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS;
+  } else {
+    process.env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS = originalSubmitResultRetryDelay;
+  }
+  if (originalPath === undefined) {
+    delete process.env.PATH;
+  } else {
+    process.env.PATH = originalPath;
+  }
+  if (originalDispatcherAuthMode === undefined) {
+    delete process.env.DISPATCHER_AUTH_MODE;
+  } else {
+    process.env.DISPATCHER_AUTH_MODE = originalDispatcherAuthMode;
+  }
+  globalThis.fetch = originalFetch;
 });
 
 describe("worker daemon cycle", () => {
   it("registers a worker, processes an assigned task, and writes execution output", async () => {
+    process.env.DISPATCHER_AUTH_MODE = "open";
     const tempDir = makeTempDir();
     const repoDir = createRepoWithOrigin(tempDir, "master");
     const stateDir = path.join(tempDir, "state");
@@ -147,6 +263,7 @@ describe("worker daemon cycle", () => {
   }, 15_000);
 
   it("lets a late worker claim a ready task and complete it", async () => {
+    process.env.DISPATCHER_AUTH_MODE = "open";
     const tempDir = makeTempDir();
     const repoDir = createRepoWithOrigin(tempDir, "master");
     const stateDir = path.join(tempDir, "state");
@@ -220,5 +337,110 @@ describe("worker daemon cycle", () => {
       id: "codex-remote-worker",
       status: "idle",
     });
+  });
+
+  it("fails the cycle instead of reporting completed when submitResult exhausts retries", async () => {
+    const tempDir = makeTempDir();
+    const repoDir = createRepoWithOrigin(tempDir, "master");
+    const daemonMod = await import(daemonModulePath);
+    process.env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS = "1";
+    let submitAttempts = 0;
+    const client = {
+      registerWorker: async () => ({ ok: true }),
+      heartbeat: async () => ({ ok: true }),
+      getAssignedTask: async () => buildAssignedTaskPayload(repoDir, "task-submit-fail", "ai/codex/task-submit-fail"),
+      startTask: async () => ({ ok: true }),
+      submitResult: async () => {
+        submitAttempts += 1;
+        throw new Error("dispatcher unavailable");
+      },
+    };
+
+    await expect(daemonMod.runWorkerDaemonCycle({
+      client,
+      workerId: "codex-submit-fail",
+      pool: "codex",
+      hostname: "host",
+      repoDir,
+      dryRunExecution: true,
+      at: new Date().toISOString(),
+    })).rejects.toThrow("submitResult failed after 3 attempts");
+
+    expect(submitAttempts).toBe(6);
+  });
+
+  it("fails explicitly and submits a failed result when git push fails", async () => {
+    const tempDir = makeTempDir();
+    const repoDir = createRepoWithOrigin(tempDir, "master");
+    const shimDir = createGitPushFailureShim(tempDir);
+    process.env.PATH = `${shimDir}:${process.env.PATH || ""}`;
+
+    const daemonMod = await import(daemonModulePath);
+    const fakeRepoRoot = createFakeWorkerRepoRoot(tempDir);
+    const submittedPayloads: Array<{ result: { output: string }; changedFiles: string[] }> = [];
+    const client = {
+      registerWorker: async () => ({ ok: true }),
+      heartbeat: async () => ({ ok: true }),
+      getAssignedTask: async () => buildAssignedTaskPayload(repoDir, "task-push-fail", "ai/codex/task-push-fail"),
+      startTask: async () => ({ ok: true }),
+      submitResult: async (_workerId: string, payload: { result: { output: string }; changedFiles: string[] }) => {
+        submittedPayloads.push(payload);
+        return { ok: true };
+      },
+    };
+
+    await expect(daemonMod.runWorkerDaemonCycle({
+      client,
+      workerId: "codex-push-fail",
+      pool: "codex",
+      hostname: "host",
+      repoDir,
+      repoRoot: fakeRepoRoot,
+      dryRunExecution: false,
+      at: new Date().toISOString(),
+    })).rejects.toThrow("simulated push failure");
+
+    expect(submittedPayloads).toHaveLength(1);
+    expect(submittedPayloads[0].result.output).toContain("simulated push failure");
+    expect(submittedPayloads[0].changedFiles).toEqual([]);
+  });
+
+  it("fails explicitly and submits a failed result when PR creation fails", async () => {
+    const tempDir = makeTempDir();
+    const repoDir = createRepoWithOrigin(tempDir, "master");
+    const daemonMod = await import(daemonModulePath);
+    const fakeRepoRoot = createFakeWorkerRepoRoot(tempDir);
+    const submittedPayloads: Array<{ result: { output: string } }> = [];
+
+    process.env.GITHUB_TOKEN = "test-token";
+    globalThis.fetch = async () => ({
+      ok: false,
+      text: async () => JSON.stringify({ message: "pr create failed" }),
+    }) as Response;
+
+    const client = {
+      registerWorker: async () => ({ ok: true }),
+      heartbeat: async () => ({ ok: true }),
+      getAssignedTask: async () => buildAssignedTaskPayload(repoDir, "task-pr-fail", "ai/codex/task-pr-fail"),
+      startTask: async () => ({ ok: true }),
+      submitResult: async (_workerId: string, payload: { result: { output: string } }) => {
+        submittedPayloads.push(payload);
+        return { ok: true };
+      },
+    };
+
+    await expect(daemonMod.runWorkerDaemonCycle({
+      client,
+      workerId: "codex-pr-fail",
+      pool: "codex",
+      hostname: "host",
+      repoDir,
+      repoRoot: fakeRepoRoot,
+      dryRunExecution: false,
+      at: new Date().toISOString(),
+    })).rejects.toThrow("pr create failed");
+
+    expect(submittedPayloads).toHaveLength(1);
+    expect(submittedPayloads[0].result.output).toContain("pr create failed");
   });
 });

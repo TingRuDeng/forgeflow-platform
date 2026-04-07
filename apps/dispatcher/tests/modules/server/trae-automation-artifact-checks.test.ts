@@ -54,11 +54,6 @@ function reviewableGitResponses(overrides: Record<string, GitResult> = {}) {
       status: 0,
       stdout: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/ai/trae/task-1",
     },
-    "fetch\u0000--quiet\u0000origin\u0000ai/trae/task-1": { status: 0, stdout: "" },
-    "merge-base\u0000--is-ancestor\u0000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u0000FETCH_HEAD": {
-      status: 0,
-      stdout: "",
-    },
     ...overrides,
   };
 }
@@ -188,13 +183,13 @@ describe("trae automation artifact checks", () => {
     fs.rmSync(worktreeDir, { recursive: true, force: true });
   });
 
-  it("returns not reviewable when remote branch does not contain the commit", async () => {
+  it("returns not reviewable when remote branch is missing", async () => {
     const mod = await import(artifactChecksModulePath);
     const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "artifact-checks-"));
     const runGit = createRunGitMock(reviewableGitResponses({
-      "merge-base\u0000--is-ancestor\u0000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u0000FETCH_HEAD": {
-        status: 1,
-        stderr: "",
+      "ls-remote\u0000--heads\u0000origin\u0000ai/trae/task-1": {
+        status: 0,
+        stdout: "",
       },
     }));
 
@@ -206,8 +201,54 @@ describe("trae automation artifact checks", () => {
     }, { runGit });
 
     expect(result.reviewable).toBe(false);
-    expect(result.reason).toContain("not pushed to remote branch");
+    expect(result.reason).toContain("Branch ai/trae/task-1 not found on remote");
     expect(result.evidence.remoteVerified).toBe(false);
+    expect(result.evidence.remoteHeadSha).toBeNull();
+
+    fs.rmSync(worktreeDir, { recursive: true, force: true });
+  });
+
+  it("returns not reviewable when remote branch HEAD does not match the reported commit", async () => {
+    const mod = await import(artifactChecksModulePath);
+    const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "artifact-checks-"));
+    const runGit = createRunGitMock(reviewableGitResponses({
+      "ls-remote\u0000--heads\u0000origin\u0000ai/trae/task-1": {
+        status: 0,
+        stdout: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\trefs/heads/ai/trae/task-1",
+      },
+    }));
+
+    const result = mod.checkArtifactReviewability({
+      worktree_dir: worktreeDir,
+      scope: ["src/**"],
+      branch: "ai/trae/task-1",
+      default_branch: "main",
+      commit_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    }, { runGit });
+
+    expect(result.reviewable).toBe(false);
+    expect(result.reason).toContain("Remote branch ai/trae/task-1 HEAD is bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    expect(result.evidence.remoteVerified).toBe(false);
+    expect(result.evidence.remoteHeadSha).toBe("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+
+    fs.rmSync(worktreeDir, { recursive: true, force: true });
+  });
+
+  it("returns not reviewable when local HEAD does not match the reported commit", async () => {
+    const mod = await import(artifactChecksModulePath);
+    const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "artifact-checks-"));
+    const runGit = createRunGitMock(reviewableGitResponses());
+
+    const result = mod.checkArtifactReviewability({
+      worktree_dir: worktreeDir,
+      scope: ["src/**"],
+      branch: "ai/trae/task-1",
+      default_branch: "main",
+      commit_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    }, { runGit });
+
+    expect(result.reviewable).toBe(false);
+    expect(result.reason).toContain("Local HEAD is aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, expected reported commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 
     fs.rmSync(worktreeDir, { recursive: true, force: true });
   });
@@ -227,6 +268,7 @@ describe("trae automation artifact checks", () => {
     expect(result.reviewable).toBe(true);
     expect(result.reason).toBe("Artifact is reviewable");
     expect(result.evidence.remoteVerified).toBe(true);
+    expect(result.evidence.remoteHeadSha).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     expect(result.evidence.filesChanged).toEqual(["src/test.js"]);
 
     fs.rmSync(worktreeDir, { recursive: true, force: true });

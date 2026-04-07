@@ -32,6 +32,11 @@ import { formatLocalTimestamp } from "../time.js";
 import { getDispatcherAuthMode, getDispatcherApiToken } from "./dispatcher-config.js";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
+const STATE_LOCK_FILENAME = ".runtime-state.lock";
+const DEFAULT_STATE_LOCK_TIMEOUT_MS = 2000;
+const DEFAULT_STATE_LOCK_RETRY_MS = 25;
+const DEFAULT_STATE_LOCK_STALE_MS = 30000;
+const STATE_LOCK_SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 
 const AUTH_WHITELIST_PATHS = ["/health"];
 
@@ -246,6 +251,109 @@ class PayloadTooLargeError extends Error {
   }
 }
 
+class StateLockTimeoutError extends Error {
+  constructor(lockPath, timeoutMs) {
+    super(`state lock timeout after ${timeoutMs}ms: ${lockPath}`);
+    this.name = "StateLockTimeoutError";
+    this.code = "state_lock_timeout";
+    this.status = 503;
+  }
+}
+
+function getStateLockTimeoutMs() {
+  return Number(process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS || DEFAULT_STATE_LOCK_TIMEOUT_MS);
+}
+
+function getStateLockRetryMs() {
+  return Number(process.env.DISPATCHER_STATE_LOCK_RETRY_MS || DEFAULT_STATE_LOCK_RETRY_MS);
+}
+
+function getStateLockStaleMs() {
+  return Number(process.env.DISPATCHER_STATE_LOCK_STALE_MS || DEFAULT_STATE_LOCK_STALE_MS);
+}
+
+function sleepSync(ms) {
+  if (ms <= 0) {
+    return;
+  }
+  Atomics.wait(STATE_LOCK_SLEEP_BUFFER, 0, 0, ms);
+}
+
+export function getStateLockFilePath(stateDir) {
+  return path.join(stateDir, STATE_LOCK_FILENAME);
+}
+
+function isLockStale(lockPath, staleMs) {
+  try {
+    const stats = fs.statSync(lockPath);
+    return Date.now() - stats.mtimeMs >= staleMs;
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function acquireStateLock(stateDir) {
+  fs.mkdirSync(stateDir, { recursive: true });
+  const lockPath = getStateLockFilePath(stateDir);
+  const timeoutMs = getStateLockTimeoutMs();
+  const retryMs = getStateLockRetryMs();
+  const staleMs = getStateLockStaleMs();
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    let fd = null;
+    try {
+      fd = fs.openSync(lockPath, "wx");
+      const metadata = JSON.stringify({
+        pid: process.pid,
+        createdAt: nowIso(),
+      });
+      fs.writeFileSync(fd, metadata);
+      fs.closeSync(fd);
+
+      return () => {
+        try {
+          fs.unlinkSync(lockPath);
+        } catch (error) {
+          if (error?.code !== "ENOENT") {
+            throw error;
+          }
+        }
+      };
+    } catch (error) {
+      if (fd !== null) {
+        try {
+          fs.closeSync(fd);
+        } catch {}
+      }
+
+      if (error?.code !== "EEXIST") {
+        throw error;
+      }
+
+      if (isLockStale(lockPath, staleMs)) {
+        try {
+          fs.unlinkSync(lockPath);
+          continue;
+        } catch (unlinkError) {
+          if (unlinkError?.code === "ENOENT") {
+            continue;
+          }
+        }
+      }
+
+      if (Date.now() >= deadline) {
+        throw new StateLockTimeoutError(lockPath, timeoutMs);
+      }
+
+      sleepSync(retryMs);
+    }
+  }
+}
+
 export async function readJsonBody(request, maxBytes = MAX_REQUEST_BODY_BYTES) {
   const chunks = [];
   let totalBytes = 0;
@@ -265,12 +373,17 @@ export async function readJsonBody(request, maxBytes = MAX_REQUEST_BODY_BYTES) {
 }
 
 function withState(stateDir, callback) {
-  const state = loadRuntimeState(stateDir);
-  const result = callback(state);
-  if (result?.state) {
-    saveRuntimeState(stateDir, result.state);
+  const releaseLock = acquireStateLock(stateDir);
+  try {
+    const state = loadRuntimeState(stateDir);
+    const result = callback(state);
+    if (result?.state) {
+      saveRuntimeState(stateDir, result.state);
+    }
+    return result;
+  } finally {
+    releaseLock();
   }
-  return result;
 }
 
 function routeNotFound(response) {
@@ -515,13 +628,15 @@ export function handleDispatcherHttpRequest(input) {
     ];
     if (method === "POST" && traeRoutes.includes(pathname)) {
       try {
-        const state = loadRuntimeState(stateDir);
-        const handled = handleTraeRoute(state, { method, pathname, body });
-        saveRuntimeState(stateDir, state);
-        return handled;
+        const result = withState(stateDir, (state) => ({
+          state,
+          handled: handleTraeRoute(state, { method, pathname, body }),
+        }));
+        return result.handled;
       } catch (err) {
         console.error("[dispatcher-server] handleTraeRoute error:", err);
-        return createJsonResponse(500, { error: err instanceof Error ? err.message : String(err) });
+        const status = typeof err?.status === "number" ? err.status : 500;
+        return createJsonResponse(status, { error: err instanceof Error ? err.message : String(err) });
       }
     }
 
@@ -529,7 +644,8 @@ export function handleDispatcherHttpRequest(input) {
       error: "not_found",
     });
   } catch (error) {
-    return createJsonResponse(500, {
+    const status = typeof error?.status === "number" ? error.status : 500;
+    return createJsonResponse(status, {
       error: error instanceof Error ? error.message : String(error),
     });
   }

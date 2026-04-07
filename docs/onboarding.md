@@ -154,6 +154,7 @@ node scripts/run-dispatcher-server.js \
 通用行为：
 - `/health` 在所有模式下均可匿名访问
 - 认证失败返回 `401` + `{ "error": "unauthorized" }`
+- dispatcher 当前会在状态目录下维护 `.runtime-state.lock`；锁竞争超时返回 `503`，调用方应重试。相关环境变量为 `DISPATCHER_STATE_LOCK_TIMEOUT_MS`、`DISPATCHER_STATE_LOCK_RETRY_MS`、`DISPATCHER_STATE_LOCK_STALE_MS`
 
 调用方连通性检查示例：
 
@@ -236,6 +237,13 @@ npm install -g @tingrudeng/trae-beta-runtime@0.1.0-beta.42 --registry=https://re
 6. 解析最终回复模板
 7. `submit_result`
 
+当前交付门禁：
+
+- Trae runtime 只有在远端分支 HEAD 与最终回执里的 commit SHA 完全一致时，才会上报 `review_ready`
+- 如果 push 已报告成功但远端 ref 仍在传播，runtime 会先做短暂重试；重试耗尽后按 failed 处理，不会直接把产物送进 review
+- 自动创建 PR 只允许开 draft，而且必须同时满足：验收命令通过、push 成功且无 `push_error`、远端 SHA 已验证一致、变更仍在允许范围内
+- rework / follow-up 只有在源任务已经交付过可验证的远端分支产物、且 worker 不变时才允许复用原分支；否则应新开 `-rN` 分支继续
+
 当前边界：
 
 - 单任务串行
@@ -288,6 +296,10 @@ forgeflow-trae-beta start all
 
 `forgeflow-trae-beta update` 会直接对已安装包执行自更新，不是推荐式卸载重装流程。
 如果默认 registry 是镜像源且镜像同步滞后，优先改用 `npm install -g @tingrudeng/trae-beta-runtime@0.1.0-beta.42 --registry=https://registry.npmjs.org/`。
+
+补充：
+
+- `worker-daemon` 现在不会再把 `submitResult` 重试耗尽、`git push` 失败或自动 PR 创建失败记成“completed”；这些路径会显式落到 failed 语义，方便控制层 redrive / rework
 
 **Git SSH Override:**
 

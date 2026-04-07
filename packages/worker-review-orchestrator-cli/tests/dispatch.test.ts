@@ -228,6 +228,143 @@ describe("dispatch", () => {
     );
   });
 
+  it("rejects follow-up branch reuse when the source task has no delivered remote artifact", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        tasks: [
+          {
+            id: "dispatch-1:task-1",
+            branchName: "feature/auth-fix",
+            lastAssignedWorkerId: "trae-local-forgeflow",
+          },
+        ],
+        assignments: [
+          {
+            taskId: "dispatch-1:task-1",
+            workerId: "trae-local-forgeflow",
+            assignment: {
+              branchName: "feature/auth-fix",
+              workerId: "trae-local-forgeflow",
+            },
+          },
+        ],
+        reviews: [
+          {
+            taskId: "dispatch-1:task-1",
+            latestWorkerResult: {
+              evidence: {
+                artifacts: {
+                  branchName: "feature/auth-fix",
+                  commitSha: "abc123",
+                  pushStatus: "not_attempted",
+                },
+              },
+            },
+          },
+        ],
+        events: [],
+      }),
+    });
+
+    await expect(runDispatch({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      input: "-",
+      payload: {
+        repo: "/repo",
+        defaultBranch: "main",
+        tasks: [
+          {
+            id: "task-2",
+            pool: "trae",
+            branchName: "feature/auth-fix",
+          },
+        ],
+        packages: [],
+      },
+      followUpOfTaskId: "dispatch-1:task-1",
+      targetWorkerId: "trae-local-forgeflow",
+      fetchImpl: fetchImpl as typeof globalThis.fetch,
+    })).rejects.toThrow("follow-up branch reuse requires a previously delivered remote artifact");
+  });
+
+  it("allows follow-up branch reuse when the source task already delivered a remote artifact", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          tasks: [
+            {
+              id: "dispatch-1:task-1",
+              branchName: "feature/auth-fix",
+              lastAssignedWorkerId: "trae-local-forgeflow",
+            },
+          ],
+          assignments: [
+            {
+              taskId: "dispatch-1:task-1",
+              workerId: "trae-local-forgeflow",
+              assignment: {
+                branchName: "feature/auth-fix",
+                workerId: "trae-local-forgeflow",
+              },
+            },
+          ],
+          reviews: [
+            {
+              taskId: "dispatch-1:task-1",
+              latestWorkerResult: {
+                evidence: {
+                  artifacts: {
+                    branchName: "feature/auth-fix",
+                    commitSha: "abc123",
+                    pushStatus: "success",
+                  },
+                },
+              },
+            },
+          ],
+          events: [],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          dispatchId: "dispatch-follow-up",
+          taskIds: ["dispatch-follow-up:task-2"],
+          assignments: [],
+        }),
+      });
+
+    const result = await runDispatch({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      input: "-",
+      payload: {
+        repo: "/repo",
+        defaultBranch: "main",
+        tasks: [
+          {
+            id: "task-2",
+            pool: "trae",
+            branchName: "feature/auth-fix",
+          },
+        ],
+        packages: [],
+      },
+      followUpOfTaskId: "dispatch-1:task-1",
+      targetWorkerId: "trae-local-forgeflow",
+      fetchImpl: fetchImpl as typeof globalThis.fetch,
+    });
+
+    expect(result).toMatchObject({
+      dispatchId: "dispatch-follow-up",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("verifies every returned assignment against the intended target worker", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
@@ -445,6 +582,21 @@ describe("dispatch", () => {
     expect(payload.packages[0].contextMarkdown).toContain("# Non-Goals");
     expect(payload.packages[0].contextMarkdown).toContain("# Must Preserve");
     expect(payload.packages[0].contextMarkdown).toContain("# Acceptance");
+  });
+
+  it("embeds draft PR gate conditions into the default Trae worker prompt", () => {
+    const payload = buildSingleTaskDispatchInput({
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      taskId: "task-1",
+      title: "Gate draft PR creation",
+      pool: "trae",
+      branchName: "ai/trae/task-1",
+    });
+
+    expect(String(payload.packages[0].workerPrompt)).toContain("Draft PR Gate");
+    expect(String(payload.packages[0].workerPrompt)).toContain("远端分支 HEAD 与最终回执 commit SHA 完全一致");
+    expect(String(payload.packages[0].workerPrompt)).toContain("PR 必须保持 draft，worker 不得自行 merge");
   });
 
   it("rejects strict task specs that are missing required sections", () => {

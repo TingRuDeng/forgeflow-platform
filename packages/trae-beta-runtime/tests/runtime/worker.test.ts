@@ -6,6 +6,48 @@ const prepareTaskWorktreeMock = vi.fn((_repoDir: string, task: { taskId?: string
 const safeTaskDirNameMock = vi.fn((value: string) => value.replace(/[^a-z0-9._-]+/gi, "-"));
 const checkArtifactReviewabilityMock = vi.fn();
 
+function reviewableArtifact(branchName = "feature/runtime", commitSha = "abc123", filesChanged: string[] = ["src/runtime/worker.ts"]) {
+  return {
+    reviewable: true,
+    reason: "Artifact is reviewable",
+    evidence: {
+      worktreeExists: true,
+      branchMatches: true,
+      hasChanges: true,
+      allChangesInScope: true,
+      remoteVerified: true,
+      remoteHeadSha: commitSha,
+      branchName,
+      commitSha,
+      filesChanged,
+      outOfScopeFiles: [],
+      uncommittedFiles: [],
+      remoteCheckReason: "Remote branch HEAD matches reported commit",
+    },
+  };
+}
+
+function unreviewableArtifact(reason = "remote artifact verification failed") {
+  return {
+    reviewable: false,
+    reason,
+    evidence: {
+      worktreeExists: true,
+      branchMatches: true,
+      hasChanges: true,
+      allChangesInScope: true,
+      remoteVerified: false,
+      remoteHeadSha: null,
+      branchName: "feature/runtime",
+      commitSha: "abc123",
+      filesChanged: ["src/runtime/worker.ts"],
+      outOfScopeFiles: [],
+      uncommittedFiles: [],
+      remoteCheckReason: reason,
+    },
+  };
+}
+
 vi.mock("../../src/runtime/task-worktree.js", () => ({
   prepareTaskWorktree: prepareTaskWorktreeMock,
   safeTaskDirName: safeTaskDirNameMock,
@@ -28,42 +70,30 @@ describe("runtime/worker", () => {
     prepareTaskWorktreeMock.mockClear();
     safeTaskDirNameMock.mockClear();
     checkArtifactReviewabilityMock.mockReset();
-    checkArtifactReviewabilityMock.mockReturnValue({
-      reviewable: false,
-      reason: null,
-      evidence: {
-        worktreeExists: false,
-        branchMatches: false,
-        hasChanges: false,
-        allChangesInScope: false,
-        remoteVerified: false,
-        branchName: null,
-        commitSha: null,
-        filesChanged: [],
-        outOfScopeFiles: [],
-        uncommittedFiles: [],
-      },
-    });
+    checkArtifactReviewabilityMock.mockReturnValue(reviewableArtifact());
   });
 
-  checkArtifactReviewabilityMock.mockReturnValue({
-    reviewable: false,
-    reason: null,
-    evidence: {
-      worktreeExists: false,
-      branchMatches: false,
-      hasChanges: false,
-      allChangesInScope: false,
-      remoteVerified: false,
-      branchName: null,
-      commitSha: null,
-      filesChanged: [],
-      outOfScopeFiles: [],
-      uncommittedFiles: [],
-    },
-  });
+  checkArtifactReviewabilityMock.mockReturnValue(reviewableArtifact());
 
   it("registers, materializes a worktree, and submits a parsed result", async () => {
+    checkArtifactReviewabilityMock.mockReturnValue({
+      reviewable: true,
+      reason: "Artifact is reviewable",
+      evidence: {
+        worktreeExists: true,
+        branchMatches: true,
+        hasChanges: true,
+        allChangesInScope: true,
+        remoteVerified: true,
+        remoteHeadSha: "abc123",
+        branchName: "codex/trae-beta-self-contained-runtime",
+        commitSha: "abc123",
+        filesChanged: ["src/runtime/worker.ts", "src/runtime/task-worktree.ts"],
+        outOfScopeFiles: [],
+        uncommittedFiles: [],
+        remoteCheckReason: "Remote branch HEAD matches reported commit",
+      },
+    });
     const dispatcherClient = {
       register: vi.fn(async () => ({})),
       fetchTask: vi.fn(async () => ({
@@ -201,6 +231,8 @@ describe("runtime/worker", () => {
           commitSha: "abc123",
           pushStatus: "success",
           filesChanged: "src/runtime/worker.ts,src/runtime/task-worktree.ts",
+          remoteVerified: "true",
+          remoteHeadSha: "abc123",
         },
       },
     });
@@ -209,6 +241,220 @@ describe("runtime/worker", () => {
       taskId: "task-1",
       responseText: expect.stringContaining("## 任务完成"),
     });
+
+    runtime.stop();
+  });
+
+  it("retries remote SHA verification before entering review", async () => {
+    checkArtifactReviewabilityMock
+      .mockReturnValueOnce({
+        reviewable: false,
+        reason: "Remote branch feature/runtime not found on remote",
+        evidence: {
+          worktreeExists: true,
+          branchMatches: true,
+          hasChanges: true,
+          allChangesInScope: true,
+          remoteVerified: false,
+          remoteHeadSha: null,
+          branchName: "feature/runtime",
+          commitSha: "abc123",
+          filesChanged: ["src/runtime/worker.ts"],
+          outOfScopeFiles: [],
+          uncommittedFiles: [],
+          remoteCheckReason: "Branch feature/runtime not found on remote",
+        },
+      })
+      .mockReturnValueOnce({
+        reviewable: false,
+        reason: "Remote branch feature/runtime HEAD is def456, expected abc123",
+        evidence: {
+          worktreeExists: true,
+          branchMatches: true,
+          hasChanges: true,
+          allChangesInScope: true,
+          remoteVerified: false,
+          remoteHeadSha: "def456",
+          branchName: "feature/runtime",
+          commitSha: "abc123",
+          filesChanged: ["src/runtime/worker.ts"],
+          outOfScopeFiles: [],
+          uncommittedFiles: [],
+          remoteCheckReason: "Remote branch feature/runtime HEAD is def456, expected abc123",
+        },
+      })
+      .mockReturnValueOnce({
+        reviewable: true,
+        reason: "Artifact is reviewable",
+        evidence: {
+          worktreeExists: true,
+          branchMatches: true,
+          hasChanges: true,
+          allChangesInScope: true,
+          remoteVerified: true,
+          remoteHeadSha: "abc123",
+          branchName: "feature/runtime",
+          commitSha: "abc123",
+          filesChanged: ["src/runtime/worker.ts"],
+          outOfScopeFiles: [],
+          uncommittedFiles: [],
+          remoteCheckReason: "Remote branch HEAD matches reported commit",
+        },
+      });
+
+    const sleep = vi.fn(async () => undefined);
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      fetchTask: vi.fn(async () => ({
+        status: "task",
+        task: {
+          task_id: "task-retry",
+          repo: "repo",
+          branch: "feature/runtime",
+          default_branch: "main",
+          scope: ["src/**"],
+          acceptance: ["pnpm test"],
+          constraints: [],
+          prompt: "Retry remote verification after push",
+        },
+      })),
+      startTask: vi.fn(async () => ({})),
+      reportProgress: vi.fn(async () => ({})),
+      submitResult: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => ({})),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-retry" } })),
+      sendChat: vi.fn(async () => ({
+        response: {
+          text: [
+            "## 任务完成",
+            "- 结果: 成功",
+            "- 任务ID: task-retry",
+            "- 修改文件: src/runtime/worker.ts",
+            "- 测试结果: pnpm test",
+            "- 风险: 无",
+            "- GitHub 证据:",
+            "  - branch: feature/runtime",
+            "  - commit: abc123",
+            "  - push: success",
+            "  - push_error: 无",
+            "  - PR: 无",
+            "  - PR URL: 无",
+            "- 备注: retry review gate",
+          ].join("\n"),
+        },
+      })),
+      releaseSession: vi.fn(async () => ({ data: { sessionId: "session-retry", released: true } })),
+    };
+
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-remote",
+      repoDir: "/tmp/project",
+      logger: { warn: vi.fn(), log: vi.fn() },
+      launchTrae: vi.fn(async () => ({ reusedExisting: false })),
+      sleep,
+      setIntervalImpl: vi.fn(() => ({}) as never),
+      clearIntervalImpl: vi.fn(),
+    });
+
+    await runtime.runOnce();
+
+    expect(checkArtifactReviewabilityMock).toHaveBeenCalledTimes(3);
+    expect(sleep).toHaveBeenCalledTimes(2);
+    expect(dispatcherClient.reportProgress).toHaveBeenCalledWith(
+      "task-retry",
+      expect.stringContaining("waiting for remote SHA verification"),
+      "trae-remote",
+    );
+    expect(dispatcherClient.submitResult).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-retry",
+      status: "review_ready",
+      github: expect.objectContaining({
+        branchName: "feature/runtime",
+        commitSha: "abc123",
+        pushStatus: "success",
+      }),
+    }));
+
+    runtime.stop();
+  });
+
+  it("fails success reports that do not provide pushed remote artifact evidence", async () => {
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      fetchTask: vi.fn(async () => ({
+        status: "task",
+        task: {
+          task_id: "task-missing-push",
+          repo: "repo",
+          branch: "feature/runtime",
+          default_branch: "main",
+          scope: ["src/**"],
+          acceptance: ["pnpm test"],
+          constraints: [],
+          prompt: "Do not enter review without a pushed branch",
+        },
+      })),
+      startTask: vi.fn(async () => ({})),
+      reportProgress: vi.fn(async () => ({})),
+      submitResult: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => ({})),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-no-push" } })),
+      sendChat: vi.fn(async () => ({
+        response: {
+          text: [
+            "## 任务完成",
+            "- 结果: 成功",
+            "- 任务ID: task-missing-push",
+            "- 修改文件: src/runtime/worker.ts",
+            "- 测试结果: pnpm test",
+            "- 风险: 无",
+            "- GitHub 证据:",
+            "  - branch: feature/runtime",
+            "  - commit: abc123",
+            "  - push: not_attempted",
+            "  - push_error: 无",
+            "  - PR: 无",
+            "  - PR URL: 无",
+            "- 备注: local commit only",
+          ].join("\n"),
+        },
+      })),
+      releaseSession: vi.fn(async () => ({ data: { sessionId: "session-no-push", released: true } })),
+    };
+
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-remote",
+      repoDir: "/tmp/project",
+      logger: { warn: vi.fn(), log: vi.fn() },
+      launchTrae: vi.fn(async () => ({ reusedExisting: false })),
+      sleep: vi.fn(async () => undefined),
+      setIntervalImpl: vi.fn(() => ({}) as never),
+      clearIntervalImpl: vi.fn(),
+    });
+
+    await runtime.runOnce();
+
+    expect(checkArtifactReviewabilityMock).not.toHaveBeenCalled();
+    expect(dispatcherClient.submitResult).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "task-missing-push",
+      status: "failed",
+      summary: "success report missing pushed remote artifact evidence",
+      github: expect.objectContaining({
+        pushStatus: "not_attempted",
+      }),
+    }));
 
     runtime.stop();
   });
@@ -538,6 +784,7 @@ describe("runtime/worker", () => {
   });
 
   it("fails when an active session keeps running past the sixty-minute hard cap", async () => {
+    checkArtifactReviewabilityMock.mockReturnValue(unreviewableArtifact());
     const dispatcherClient = {
       register: vi.fn(async () => ({})),
       fetchTask: vi.fn(async () => ({
@@ -629,6 +876,7 @@ describe("runtime/worker", () => {
   });
 
   it("reports an explicit recovery error when chat times out without sessionId", async () => {
+    checkArtifactReviewabilityMock.mockReturnValue(unreviewableArtifact());
     const dispatcherClient = {
       register: vi.fn(async () => ({})),
       fetchTask: vi.fn(async () => ({
@@ -867,6 +1115,7 @@ describe("runtime/worker", () => {
   });
 
   it("releases the session when task execution fails", async () => {
+    checkArtifactReviewabilityMock.mockReturnValue(unreviewableArtifact());
     const dispatcherClient = {
       register: vi.fn(async () => ({})),
       fetchTask: vi.fn(async () => ({
@@ -929,6 +1178,7 @@ describe("runtime/worker", () => {
   });
 
   it("rejects a parsed result with a mismatched task ID", async () => {
+    checkArtifactReviewabilityMock.mockReturnValue(unreviewableArtifact());
     const dispatcherClient = {
       register: vi.fn(async () => ({})),
       fetchTask: vi.fn(async () => ({
@@ -1478,6 +1728,7 @@ describe("runtime/worker", () => {
   });
 
   it("fails when final report contains a real stale task ID from a previous task", async () => {
+    checkArtifactReviewabilityMock.mockReturnValue(unreviewableArtifact());
     const dispatcherClient = {
       register: vi.fn(async () => ({})),
       fetchTask: vi.fn(async () => ({
@@ -1842,6 +2093,7 @@ describe("runtime/worker", () => {
   });
 
   it("fails when session completed but responseText is missing", async () => {
+    checkArtifactReviewabilityMock.mockReturnValue(unreviewableArtifact());
     const dispatcherClient = {
       register: vi.fn(async () => ({})),
       fetchTask: vi.fn(async () => ({
@@ -1997,6 +2249,7 @@ describe("runtime/worker", () => {
   });
 
   it("fails when session completed but response is still a template placeholder", async () => {
+    checkArtifactReviewabilityMock.mockReturnValue(unreviewableArtifact());
     const dispatcherClient = {
       register: vi.fn(async () => ({})),
       fetchTask: vi.fn(async () => ({

@@ -17,6 +17,7 @@ export interface ArtifactTaskInput {
   worktree_dir?: string;
   execution_dir?: string;
   branch?: string;
+  commit_sha?: string;
   default_branch?: string;
   scope?: string[];
 }
@@ -24,6 +25,7 @@ export interface ArtifactTaskInput {
 export interface RemoteCommitCheckResult {
   exists: boolean;
   reason: string;
+  remoteHeadSha: string | null;
 }
 
 export interface ArtifactReviewabilityEvidence {
@@ -37,6 +39,7 @@ export interface ArtifactReviewabilityEvidence {
   filesChanged: string[];
   outOfScopeFiles: string[];
   uncommittedFiles: string[];
+  remoteHeadSha?: string | null;
   remoteCheckReason?: string;
 }
 
@@ -167,29 +170,32 @@ export function checkRemoteCommitExists(
 ): RemoteCommitCheckResult {
   const runGitFn = options.runGit || runGit;
   if (!branchName || !commitSha) {
-    return { exists: false, reason: "Missing branch name or commit SHA" };
+    return { exists: false, reason: "Missing branch name or commit SHA", remoteHeadSha: null };
   }
 
   const branchResult = runGitFn(["ls-remote", "--heads", "origin", branchName], worktreeDir);
   if (branchResult.status !== 0) {
-    return { exists: false, reason: `Failed to check remote branch: ${branchResult.stderr}` };
+    return { exists: false, reason: `Failed to check remote branch: ${branchResult.stderr}`, remoteHeadSha: null };
   }
 
   if (!branchResult.stdout) {
-    return { exists: false, reason: `Branch ${branchName} not found on remote` };
+    return { exists: false, reason: `Branch ${branchName} not found on remote`, remoteHeadSha: null };
   }
 
-  const fetchResult = runGitFn(["fetch", "--quiet", "origin", branchName], worktreeDir);
-  if (fetchResult.status !== 0) {
-    return { exists: false, reason: `Failed to fetch remote branch ${branchName}: ${fetchResult.stderr}` };
+  const remoteHeadSha = branchResult.stdout.split(/\s+/)[0] || null;
+  if (!remoteHeadSha) {
+    return { exists: false, reason: `Could not determine remote HEAD for branch ${branchName}`, remoteHeadSha: null };
   }
 
-  const commitResult = runGitFn(["merge-base", "--is-ancestor", commitSha, "FETCH_HEAD"], worktreeDir);
-  if (commitResult.status !== 0) {
-    return { exists: false, reason: `Commit ${commitSha} not pushed to remote branch ${branchName}` };
+  if (remoteHeadSha !== commitSha) {
+    return {
+      exists: false,
+      reason: `Remote branch ${branchName} HEAD is ${remoteHeadSha}, expected ${commitSha}`,
+      remoteHeadSha,
+    };
   }
 
-  return { exists: true, reason: "Commit exists on remote" };
+  return { exists: true, reason: "Remote branch HEAD matches reported commit", remoteHeadSha };
 }
 
 export function checkArtifactReviewability(
@@ -244,7 +250,16 @@ export function checkArtifactReviewability(
   result.evidence.branchMatches = true;
 
   const headCommit = getHeadCommit(effectiveDir, runGitFn);
-  result.evidence.commitSha = headCommit;
+  const expectedCommit = task.commit_sha || headCommit;
+  result.evidence.commitSha = expectedCommit;
+  if (!headCommit) {
+    result.reason = "Could not determine local HEAD commit";
+    return result;
+  }
+  if (task.commit_sha && headCommit !== task.commit_sha) {
+    result.reason = `Local HEAD is ${headCommit}, expected reported commit ${task.commit_sha}`;
+    return result;
+  }
 
   let committedChanges: string[] = [];
   const mergeBase = getMergeBase(effectiveDir, defaultBranch, runGitFn);
@@ -287,10 +302,11 @@ export function checkArtifactReviewability(
     result.evidence.allChangesInScope = true;
   }
 
-  const remoteCheck = checkRemoteCommitExists(effectiveDir, currentBranch, headCommit, {
+  const remoteCheck = checkRemoteCommitExists(effectiveDir, currentBranch, expectedCommit, {
     runGit: runGitFn,
   });
   result.evidence.remoteVerified = remoteCheck.exists;
+  result.evidence.remoteHeadSha = remoteCheck.remoteHeadSha;
   result.evidence.remoteCheckReason = remoteCheck.reason;
   if (!remoteCheck.exists) {
     result.reason = remoteCheck.reason;

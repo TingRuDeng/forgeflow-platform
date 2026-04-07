@@ -14,6 +14,9 @@ const tempRoots: string[] = [];
 
 const originalEnv = process.env.DISPATCHER_API_TOKEN;
 const originalAuthMode = process.env.DISPATCHER_AUTH_MODE;
+const originalStateLockTimeout = process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS;
+const originalStateLockRetry = process.env.DISPATCHER_STATE_LOCK_RETRY_MS;
+const originalStateLockStale = process.env.DISPATCHER_STATE_LOCK_STALE_MS;
 
 function makeTempDir() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-dispatcher-server-"));
@@ -38,6 +41,21 @@ afterEach(() => {
     delete process.env.DISPATCHER_AUTH_MODE;
   } else {
     process.env.DISPATCHER_AUTH_MODE = originalAuthMode;
+  }
+  if (originalStateLockTimeout === undefined) {
+    delete process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS;
+  } else {
+    process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS = originalStateLockTimeout;
+  }
+  if (originalStateLockRetry === undefined) {
+    delete process.env.DISPATCHER_STATE_LOCK_RETRY_MS;
+  } else {
+    process.env.DISPATCHER_STATE_LOCK_RETRY_MS = originalStateLockRetry;
+  }
+  if (originalStateLockStale === undefined) {
+    delete process.env.DISPATCHER_STATE_LOCK_STALE_MS;
+  } else {
+    process.env.DISPATCHER_STATE_LOCK_STALE_MS = originalStateLockStale;
   }
   process.env.DISPATCHER_AUTH_MODE = "open";
 });
@@ -221,6 +239,93 @@ describe("dispatcher server", () => {
     expect(response.json).toEqual({
       error: "task not found: nonexistent-task",
     });
+  });
+
+  it("returns 503 when a state mutation route cannot acquire the runtime lock", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS = "1";
+    process.env.DISPATCHER_STATE_LOCK_RETRY_MS = "1";
+
+    const lockPath = mod.getStateLockFilePath
+      ? mod.getStateLockFilePath(stateDir)
+      : path.join(stateDir, ".runtime-state.lock");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(lockPath, "held");
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-lock",
+        pool: "codex",
+        hostname: "host",
+        labels: [],
+        repoDir: "/repo",
+      },
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.json.error).toContain("state lock timeout");
+  });
+
+  it("applies the same runtime lock to Trae write routes", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS = "1";
+    process.env.DISPATCHER_STATE_LOCK_RETRY_MS = "1";
+
+    const lockPath = mod.getStateLockFilePath
+      ? mod.getStateLockFilePath(stateDir)
+      : path.join(stateDir, ".runtime-state.lock");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(lockPath, "held");
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/heartbeat",
+      body: {
+        worker_id: "trae-lock",
+      },
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.json.error).toContain("state lock timeout");
+  });
+
+  it("reclaims a stale runtime lock before mutating state", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS = "25";
+    process.env.DISPATCHER_STATE_LOCK_RETRY_MS = "1";
+    process.env.DISPATCHER_STATE_LOCK_STALE_MS = "1";
+
+    const lockPath = mod.getStateLockFilePath
+      ? mod.getStateLockFilePath(stateDir)
+      : path.join(stateDir, ".runtime-state.lock");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(lockPath, "stale");
+    const staleAt = new Date(Date.now() - 10_000);
+    fs.utimesSync(lockPath, staleAt, staleAt);
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-stale-lock",
+        pool: "codex",
+        hostname: "host",
+        labels: [],
+        repoDir: "/repo",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.json.status).toBe("registered");
+    expect(fs.existsSync(lockPath)).toBe(false);
   });
 
   it("returns 409 when review decision task is not in review", async () => {

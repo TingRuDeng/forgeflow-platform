@@ -12,6 +12,7 @@ interface Task {
   scope?: string[];
   default_branch?: string;
   branch?: string;
+  commit_sha?: string;
 }
 
 interface ArtifactCheckResult {
@@ -28,6 +29,7 @@ interface ArtifactCheckResult {
     filesChanged: string[];
     outOfScopeFiles: string[];
     uncommittedFiles: string[];
+    remoteHeadSha?: string | null;
     remoteCheckReason?: string;
   };
 }
@@ -142,32 +144,35 @@ function filterFilesInScope(files: string[], allowedPaths: string[]): { inScope:
   return { inScope, outOfScope };
 }
 
-export function checkRemoteCommitExists(worktreeDir: string, branchName: string, commitSha: string, options: { runGit?: typeof runGit } = {}): { exists: boolean; reason: string } {
+export function checkRemoteCommitExists(worktreeDir: string, branchName: string, commitSha: string, options: { runGit?: typeof runGit } = {}): { exists: boolean; reason: string; remoteHeadSha: string | null } {
   const runGitFn = options.runGit || runGit;
   if (!branchName || !commitSha) {
-    return { exists: false, reason: "Missing branch name or commit SHA" };
+    return { exists: false, reason: "Missing branch name or commit SHA", remoteHeadSha: null };
   }
 
   const branchResult = runGitFn(["ls-remote", "--heads", "origin", branchName], worktreeDir);
   if (branchResult.status !== 0) {
-    return { exists: false, reason: `Failed to check remote branch: ${branchResult.stderr}` };
+    return { exists: false, reason: `Failed to check remote branch: ${branchResult.stderr}`, remoteHeadSha: null };
   }
 
   if (!branchResult.stdout) {
-    return { exists: false, reason: `Branch ${branchName} not found on remote` };
+    return { exists: false, reason: `Branch ${branchName} not found on remote`, remoteHeadSha: null };
   }
 
-  const fetchResult = runGitFn(["fetch", "--quiet", "origin", branchName], worktreeDir);
-  if (fetchResult.status !== 0) {
-    return { exists: false, reason: `Failed to fetch remote branch ${branchName}: ${fetchResult.stderr}` };
+  const remoteHeadSha = branchResult.stdout.split(/\s+/)[0] || null;
+  if (!remoteHeadSha) {
+    return { exists: false, reason: `Could not determine remote HEAD for branch ${branchName}`, remoteHeadSha: null };
   }
 
-  const commitResult = runGitFn(["merge-base", "--is-ancestor", commitSha, "FETCH_HEAD"], worktreeDir);
-  if (commitResult.status !== 0) {
-    return { exists: false, reason: `Commit ${commitSha} not pushed to remote branch ${branchName}` };
+  if (remoteHeadSha !== commitSha) {
+    return {
+      exists: false,
+      reason: `Remote branch ${branchName} HEAD is ${remoteHeadSha}, expected ${commitSha}`,
+      remoteHeadSha,
+    };
   }
 
-  return { exists: true, reason: "Commit exists on remote" };
+  return { exists: true, reason: "Remote branch HEAD matches reported commit", remoteHeadSha };
 }
 
 export function checkArtifactReviewability(task: Task, options: { runGit?: typeof runGit } = {}): ArtifactCheckResult {
@@ -220,7 +225,16 @@ export function checkArtifactReviewability(task: Task, options: { runGit?: typeo
   result.evidence.branchMatches = true;
 
   const headCommit = getHeadCommit(worktreeDir, runGitFn);
-  result.evidence.commitSha = headCommit;
+  const expectedCommit = task.commit_sha || headCommit;
+  result.evidence.commitSha = expectedCommit;
+  if (!headCommit) {
+    result.reason = "Could not determine local HEAD commit";
+    return result;
+  }
+  if (task.commit_sha && headCommit !== task.commit_sha) {
+    result.reason = `Local HEAD is ${headCommit}, expected reported commit ${task.commit_sha}`;
+    return result;
+  }
 
   let committedChanges: string[] = [];
   const mergeBase = getMergeBase(worktreeDir, defaultBranch, runGitFn);
@@ -264,10 +278,11 @@ export function checkArtifactReviewability(task: Task, options: { runGit?: typeo
     result.evidence.allChangesInScope = true;
   }
 
-  const remoteCheck = checkRemoteCommitExists(worktreeDir, currentBranch, headCommit || "", {
+  const remoteCheck = checkRemoteCommitExists(worktreeDir, currentBranch, expectedCommit || "", {
     runGit: runGitFn,
   });
   result.evidence.remoteVerified = remoteCheck.exists;
+  result.evidence.remoteHeadSha = remoteCheck.remoteHeadSha;
   result.evidence.remoteCheckReason = remoteCheck.reason;
   if (!remoteCheck.exists) {
     result.reason = remoteCheck.reason;

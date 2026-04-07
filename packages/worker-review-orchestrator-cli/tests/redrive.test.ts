@@ -448,13 +448,12 @@ describe("redrive", () => {
       return task.id && String(task.id).startsWith("redrive-");
     }) as Record<string, unknown> | undefined;
     expect(redriveTask).toBeDefined();
-    expect(redriveTask?.branchName).not.toBe(originalBranchName);
-    expect(redriveTask?.branchName).toMatch(new RegExp(`^${originalBranchName}-redrive-[a-f0-9]{8}$`));
+    expect(redriveTask?.branchName).toBe(`${originalBranchName}-r2`);
     expect(redriveTask?.continuationMode).toBe("continue");
     expect(redriveTask?.continueFromTaskId).toBe("dispatch-1:task-1");
   });
 
-  it("generates new branchName with -redrive- suffix", async () => {
+  it("generates new branchName with incrementing -rN suffix", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       text: () => Promise.resolve(JSON.stringify(mockWorktreeMismatchSnapshot)),
@@ -500,8 +499,7 @@ describe("redrive", () => {
       return task.id && String(task.id).startsWith("redrive-");
     }) as Record<string, unknown> | undefined;
     expect(taskPayload).toBeDefined();
-    expect(taskPayload?.branchName).toMatch(/^feature\/test-redrive-[a-f0-9]{8}$/);
-    expect(taskPayload?.branchName).not.toBe(originalBranchName);
+    expect(taskPayload?.branchName).toBe("feature/test-r2");
   });
 
   it("throws error when dispatch response is missing taskIds", async () => {
@@ -940,7 +938,7 @@ describe("redrive", () => {
     expect(redriveTask?.continueFromTaskId).toBe("dispatch-1:task-cont-rework");
 
     const originalBranchName = "feature/cont-rework";
-    expect(redriveTask?.branchName).toMatch(new RegExp(`^${originalBranchName}-redrive-[a-f0-9]{8}$`));
+    expect(redriveTask?.branchName).toBe(`${originalBranchName}-r2`);
   });
 
   it("blocked+rework redrive injects rework notes into workerPrompt and contextMarkdown", async () => {
