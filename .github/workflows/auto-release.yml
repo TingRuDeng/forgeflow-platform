@@ -65,6 +65,7 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.has-packages == 'true'
     runs-on: ubuntu-latest
+    environment: npm
     permissions:
       contents: read
       id-token: write
@@ -94,11 +95,12 @@ jobs:
       - name: Build package
         run: pnpm --filter @tingrudeng/${{ matrix.package.name }} build
 
-      - name: Publish to npm with provenance
+      - name: Publish to npm with Trusted Publishing (OIDC)
         env:
           GITHUB_ACTIONS: "true"
         run: |
-          pnpm --filter @tingrudeng/${{ matrix.package.name }} publish --access public --provenance --no-git-checks
+          cd packages/${{ matrix.package.name }}
+          npm publish --access public --provenance
           echo "✅ Published @tingrudeng/${{ matrix.package.name }}@${{ matrix.package.version }}"
 
   summary:
