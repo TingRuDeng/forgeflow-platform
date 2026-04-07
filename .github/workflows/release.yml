@@ -22,6 +22,10 @@ on:
         required: true
         default: beta
         type: string
+  push:
+    branches: [main]
+    paths:
+      - 'packages/*/package.json'
 
 permissions:
   contents: read
@@ -30,7 +34,59 @@ permissions:
   actions: read
 
 jobs:
-  publish:
+  detect-changes:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.detect.outputs.packages }}
+      has-packages: ${{ steps.detect.outputs.has-packages }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Detect packages needing release
+        id: detect
+        run: |
+          PACKAGES='[]'
+          
+          for pkg_dir in packages/*/; do
+            pkg_name=$(node -p "require('./${pkg_dir}package.json').name")
+            local_version=$(node -p "require('./${pkg_dir}package.json').version")
+            
+            if [[ "$pkg_name" == @tingrudeng/* ]]; then
+              npm_version=$(npm view "$pkg_name" version 2>/dev/null || echo "0.0.0")
+              
+              if [ "$local_version" != "$npm_version" ]; then
+                echo "📦 $pkg_name: local=$local_version, npm=$npm_version -> NEEDS RELEASE"
+                pkg_short=$(echo "$pkg_name" | sed 's/@tingrudeng\///')
+                PACKAGES=$(echo "$PACKAGES" | jq -c --arg name "$pkg_short" --arg version "$local_version" '. += [{"name": $name, "version": $version}]')
+              else
+                echo "✓ $pkg_name: local=$local_version, npm=$npm_version -> up to date"
+              fi
+            fi
+          done
+          
+          echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
+          if [ "$PACKAGES" != "[]" ]; then
+            echo "has-packages=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-packages=false" >> $GITHUB_OUTPUT
+          fi
+
+  publish-manual:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: npm
     steps:
@@ -47,7 +103,6 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -69,8 +124,47 @@ jobs:
             --publish \
             --ci
 
+  publish-auto:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has-packages == 'true'
+    runs-on: ubuntu-latest
+    environment: npm
+    strategy:
+      matrix:
+        package: ${{ fromJson(needs.detect-changes.outputs.packages) }}
+      fail-fast: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build package
+        run: pnpm --filter @tingrudeng/${{ matrix.package.name }} build
+
+      - name: Publish to npm with Trusted Publishing (OIDC)
+        env:
+          GITHUB_ACTIONS: "true"
+        run: |
+          cd packages/${{ matrix.package.name }}
+          npm publish --access public --provenance
+          echo "✅ Published @tingrudeng/${{ matrix.package.name }}@${{ matrix.package.version }}"
+
   scorecard:
-    needs: publish
+    needs: [publish-manual, publish-auto]
+    if: always() && (needs.publish-manual.result == 'success' || needs.publish-auto.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       security-events: write
