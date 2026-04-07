@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -116,6 +117,56 @@ function createTestState(): RuntimeState {
   };
 }
 
+function readSnapshotState(stateDir: string): {
+  journalMode: string;
+  count: number;
+  minRevision: number;
+  maxRevision: number;
+  latest:
+    | {
+        revision: number;
+        data: string;
+        checksum_sha256: string;
+        created_at: string;
+      }
+    | undefined;
+} {
+  const db = new DatabaseSync(path.join(stateDir, "runtime-state.db"), { readOnly: true });
+
+  try {
+    const journalMode = db.prepare("PRAGMA journal_mode").get() as { journal_mode: string };
+    const stats = db.prepare(`
+      SELECT
+        COUNT(*) AS count,
+        MIN(revision) AS minRevision,
+        MAX(revision) AS maxRevision
+      FROM snapshots
+    `).get() as { count: number; minRevision: number; maxRevision: number };
+    const latest = db
+      .prepare(
+        "SELECT revision, data, checksum_sha256, created_at FROM snapshots ORDER BY revision DESC LIMIT 1",
+      )
+      .get() as
+      | {
+          revision: number;
+          data: string;
+          checksum_sha256: string;
+          created_at: string;
+        }
+      | undefined;
+
+    return {
+      journalMode: journalMode.journal_mode,
+      count: stats.count,
+      minRevision: stats.minRevision,
+      maxRevision: stats.maxRevision,
+      latest,
+    };
+  } finally {
+    db.close();
+  }
+}
+
 describe("runtime-state-sqlite", () => {
   it("initializes empty database when no db file exists", () => {
     const stateDir = makeTempDir();
@@ -197,18 +248,7 @@ describe("runtime-state-sqlite", () => {
     expect(reloaded2.workers[1].id).toBe("test-worker-2");
   });
 
-  it("returns empty state for corrupted db file", () => {
-    const stateDir = makeTempDir();
-    const dbPath = path.join(stateDir, "runtime-state.db");
-    fs.writeFileSync(dbPath, "not a valid sqlite database");
-
-    const state = loadRuntimeState(stateDir);
-
-    expect(state.version).toBe(1);
-    expect(state.workers).toHaveLength(0);
-  });
-
-  it("updates existing snapshot on save", () => {
+  it("appends snapshot revisions and preserves history on save", () => {
     const stateDir = makeTempDir();
     const state = createTestState();
 
@@ -235,6 +275,52 @@ describe("runtime-state-sqlite", () => {
     const reloaded = loadRuntimeState(stateDir);
     expect(reloaded.workers).toHaveLength(2);
     expect(reloaded.workers.find((w) => w.id === "test-worker-updated")).toBeDefined();
+
+    const snapshotState = readSnapshotState(stateDir);
+    expect(snapshotState.journalMode).toBe("wal");
+    expect(snapshotState.count).toBe(2);
+    expect(snapshotState.minRevision).toBe(1);
+    expect(snapshotState.maxRevision).toBe(2);
+    expect(snapshotState.latest?.revision).toBe(2);
+    expect(snapshotState.latest).toBeDefined();
+    expect(snapshotState.latest?.checksum_sha256).toBe(
+      crypto.createHash("sha256").update(snapshotState.latest?.data ?? "", "utf8").digest("hex"),
+    );
+  });
+
+  it("throws when the snapshot table is empty", () => {
+    const stateDir = makeTempDir();
+    const dbPath = path.join(stateDir, "runtime-state.db");
+
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS snapshots (
+        revision INTEGER PRIMARY KEY AUTOINCREMENT,
+        data TEXT NOT NULL,
+        checksum_sha256 TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `);
+    db.close();
+
+    expect(() => loadRuntimeState(stateDir)).toThrow(/failed to load runtime-state\.db|snapshots/i);
+  });
+
+  it("throws when the latest snapshot checksum does not match", () => {
+    const stateDir = makeTempDir();
+    const state = createTestState();
+
+    saveRuntimeState(stateDir, state);
+
+    const db = new DatabaseSync(path.join(stateDir, "runtime-state.db"));
+    db.prepare("UPDATE snapshots SET data = data || 'corrupted' WHERE revision = 1").run();
+    db.close();
+
+    expect(() => loadRuntimeState(stateDir)).toThrow(/checksum mismatch|failed to load runtime-state\.db/i);
   });
 
   it("sqliteStore has required methods", () => {
@@ -272,7 +358,7 @@ describe("runtime-state-sqlite", () => {
     expect(state.workers).toHaveLength(0);
   });
 
-  it("imports from corrupted DB by falling back to JSON if available", () => {
+  it("throws for a corrupted db by default and rescues from JSON only with the explicit env switch", () => {
     const stateDir = makeTempDir();
     const dbPath = path.join(stateDir, "runtime-state.db");
     const jsonPath = path.join(stateDir, "runtime-state.json");
@@ -281,37 +367,21 @@ describe("runtime-state-sqlite", () => {
     const testState = createTestState();
     fs.writeFileSync(jsonPath, JSON.stringify(testState, null, 2));
 
+    const originalEnv = process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON;
+    delete process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON;
+
+    expect(() => sqliteStore.load(stateDir)).toThrow(/failed to load runtime-state\.db/i);
+
+    process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON = "1";
     const imported = sqliteStore.load(stateDir);
 
     expect(imported.workers).toHaveLength(1);
     expect(imported.workers[0].id).toBe("test-worker-1");
-  });
 
-  it("imports from empty DB by falling back to JSON if available", () => {
-    const stateDir = makeTempDir();
-    const dbPath = path.join(stateDir, "runtime-state.db");
-    const jsonPath = path.join(stateDir, "runtime-state.json");
-
-    const db = new DatabaseSync(dbPath);
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS metadata (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS snapshots (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        data TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-    `);
-    db.close();
-
-    const testState = createTestState();
-    fs.writeFileSync(jsonPath, JSON.stringify(testState, null, 2));
-
-    const imported = sqliteStore.load(stateDir);
-
-    expect(imported.workers).toHaveLength(1);
-    expect(imported.workers[0].id).toBe("test-worker-1");
+    if (originalEnv !== undefined) {
+      process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON = originalEnv;
+    } else {
+      delete process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON;
+    }
   });
 });

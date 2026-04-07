@@ -17,6 +17,7 @@ const originalFetch = globalThis.fetch;
 const originalPath = process.env.PATH;
 const originalSubmitResultRetryDelay = process.env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS;
 const originalDispatcherAuthMode = process.env.DISPATCHER_AUTH_MODE;
+const originalWorkerCreatePr = process.env.FORGEFLOW_WORKER_CREATE_PR;
 
 function makeTempDir() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-worker-daemon-"));
@@ -50,7 +51,7 @@ function createRepoWithOrigin(rootDir: string, defaultBranch = "master") {
   return repoDir;
 }
 
-function createFakeWorkerRepoRoot(rootDir: string) {
+function createFakeWorkerRepoRoot(rootDir: string, options: { captureEnv?: boolean } = {}) {
   const fakeRoot = path.join(rootDir, "fake-worker-root");
   const scriptsDir = path.join(fakeRoot, "scripts");
   fs.mkdirSync(scriptsDir, { recursive: true });
@@ -64,6 +65,9 @@ function createFakeWorkerRepoRoot(rootDir: string) {
       'const worktreeDir = arg("--worktree-dir");',
       'const outputDir = arg("--output-dir");',
       'const assignment = JSON.parse(fs.readFileSync(path.join(assignmentDir, "assignment.json"), "utf8"));',
+      options.captureEnv
+        ? 'const capturedEnv = { GITHUB_TOKEN: process.env.GITHUB_TOKEN ?? null, DISPATCHER_API_TOKEN: process.env.DISPATCHER_API_TOKEN ?? null, CUSTOM_SECRET: process.env.CUSTOM_SECRET ?? null, PATH: process.env.PATH ?? null, HOME: process.env.HOME ?? null };'
+        : "",
       'fs.mkdirSync(path.join(worktreeDir, "docs"), { recursive: true });',
       'fs.writeFileSync(path.join(worktreeDir, "docs", "smoke.md"), "# smoke\\n");',
       'fs.mkdirSync(outputDir, { recursive: true });',
@@ -86,6 +90,9 @@ function createFakeWorkerRepoRoot(rootDir: string) {
       'fs.writeFileSync(path.join(outputDir, "worker-result.json"), JSON.stringify(result, null, 2));',
       'fs.writeFileSync(path.join(outputDir, "worker-verification.json"), JSON.stringify(result.verification, null, 2));',
       'fs.writeFileSync(path.join(outputDir, "worker-output.raw.txt"), "worker ok\\n");',
+      options.captureEnv
+        ? 'fs.writeFileSync(path.join(outputDir, "captured-env.json"), JSON.stringify(capturedEnv, null, 2));'
+        : "",
     ].join("\n"),
   );
   return fakeRoot;
@@ -162,6 +169,11 @@ afterEach(() => {
     delete process.env.DISPATCHER_AUTH_MODE;
   } else {
     process.env.DISPATCHER_AUTH_MODE = originalDispatcherAuthMode;
+  }
+  if (originalWorkerCreatePr === undefined) {
+    delete process.env.FORGEFLOW_WORKER_CREATE_PR;
+  } else {
+    process.env.FORGEFLOW_WORKER_CREATE_PR = originalWorkerCreatePr;
   }
   globalThis.fetch = originalFetch;
 });
@@ -260,6 +272,87 @@ describe("worker daemon cycle", () => {
     );
     expect(fs.existsSync(path.join(materializedAssignmentDir, "assignment.json"))).toBe(true);
     expect(fs.existsSync(path.join(materializedAssignmentDir, "execution", "worker-result.json"))).toBe(true);
+  }, 15_000);
+
+  it("keeps the worker child process env on an allowlist", async () => {
+    process.env.DISPATCHER_AUTH_MODE = "open";
+    process.env.GITHUB_TOKEN = "super-secret";
+    process.env.DISPATCHER_API_TOKEN = "dispatcher-secret";
+    process.env.CUSTOM_SECRET = "custom-secret";
+    const tempDir = makeTempDir();
+    const repoDir = createRepoWithOrigin(tempDir, "master");
+    const stateDir = path.join(tempDir, "state");
+
+    const stateMod = await import(stateModulePath);
+    const daemonMod = await import(daemonModulePath);
+    const baseTime = Date.now();
+    const iso = (offsetMs: number) => new Date(baseTime + offsetMs).toISOString();
+    const dispatch = stateMod.createDispatch(stateMod.createEmptyRuntimeState(), {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-env",
+          title: "capture child env",
+          pool: "codex",
+          allowedPaths: ["docs/**"],
+          acceptance: ["capture env"],
+          dependsOn: [],
+          branchName: "ai/codex/task-env",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-env",
+          assignment: {
+            taskId: "task-env",
+            workerId: "placeholder",
+            pool: "codex",
+            status: "assigned",
+            branchName: "ai/codex/task-env",
+            allowedPaths: ["docs/**"],
+            commands: {
+              test: "echo ok",
+            },
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+          },
+          workerPrompt: "你是 codex-worker。",
+          contextMarkdown: "# Context",
+        },
+      ],
+      createdAt: iso(0),
+    });
+    stateMod.saveRuntimeState(stateDir, dispatch.state);
+
+    const client = daemonMod.createStateDirDispatcherClient(stateDir);
+    const fakeRepoRoot = createFakeWorkerRepoRoot(tempDir, { captureEnv: true });
+    const summary = await daemonMod.runWorkerDaemonCycle({
+      client,
+      workerId: "codex-env-worker",
+      pool: "codex",
+      hostname: "mac-mini",
+      repoDir,
+      repoRoot: fakeRepoRoot,
+      dryRunExecution: false,
+      at: iso(5_000),
+    });
+
+    const capturedEnv = JSON.parse(fs.readFileSync(path.join(summary.outputDir, "captured-env.json"), "utf8")) as {
+      GITHUB_TOKEN: string | null;
+      DISPATCHER_API_TOKEN: string | null;
+      CUSTOM_SECRET: string | null;
+      PATH: string | null;
+      HOME: string | null;
+    };
+
+    expect(capturedEnv.GITHUB_TOKEN).toBeNull();
+    expect(capturedEnv.DISPATCHER_API_TOKEN).toBeNull();
+    expect(capturedEnv.CUSTOM_SECRET).toBeNull();
+    expect(capturedEnv.PATH).toBeTruthy();
+    expect(capturedEnv.HOME).toBeTruthy();
   }, 15_000);
 
   it("lets a late worker claim a ready task and complete it", async () => {
@@ -405,6 +498,39 @@ describe("worker daemon cycle", () => {
     expect(submittedPayloads[0].changedFiles).toEqual([]);
   });
 
+  it("rejects worker pushes to the default branch name", async () => {
+    const tempDir = makeTempDir();
+    const repoDir = createRepoWithOrigin(tempDir, "master");
+    const daemonMod = await import(daemonModulePath);
+    const fakeRepoRoot = createFakeWorkerRepoRoot(tempDir);
+    const submittedPayloads: Array<{ result: { output: string } }> = [];
+
+    const client = {
+      registerWorker: async () => ({ ok: true }),
+      heartbeat: async () => ({ ok: true }),
+      getAssignedTask: async () => buildAssignedTaskPayload(repoDir, "task-branch-safety", "master"),
+      startTask: async () => ({ ok: true }),
+      submitResult: async (_workerId: string, payload: { result: { output: string } }) => {
+        submittedPayloads.push(payload);
+        return { ok: true };
+      },
+    };
+
+    await expect(daemonMod.runWorkerDaemonCycle({
+      client,
+      workerId: "codex-branch-safety",
+      pool: "codex",
+      hostname: "host",
+      repoDir,
+      repoRoot: fakeRepoRoot,
+      dryRunExecution: false,
+      at: new Date().toISOString(),
+    })).rejects.toThrow(/default branch/i);
+
+    expect(submittedPayloads).toHaveLength(1);
+    expect(submittedPayloads[0].result.output).toContain("default branch");
+  });
+
   it("fails explicitly and submits a failed result when PR creation fails", async () => {
     const tempDir = makeTempDir();
     const repoDir = createRepoWithOrigin(tempDir, "master");
@@ -413,6 +539,7 @@ describe("worker daemon cycle", () => {
     const submittedPayloads: Array<{ result: { output: string } }> = [];
 
     process.env.GITHUB_TOKEN = "test-token";
+    process.env.FORGEFLOW_WORKER_CREATE_PR = "1";
     globalThis.fetch = async () => ({
       ok: false,
       text: async () => JSON.stringify({ message: "pr create failed" }),

@@ -9,6 +9,12 @@ function normalizeDecision(decision: DecideOptions["decision"]) {
   if (decision === "merge") {
     return "merge" as const;
   }
+  if (decision === "changes_requested") {
+    return "changes_requested" as const;
+  }
+  if (decision === "rework") {
+    return "rework" as const;
+  }
   return "block" as const;
 }
 
@@ -30,7 +36,10 @@ function upsertByTaskId(items: Array<Record<string, unknown>>, payload: Record<s
   return next;
 }
 
-function buildLocalDecisionState(state: LocalRuntimeState, input: DecideOptions & { decision: "merge" | "block" }) {
+function buildLocalDecisionState(
+  state: LocalRuntimeState,
+  input: DecideOptions & { decision: "merge" | "block" | "rework" | "changes_requested" },
+) {
   const task = state.tasks.find((candidate) => candidate.id === input.taskId);
   if (!task) {
     throw new Error(`task not found: ${input.taskId}`);

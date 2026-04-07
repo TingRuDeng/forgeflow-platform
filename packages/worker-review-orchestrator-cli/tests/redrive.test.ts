@@ -761,6 +761,85 @@ describe("redrive", () => {
     expect(result.continueFromTaskId).toBe("dispatch-1:task-rework");
   });
 
+  it("redrives a blocked task with changes_requested decision", async () => {
+    const snapshot = {
+      tasks: [
+        {
+          id: "dispatch-1:task-changes-requested",
+          status: "blocked",
+          title: "Changes Requested Task",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/changes-requested",
+          pool: "trae",
+          allowedPaths: ["src/**"],
+          acceptance: ["pnpm test"],
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-1:task-changes-requested",
+          workerId: "worker-1",
+          pool: "trae",
+          status: "blocked",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/changes-requested",
+          allowedPaths: ["src/**"],
+          targetWorkerId: "trae-remote-forgeflow",
+          workerPrompt: "Custom worker prompt",
+          contextMarkdown: "# Context\n\nChanges requested task.",
+        },
+      ],
+      reviews: [
+        {
+          taskId: "dispatch-1:task-changes-requested",
+          decision: "changes_requested",
+          actor: "reviewer",
+          notes: "please address the requested changes",
+          decidedAt: "2026-03-29T10:00:00Z",
+        },
+      ],
+      events: [],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(snapshot)),
+    });
+
+    const dispatchMockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            dispatchId: "dispatch-redrive-changes-requested",
+            taskIds: ["dispatch-74:redrive-changes-requested"],
+            assignments: [],
+          }),
+        ),
+    });
+
+    let fetchCallCount = 0;
+    const combinedFetch = async (url: string, init?: RequestInit) => {
+      fetchCallCount++;
+      if (fetchCallCount === 1) {
+        return mockFetch(url, init);
+      }
+      return dispatchMockFetch(url, init);
+    };
+
+    const result = await runRedrive({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-changes-requested",
+      fetchImpl: combinedFetch as typeof globalThis.fetch,
+    });
+
+    expect(result.originalTaskId).toBe("dispatch-1:task-changes-requested");
+    expect(result.newTaskId).toBe("dispatch-74:redrive-changes-requested");
+    expect(result.failureSummary).toContain("rework:");
+  });
+
   it("throws error when blocked task has non-rework decision", async () => {
     const snapshot = {
       tasks: [
@@ -798,7 +877,7 @@ describe("redrive", () => {
         taskId: "dispatch-1:task-blocked-merge",
         fetchImpl: mockFetch as typeof globalThis.fetch,
       }),
-    ).rejects.toThrow('task dispatch-1:task-blocked-merge is blocked but latest review decision is "merge" (only "rework" is redriveable)');
+    ).rejects.toThrow('task dispatch-1:task-blocked-merge is blocked but latest review decision is "merge" (only "rework" and "changes_requested" are redriveable)');
   });
 
   it("uses parsed review timestamps when UTC and local-offset decisions are mixed", async () => {
@@ -845,7 +924,7 @@ describe("redrive", () => {
         taskId: "dispatch-1:task-mixed-review-times",
         fetchImpl: mockFetch as typeof globalThis.fetch,
       }),
-    ).rejects.toThrow('task dispatch-1:task-mixed-review-times is blocked but latest review decision is "merge" (only "rework" is redriveable)');
+    ).rejects.toThrow('task dispatch-1:task-mixed-review-times is blocked but latest review decision is "merge" (only "rework" and "changes_requested" are redriveable)');
   });
 
   it("blocked+rework redrive generates payload with continuation fields", async () => {

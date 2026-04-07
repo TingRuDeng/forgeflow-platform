@@ -1,4 +1,4 @@
-export type ReviewDecisionKind = "merge" | "block" | "rework";
+export type ReviewDecisionKind = "merge" | "block" | "rework" | "changes_requested";
 
 import type {
   ReviewDecisionEvidence,

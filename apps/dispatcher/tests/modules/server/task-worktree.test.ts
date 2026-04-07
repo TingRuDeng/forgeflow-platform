@@ -80,7 +80,7 @@ describe("task worktree preparation", () => {
     expect(runGit(["branch", "--show-current"], worktreeDir)).toBe("ai/test-task");
   });
 
-  it("reuses the same task worktree only when reuse is explicitly allowed", async () => {
+  it("resets a reused task worktree before returning it", async () => {
     const { repoDir } = setupRepoWithOrigin();
     const mod = await import(taskWorktreeModulePath);
 
@@ -103,10 +103,12 @@ describe("task worktree preparation", () => {
       defaultBranch: "master",
     }, {
       allowReuse: true,
+      resetOnReuse: true,
     });
 
     expect(second).toBe(first);
-    expect(fs.existsSync(path.join(second, "LOCAL.txt"))).toBe(true);
+    expect(fs.existsSync(path.join(second, "LOCAL.txt"))).toBe(false);
+    expect(runGit(["branch", "--show-current"], second)).toBe("ai/test-reuse");
   });
 
   it("fails instead of falling back to a stale local branch when fetch fails", async () => {

@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawn, spawnSync, execSync, ChildProcess } from "node:child_process";
 
 import { handleDispatcherHttpRequest } from "./dispatcher-server.js";
-import { prepareTaskWorktree, safeTaskDirName } from "./task-worktree.js";
+import { prepareTaskWorktree, removeTaskWorktree, safeTaskDirName } from "./task-worktree.js";
 import { formatLocalTimestamp } from "./time.js";
 import {
   logger,
@@ -86,6 +86,72 @@ function runGit(args: string[], cwd: string): GitResult {
     stdout: (result.stdout || "").trim(),
     stderr: (result.stderr || "").trim(),
   };
+}
+
+function buildWorkerEnv(): NodeJS.ProcessEnv {
+  const defaultAllowlist = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "TERM",
+    "TMPDIR",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "FORGEFLOW_CODEX_MODEL",
+    "FORGEFLOW_EXEC_TIMEOUT_MS",
+    "FORGEFLOW_VERIFICATION_TIMEOUT_MS",
+    "FORGEFLOW_VERIFICATION_SHELL",
+    "FORGEFLOW_GIT_SSH_COMMAND",
+  ];
+  const allowlist = String(process.env.FORGEFLOW_WORKER_ENV_ALLOWLIST || defaultAllowlist.join(","))
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of allowlist) {
+    if (process.env[key] !== undefined) {
+      env[key] = process.env[key];
+    }
+  }
+  return env;
+}
+
+function assertSafeBranchName(repoDir: string, branchName: string, defaultBranch: string): void {
+  const normalizedBranch = branchName.trim();
+  if (!normalizedBranch) {
+    throw new Error("invalid branchName (empty)");
+  }
+  if (normalizedBranch !== branchName) {
+    throw new Error("invalid branchName (surrounding whitespace)");
+  }
+  if (normalizedBranch === defaultBranch) {
+    throw new Error(`refusing to push to default branch: ${defaultBranch}`);
+  }
+
+  const allowedPrefixes = String(process.env.FORGEFLOW_ALLOWED_PUSH_PREFIXES || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (allowedPrefixes.length > 0 && !allowedPrefixes.some((prefix) => normalizedBranch.startsWith(prefix))) {
+    throw new Error(`branchName not allowed by FORGEFLOW_ALLOWED_PUSH_PREFIXES: ${normalizedBranch}`);
+  }
+
+  ensureSuccess(
+    runGit(["check-ref-format", "--branch", normalizedBranch], repoDir),
+    `invalid git branch ref: ${normalizedBranch}`,
+  );
+}
+
+function shouldCreatePullRequest(): boolean {
+  return process.env.FORGEFLOW_WORKER_CREATE_PR === "1";
+}
+
+function shouldRemoveWorktreeOnExit(): boolean {
+  return process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT === "1";
 }
 
 interface TaskAssignment {
@@ -190,7 +256,7 @@ function maybeCommitAndPush(worktreeDir: string, payload: TaskPayload, changedFi
 }
 
 async function maybeCreatePullRequest(payload: TaskPayload, changedFiles: string[]): Promise<PullRequestInfo | null> {
-  if (!process.env.GITHUB_TOKEN || changedFiles.length === 0) {
+  if (!shouldCreatePullRequest() || !process.env.GITHUB_TOKEN || changedFiles.length === 0) {
     return null;
   }
 
@@ -274,7 +340,7 @@ function runWorkerAssignmentScript(repoRoot: string, assignmentDir: string, work
       outputDir,
     ], {
       cwd: repoRoot,
-      env: process.env,
+      env: buildWorkerEnv(),
     }) as ChildProcess & { stdout?: NodeJS.ReadableStream; stderr?: NodeJS.ReadableStream };
 
     let stdout = "";
@@ -344,6 +410,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
   const heartbeatClient = input.client;
   const taskId = input.payload.task.id;
   const workerId = input.workerId;
+  let worktreeDir: string | null = null;
 
   let heartbeatIntervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -374,8 +441,10 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
 
     startHeartbeat();
 
-    const worktreeDir = prepareTaskWorktree(input.repoDir, input.payload.assignment, {
+    assertSafeBranchName(input.repoDir, input.payload.assignment.branchName, input.payload.assignment.defaultBranch);
+    worktreeDir = prepareTaskWorktree(input.repoDir, input.payload.assignment, {
       allowReuse: true,
+      resetOnReuse: true,
     });
     const assignmentDir = materializeAssignmentPackage(worktreeDir, input.payload);
     const outputDir = path.join(assignmentDir, "execution");
@@ -501,6 +570,19 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
     }
 
     throw error;
+  } finally {
+    if (worktreeDir && shouldRemoveWorktreeOnExit()) {
+      try {
+        removeTaskWorktree(input.repoDir, taskId);
+      } catch (cleanupError) {
+        logger.warn({
+          operation: "cleanupWorktree",
+          taskId,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          event: "worktree_cleanup_failed",
+        });
+      }
+    }
   }
 }
 

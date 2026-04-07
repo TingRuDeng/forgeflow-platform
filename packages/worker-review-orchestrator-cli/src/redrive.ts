@@ -253,9 +253,9 @@ export async function runRedrive(options: RedriveOptions): Promise<RedriveResult
         `task ${options.taskId} is blocked but has no review decision`,
       );
     }
-    if (latestReview.decision !== "rework") {
+    if (!["rework", "changes_requested"].includes(latestReview.decision)) {
       throw new Error(
-        `task ${options.taskId} is blocked but latest review decision is "${latestReview.decision}" (only "rework" is redriveable)`,
+        `task ${options.taskId} is blocked but latest review decision is "${latestReview.decision}" (only "rework" and "changes_requested" are redriveable)`,
       );
     }
 
@@ -279,7 +279,7 @@ export async function runRedrive(options: RedriveOptions): Promise<RedriveResult
     }
   } else {
     throw new Error(
-      `task ${options.taskId} is in "${status}" state and is not redriveable (only "failed" and "blocked" with rework are redriveable)`,
+      `task ${options.taskId} is in "${status}" state and is not redriveable (only "failed" and "blocked" with rework/changes_requested are redriveable)`,
     );
   }
 

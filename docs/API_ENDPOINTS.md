@@ -65,11 +65,13 @@ Current endpoint families:
   - Update worker heartbeat.
 - `GET /api/workers/:workerId/assigned-task`
   - Claim an assigned task or pick a `ready` task for that worker pool.
+  - Tasks whose `dependsOn` prerequisites are not yet merged stay in `planned` and are excluded from this claim path until dispatcher unlocks them to `ready`.
 - `POST /api/workers/:workerId/start-task`
   - Move task from `assigned` to `in_progress`.
 - `POST /api/workers/:workerId/result`
   - Submit execution result, changed files, and optional PR metadata.
   - Caller should only treat the task as durably delivered after this endpoint returns success; `worker-daemon` no longer treats exhausted submission retries as a completed task.
+  - Worker execution now uses a child-process env allowlist; do not assume parent-side secrets such as `GITHUB_TOKEN` or `DISPATCHER_API_TOKEN` are visible inside the assignment process.
   - `result` may now include additive structured worker evidence for dispatcher persistence:
     - `failureType`
     - `failureSummary`
@@ -87,12 +89,20 @@ Current endpoint families:
     - `workerPromptMode`
     - `reportSchemaVersion`
 - `POST /api/reviews/:taskId/decision`
-  - Submit `merge` or `block` and move task from `review` to `merged` or `blocked`.
+  - Submit `merge`, `block`, `rework`, or `changes_requested`.
+  - `merge` moves task `review -> merged`.
+  - `block` / `rework` / `changes_requested` all move task `review -> blocked`, but dispatcher preserves the original review decision value for audit and redrive.
+  - Request body must be a JSON object and now validates:
+    - `actor` required, non-empty string
+    - `decision` required enum
+    - `notes` optional string
+    - `evidence` optional object
   - Request body may include additive structured decision evidence:
     - `reasonCode`
     - `mustFix[]`
     - `canRedrive`
     - `redriveStrategy`
+  - Blocked tasks with latest review decision `rework` or `changes_requested` are redriveable in the orchestrator CLI.
   - Returns `404` when the task or assignment does not exist.
   - Returns `409` when the task exists but is not currently in `review`.
 

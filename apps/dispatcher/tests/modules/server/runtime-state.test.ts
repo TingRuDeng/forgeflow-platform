@@ -778,6 +778,196 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
   });
 
+  it("keeps dependent tasks planned until dependencies merge, then unlocks them with a ready event", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-upstream",
+      pool: "codex",
+      hostname: "upstream-host",
+      labels: ["codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-04-05T10:00:00.000Z",
+    });
+    state = registerWorker(state, {
+      workerId: "codex-dependent",
+      pool: "codex",
+      hostname: "dependent-host",
+      labels: ["codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-04-05T10:01:00.000Z",
+    });
+
+    const upstreamDispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-upstream",
+          title: "Upstream task",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["完成上游任务"],
+          dependsOn: [],
+          branchName: "ai/codex/task-upstream",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-upstream",
+          assignment: {
+            taskId: "task-upstream",
+            workerId: "placeholder",
+            pool: "codex",
+            status: "assigned",
+            branchName: "ai/codex/task-upstream",
+            allowedPaths: ["src/**"],
+            commands: { test: "pnpm test" },
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+          },
+          workerPrompt: "你是 codex-worker。",
+          contextMarkdown: "# Context",
+        },
+      ],
+      createdAt: "2026-04-05T10:02:00.000Z",
+    });
+    state = upstreamDispatch.state;
+
+    expect(upstreamDispatch.assignments[0]).toMatchObject({
+      workerId: "codex-upstream",
+      status: "assigned",
+    });
+
+    const dependentDispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-dependent",
+          title: "Dependent task",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["完成依赖任务后才能运行"],
+          dependsOn: [upstreamDispatch.taskIds[0]],
+          branchName: "ai/codex/task-dependent",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-dependent",
+          assignment: {
+            taskId: "task-dependent",
+            workerId: "placeholder",
+            pool: "codex",
+            status: "assigned",
+            branchName: "ai/codex/task-dependent",
+            allowedPaths: ["src/**"],
+            commands: { test: "pnpm test" },
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+          },
+          workerPrompt: "你是 codex-worker。",
+          contextMarkdown: "# Context",
+        },
+      ],
+      createdAt: "2026-04-05T10:03:00.000Z",
+    });
+    state = dependentDispatch.state;
+
+    const dependentTaskId = dependentDispatch.taskIds[0];
+    const dependentTask = state.tasks.find((task) => task.id === dependentTaskId);
+    const dependentAssignment = state.assignments.find((assignment) => assignment.taskId === dependentTaskId);
+
+    expect(dependentTask).toMatchObject({
+      status: "planned",
+      assignedWorkerId: null,
+      lastAssignedWorkerId: null,
+    });
+    expect(dependentAssignment).toMatchObject({
+      workerId: null,
+      status: "pending",
+      assignment: {
+        workerId: null,
+        status: "pending",
+      },
+    });
+
+    const claimBeforeUnlock = claimAssignedTaskForWorker(state, {
+      workerId: "codex-dependent",
+      at: "2026-04-05T10:03:05.000Z",
+    });
+    expect(claimBeforeUnlock.assignment).toBeNull();
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-upstream",
+      result: {
+        taskId: upstreamDispatch.taskIds[0],
+        workerId: "codex-upstream",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-upstream",
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "master",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-04-05T10:04:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [
+            {
+              command: "pnpm test",
+              exitCode: 0,
+              output: "ok",
+            },
+          ],
+        },
+      },
+      changedFiles: ["src/upstream.ts"],
+      pullRequest: {
+        number: 101,
+        url: "https://github.com/TingRuDeng/openclaw-multi-agent-mvp/pull/101",
+        headBranch: "ai/codex/task-upstream",
+        baseBranch: "master",
+      },
+    });
+    state = recordReviewDecision(state, {
+      taskId: upstreamDispatch.taskIds[0],
+      actor: "codex-control",
+      decision: "merge",
+      notes: "upstream approved",
+      at: "2026-04-05T10:05:00.000Z",
+    });
+
+    const snapshot = buildDashboardSnapshot(state, {
+      now: "2026-04-05T10:05:05.000Z",
+    });
+    const unlockedTask = snapshot.tasks.find((task) => task.id === dependentTaskId);
+    expect(unlockedTask).toMatchObject({
+      status: "ready",
+      assignedWorkerId: null,
+    });
+    expect(snapshot.events.some((event) =>
+      event.taskId === dependentTaskId &&
+      event.type === "status_changed" &&
+      event.payload && typeof event.payload === "object" &&
+      "from" in event.payload &&
+      "to" in event.payload &&
+      event.payload.from === "planned" &&
+      event.payload.to === "ready")).toBe(true);
+
+    const claimAfterUnlock = claimAssignedTaskForWorker(state, {
+      workerId: "codex-dependent",
+      at: "2026-04-05T10:05:10.000Z",
+    });
+
+    expect(claimAfterUnlock.assignment?.task.id).toBe(dependentTaskId);
+    expect(claimAfterUnlock.assignment?.assignment.workerId).toBe("codex-dependent");
+  });
+
   it("requeues an assigned task after timeout and lets another worker claim it", () => {
     const stateDir = makeTempDir();
 
@@ -1534,6 +1724,117 @@ describe("dispatcher runtime state (TypeScript)", () => {
       canRedrive: true,
       redriveStrategy: "same_worker_continue",
     });
+  });
+
+  it("records changes_requested as a real review decision event", () => {
+    const stateDir = makeTempDir();
+
+    let state = loadRuntimeState(stateDir);
+    state = registerWorker(state, {
+      workerId: "codex-review-changes",
+      pool: "codex",
+      hostname: "test-host",
+      labels: ["codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-03-17T10:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-review-changes",
+          title: "Review changes requested task",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["完成代码"],
+          dependsOn: [],
+          branchName: "ai/codex/task-review-changes",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-review-changes",
+          assignment: {
+            taskId: "task-review-changes",
+            workerId: "placeholder",
+            pool: "codex",
+            status: "assigned",
+            branchName: "ai/codex/task-review-changes",
+            allowedPaths: ["src/**"],
+            commands: { test: "pnpm test" },
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+          },
+          workerPrompt: "你是 codex-worker。",
+          contextMarkdown: "# Context",
+        },
+      ],
+      createdAt: "2026-03-17T10:00:10.000Z",
+    });
+    state = dispatch.state;
+
+    state = beginTaskForWorker(state, {
+      workerId: "codex-review-changes",
+      taskId: dispatch.taskIds[0],
+      at: "2026-03-17T10:00:15.000Z",
+    });
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-review-changes",
+      result: {
+        taskId: dispatch.taskIds[0],
+        workerId: "codex-review-changes",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-review-changes",
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "master",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-03-17T10:05:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [{ command: "pnpm test", exitCode: 0, output: "ok" }],
+        },
+      },
+      changedFiles: ["src/main.ts"],
+      pullRequest: {
+        number: 101,
+        url: "https://github.com/TingRuDeng/openclaw-multi-agent-mvp/pull/101",
+        headBranch: "ai/codex/task-review-changes",
+        baseBranch: "master",
+      },
+    });
+
+    state = recordReviewDecision(state, {
+      taskId: dispatch.taskIds[0],
+      decision: "changes_requested",
+      actor: "reviewer",
+      notes: "needs requested changes",
+      at: "2026-03-17T10:06:00.000Z",
+    });
+
+    const review = state.reviews.find((item) => item.taskId === dispatch.taskIds[0]);
+    expect(review).toMatchObject({
+      decision: "changes_requested",
+      actor: "reviewer",
+    });
+    expect(state.tasks[0]).toMatchObject({
+      status: "blocked",
+    });
+    expect(state.pullRequests[0]).toMatchObject({
+      status: "changes_requested",
+    });
+    expect(state.events.some((event) =>
+      event.taskId === dispatch.taskIds[0] &&
+      event.type === "review_decided" &&
+      event.payload && typeof event.payload === "object" &&
+      "decision" in event.payload &&
+      event.payload.decision === "changes_requested")).toBe(true);
   });
 
   it("busy worker becomes offline after heartbeat timeout", () => {

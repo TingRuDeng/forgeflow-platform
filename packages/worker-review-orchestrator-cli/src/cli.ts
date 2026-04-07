@@ -342,7 +342,7 @@ Examples:
     }
     const result = await deps.runDecide({
       taskId,
-      decision: decision as "merge" | "block" | "rework",
+      decision: decision as "merge" | "block" | "rework" | "changes_requested",
       actor: typeof options.actor === "string" ? options.actor : undefined,
       notes: typeof options.notes === "string" ? options.notes : undefined,
       at: typeof options.at === "string" ? options.at : undefined,

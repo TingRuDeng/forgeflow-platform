@@ -461,11 +461,11 @@ function upsertAssignment(assignments: Assignment[], assignment: Assignment): As
 }
 
 function resolveHeartbeatTimeoutMs(options: ReconcileOptions = {}): number {
-  return options.heartbeatTimeoutMs ?? 30_000;
+  return options.heartbeatTimeoutMs ?? 5 * 60_000;
 }
 
 function resolveAssignmentTimeoutMs(options: ReconcileOptions = {}): number {
-  return options.assignmentTimeoutMs ?? 60_000;
+  return options.assignmentTimeoutMs ?? 5 * 60_000;
 }
 
 function resolveWorkerStatus(worker: Worker, options: ReconcileOptions = {}): WorkerStatus {
@@ -494,6 +494,18 @@ function selectWorker(state: RuntimeState, pool: string, options: ReconcileOptio
       worker.status === "idle" &&
       !worker.disabledAt &&
       resolveWorkerStatus(worker, options) === "idle")
+    .sort((left, right) => {
+      const heartbeatCompare = compareTimestampAsc(left.lastHeartbeatAt, right.lastHeartbeatAt);
+      if (heartbeatCompare !== 0) {
+        return heartbeatCompare;
+      }
+      return left.id.localeCompare(right.id);
+    })[0];
+}
+
+function selectWorkerForDispatch(state: RuntimeState, pool: string): Worker | undefined {
+  return [...state.workers]
+    .filter((worker) => worker.pool === pool && worker.status === "idle" && !worker.disabledAt)
     .sort((left, right) => {
       const heartbeatCompare = compareTimestampAsc(left.lastHeartbeatAt, right.lastHeartbeatAt);
       if (heartbeatCompare !== 0) {
@@ -539,6 +551,17 @@ function hasHealthyIdleAlternative(state: RuntimeState, pool: string, workerId: 
 
 function assignmentWasClaimed(assignment: Assignment | undefined): boolean {
   return Boolean(assignment?.claimedAt);
+}
+
+function areDependenciesSatisfied(state: RuntimeState, task: Task): boolean {
+  if (!task.dependsOn.length) {
+    return true;
+  }
+
+  return task.dependsOn.every((dependencyTaskId) => {
+    const dependencyTask = state.tasks.find((candidate) => candidate.id === dependencyTaskId);
+    return dependencyTask?.status === "merged";
+  });
 }
 
 function didWorkerHeartbeatAfterAssignment(worker: Worker | undefined, assignment: Assignment | undefined): boolean {
@@ -643,7 +666,7 @@ export function reconcileRuntimeState(state: RuntimeState, options: ReconcileOpt
       ...nextState,
       workers: upsertWorker(nextState.workers, {
         ...worker,
-        status: workerResolvedStatus === "offline" ? "offline" : "idle",
+        status: shouldRequeueBecauseTimeout || workerResolvedStatus === "offline" ? "offline" : "idle",
         currentTaskId: shouldRequeueBecauseOffline || shouldRequeueBecauseTimeout
           ? undefined
           : worker.currentTaskId,
@@ -655,6 +678,49 @@ export function reconcileRuntimeState(state: RuntimeState, options: ReconcileOpt
     nextState = {
       ...nextState,
       updatedAt: at,
+    };
+  }
+
+  for (const task of nextState.tasks) {
+    if (task.status !== "planned" || !task.dependsOn.length || !areDependenciesSatisfied(nextState, task)) {
+      continue;
+    }
+
+    const assignment = nextState.assignments.find((candidate) => candidate.taskId === task.id);
+    if (!assignment) {
+      throw new Error(`assignment not found for task: ${task.id}`);
+    }
+
+    nextState = appendEvent(nextState, {
+      taskId: task.id,
+      type: "status_changed",
+      at,
+      payload: {
+        from: "planned",
+        to: "ready",
+      },
+    });
+
+    nextState = {
+      ...nextState,
+      updatedAt: at,
+      tasks: upsertTask(nextState.tasks, {
+        ...task,
+        status: "ready",
+        assignedWorkerId: null,
+      }),
+      assignments: upsertAssignment(nextState.assignments, {
+        ...assignment,
+        workerId: null,
+        status: "pending",
+        assignedAt: null,
+        claimedAt: null,
+        assignment: {
+          ...assignment.assignment,
+          workerId: null,
+          status: "pending",
+        },
+      }),
     };
   }
 
@@ -701,9 +767,7 @@ export function heartbeatWorker(state: RuntimeState, input: HeartbeatWorkerInput
 
 export function createDispatch(state: RuntimeState, input: CreateDispatchInput): CreateDispatchResult {
   const dispatchSeed = nextDispatchId(state);
-  let nextState = reconcileRuntimeState(dispatchSeed.state, {
-    now: input.createdAt ?? nowIso(),
-  });
+  let nextState = dispatchSeed.state;
   const dispatchId = dispatchSeed.dispatchId;
   const assignments: Assignment[] = [];
   const taskIds: string[] = [];
@@ -726,9 +790,10 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
         targetWorkerId = sourceWorkerId;
       }
     }
+    const hasDependencies = (taskInput.dependsOn ?? []).length > 0;
     let worker: Worker | null = null;
     let hasTargetWorkerConstraint = false;
-    if (targetWorkerId) {
+    if (!hasDependencies && targetWorkerId) {
       worker = [...state.workers, ...nextState.workers].reduce<Worker | null>((found, w) => {
         if (found) return found;
         if (
@@ -744,11 +809,15 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
         hasTargetWorkerConstraint = true;
       }
     }
-    if (!worker && !hasTargetWorkerConstraint) {
-      worker = selectWorker(nextState, taskInput.pool, {
-        now: createdAt,
-      }) ?? null;
+    if (!hasDependencies && !worker && !hasTargetWorkerConstraint) {
+      worker = selectWorkerForDispatch(nextState, taskInput.pool) ?? null;
     }
+
+    const initialTaskStatus: TaskStatus = hasDependencies
+      ? "planned"
+      : worker
+        ? "assigned"
+        : "ready";
 
     const task: Task = {
       id: taskId,
@@ -768,9 +837,9 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
       continueFromTaskId: taskInput.continueFromTaskId ?? null,
       followUpOfTaskId,
       workerChangeReason,
-      status: worker ? "assigned" : "ready",
+      status: initialTaskStatus,
       assignedWorkerId: worker?.id ?? null,
-      lastAssignedWorkerId: worker?.id ?? null,
+      lastAssignedWorkerId: hasDependencies ? null : worker?.id ?? null,
       requestedBy: input.requestedBy ?? "unknown",
       createdAt,
     };
@@ -781,15 +850,17 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
       at: createdAt,
       payload: { status: "planned" },
     });
-    nextState = appendEvent(nextState, {
-      taskId,
-      type: "status_changed",
-      at: createdAt,
-      payload: {
-        from: "planned",
-        to: worker ? "assigned" : "ready",
-      },
-    });
+    if (initialTaskStatus !== "planned") {
+      nextState = appendEvent(nextState, {
+        taskId,
+        type: "status_changed",
+        at: createdAt,
+        payload: {
+          from: "planned",
+          to: initialTaskStatus,
+        },
+      });
+    }
 
     const sourcePackage = input.packages.find((candidate) => candidate.taskId === taskInput.id);
     if (!sourcePackage) {
@@ -916,12 +987,13 @@ export function getAssignedTaskForWorker(state: RuntimeState, workerId: string):
 
 export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssignedTaskInput): ClaimAssignedTaskResult {
   const at = input.at ?? nowIso();
-  const reconciledState = reconcileRuntimeState(state, {
+  const originalWorker = state.workers.find((candidate) => candidate.id === input.workerId);
+  let reconciledState = reconcileRuntimeState(state, {
     now: at,
     heartbeatTimeoutMs: input.heartbeatTimeoutMs,
     assignmentTimeoutMs: input.assignmentTimeoutMs,
   });
-  const worker = reconciledState.workers.find((candidate) => candidate.id === input.workerId);
+  let worker = reconciledState.workers.find((candidate) => candidate.id === input.workerId);
   if (!worker) {
     throw new Error(`worker not found: ${input.workerId}`);
   }
@@ -930,6 +1002,25 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
     return {
       state: reconciledState,
       assignment: null,
+    };
+  }
+
+  if (
+    worker.status === "offline" &&
+    !worker.currentTaskId &&
+    originalWorker &&
+    !originalWorker.currentTaskId &&
+    originalWorker.status !== "busy"
+  ) {
+    worker = {
+      ...worker,
+      status: "idle",
+      lastHeartbeatAt: at,
+    };
+    reconciledState = {
+      ...reconciledState,
+      updatedAt: at,
+      workers: upsertWorker(reconciledState.workers, worker),
     };
   }
 
@@ -1032,6 +1123,7 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
 
   const readyTask = [...reconciledState.tasks]
     .filter((task) => task.pool === worker.pool && task.status === "ready")
+    .filter((task) => areDependenciesSatisfied(reconciledState, task))
     .filter((task) => {
       if (task.targetWorkerId && task.targetWorkerId !== worker.id) {
         return false;
@@ -1311,6 +1403,17 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
     payload: {
       from: "review",
       to: nextStatus,
+    },
+  });
+  nextState = appendEvent(nextState, {
+    taskId: task.id,
+    type: "review_decided",
+    at: input.at ?? nowIso(),
+    payload: {
+      decision: input.decision,
+      actor: input.actor,
+      notes: input.notes ?? "",
+      evidence: input.evidence ?? review?.evidence ?? null,
     },
   });
 

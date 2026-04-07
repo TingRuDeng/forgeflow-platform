@@ -95,3 +95,25 @@ registry:
 
 Document install/upgrade guidance accordingly whenever a runtime release introduces a new
 shared dependency version.
+
+## 10. Worker assignment child processes no longer inherit generic parent secrets by default
+
+`scripts/lib/worker-daemon.js` now starts assignment execution with an env allowlist.
+
+Do not assume secrets from the parent worker process automatically exist inside the task process.
+
+In particular, values such as:
+
+- `GITHUB_TOKEN`
+- `DISPATCHER_API_TOKEN`
+- ad-hoc local secrets
+
+should be treated as absent unless they are explicitly added to `FORGEFLOW_WORKER_ENV_ALLOWLIST`.
+
+## 11. Automatic PR creation is opt-in, not implied by `GITHUB_TOKEN`
+
+`worker-daemon` no longer treats a parent-side `GITHUB_TOKEN` as enough to open PRs.
+
+Automatic draft PR creation now requires explicit opt-in via `FORGEFLOW_WORKER_CREATE_PR=1`.
+
+If a worker should push changes but must not create PRs, leaving `GITHUB_TOKEN` set is no longer sufficient to trigger PR creation by accident.
