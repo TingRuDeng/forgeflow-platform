@@ -92,6 +92,12 @@ Verified core task fields include:
 - `requestedBy`
 - `createdAt`
 
+当前调度语义补充：
+
+- `dependsOn` 不再只是持久化字段
+- 带依赖的任务初始保持 `planned`
+- 依赖任务全部进入 `merged` 后，dispatcher 才会把该任务自动解锁到 `ready`
+
 ### 2.3 Assignments
 
 Assignment records wrap the assignment package plus dispatcher tracking metadata:
@@ -209,19 +215,31 @@ Verified status values:
 
 ## 5. Dispatcher SQLite Snapshot Schema
 
-The active runtime SQLite backend currently uses a minimal snapshot schema in `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts`:
+The active runtime SQLite backend currently uses an append-only snapshot schema in `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts`:
 
 - `metadata`
   - generic key/value table
 - `snapshots`
-  - single authoritative runtime snapshot row
-  - stores serialized dispatcher state JSON plus `updated_at`
+  - append-only authoritative runtime snapshots
+  - columns:
+    - `revision` (`INTEGER PRIMARY KEY AUTOINCREMENT`)
+    - `data` (`TEXT`)
+    - `checksum_sha256` (`TEXT`)
+    - `created_at` (`TEXT`)
 
 This is intentionally not a fully normalized operational schema. The current design optimizes for:
 
+- revision history for audit / rescue
+- checksum validation to detect silent corruption
+- WAL mode for safer concurrent read/write behavior
 - transactional snapshot persistence
 - file-backed SQLite correctness
 - simple JSON import from `runtime-state.json`
+
+Recovery semantics:
+
+- runtime-state.db 读取失败时默认 fail-closed
+- 只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 且 `runtime-state.json` 存在时，才允许走 JSON 救援导入
 
 `apps/dispatcher/src/db/schema.ts` still contains additional SQLite schema constants, but those constants are not the active dispatcher runtime persistence path.
 

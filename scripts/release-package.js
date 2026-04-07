@@ -27,21 +27,23 @@ Usage:
 Options:
   --package <name>       Package name to release (required)
   --bump <type>          Version bump type: major, minor, patch, prerelease (required)
+  --tag <name>           npm dist-tag to publish with (optional)
   --publish              Actually publish to npm (default: dry-run only)
+  --ci                   Confirm the publish is running in CI / GitHub Actions
   --dry-run              Explicit dry-run mode (default behavior)
   --help                 Show this help message
 
 Behavior:
   - Without --publish: Shows what would happen, does NOT modify package.json or publish
-  - With --publish: Updates package.json version AND publishes to npm
-  - Publish command uses --no-git-checks to avoid git state conflicts
+  - With --publish: only allowed in CI / GitHub Actions, then updates package.json version AND publishes to npm
+  - CI publish uses provenance and --no-git-checks to avoid local git state conflicts
 
 Examples:
   # Dry-run: see what version would be published
   node scripts/release-package.js --package trae-beta-runtime --bump prerelease
 
-  # Actually publish
-  node scripts/release-package.js --package trae-beta-runtime --bump prerelease --publish
+  # Actually publish in CI
+  node scripts/release-package.js --package trae-beta-runtime --bump prerelease --publish --ci
 
   # Explicit dry-run
   node scripts/release-package.js --package trae-beta-runtime --bump prerelease --dry-run
@@ -65,6 +67,12 @@ const packageName = parsedArgs.package;
 const bumpType = parsedArgs.bump;
 const shouldPublish = parsedArgs.publish === true;
 const isDryRun = !shouldPublish;
+const isCiExecution = parsedArgs.ci === true || process.env.GITHUB_ACTIONS === "true";
+const distTag = typeof parsedArgs.tag === "string" ? parsedArgs.tag : "";
+if (shouldPublish && !isCiExecution) {
+    console.error("Error: release-package publish is CI-only. Run it from GitHub Actions with --ci enabled.");
+    process.exit(1);
+}
 const workspacePath = resolve(process.cwd());
 let packagePath;
 try {
@@ -139,7 +147,7 @@ if (isDryRun) {
     console.log(`  2. Build the package:`);
     console.log(`     pnpm --filter @tingrudeng/${packageName} build`);
     console.log(`  3. Publish to npm:`);
-    console.log(`     pnpm --filter @tingrudeng/${packageName} publish --access public --no-git-checks`);
+    console.log(`     pnpm --filter @tingrudeng/${packageName} publish --access public --provenance${distTag ? ` --tag ${distTag}` : ""} --no-git-checks`);
     console.log('\nTo actually publish, add --publish flag');
     process.exit(0);
 }
@@ -168,7 +176,7 @@ catch (error) {
 }
 console.log('\nPublishing to npm...');
 try {
-    execSync(`pnpm --filter @tingrudeng/${packageName} publish --access public --no-git-checks`, {
+    execSync(`pnpm --filter @tingrudeng/${packageName} publish --access public --provenance${distTag ? ` --tag ${distTag}` : ""} --no-git-checks`, {
         stdio: 'inherit',
         cwd: workspacePath
     });

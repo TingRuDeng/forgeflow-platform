@@ -31,6 +31,10 @@ function resolveBaseRef(repoDir, defaultBranch) {
     }
     throw new Error(`default branch ref ${originRef} is unavailable after fetch`);
 }
+function resetExistingWorktree(worktreeDir) {
+    ensureSuccess(runGit(["reset", "--hard", "HEAD"], worktreeDir), `failed to reset worktree ${worktreeDir}`);
+    ensureSuccess(runGit(["clean", "-fd"], worktreeDir), `failed to clean worktree ${worktreeDir}`);
+}
 export function prepareTaskWorktree(repoDir, task, options = {}) {
     const taskId = String(task?.taskId || task?.task_id || "").trim();
     if (!taskId) {
@@ -41,11 +45,17 @@ export function prepareTaskWorktree(repoDir, task, options = {}) {
         throw new Error(`branchName is required for ${taskId}`);
     }
     const defaultBranch = String(task?.defaultBranch || task?.default_branch || "main").trim() || "main";
+    if (branchName === defaultBranch) {
+        throw new Error(`refusing to use default branch as task worktree branch: ${defaultBranch}`);
+    }
     const worktreeRoot = path.join(repoDir, ".worktrees");
     const worktreeDir = path.join(worktreeRoot, safeTaskDirName(taskId));
     fs.mkdirSync(worktreeRoot, { recursive: true });
     if (fs.existsSync(worktreeDir)) {
         if (options.allowReuse) {
+            if (options.resetOnReuse) {
+                resetExistingWorktree(worktreeDir);
+            }
             return worktreeDir;
         }
         throw new Error(`existing worktree already present for ${taskId}`);
@@ -63,4 +73,11 @@ export function prepareTaskWorktree(repoDir, task, options = {}) {
     ], repoDir);
     ensureSuccess(addResult, `failed to create worktree for ${taskId}`);
     return worktreeDir;
+}
+export function removeTaskWorktree(repoDir, taskId) {
+    const worktreeDir = path.join(repoDir, ".worktrees", safeTaskDirName(taskId));
+    if (!fs.existsSync(worktreeDir)) {
+        return;
+    }
+    ensureSuccess(runGit(["worktree", "remove", "--force", worktreeDir], repoDir), `failed to remove worktree for ${taskId}`);
 }

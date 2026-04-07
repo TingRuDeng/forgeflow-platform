@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "workspace package name, for example trae-beta-runtime"
+        required: true
+        type: string
+      bump:
+        description: "version bump type"
+        required: true
+        default: prerelease
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+          - prerelease
+      tag:
+        description: "npm dist-tag"
+        required: true
+        default: beta
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  security-events: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run typecheck
+        run: pnpm typecheck
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Publish package with provenance
+        env:
+          GITHUB_ACTIONS: "true"
+        run: |
+          node scripts/release-package.js \
+            --package "${{ inputs.package }}" \
+            --bump "${{ inputs.bump }}" \
+            --tag "${{ inputs.tag }}" \
+            --publish \
+            --ci
+
+  scorecard:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run OpenSSF Scorecard
+        uses: ossf/scorecard-action@v2.3.3
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload Scorecard SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scorecard.sarif

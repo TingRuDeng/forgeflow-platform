@@ -242,14 +242,17 @@ npm install -g @tingrudeng/trae-beta-runtime@0.1.0-beta.42 --registry=https://re
 - Trae runtime 只有在远端分支 HEAD 与最终回执里的 commit SHA 完全一致时，才会上报 `review_ready`
 - 如果 push 已报告成功但远端 ref 仍在传播，runtime 会先做短暂重试；重试耗尽后按 failed 处理，不会直接把产物送进 review
 - 自动创建 PR 只允许开 draft，而且必须同时满足：验收命令通过、push 成功且无 `push_error`、远端 SHA 已验证一致、变更仍在允许范围内
+- 自动创建 PR 现在还是显式 opt-in：只有设置 `FORGEFLOW_WORKER_CREATE_PR=1` 的 worker 才会尝试建 draft PR
 - rework / follow-up 只有在源任务已经交付过可验证的远端分支产物、且 worker 不变时才允许复用原分支；否则应新开 `-rN` 分支继续
+- worker 子进程默认只继承 allowlist 环境变量，不会把 `GITHUB_TOKEN`、`DISPATCHER_API_TOKEN` 之类的上层 secrets 原样透传进 assignment 执行进程
 
 当前边界：
 
 - 单任务串行
 - 非流式最终回复
 - 只有最小 backoff / 错误恢复
-- 还没有自动清理旧 worktree 的完整生命周期治理
+- 允许复用的 task worktree 会先 `git reset --hard HEAD` + `git clean -fd`
+- 还没有默认开启“任务完成后自动删除旧 worktree”的完整生命周期治理
 - 没有多实例协调
 - `blocked + rework -> continuation` 已进入主线协议，并完成远程 Trae smoke 验证；当前 continuation 链路依赖更新后的 packaged runtime。
 - 一个最小的远程机器运行时包已进入 beta 安装路径，位于 `packages/trae-beta-runtime/`；当前 npm 包版本为 `@tingrudeng/trae-beta-runtime@0.1.0-beta.42`，用于包装启动与直接包自更新命令。

@@ -228,6 +228,57 @@ function classifyReviewDecisionError(error) {
   return 500;
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function validateReviewDecisionBody(body) {
+  if (!isPlainObject(body)) {
+    throw Object.assign(new Error("review decision body must be a JSON object"), { status: 400 });
+  }
+
+  const actor = typeof body.actor === "string" ? body.actor.trim() : "";
+  if (!actor) {
+    throw Object.assign(new Error("review decision actor is required"), { status: 400 });
+  }
+
+  const decision = typeof body.decision === "string" ? body.decision.trim() : "";
+  if (!["merge", "block", "rework", "changes_requested"].includes(decision)) {
+    throw Object.assign(new Error(`invalid review decision: ${decision || "<empty>"}`), { status: 400 });
+  }
+
+  if (body.notes !== undefined && typeof body.notes !== "string") {
+    throw Object.assign(new Error("review decision notes must be a string when provided"), { status: 400 });
+  }
+
+  if (body.evidence !== undefined) {
+    if (!isPlainObject(body.evidence)) {
+      throw Object.assign(new Error("review decision evidence must be an object when provided"), { status: 400 });
+    }
+    if (body.evidence.reasonCode !== undefined && typeof body.evidence.reasonCode !== "string") {
+      throw Object.assign(new Error("review decision evidence.reasonCode must be a string"), { status: 400 });
+    }
+    if (
+      body.evidence.mustFix !== undefined
+      && (!Array.isArray(body.evidence.mustFix) || body.evidence.mustFix.some((item) => typeof item !== "string"))
+    ) {
+      throw Object.assign(new Error("review decision evidence.mustFix must be an array of strings"), { status: 400 });
+    }
+    if (body.evidence.canRedrive !== undefined && typeof body.evidence.canRedrive !== "boolean") {
+      throw Object.assign(new Error("review decision evidence.canRedrive must be a boolean"), { status: 400 });
+    }
+    if (body.evidence.redriveStrategy !== undefined && typeof body.evidence.redriveStrategy !== "string") {
+      throw Object.assign(new Error("review decision evidence.redriveStrategy must be a string"), { status: 400 });
+    }
+  }
+
+  return {
+    ...body,
+    actor,
+    decision,
+  };
+}
+
 function createHtmlResponse(status, html) {
   return {
     status,
@@ -601,14 +652,15 @@ export function handleDispatcherHttpRequest(input) {
       : null;
     if (reviewMatch) {
       try {
+        const validatedBody = validateReviewDecisionBody(body);
         const result = withState(stateDir, (state) => ({
           state: recordReviewDecision(state, {
             taskId: decodeURIComponent(reviewMatch[1]),
-            actor: body.actor,
-            decision: body.decision,
-            notes: body.notes,
-            at: body.at,
-            evidence: body.evidence,
+            actor: validatedBody.actor,
+            decision: validatedBody.decision,
+            notes: validatedBody.notes,
+            at: validatedBody.at,
+            evidence: validatedBody.evidence,
           }),
         }));
         return createJsonResponse(200, {
@@ -616,7 +668,8 @@ export function handleDispatcherHttpRequest(input) {
           tasks: result.state.tasks,
         });
       } catch (error) {
-        return createJsonResponse(classifyReviewDecisionError(error), {
+        const status = typeof error?.status === "number" ? error.status : classifyReviewDecisionError(error);
+        return createJsonResponse(status, {
           error: error instanceof Error ? error.message : String(error),
         });
       }

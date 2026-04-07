@@ -241,6 +241,46 @@ describe("dispatcher server", () => {
     });
   });
 
+  it("returns 400 when review decision actor is missing", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/reviews/nonexistent-task/decision",
+      body: {
+        decision: "merge",
+        notes: "probe",
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.json).toEqual({
+      error: "review decision actor is required",
+    });
+  });
+
+  it("returns 400 when review decision value is invalid", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/reviews/nonexistent-task/decision",
+      body: {
+        actor: "codex-control",
+        decision: "approve",
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.json).toEqual({
+      error: "invalid review decision: approve",
+    });
+  });
+
   it("returns 503 when a state mutation route cannot acquire the runtime lock", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);

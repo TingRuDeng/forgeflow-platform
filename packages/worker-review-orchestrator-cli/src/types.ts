@@ -1,4 +1,4 @@
-export type ReviewDecisionKind = "merge" | "block" | "rework";
+export type ReviewDecisionKind = "merge" | "block" | "rework" | "changes_requested";
 
 export interface DispatchInput {
   repo: string;
@@ -84,7 +84,7 @@ export interface DecideOptions {
 
 export interface DecideResult {
   taskId: string;
-  decision: "merge" | "block";
+  decision: ReviewDecisionKind;
   status: "merged" | "blocked";
   source: "dispatcher" | "state-dir";
   payload: Record<string, unknown>;
