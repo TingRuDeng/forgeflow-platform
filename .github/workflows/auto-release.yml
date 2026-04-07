@@ -65,6 +65,7 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.has-packages == 'true'
     runs-on: ubuntu-latest
+    environment: npm
     permissions:
       contents: read
       id-token: write
