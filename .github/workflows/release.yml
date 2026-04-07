@@ -33,8 +33,6 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write
-  security-events: write
   actions: read
 
 jobs:
@@ -94,6 +92,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: npm
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -195,6 +196,9 @@ jobs:
     if: github.event_name == 'push' && needs.detect-changes.outputs.has-packages == 'true' && vars.NPM_TRUSTED_PUBLISHING_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: npm
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       matrix:
         package: ${{ fromJson(needs.detect-changes.outputs.packages) }}
