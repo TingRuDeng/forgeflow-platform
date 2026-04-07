@@ -89,6 +89,7 @@ describe("release-package CI gate", () => {
         encoding: "utf8",
         env: {
           ...process.env,
+          GITHUB_ACTIONS: "false",
           ...fakePnpm.env,
         },
       },
