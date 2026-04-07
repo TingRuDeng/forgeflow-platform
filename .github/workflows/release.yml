@@ -59,6 +59,7 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: "22.14.0"
+          package-manager-cache: false
 
       - name: Detect packages needing release
         id: detect
