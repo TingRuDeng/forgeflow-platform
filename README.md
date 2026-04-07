@@ -193,6 +193,7 @@ node scripts/release-package.js --package trae-beta-runtime --bump prerelease --
 
 - 只有 `.github/workflows/release.yml` 这一条正式发布链路，`packages/*/package.json` 变更不会再触发重复 workflow 并发发包。
 - 只有当 npm 已把当前仓库 `TingRuDeng/forgeflow-platform` 配置成 `@tingrudeng/*` 包的 Trusted Publisher，且仓库或组织变量 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 时，push 自动发包才会真正执行；否则 workflow 会成功结束并明确写出“已跳过自动发布”。
+- release job 会先把 npm CLI 升到 `11.12.1`；npm Trusted Publishing 至少要求 `npm 11.5.1+`，不要再用 Node 自带的 npm 10.x 直接判断发布链是否可用。
 
 如需安装发包助手 skill：
 

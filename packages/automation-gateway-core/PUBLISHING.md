@@ -7,6 +7,7 @@ The repository release path is GitHub Actions only:
 - workflow: `.github/workflows/release.yml`
 - auth model: npm Trusted Publishing via GitHub OIDC
 - repo-side enable gate: repository/org variable `NPM_TRUSTED_PUBLISHING_ENABLED=true`
+- npm CLI: `11.5.1+` required, workflow currently upgrades to `11.12.1`
 
 ## Preconditions
 
