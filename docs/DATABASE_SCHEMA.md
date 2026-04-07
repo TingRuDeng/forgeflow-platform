@@ -128,6 +128,16 @@ Reviews track dispatcher-side review state:
 - `latestWorkerResult`
 - `evidence`
 
+`latestWorkerResult` is now dispatcher-canonicalized. The following fields are derived from dispatcher task / assignment truth, not blindly trusted from worker payload:
+
+- `latestWorkerResult.taskId`
+- `latestWorkerResult.workerId`
+- `latestWorkerResult.pool`
+- `latestWorkerResult.repo`
+- `latestWorkerResult.defaultBranch`
+- `latestWorkerResult.branchName`
+- `latestWorkerResult.mode`
+
 Current additive review-side structured fields:
 
 - `latestWorkerResult.evidence`

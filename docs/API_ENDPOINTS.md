@@ -54,8 +54,16 @@ Current endpoint families:
   - HTML dashboard view.
 - `GET /api/dashboard/snapshot`
   - Returns a JSON snapshot of workers, tasks, assignments, reviews, PRs, recent events, and stats.
+  - Current GET response sets `Cache-Control: no-store`.
+  - Snapshot now also includes minimum control-plane metrics:
+    - `metrics.queueDepth`
+    - `metrics.plannedTasks`
+    - `metrics.reviewBacklog`
+    - `metrics.avgAssignmentLagMs`
+    - `metrics.maxAssignmentLagMs`
 - `GET /api/workers`
   - Returns worker list from the current snapshot.
+  - Current GET response sets `Cache-Control: no-store`.
 
 ### Generic worker endpoints
 
@@ -64,14 +72,28 @@ Current endpoint families:
 - `POST /api/workers/:workerId/heartbeat`
   - Update worker heartbeat.
 - `GET /api/workers/:workerId/assigned-task`
-  - Claim an assigned task or pick a `ready` task for that worker pool.
-  - Tasks whose `dependsOn` prerequisites are not yet merged stay in `planned` and are excluded from this claim path until dispatcher unlocks them to `ready`.
+  - Read-only lookup for the task currently bound to that worker.
+  - Current GET response sets `Cache-Control: no-store`.
+- `POST /api/workers/:workerId/claim-task`
+  - The only generic worker claim path.
+  - May return an already assigned task for that worker, or atomically claim a `ready` task from the same pool.
+  - Tasks whose `dependsOn` prerequisites are not yet merged stay in `planned` and are excluded until dispatcher unlocks them to `ready`.
 - `POST /api/workers/:workerId/start-task`
   - Move task from `assigned` to `in_progress`.
 - `POST /api/workers/:workerId/result`
   - Submit execution result, changed files, and optional PR metadata.
   - Caller should only treat the task as durably delivered after this endpoint returns success; `worker-daemon` no longer treats exhausted submission retries as a completed task.
   - Worker execution now uses a child-process env allowlist; do not assume parent-side secrets such as `GITHUB_TOKEN` or `DISPATCHER_API_TOKEN` are visible inside the assignment process.
+  - Dispatcher now canonicalizes dispatcher-owned fields:
+    - `taskId`
+    - `workerId`
+    - `pool`
+    - `repo`
+    - `defaultBranch`
+    - `branchName`
+    - `mode`
+  - Dispatcher will reject mismatched worker metadata with `409`.
+  - Request-body validation now rejects malformed result payloads with `400`.
   - `result` may now include additive structured worker evidence for dispatcher persistence:
     - `failureType`
     - `failureSummary`
@@ -127,6 +149,7 @@ Current endpoint families:
   - `review_ready` now assumes the runtime already verified that remote branch HEAD exactly matches the reported commit SHA.
   - Packaged runtime may briefly retry remote verification after push before downgrading the report to `failed`.
   - Delivery evidence may include a remote-verified push state plus `remoteHeadSha`.
+  - Dispatcher now rebuilds canonical worker result metadata for Trae too; route-local payload no longer overrides dispatcher-owned task identity fields.
 - `POST /api/trae/heartbeat`
   - Heartbeat endpoint for Trae workers.
 

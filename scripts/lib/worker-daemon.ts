@@ -590,6 +590,7 @@ export interface DispatcherClient {
   registerWorker: (worker: { workerId: string; pool: string; hostname: string; labels: string[]; repoDir: string; at: string }) => Promise<unknown>;
   heartbeat: (workerId: string, payload: { at: string }) => Promise<unknown>;
   getAssignedTask: (workerId: string) => Promise<TaskPayload | null>;
+  claimTask: (workerId: string, payload?: { at?: string }) => Promise<TaskPayload | null>;
   startTask: (workerId: string, payload: { taskId: string; at: string }) => Promise<unknown>;
   submitResult: (workerId: string, payload: { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }) => Promise<unknown>;
 }
@@ -660,6 +661,9 @@ export function createDispatcherClient(dispatcherUrl: string): DispatcherClient 
     getAssignedTask(workerId) {
       return call("GET", `/api/workers/${encodeURIComponent(workerId)}/assigned-task`) as Promise<TaskPayload | null>;
     },
+    claimTask(workerId, payload = {}) {
+      return call("POST", `/api/workers/${encodeURIComponent(workerId)}/claim-task`, payload) as Promise<TaskPayload | null>;
+    },
     startTask(workerId, payload) {
       return call("POST", `/api/workers/${encodeURIComponent(workerId)}/start-task`, payload);
     },
@@ -698,6 +702,17 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         stateDir,
         method: "GET",
         pathname: `/api/workers/${encodeURIComponent(workerId)}/assigned-task`,
+        clientAddress: "127.0.0.1",
+        internalCall: true,
+      });
+      return Promise.resolve(response.json) as Promise<TaskPayload | null>;
+    },
+    claimTask(workerId, payload = {}) {
+      const response = handleDispatcherHttpRequest({
+        stateDir,
+        method: "POST",
+        pathname: `/api/workers/${encodeURIComponent(workerId)}/claim-task`,
+        body: payload,
         clientAddress: "127.0.0.1",
         internalCall: true,
       });
@@ -755,7 +770,7 @@ export async function runWorkerDaemonCycle(input: RunWorkerDaemonCycleInput): Pr
   });
   await client.heartbeat(input.workerId, { at });
 
-  const assigned = await client.getAssignedTask(input.workerId) as { assignment?: TaskAssignment; task?: TaskInfo } | null;
+  const assigned = await client.claimTask(input.workerId, { at }) as { assignment?: TaskAssignment; task?: TaskInfo } | null;
   if (!assigned || !assigned.assignment || !assigned.task) {
     return {
       status: "idle",

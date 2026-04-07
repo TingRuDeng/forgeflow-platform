@@ -9,9 +9,10 @@ import type {
 import {
   beginTaskForWorker,
   claimAssignedTaskForWorker,
+  heartbeatWorker as heartbeatWorkerFn,
   registerWorker as registerWorkerFn,
+  recordWorkerResult as recordWorkerResultFn,
   reconcileRuntimeState as reconcileRuntimeStateFn,
-  upsertReview,
 } from "./runtime-state.js";
 
 import type {
@@ -37,6 +38,28 @@ function appendRuntimeEvent(state: RuntimeState, event: Event): void {
   if (state.events.length > RUNTIME_EVENTS_RETENTION_LIMIT) {
     state.events.splice(0, state.events.length - RUNTIME_EVENTS_RETENTION_LIMIT);
   }
+}
+
+function upsertWorkerRepoDir(
+  state: RuntimeState,
+  workerId: string,
+  repoDir: string,
+): RuntimeState {
+  const worker = state.workers.find((candidate) => candidate.id === workerId);
+  if (!worker || worker.repoDir === repoDir) {
+    return state;
+  }
+
+  return {
+    ...state,
+    updatedAt: nowIso(),
+    workers: state.workers.map((candidate) => candidate.id === workerId
+      ? {
+          ...candidate,
+          repoDir,
+        }
+      : candidate),
+  };
 }
 
 function overwriteRuntimeState(target: RuntimeState, source: RuntimeState): void {
@@ -105,63 +128,74 @@ export function findTraeTaskForWorker(
   workerId: string,
   repoDirInput?: string
 ): FindTraeTaskResult {
-  let worker = state.workers.find((w) => w.id === workerId);
+  let nextState = state;
+  let worker = nextState.workers.find((candidate) => candidate.id === workerId);
   if (!worker) {
-    const newWorker: Worker = {
-      id: workerId,
+    nextState = registerWorkerFn(nextState, {
+      workerId,
       pool: "trae",
       hostname: "",
       labels: [],
       repoDir: repoDirInput ?? "",
-      status: "idle",
-      lastHeartbeatAt: nowIso(),
-    };
-    state.workers.push(newWorker);
-    worker = newWorker;
+      at: nowIso(),
+    });
   } else if (repoDirInput) {
-    worker.repoDir = repoDirInput;
+    nextState = upsertWorkerRepoDir(nextState, workerId, repoDirInput);
   }
 
-  const repoDir = worker.repoDir || repoDirInput || "";
+  overwriteRuntimeState(state, nextState);
 
-  let task = state.tasks.find(
-    (t) =>
-      (t.status === "assigned" || t.status === "in_progress") &&
-      t.assignedWorkerId === workerId
-  );
+  const claimed = claimAssignedTaskForWorker(state, {
+    workerId,
+    at: nowIso(),
+  });
+  overwriteRuntimeState(state, claimed.state);
 
-  if (!task) {
-    const readyTask = state.tasks.find(
-      (t) =>
-        (t.status === "ready" || (t.status as string) === "pending") &&
-        t.pool === "trae" &&
-        (!t.targetWorkerId || t.targetWorkerId === workerId)
-    );
-    if (readyTask) {
-      readyTask.status = "assigned";
-      readyTask.assignedWorkerId = workerId;
-      task = readyTask;
-
-      const assignment = state.assignments.find((a) => a.taskId === task!.id);
-      if (assignment) {
-        assignment.status = "assigned";
-        assignment.workerId = workerId;
-        assignment.assignedAt = nowIso();
+  worker = state.workers.find((candidate) => candidate.id === workerId);
+  const repoDir = worker?.repoDir || repoDirInput || "";
+  let resolvedAssignment = claimed.assignment;
+  if (!resolvedAssignment) {
+    const recoveryTask = state.tasks.find((candidate) =>
+      candidate.pool === "trae"
+      && candidate.assignedWorkerId === workerId
+      && (candidate.status === "assigned" || candidate.status === "in_progress"));
+    if (recoveryTask) {
+      if (worker && worker.currentTaskId !== recoveryTask.id) {
+        overwriteRuntimeState(state, {
+          ...state,
+          updatedAt: nowIso(),
+          workers: state.workers.map((candidate) => candidate.id === workerId
+            ? {
+                ...candidate,
+                status: "busy",
+                currentTaskId: recoveryTask.id,
+                lastHeartbeatAt: nowIso(),
+              }
+            : candidate),
+        });
+        worker = state.workers.find((candidate) => candidate.id === workerId);
       }
 
-      appendRuntimeEvent(state, {
-        taskId: task.id,
-        type: "assigned",
-        at: nowIso(),
-        payload: { workerId, pool: "trae" },
-      });
+      const recoveryRecord = state.assignments.find((candidate) => candidate.taskId === recoveryTask.id);
+      if (recoveryRecord) {
+        resolvedAssignment = {
+          task: recoveryTask,
+          assignment: recoveryRecord.assignment,
+          workerPrompt: recoveryRecord.workerPrompt,
+          contextMarkdown: recoveryRecord.contextMarkdown,
+          workerPromptMode: recoveryRecord.workerPromptMode,
+          reportSchemaVersion: recoveryRecord.reportSchemaVersion,
+          chatMode: (recoveryRecord as Assignment & { chatMode?: string }).chatMode ?? recoveryTask.chatMode ?? "new_chat",
+          continuationMode: (recoveryRecord as Assignment & { continuationMode?: string }).continuationMode ?? recoveryTask.continuationMode,
+          continueFromTaskId: (recoveryRecord as Assignment & { continueFromTaskId?: string | null }).continueFromTaskId ?? recoveryTask.continueFromTaskId ?? null,
+          followUpOfTaskId: (recoveryRecord as Assignment & { followUpOfTaskId?: string | null }).followUpOfTaskId ?? recoveryTask.followUpOfTaskId ?? null,
+          workerChangeReason: (recoveryRecord as Assignment & { workerChangeReason?: string | null }).workerChangeReason ?? recoveryTask.workerChangeReason ?? null,
+        };
+      }
     }
   }
 
-  if (!task) {
-    worker.status = "idle";
-    worker.currentTaskId = undefined;
-    worker.lastHeartbeatAt = nowIso();
+  if (!resolvedAssignment) {
     return {
       task: null,
       assignment: null,
@@ -173,7 +207,8 @@ export function findTraeTaskForWorker(
     };
   }
 
-  const assignment = state.assignments.find((a) => a.taskId === task!.id) ?? null;
+  const task = resolvedAssignment.task;
+  const assignment = state.assignments.find((a) => a.taskId === task.id) ?? null;
   const workerPrompt = assignment?.workerPrompt ?? "";
   const contextMarkdown = assignment?.contextMarkdown ?? "";
   const workerPromptMode = assignment?.workerPromptMode;
@@ -181,8 +216,9 @@ export function findTraeTaskForWorker(
 
   const constraints = buildTraeConstraints(task);
 
+  const workerRepoDir = worker?.repoDir || "";
   const dirs = assignment
-    ? buildTraeWorktreeAndAssignmentDirs(worker.repoDir || "", repoDir, task)
+    ? buildTraeWorktreeAndAssignmentDirs(workerRepoDir, repoDir, task)
     : { worktree_dir: "", assignment_dir: "" };
 
   const chatMode = (assignment as Assignment & { chatMode?: string })?.chatMode
@@ -235,129 +271,89 @@ export function applyTraeSubmitResult(
   }
 
   const assignment = state.assignments.find((item) => item.taskId === input.taskId);
-  const worker = state.workers.find((w) => w.currentTaskId === input.taskId);
-  const review = state.reviews.find((item) => item.taskId === input.taskId) ?? null;
-  const newStatus = input.status === "review_ready" ? "review" : "failed";
-  const now = nowIso();
-
-  task.status = newStatus;
-  if (assignment) {
-    assignment.status = newStatus;
-    if (assignment.assignment) {
-      assignment.assignment.status = newStatus;
-    }
-  }
-  if (worker) {
-    worker.status = "idle";
-    worker.currentTaskId = undefined;
-    worker.lastHeartbeatAt = now;
+  const workerId = task.assignedWorkerId
+    ?? assignment?.workerId
+    ?? state.workers.find((candidate) => candidate.currentTaskId === input.taskId)?.id
+    ?? null;
+  if (!workerId) {
+    return { state, ok: false, error: "worker_not_found" };
   }
 
-  const github =
-    input.branchName || input.commitSha || input.pushStatus || input.prNumber || input.prUrl
-      ? {
-          branch_name: input.branchName || null,
-          commit_sha: input.commitSha || null,
-          push_status: input.pushStatus || null,
-          push_error: input.pushError || null,
-          pr_number: input.prNumber || null,
-          pr_url: input.prUrl || null,
-        }
-      : null;
-
-  const reviewMaterial = input.status === "review_ready"
-    ? {
+  try {
+    const nextState = recordWorkerResultFn(state, {
+      workerId,
+      result: {
+        taskId: input.taskId,
+        workerId,
+        provider: "trae",
+        pool: task.pool,
+        branchName: input.branchName ?? task.branchName,
         repo: task.repo,
-        title: task.title,
-        changedFiles: input.filesChanged || [],
-        selfTestPassed: true,
-        checks: [],
-        pullRequest: input.prNumber && input.prUrl && input.branchName
-          ? {
-              number: input.prNumber,
-              url: input.prUrl,
-              headBranch: input.branchName,
-              baseBranch: task.defaultBranch,
-            }
-          : null,
-      }
-    : review?.reviewMaterial ?? null;
-
-  const eventPayload: Record<string, unknown> = {
-    from: "in_progress",
-    to: newStatus,
-    summary: input.summary,
-    test_output: input.testOutput,
-    risks: input.risks || [],
-    files_changed: input.filesChanged || [],
-    github,
-  };
-
-  if (input.status === "failed" && input.evidence) {
-    eventPayload.failureType = input.evidence.failureType ?? null;
-    eventPayload.failureSummary = input.evidence.failureSummary ?? input.summary ?? null;
-  }
-
-  appendRuntimeEvent(state, {
-    taskId: input.taskId,
-    type: "status_changed",
-    at: now,
-    payload: eventPayload,
-  });
-
-  state.reviews = upsertReview(state.reviews, {
-    taskId: input.taskId,
-    decision: review?.decision ?? "pending",
-    actor: review?.actor ?? null,
-    notes: review?.notes ?? "",
-    decidedAt: review?.decidedAt ?? null,
-    reviewMaterial,
-    latestWorkerResult: {
-      taskId: input.taskId,
-      workerId: worker?.id ?? review?.latestWorkerResult?.workerId ?? "trae",
-      provider: "trae",
-      pool: "trae",
-      branchName: input.branchName ?? review?.latestWorkerResult?.branchName ?? "",
-      repo: task.repo,
-      defaultBranch: task.defaultBranch,
-      mode: "run",
-      output: input.summary ?? "",
-      generatedAt: now,
-      verification: {
-        allPassed: input.status === "review_ready",
-        commands: [],
+        defaultBranch: task.defaultBranch,
+        mode: task.verification.mode,
+        output: input.summary ?? "",
+        generatedAt: nowIso(),
+        verification: {
+          allPassed: input.status === "review_ready",
+          commands: input.testOutput
+            ? [
+                {
+                  command: "trae:test_output",
+                  exitCode: input.status === "review_ready" ? 0 : 1,
+                  output: input.testOutput,
+                },
+              ]
+            : [],
+        },
+        evidence: input.evidence,
       },
-      evidence: input.evidence,
-    },
-    evidence: review?.evidence ?? null,
-  });
-
-  return { state, ok: true };
+      changedFiles: input.filesChanged,
+      pullRequest: input.prNumber && input.prUrl
+        ? {
+            number: input.prNumber,
+            url: input.prUrl,
+            headBranch: input.branchName ?? task.branchName,
+            baseBranch: task.defaultBranch,
+          }
+        : null,
+    });
+    overwriteRuntimeState(state, nextState);
+    return { state, ok: true };
+  } catch (error) {
+    return {
+      state,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export function applyTraeHeartbeat(
   state: RuntimeState,
   workerId: string
 ): { state: RuntimeState; worker: Worker | null } {
-  let worker = state.workers.find((w) => w.id === workerId);
-  if (!worker) {
-    const newWorker: Worker = {
-      id: workerId,
+  let nextState = state;
+  const existingWorker = nextState.workers.find((candidate) => candidate.id === workerId);
+  if (!existingWorker) {
+    nextState = registerWorkerFn(nextState, {
+      workerId,
       pool: "trae",
       hostname: "",
       labels: [],
       repoDir: "",
-      status: "idle",
-      lastHeartbeatAt: nowIso(),
-    };
-    state.workers.push(newWorker);
-    worker = newWorker;
+      at: nowIso(),
+    });
   }
-  const hasActiveTask = Boolean(worker.currentTaskId);
-  const previousStatus = worker.status;
-  worker.lastHeartbeatAt = nowIso();
-  worker.status = hasActiveTask ? "busy" : (previousStatus === "offline" ? "idle" : previousStatus);
-  return { state, worker };
+
+  nextState = reconcileRuntimeStateFn(heartbeatWorkerFn(nextState, {
+    workerId,
+    at: nowIso(),
+  }));
+  overwriteRuntimeState(state, nextState);
+  return {
+    state,
+    worker: state.workers.find((candidate) => candidate.id === workerId) ?? null,
+  };
 }
 
 export function applyTraeReportProgress(
@@ -483,17 +479,18 @@ function handleTraeRouteImpl(
       repoDir,
       at: nowIso(),
     }));
+    overwriteRuntimeState(state, nextState);
 
     return {
       status: 200,
       headers: { "content-type": "application/json" },
       json: {
         ok: true,
-        worker: nextState.workers.find((worker) => worker.id === workerId) ?? null,
+        worker: state.workers.find((worker) => worker.id === workerId) ?? null,
       },
       text: JSON.stringify({
         ok: true,
-        worker: nextState.workers.find((worker) => worker.id === workerId) ?? null,
+        worker: state.workers.find((worker) => worker.id === workerId) ?? null,
       }),
     };
   }

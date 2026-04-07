@@ -476,6 +476,9 @@ export function createDispatcherClient(dispatcherUrl) {
         getAssignedTask(workerId) {
             return call("GET", `/api/workers/${encodeURIComponent(workerId)}/assigned-task`);
         },
+        claimTask(workerId, payload = {}) {
+            return call("POST", `/api/workers/${encodeURIComponent(workerId)}/claim-task`, payload);
+        },
         startTask(workerId, payload) {
             return call("POST", `/api/workers/${encodeURIComponent(workerId)}/start-task`, payload);
         },
@@ -493,6 +496,7 @@ export function createStateDirDispatcherClient(stateDir) {
                 pathname: "/api/workers/register",
                 body: worker,
                 clientAddress: "127.0.0.1",
+                internalCall: true,
             });
             return Promise.resolve(response.json);
         },
@@ -503,6 +507,7 @@ export function createStateDirDispatcherClient(stateDir) {
                 pathname: `/api/workers/${encodeURIComponent(workerId)}/heartbeat`,
                 body: payload,
                 clientAddress: "127.0.0.1",
+                internalCall: true,
             });
             return Promise.resolve(response.json);
         },
@@ -512,6 +517,18 @@ export function createStateDirDispatcherClient(stateDir) {
                 method: "GET",
                 pathname: `/api/workers/${encodeURIComponent(workerId)}/assigned-task`,
                 clientAddress: "127.0.0.1",
+                internalCall: true,
+            });
+            return Promise.resolve(response.json);
+        },
+        claimTask(workerId, payload = {}) {
+            const response = handleDispatcherHttpRequest({
+                stateDir,
+                method: "POST",
+                pathname: `/api/workers/${encodeURIComponent(workerId)}/claim-task`,
+                body: payload,
+                clientAddress: "127.0.0.1",
+                internalCall: true,
             });
             return Promise.resolve(response.json);
         },
@@ -522,6 +539,7 @@ export function createStateDirDispatcherClient(stateDir) {
                 pathname: `/api/workers/${encodeURIComponent(workerId)}/start-task`,
                 body: payload,
                 clientAddress: "127.0.0.1",
+                internalCall: true,
             });
             return Promise.resolve(response.json);
         },
@@ -532,6 +550,7 @@ export function createStateDirDispatcherClient(stateDir) {
                 pathname: `/api/workers/${encodeURIComponent(workerId)}/result`,
                 body: payload,
                 clientAddress: "127.0.0.1",
+                internalCall: true,
             });
             return Promise.resolve(response.json);
         },
@@ -549,7 +568,7 @@ export async function runWorkerDaemonCycle(input) {
         at,
     });
     await client.heartbeat(input.workerId, { at });
-    const assigned = await client.getAssignedTask(input.workerId);
+    const assigned = await client.claimTask(input.workerId, { at });
     if (!assigned || !assigned.assignment || !assigned.task) {
         return {
             status: "idle",

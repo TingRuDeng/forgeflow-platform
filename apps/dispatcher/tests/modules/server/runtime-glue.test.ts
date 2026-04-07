@@ -66,6 +66,7 @@ describe("runtime-glue dispatcher-client", () => {
       expect(typeof client.registerWorker).toBe("function");
       expect(typeof client.heartbeat).toBe("function");
       expect(typeof client.getAssignedTask).toBe("function");
+      expect(typeof client.claimTask).toBe("function");
       expect(typeof client.startTask).toBe("function");
       expect(typeof client.submitResult).toBe("function");
     });
@@ -138,7 +139,8 @@ describe("runtime-glue worker-daemon-cycle", () => {
       const mockClient = {
         registerWorker: vi.fn().mockResolvedValue({ status: "registered" }),
         heartbeat: vi.fn().mockResolvedValue({ status: "heartbeat" }),
-        getAssignedTask: vi.fn().mockResolvedValue({ assignment: null, task: null }),
+        getAssignedTask: vi.fn(),
+        claimTask: vi.fn().mockResolvedValue({ assignment: null, task: null }),
         startTask: vi.fn(),
         submitResult: vi.fn(),
       };
@@ -163,7 +165,10 @@ describe("runtime-glue worker-daemon-cycle", () => {
       expect(mockClient.heartbeat).toHaveBeenCalledWith("test-worker", {
         at: expect.any(String),
       });
-      expect(mockClient.getAssignedTask).toHaveBeenCalledWith("test-worker");
+      expect(mockClient.claimTask).toHaveBeenCalledWith("test-worker", {
+        at: expect.any(String),
+      });
+      expect(mockClient.getAssignedTask).not.toHaveBeenCalled();
       expect(mockClient.startTask).not.toHaveBeenCalled();
       expect(mockClient.submitResult).not.toHaveBeenCalled();
     });
@@ -172,7 +177,8 @@ describe("runtime-glue worker-daemon-cycle", () => {
       const mockClient = {
         registerWorker: vi.fn().mockResolvedValue({ status: "registered" }),
         heartbeat: vi.fn().mockResolvedValue({ status: "heartbeat" }),
-        getAssignedTask: vi.fn().mockResolvedValue({
+        getAssignedTask: vi.fn(),
+        claimTask: vi.fn().mockResolvedValue({
           assignment: { taskId: "task-1", workerId: "test-worker" },
           task: { id: "task-1", title: "Test Task" },
         }),
@@ -211,7 +217,9 @@ describe("runtime-glue worker-daemon-cycle", () => {
         at: expect.any(String),
       });
       expect(mockClient.heartbeat).toHaveBeenCalledWith("test-worker", { at: expect.any(String) });
-      expect(mockClient.getAssignedTask).toHaveBeenCalledWith("test-worker");
+      expect(mockClient.claimTask).toHaveBeenCalledWith("test-worker", {
+        at: expect.any(String),
+      });
 
       expect(mockClient.startTask).toHaveBeenCalledWith("test-worker", {
         taskId: "task-1",
@@ -232,7 +240,8 @@ describe("runtime-glue worker-daemon-cycle", () => {
       const mockClient = {
         registerWorker: vi.fn().mockResolvedValue({ status: "registered" }),
         heartbeat: vi.fn().mockResolvedValue({ status: "heartbeat" }),
-        getAssignedTask: vi.fn().mockResolvedValue({
+        getAssignedTask: vi.fn(),
+        claimTask: vi.fn().mockResolvedValue({
           assignment: { taskId: "task-1", workerId: "test-worker" },
           task: { id: "task-1", title: "Test Task" },
         }),
@@ -274,7 +283,8 @@ describe("runtime-glue worker-daemon-cycle", () => {
       const mockClient = {
         registerWorker: vi.fn().mockResolvedValue({ status: "registered" }),
         heartbeat: vi.fn().mockResolvedValue({ status: "heartbeat" }),
-        getAssignedTask: vi.fn().mockResolvedValue({
+        getAssignedTask: vi.fn(),
+        claimTask: vi.fn().mockResolvedValue({
           assignment: { taskId: "task-1", workerId: "test-worker" },
           task: { id: "task-1", title: "Test Task" },
         }),

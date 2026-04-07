@@ -22,6 +22,7 @@ export interface DispatcherHttpClient extends DispatcherWorkerClient {
   registerWorker(worker: WorkerRegistration): Promise<unknown>;
   heartbeat(workerId: string, payload: HeartbeatPayload): Promise<unknown>;
   getAssignedTask(workerId: string): Promise<AssignedTaskResponse>;
+  claimTask(workerId: string, payload?: { at?: string }): Promise<AssignedTaskResponse>;
   startTask(workerId: string, payload: StartTaskPayload): Promise<unknown>;
   submitResult(workerId: string, payload: SubmitResultPayload): Promise<unknown>;
 }
@@ -30,6 +31,7 @@ export interface DispatcherStateDirClient {
   registerWorker(worker: WorkerRegistration): unknown;
   heartbeat(workerId: string, payload: HeartbeatPayload): unknown;
   getAssignedTask(workerId: string): unknown;
+  claimTask(workerId: string, payload?: { at?: string }): unknown;
   startTask(workerId: string, payload: StartTaskPayload): unknown;
   submitResult(workerId: string, payload: SubmitResultPayload): unknown;
 }
@@ -132,6 +134,14 @@ export function createDispatcherHttpClient(
       ) as Promise<AssignedTaskResponse>;
     },
 
+    claimTask(workerId: string, payload?: { at?: string }): Promise<AssignedTaskResponse> {
+      return call(
+        "POST",
+        `/api/workers/${encodeURIComponent(workerId)}/claim-task`,
+        payload ?? {},
+      ) as Promise<AssignedTaskResponse>;
+    },
+
     startTask(workerId: string, payload: StartTaskPayload): Promise<unknown> {
       return call(
         "POST",
@@ -192,6 +202,16 @@ export function createDispatcherStateDirClientFactory(
           stateDir,
           method: "GET",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/assigned-task`,
+          internalCall: true,
+        }).json;
+      },
+
+      claimTask(workerId: string, payload?: { at?: string }): unknown {
+        return handleRequest({
+          stateDir,
+          method: "POST",
+          pathname: `/api/workers/${encodeURIComponent(workerId)}/claim-task`,
+          body: payload ?? {},
           internalCall: true,
         }).json;
       },
@@ -278,7 +298,7 @@ export async function runWorkerDaemonCycle(
 
   await client.heartbeat(input.workerId, { at });
 
-  const assigned = await client.getAssignedTask(input.workerId);
+  const assigned = await client.claimTask(input.workerId, { at });
 
   if (!assigned || !assigned.assignment || !assigned.task) {
     return {

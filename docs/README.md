@@ -15,6 +15,9 @@
   - 不是规则文件。
 - `ARCHITECTURE.md`
   - 当前主线架构与运行边界的验证版概览。
+- `STATE_MACHINE.md`
+  - dispatcher task / assignment / review / continuation 状态机摘要。
+  - 用于核对阶段二主链规则，不替代 API 字段文档。
 - `API_ENDPOINTS.md`
   - 当前 HTTP 接口面的验证版概览。
   - 不是完整字段字典。
@@ -80,9 +83,10 @@
 dispatcher / worker / runtime 变更：
 
 1. `ARCHITECTURE.md`
-2. `API_ENDPOINTS.md`
-3. `DATABASE_SCHEMA.md`
-4. 相关契约：
+2. `STATE_MACHINE.md`
+3. `API_ENDPOINTS.md`
+4. `DATABASE_SCHEMA.md`
+5. 相关契约：
    - `contracts/worker-prompt-layering-v1.md`
    - `contracts/review-memory-v1.md`
    - `contracts/provider-capabilities-v1.md`
@@ -126,7 +130,12 @@ Trae MCP fallback 维护：
 - `codex` / `gemini` 的 `worker daemon` 链路仍可用，但当前迭代策略是 Trae-first，相关扩展暂缓投入（deferred），不属于推荐启动路径。
 - `worker-daemon` / Trae runtime 现在只有在结果成功回写到 dispatcher 后才会对外呈现“完成”；`submitResult`、`git push`、自动 PR 创建失败都属于显式失败，而不是假完成。
 - `dependsOn` 现在进入 dispatcher 调度门控：依赖未满足时任务保持 `planned`，满足后自动解锁为 `ready`。
+- generic worker claim 已从副作用 GET 收口为显式 POST：
+  - `GET /api/workers/:workerId/assigned-task` 只读
+  - `POST /api/workers/:workerId/claim-task` 才会真正 claim / assign
 - review decision 现在显式支持 `merge`、`block`、`rework`、`changes_requested`，其中后两者都会把任务落到 `blocked`，但保留原始 decision 供 redrive 和审计使用。
+- dispatcher 现在会 canonicalize worker result 的 `workerId/pool/repo/defaultBranch/branchName`，worker 不能再覆盖这些 dispatcher-owned 字段。
+- dashboard snapshot 现在附带最小控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`。
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - Trae 的首选无人值守路径是 `automation gateway` + `automation worker`。
 - Trae MCP worker 已降级为 deprecated/fallback 接入。
@@ -169,6 +178,7 @@ Trae MCP fallback 维护：
 - `../packages/mcp-*/README.md`
   - MCP thin-wrapper 包入口（`mcp-scheduler`、`mcp-trae-worker`、`mcp-review-gate`、`mcp-github`、`mcp-repo-policy`）。
   - 都是 thin wrapper：工具定义和 deps 注入委托，实际逻辑在 dispatcher 层。
+  - `mcp-scheduler` 现在已经切到 generic pool 表达，并为每个 tool 暴露输入 schema。
   - `mcp-trae-worker` 是 deprecated/fallback；推荐路径是 Trae automation gateway + automation worker。
 - `../prompts/dispatch-task-template.md`
   - 给 worker 派发代码任务时的通用骨架模板。

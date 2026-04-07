@@ -15,7 +15,8 @@ describe("mcp scheduler server", () => {
       getAssignedTask: vi.fn(),
     });
 
-    expect(server.listTools().map((tool) => tool.name)).toEqual([
+    const tools = server.listTools();
+    expect(tools.map((tool) => tool.name)).toEqual([
       "create_tasks",
       "list_ready_tasks",
       "assign_task",
@@ -25,6 +26,7 @@ describe("mcp scheduler server", () => {
       "fail_task",
       "get_assigned_task",
     ]);
+    expect(tools.every((tool) => tool.inputSchema && typeof tool.inputSchema === "object")).toBe(true);
   });
 
   it("delegates create_tasks", async () => {
@@ -46,7 +48,7 @@ describe("mcp scheduler server", () => {
           id: "task-1",
           repo: "org/repo-a",
           title: "Implement auth API",
-          pool: "codex",
+          pool: "trae",
           allowedPaths: ["apps/api/**"],
           acceptance: ["tests pass"],
           dependsOn: [],
@@ -59,13 +61,30 @@ describe("mcp scheduler server", () => {
         id: "task-1",
         repo: "org/repo-a",
         title: "Implement auth API",
-        pool: "codex",
+        pool: "trae",
         allowedPaths: ["apps/api/**"],
         acceptance: ["tests pass"],
         dependsOn: [],
       },
     ]);
     expect(result).toEqual({ created: ["task-1"] });
+  });
+
+  it("rejects invalid scheduler arguments before hitting deps", async () => {
+    const createTasks = vi.fn();
+    const server = createSchedulerServer({
+      createTasks,
+      listReadyTasks: vi.fn(),
+      assignTask: vi.fn(),
+      heartbeat: vi.fn(),
+      startTask: vi.fn(),
+      completeTask: vi.fn(),
+      failTask: vi.fn(),
+      getAssignedTask: vi.fn(),
+    });
+
+    await expect(server.callTool("heartbeat", { workerId: "", at: "" })).rejects.toThrow();
+    expect(createTasks).not.toHaveBeenCalled();
   });
 
   it("delegates assign_task and get_assigned_task", async () => {

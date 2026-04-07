@@ -343,6 +343,13 @@ export interface DashboardSnapshot {
       failed: number;
     };
   };
+  metrics: {
+    queueDepth: number;
+    plannedTasks: number;
+    reviewBacklog: number;
+    avgAssignmentLagMs: number;
+    maxAssignmentLagMs: number;
+  };
   workers: Worker[];
   tasks: Task[];
   assignments: Assignment[];
@@ -358,6 +365,175 @@ function nowIso(): string {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeTimestamp(value: unknown, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  return Number.isFinite(Date.parse(trimmed)) ? trimmed : fallback;
+}
+
+function normalizeString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function normalizeVerificationCommands(value: unknown): WorkerVerificationCommandResult[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const commands: WorkerVerificationCommandResult[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+
+    const command = normalizeString(entry.command).trim();
+    const output = normalizeString(entry.output);
+    const exitCodeRaw = entry.exitCode;
+    const exitCode = typeof exitCodeRaw === "number"
+      ? exitCodeRaw
+      : typeof exitCodeRaw === "string" && exitCodeRaw.trim()
+        ? Number(exitCodeRaw)
+        : Number.NaN;
+    if (!command || !Number.isInteger(exitCode)) {
+      continue;
+    }
+
+    commands.push({
+      command,
+      exitCode,
+      output,
+    });
+  }
+
+  return commands;
+}
+
+function normalizeWorkerEvidence(value: unknown): WorkerEvidence | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return clone(value) as WorkerEvidence;
+}
+
+function assertWorkerResultMatchesTask(
+  task: Task,
+  workerId: string,
+  result: Record<string, unknown>,
+): void {
+  const rawTaskId = normalizeString(result.taskId).trim();
+  if (!rawTaskId) {
+    throw new Error("worker result taskId is required");
+  }
+  if (rawTaskId !== task.id) {
+    throw new Error(`worker result taskId mismatch for ${task.id}`);
+  }
+
+  const rawWorkerId = normalizeString(result.workerId).trim();
+  if (rawWorkerId && rawWorkerId !== workerId) {
+    throw new Error(`worker result workerId mismatch for ${task.id}`);
+  }
+
+  const rawPool = normalizeString(result.pool).trim();
+  if (rawPool && rawPool !== task.pool) {
+    throw new Error(`worker result pool mismatch for ${task.id}`);
+  }
+
+  const rawRepo = normalizeString(result.repo).trim();
+  if (rawRepo && rawRepo !== task.repo) {
+    throw new Error(`worker result repo mismatch for ${task.id}`);
+  }
+
+  const rawDefaultBranch = normalizeString(result.defaultBranch).trim();
+  if (rawDefaultBranch && rawDefaultBranch !== task.defaultBranch) {
+    throw new Error(`worker result defaultBranch mismatch for ${task.id}`);
+  }
+
+  const rawBranchName = normalizeString(result.branchName).trim();
+  if (rawBranchName && rawBranchName !== task.branchName) {
+    throw new Error(`worker result branchName mismatch for ${task.id}`);
+  }
+}
+
+function canonicalizePullRequest(
+  task: Task,
+  pullRequest?: {
+    number: number;
+    url: string;
+    headBranch: string;
+    baseBranch: string;
+  } | null,
+): {
+  number: number;
+  url: string;
+  headBranch: string;
+  baseBranch: string;
+} | null {
+  if (!pullRequest) {
+    return null;
+  }
+
+  if (
+    !Number.isInteger(pullRequest.number)
+    || pullRequest.number <= 0
+    || !pullRequest.url
+  ) {
+    throw new Error(`pull request metadata invalid for ${task.id}`);
+  }
+
+  if (
+    pullRequest.headBranch !== task.branchName
+    || pullRequest.baseBranch !== task.defaultBranch
+  ) {
+    throw new Error(`pull request metadata mismatch for ${task.id}`);
+  }
+
+  return {
+    number: pullRequest.number,
+    url: pullRequest.url,
+    headBranch: task.branchName,
+    baseBranch: task.defaultBranch,
+  };
+}
+
+function buildCanonicalWorkerResult(task: Task, workerId: string, result: WorkerResult): WorkerResult {
+  const rawResult: Record<string, unknown> = isRecord(result) ? result : {};
+  assertWorkerResultMatchesTask(task, workerId, rawResult);
+
+  const verification: Record<string, unknown> = isRecord(rawResult.verification)
+    ? rawResult.verification
+    : {};
+  const commands = normalizeVerificationCommands(verification.commands);
+  const allPassed = verification.allPassed === true;
+  const generatedAt = normalizeTimestamp(rawResult.generatedAt, nowIso());
+
+  return {
+    taskId: task.id,
+    workerId,
+    provider: normalizeString(rawResult.provider, task.pool) || task.pool,
+    pool: task.pool,
+    branchName: task.branchName,
+    repo: task.repo,
+    defaultBranch: task.defaultBranch,
+    mode: task.verification.mode,
+    output: normalizeString(rawResult.output),
+    generatedAt,
+    verification: {
+      allPassed,
+      commands,
+    },
+    evidence: normalizeWorkerEvidence(rawResult.evidence),
+  };
 }
 
 function resolveSourceTaskForFollowUp(state: RuntimeState, followUpOfTaskId: string) {
@@ -1273,13 +1449,14 @@ export function beginTaskForWorker(state: RuntimeState, input: BeginTaskInput): 
 }
 
 export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResultInput): RuntimeState {
-  const task = state.tasks.find((candidate) => candidate.id === input.result.taskId);
+  const taskId = isRecord(input.result) ? normalizeString(input.result.taskId).trim() : "";
+  const task = state.tasks.find((candidate) => candidate.id === taskId);
   if (!task) {
-    throw new Error(`task not found: ${input.result.taskId}`);
+    throw new Error(`task not found: ${taskId || "<unknown>"}`);
   }
-  const assignment = state.assignments.find((candidate) => candidate.taskId === input.result.taskId);
+  const assignment = state.assignments.find((candidate) => candidate.taskId === task.id);
   if (!assignment) {
-    throw new Error(`assignment not found for task: ${input.result.taskId}`);
+    throw new Error(`assignment not found for task: ${task.id}`);
   }
 
   const worker = state.workers.find((candidate) => candidate.id === input.workerId);
@@ -1290,19 +1467,21 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     throw new Error(`task not assigned to worker: ${input.workerId}`);
   }
   if (!["assigned", "in_progress"].includes(task.status)) {
-    throw new Error(`task not executable: ${input.result.taskId}`);
+    throw new Error(`task not executable: ${task.id}`);
   }
-  const currentReview = state.reviews.find((candidate) => candidate.taskId === input.result.taskId);
+  const currentReview = state.reviews.find((candidate) => candidate.taskId === task.id);
+  const canonicalResult = buildCanonicalWorkerResult(task, input.workerId, input.result);
+  const canonicalPullRequest = canonicalizePullRequest(task, input.pullRequest);
 
-  const nextStatus = input.result.verification.allPassed ? "review" : "failed";
-  const reviewMaterial = input.result.verification.allPassed
+  const nextStatus = canonicalResult.verification.allPassed ? "review" : "failed";
+  const reviewMaterial = canonicalResult.verification.allPassed
     ? {
         repo: task.repo,
         title: task.title,
         changedFiles: input.changedFiles ?? [],
         selfTestPassed: true,
-        checks: input.result.verification.commands.map((item) => item.command),
-        pullRequest: input.pullRequest ?? null,
+        checks: canonicalResult.verification.commands.map((item) => item.command),
+        pullRequest: canonicalPullRequest,
       }
     : null;
 
@@ -1311,7 +1490,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     nextState = appendEvent(nextState, {
       taskId: task.id,
       type: "status_changed",
-      at: input.result.generatedAt,
+      at: canonicalResult.generatedAt,
       payload: {
         from: "assigned",
         to: "in_progress",
@@ -1321,7 +1500,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   nextState = appendEvent(nextState, {
     taskId: task.id,
     type: "status_changed",
-    at: input.result.generatedAt,
+    at: canonicalResult.generatedAt,
     payload: {
       from: "in_progress",
       to: nextStatus,
@@ -1330,7 +1509,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
 
   nextState = {
     ...nextState,
-    updatedAt: input.result.generatedAt,
+    updatedAt: canonicalResult.generatedAt,
     tasks: upsertTask(nextState.tasks, {
       ...task,
       status: nextStatus,
@@ -1347,7 +1526,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
       ...worker,
       status: "idle",
       currentTaskId: undefined,
-      lastHeartbeatAt: input.result.generatedAt,
+      lastHeartbeatAt: canonicalResult.generatedAt,
     }),
     reviews: upsertReview(nextState.reviews, {
       taskId: task.id,
@@ -1356,24 +1535,24 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
       notes: "",
       decidedAt: null,
       reviewMaterial,
-      latestWorkerResult: clone(input.result),
+      latestWorkerResult: clone(canonicalResult),
       evidence: currentReview?.evidence ?? null,
     }),
   };
 
-  if (input.pullRequest) {
+  if (canonicalPullRequest) {
     nextState = {
       ...nextState,
       pullRequests: upsertPullRequest(nextState.pullRequests, {
         taskId: task.id,
-        number: input.pullRequest.number,
-        url: input.pullRequest.url,
-        headBranch: input.pullRequest.headBranch,
-        baseBranch: input.pullRequest.baseBranch,
+        number: canonicalPullRequest.number,
+        url: canonicalPullRequest.url,
+        headBranch: canonicalPullRequest.headBranch,
+        baseBranch: canonicalPullRequest.baseBranch,
         title: task.title,
         status: "opened",
-        createdAt: input.result.generatedAt,
-        updatedAt: input.result.generatedAt,
+        createdAt: canonicalResult.generatedAt,
+        updatedAt: canonicalResult.generatedAt,
       }),
     };
   }
@@ -1471,9 +1650,41 @@ function resolveWorkerStatuses(workers: Worker[], options: ReconcileOptions = {}
   });
 }
 
+function computeAssignmentLagMetrics(tasks: Task[], assignments: Assignment[]): {
+  avgAssignmentLagMs: number;
+  maxAssignmentLagMs: number;
+} {
+  const lags = assignments.flatMap((assignment) => {
+    if (!assignment.assignedAt) {
+      return [];
+    }
+    const task = tasks.find((candidate) => candidate.id === assignment.taskId);
+    const createdAt = Date.parse(task?.createdAt ?? "");
+    const assignedAt = Date.parse(assignment.assignedAt);
+    if (!Number.isFinite(createdAt) || !Number.isFinite(assignedAt)) {
+      return [];
+    }
+    return [Math.max(0, assignedAt - createdAt)];
+  });
+
+  if (lags.length === 0) {
+    return {
+      avgAssignmentLagMs: 0,
+      maxAssignmentLagMs: 0,
+    };
+  }
+
+  const total = lags.reduce((sum, value) => sum + value, 0);
+  return {
+    avgAssignmentLagMs: Math.round(total / lags.length),
+    maxAssignmentLagMs: Math.max(...lags),
+  };
+}
+
 export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOptions = {}): DashboardSnapshot {
   const reconciledState = reconcileRuntimeState(state, options);
   const workers = resolveWorkerStatuses(reconciledState.workers, options);
+  const assignmentLag = computeAssignmentLagMetrics(reconciledState.tasks, reconciledState.assignments);
 
   return {
     updatedAt: reconciledState.updatedAt,
@@ -1494,6 +1705,13 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
         merged: reconciledState.tasks.filter((task) => task.status === "merged").length,
         failed: reconciledState.tasks.filter((task) => task.status === "failed").length,
       },
+    },
+    metrics: {
+      queueDepth: reconciledState.tasks.filter((task) => task.status === "ready").length,
+      plannedTasks: reconciledState.tasks.filter((task) => task.status === "planned").length,
+      reviewBacklog: reconciledState.tasks.filter((task) => task.status === "review").length,
+      avgAssignmentLagMs: assignmentLag.avgAssignmentLagMs,
+      maxAssignmentLagMs: assignmentLag.maxAssignmentLagMs,
     },
     workers,
     tasks: clone([...reconciledState.tasks].reverse()),
