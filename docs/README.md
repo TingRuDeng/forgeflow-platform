@@ -145,6 +145,7 @@ Trae MCP fallback 维护：
 - `../.github/workflows/release.yml`
   - GitHub Actions 发布入口。
   - 用 OIDC + provenance 执行 npm 发布，并在发布后跑 Scorecard。
+  - 发布前会校验包元数据是否与当前仓库 `TingRuDeng/forgeflow-platform` 对齐，并要求 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 作为自动发布显式门禁。
 - `codex-session-bootstrap.md`
   - Codex-control 专用会话提示助手。
   - 不替代 `AGENTS.md` 或本文件。

@@ -5,12 +5,12 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TingRuDeng/ForgeFlow.git",
+    "url": "git+https://github.com/TingRuDeng/forgeflow-platform.git",
     "directory": "packages/worker-review-orchestrator-cli"
   },
-  "homepage": "https://github.com/TingRuDeng/ForgeFlow/tree/main/packages/worker-review-orchestrator-cli",
+  "homepage": "https://github.com/TingRuDeng/forgeflow-platform/tree/main/packages/worker-review-orchestrator-cli",
   "bugs": {
-    "url": "https://github.com/TingRuDeng/ForgeFlow/issues"
+    "url": "https://github.com/TingRuDeng/forgeflow-platform/issues"
   },
   "type": "module",
   "description": "ForgeFlow control-layer CLI for dispatching tasks, watching execution, and submitting review decisions.",
