@@ -30,6 +30,8 @@ Current active building blocks:
 The current main runtime is hybrid:
 
 - live entrypoints and CLI/bootstrap remain under `scripts/` and `scripts/lib/`
+- the `scripts/` root is intentionally trimmed to supported entrypoints plus a small legacy drill set, rather than keeping duplicate staging wrappers
+- the old local codex drill flow has been retired from active entrypoints; only the deferred `worker-daemon` execution path remains for `codex/gemini`
 - the dispatcher TypeScript foundation now owns major runtime logic under `apps/dispatcher/src/modules/server/`
 - current live bridges import built output from `apps/dispatcher/dist/`
 
@@ -46,6 +48,13 @@ Still script-owned glue:
 - review-memory injection
 - dashboard HTML shell
 - Trae automation gateway and Trae automation worker runtime
+
+Not part of the active runtime surface anymore:
+
+- unreferenced `start-staging-*.sh` wrapper scripts
+- the old `trigger-ai-dispatch.*` GitHub workflow trigger helper
+- the old local codex drill helpers (`run-codex-control-flow.*`, `create-two-codex-drill-planner.*`, `run-dispatch-assignments.*`, `process-worker-result.*`)
+- checked-in declaration stubs under `scripts/*.d.ts` and `scripts/lib/*.d.ts`
 
 Do not assume `apps/dispatcher/src/index.ts` is the live server entry. It is not. The live process still starts from `scripts/*.js`, but the main dispatcher runtime path is no longer purely script-first.
 
