@@ -69,14 +69,12 @@ jobs:
             local_version=$(node -p "require('./${pkg_dir}package.json').version")
             
             if [[ "$pkg_name" == @tingrudeng/* ]]; then
-              npm_version=$(npm view "$pkg_name" version 2>/dev/null || echo "0.0.0")
-              
-              if [ "$local_version" != "$npm_version" ]; then
-                echo "📦 $pkg_name: local=$local_version, npm=$npm_version -> NEEDS RELEASE"
+              if npm view "${pkg_name}@${local_version}" version >/dev/null 2>&1; then
+                echo "✓ $pkg_name@$local_version already exists on npm -> up to date"
+              else
+                echo "📦 $pkg_name@$local_version is not published yet -> NEEDS RELEASE"
                 pkg_short=$(echo "$pkg_name" | sed 's/@tingrudeng\///')
                 PACKAGES=$(echo "$PACKAGES" | jq -c --arg name "$pkg_short" --arg version "$local_version" '. += [{"name": $name, "version": $version}]')
-              else
-                echo "✓ $pkg_name: local=$local_version, npm=$npm_version -> up to date"
               fi
             fi
           done
@@ -237,10 +235,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check if exact version is already published
+        id: version_check
+        run: |
+          PACKAGE="@tingrudeng/${{ matrix.package.name }}"
+          VERSION="${{ matrix.package.version }}"
+          if npm view "${PACKAGE}@${VERSION}" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "⚪ ${PACKAGE}@${VERSION} already exists on npm; skipping build and publish."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build package
+        if: steps.version_check.outputs.already_published != 'true'
         run: pnpm --filter @tingrudeng/${{ matrix.package.name }} build
 
       - name: Publish to npm with Trusted Publishing (OIDC)
+        if: steps.version_check.outputs.already_published != 'true'
         env:
           GITHUB_ACTIONS: "true"
         run: |

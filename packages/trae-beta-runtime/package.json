@@ -17,7 +17,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "forgeflow-trae-beta": "./dist/cli.js"
+    "forgeflow-trae-beta": "dist/cli.js"
   },
   "files": [
     "dist",
