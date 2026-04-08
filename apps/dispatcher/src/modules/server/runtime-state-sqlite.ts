@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type { RuntimeState } from "./runtime-state.js";
 import { formatLocalTimestamp } from "../time.js";
@@ -22,12 +23,23 @@ function stateFilePath(stateDir: string): string {
   return path.join(stateDir, "runtime-state.json");
 }
 
+function readOnlyDbUri(filePath: string): string {
+  const url = pathToFileURL(filePath);
+  url.searchParams.set("mode", "ro");
+  url.searchParams.set("immutable", "1");
+  return url.href;
+}
+
 function checksumSha256(content: string): string {
   return crypto.createHash("sha256").update(content, "utf8").digest("hex");
 }
 
 function applyPragmas(db: InstanceType<typeof DatabaseSync>): void {
   db.exec(`PRAGMA journal_mode = WAL;`);
+  db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`);
+}
+
+function applyReadOnlyPragmas(db: InstanceType<typeof DatabaseSync>): void {
   db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`);
 }
 
@@ -97,8 +109,8 @@ export function loadRuntimeState(stateDir: string): RuntimeState {
 
   let db: InstanceType<typeof DatabaseSync> | null = null;
   try {
-    db = new DatabaseSync(filePath, { readOnly: true });
-    applyPragmas(db);
+    db = new DatabaseSync(readOnlyDbUri(filePath), { readOnly: true });
+    applyReadOnlyPragmas(db);
     const row = db
       .prepare(
         "SELECT revision, data, checksum_sha256, created_at FROM snapshots ORDER BY revision DESC LIMIT 1",
