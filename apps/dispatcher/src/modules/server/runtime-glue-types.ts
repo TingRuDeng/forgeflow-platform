@@ -120,6 +120,7 @@ export type WorkerStatus = "idle" | "busy" | "offline";
 
 export interface TraeTaskInfo {
   task_id: string;
+  trace_id?: string;
   repo: string;
   branch: string;
   default_branch: string;

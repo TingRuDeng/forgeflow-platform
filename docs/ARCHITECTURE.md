@@ -1,6 +1,6 @@
 # forgeflow-platform Architecture
 
-> Verified overview of the current main path. This is not a full code catalog. Facts below were checked against the live script entrypoints under `scripts/lib/`, the dispatcher TypeScript foundations under `apps/dispatcher/src/`, and the packaged Trae runtime under `packages/trae-beta-runtime/src/`.
+> Verified overview of the current main path. This is not a full code catalog. Facts below were checked against the live script entrypoints under `scripts/` and `scripts/lib/`, the dispatcher TypeScript foundations under `apps/dispatcher/src/`, and the packaged Trae runtime under `packages/trae-beta-runtime/src/`.
 
 ## 1. System Shape
 
@@ -11,7 +11,7 @@ Current active building blocks:
 - `dispatcher`
   - Current truth source for task state, worker state, assignments, reviews, PR metadata, and audit events.
   - Active runtime entry still lives in `scripts/lib/dispatcher-server.js`.
-  - Trae-specific dispatcher route handling is now bridged into the TypeScript runtime foundation under `apps/dispatcher/dist/modules/server/runtime-dispatcher-server.js`.
+  - Trae-specific dispatcher route handling, review-memory loading, and task-worktree ownership now live in the TypeScript runtime foundation under `apps/dispatcher/dist/modules/server/*.js`; `scripts/lib/*` only bootstraps or re-exports those modules.
   - HTTP surface supports optional bearer-token protection via `DISPATCHER_API_TOKEN`; `/health` remains public.
 - `worker daemon`
   - Preferred unattended path for `codex` and `gemini`.
@@ -34,19 +34,21 @@ The current main runtime is hybrid:
 - the old local codex drill flow has been retired from active entrypoints; only the deferred `worker-daemon` execution path remains for `codex/gemini`
 - the dispatcher TypeScript foundation now owns major runtime logic under `apps/dispatcher/src/modules/server/`
 - current live bridges import built output from `apps/dispatcher/dist/`
+- dispatcher-generated `traceId` is now the stable stage-2 correlation key across snapshot, worker events, CLI summaries, console drill-down, and Trae worker evidence
 
 Verified bridge points:
 
 - HTTP dispatcher server Trae route handling: `scripts/lib/dispatcher-server.js` -> `apps/dispatcher/dist/modules/server/runtime-dispatcher-server.js`
 - Dispatcher state machine: `scripts/lib/dispatcher-state.js` -> `apps/dispatcher/dist/modules/server/runtime-state.js`
+- Review-memory loading and lesson extraction: `scripts/lib/review-memory.js` -> `apps/dispatcher/dist/modules/server/review-memory.js`
+- Task worktree planning and reuse rules: `scripts/lib/task-worktree.js` -> `apps/dispatcher/dist/modules/server/task-worktree.js`
 - Generic worker loop bridge: `scripts/lib/worker-daemon.js` / `scripts/run-worker-daemon.js` -> `apps/dispatcher/dist/modules/server/runtime-glue-dispatcher-client.js`
 - Review decision bridge: `scripts/lib/review-decision.js` / `scripts/submit-review-decision.js` -> `apps/dispatcher/dist/modules/server/runtime-glue-review-decision.js`
 
 Still script-owned glue:
 
-- task worktree materialization
-- review-memory injection
 - dashboard HTML shell
+- generic worker execution bootstrap and worker-daemon process glue
 - Trae automation gateway and Trae automation worker runtime
 
 Not part of the active runtime surface anymore:
@@ -70,6 +72,8 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
   - Only used when `RUNTIME_STATE_BACKEND=json` or `--persistence-backend json` is explicitly selected
   - Also used as one-time import source when SQLite is the default but only a JSON snapshot exists
 - Review memory: `.forgeflow-dispatcher/memory.json`
+  - owned by `apps/dispatcher/src/modules/server/review-memory.ts`
+  - accessed through the thin wrapper `scripts/lib/review-memory.js`
 - Script-local Trae gateway sessions: `.forgeflow-trae-gateway/sessions.json`
 - Packaged Trae runtime sessions: `~/.forgeflow-trae-beta/sessions/sessions.json`
 
@@ -81,12 +85,13 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
 
 1. Control layer creates a dispatch payload.
 2. Dispatcher records tasks, assignments, reviews, and events.
+   - Each task receives a stable `traceId`.
 3. Worker daemon registers and heartbeats against dispatcher.
 4. Worker daemon claims an assigned task or a ready task in its pool.
 5. Worker daemon creates a per-task worktree from the latest fetched default branch.
 6. Worker executes assignment scripts inside the worktree.
 7. Worker reports verification results, changed files, and optional PR metadata back to dispatcher.
-8. Worker may additionally report best-effort runtime events such as delivery failure, cleanup failure, or session interruption back to dispatcher metrics.
+8. Worker may additionally report best-effort runtime events such as delivery failure, cleanup failure, session interruption, and structured failure codes back to dispatcher metrics.
 9. Dispatcher moves the task to `review` or `failed`.
 10. Control layer submits `merge` or `block`.
 
@@ -95,10 +100,12 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
 1. Dispatcher exposes Trae-specific worker endpoints under `/api/trae/*`.
 2. Trae automation worker registers and fetches tasks from dispatcher.
 3. Dispatcher computes task-specific worktree and assignment directories for the Trae worker.
+   - The task payload also carries the stable dispatcher `trace_id`.
 4. Trae automation worker calls the local automation gateway.
 5. Automation gateway drives Trae, tracks session state, and returns the final response.
-6. Trae automation worker submits `review_ready` or `failed` back to dispatcher.
-7. Dispatcher maps those statuses to `review` or `failed`.
+6. Trae automation worker reports structured phase events plus `traceId` / `sessionId` / `failureCode` hints back to dispatcher.
+7. Trae automation worker submits `review_ready` or `failed` back to dispatcher.
+8. Dispatcher maps those statuses to `review` or `failed`.
 
 ### 4.3 Rework continuation flow
 

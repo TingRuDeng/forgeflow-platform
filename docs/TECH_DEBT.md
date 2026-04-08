@@ -2,23 +2,23 @@
 
 Only confirmed, still-active debt belongs here.
 
-## 1. Dispatcher runtime ownership is still split across `apps/dispatcher/` and `scripts/lib/`
+## 1. Dispatcher compatibility wrappers still depend on `apps/dispatcher/dist` freshness
 
 Current situation:
 
-- `apps/dispatcher/` now contains the TypeScript runtime foundations for dispatcher server/state, worker-daemon client glue, and review-decision glue
-- live entrypoints still start from `scripts/lib/` and import `apps/dispatcher/dist`
-- some remaining runtime glue is still script-owned
+- dispatcher control-plane ownership now lives in `apps/dispatcher/`
+- `scripts/lib/dispatcher-server|dispatcher-state|review-memory|task-worktree|review-decision` 只保留 bootstrap / compatibility wrapper
+- live entrypoints still depend on checked-in adapters importing `apps/dispatcher/dist`
 
 Impact:
 
-- contributors still need to understand both the TS foundation layer and the live script adapter layer
-- bootstrap/freshness bugs can appear at the boundary between source and built `dist`
+- bootstrap/freshness bugs can still appear at the boundary between source and built `dist`
+- compatibility wrappers still add one extra layer for debugging local runtime startup
 
 Desired direction:
 
-- either converge further toward one clearer ownership boundary
-- or keep the adapter split but enforce explicit bridge contracts and dist freshness rules
+- either keep this adapter split explicit and well-tested
+- or remove more checked-in wrappers once all supported entrypoints can run directly from packaged/app-owned runtime modules
 
 ## 2. SQLite runtime state, JSON fallback, and schema constants still coexist without one fully consolidated persistence story
 

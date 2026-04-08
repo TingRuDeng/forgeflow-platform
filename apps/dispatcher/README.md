@@ -8,6 +8,7 @@ Current verified contents:
 
 - dispatcher domain services under `src/modules/*`
 - dispatcher runtime foundations under `src/modules/server/*`
+- dispatcher-owned review-memory and task-worktree implementations under `src/modules/server/*`
 - schema constants under `src/db/schema.ts`
 - dispatcher-focused tests under `tests/modules/*`
 
@@ -21,6 +22,8 @@ Current live entry adapters are still under:
 - `../../scripts/lib/dispatcher-state.js`
 - `../../scripts/lib/worker-daemon.js`
 - `../../scripts/lib/review-decision.js`
+- `../../scripts/lib/review-memory.js`
+- `../../scripts/lib/task-worktree.js`
 
 Current live bridges import built output from `apps/dispatcher/dist`, so behavior changes may require checking:
 
@@ -53,6 +56,8 @@ Changing dispatcher state semantics usually ripples into:
 - `../../scripts/lib/dispatcher-server.js`
 - `../../scripts/lib/worker-daemon.js`
 - `../../scripts/lib/review-decision.js`
+- `../../scripts/lib/review-memory.js`
+- `../../scripts/lib/task-worktree.js`
 - `../../packages/worker-review-orchestrator-cli/`
 - `../../docs/ARCHITECTURE.md`
 - `../../docs/API_ENDPOINTS.md`

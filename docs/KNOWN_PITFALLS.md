@@ -4,7 +4,7 @@ Only code-backed or implementation-backed pitfalls belong here.
 
 ## 1. Do not mistake `apps/dispatcher/src/db/schema.ts` for the live dispatcher truth source
 
-Current mainline runtime state is loaded through `scripts/lib/dispatcher-state.js`, with SQLite as the default backend (`.forgeflow-dispatcher/runtime-state.db`) and JSON only as an explicit fallback/import path.
+Current mainline runtime state is loaded through `scripts/lib/dispatcher-state.js`, which bootstraps the dispatcher-owned implementation in `apps/dispatcher/dist/modules/server/runtime-state.js`. SQLite remains the default backend (`.forgeflow-dispatcher/runtime-state.db`), and JSON is only an explicit fallback/import path.
 
 If you change dispatcher behavior and only update the SQLite schema constants, you have not updated the active runtime path.
 
@@ -29,7 +29,7 @@ When you touch one gateway implementation, check the other one in the same task.
 
 ## 4. Worktree creation hard-fails on missing remote baseline
 
-`scripts/lib/task-worktree.js` always does:
+The active task-worktree implementation in `apps/dispatcher/src/modules/server/task-worktree.ts` (re-exported by `scripts/lib/task-worktree.js`) always does:
 
 - `git fetch origin <defaultBranch>`
 - resolve `origin/<defaultBranch>`

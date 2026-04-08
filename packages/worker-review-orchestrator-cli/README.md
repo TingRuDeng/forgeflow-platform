@@ -70,6 +70,7 @@ The CLI automatically includes `Authorization: Bearer <token>` in all dispatcher
   - Use this for blocked/rework or failed tasks that should resume from the original task state
 - `watch`
   - Poll `/api/dashboard/snapshot` until a task reaches `review`, `failed`, `merged`, or `blocked`
+  - `--summary` 会输出 `traceId`、`failureCode`、progress / review / redrive 摘要，便于控制层快速判断是否可继续
 - `decide`
   - Submit `merge` or `block` decisions through the dispatcher review flow
   - Supports dispatcher HTTP or local `state-dir` fallback
@@ -77,7 +78,7 @@ The CLI automatically includes `Authorization: Bearer <token>` in all dispatcher
 - `inspect`
   - Retrieve review material for a task from the dispatcher snapshot
   - Fetches task, assignment, reviews, pull request, and events to help a control-layer reviewer summarize before merge/block decision
-  - Use `--summary` flag to get concise output with task status, branch, worker, result evidence, recent events, and review/PR state
+  - Use `--summary` flag to get concise output with task status, branch, worker, `traceId`, result evidence, recent events, and review/PR state
 
 ## Current Boundary
 
@@ -108,6 +109,6 @@ Use `dispatch-task` for the common case of one worker task with one branch, one 
 
 For Trae tasks, prefer structured flags (`--goal`, `--source-of-truth`, `--required-changes`, `--non-goals`, `--must-preserve`, `--acceptance`) over hand-written prompt files. The CLI now treats the final report contract as part of dispatch validation, not just a runtime convention.
 
-Use `continue-task` when you need to resume an existing task. It preserves the original task lineage and routes through the redrive flow instead of creating a new dispatch.
+Use `continue-task` when you need to resume an existing task. It preserves the original task lineage, current `traceId` correlation context, and routes through the redrive flow instead of creating a new dispatch.
 
 For control-layer review flow, prefer this CLI over calling lower-level review-decision scripts directly. Keep the scripts as compatibility and implementation detail, but use `forgeflow-review-orchestrator decide` as the default operator entrypoint.

@@ -19,7 +19,7 @@ Current active persistence sources verified in code:
 
 ## 2. Dispatcher Runtime State
 
-Dispatcher runtime state is created and loaded through `scripts/lib/dispatcher-state.js`, which bridges into `apps/dispatcher/src/modules/server/runtime-state.ts`.
+Dispatcher runtime state is created and loaded through `scripts/lib/dispatcher-state.js`, which bootstraps the dispatcher-owned implementation in `apps/dispatcher/src/modules/server/runtime-state.ts`.
 
 Default backend:
 
@@ -50,6 +50,13 @@ Top-level collections currently include:
 - `worktree_cleanup_failed`
 - `session_interrupted`
 - `state_lock_timeout`
+
+当前事件记录还会保留最小关联字段：
+
+- `summary`
+- `payload.traceId`
+- `payload.sessionId`
+- `payload.failureCode`
 
 Supporting metadata:
 
@@ -94,6 +101,7 @@ Verified core task fields include:
 - `continuationMode`
 - `continueFromTaskId`
 - `verification`
+- `traceId`
 - `status`
 - `assignedWorkerId`
 - `lastAssignedWorkerId`
@@ -121,6 +129,7 @@ Assignment records wrap the assignment package plus dispatcher tracking metadata
 - `reportSchemaVersion`
 - `assignedAt`
 - `claimedAt`
+- `traceId`
 - `continuationMode` / `continueFromTaskId` / `chatMode` inside `assignment`
 
 ### 2.4 Reviews and PR metadata
@@ -176,7 +185,7 @@ Pull request records track review-side Git metadata:
 
 ## 3. Review Memory Store
 
-`memory.json` is loaded in `scripts/lib/review-memory.js`.
+`memory.json` is owned by `apps/dispatcher/src/modules/server/review-memory.ts` and accessed through the thin wrapper `scripts/lib/review-memory.js`.
 
 Verified top-level shape:
 

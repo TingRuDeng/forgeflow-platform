@@ -222,6 +222,18 @@ interface WorkerResult {
       output: string;
     }>;
   };
+  evidence?: {
+    failureType?: "preflight" | "execution" | "verification" | "unknown";
+    failureSummary?: string;
+    blockers?: Array<{
+      kind: "preflight" | "execution" | "verification" | "unknown";
+      code: string;
+      message: string;
+      details?: Record<string, unknown>;
+    }>;
+    findings?: unknown[];
+    artifacts?: Record<string, string>;
+  };
 }
 
 interface PullRequestInfo {
@@ -229,6 +241,81 @@ interface PullRequestInfo {
   url: string;
   headBranch: string;
   baseBranch: string;
+}
+
+type WorkerFailureKind = "preflight" | "execution" | "verification" | "unknown";
+
+function buildWorkerFailureBlocker(
+  kind: WorkerFailureKind,
+  code: string,
+  message: string,
+  details?: Record<string, unknown>,
+) {
+  return {
+    kind,
+    code,
+    message,
+    ...(details && Object.keys(details).length > 0 ? { details } : {}),
+  };
+}
+
+function classifyWorkerDaemonFailure(error: Error | string): {
+  failureType: WorkerFailureKind;
+  blocker: ReturnType<typeof buildWorkerFailureBlocker>;
+} {
+  const message = error instanceof Error ? error.message : String(error);
+  const lowerMessage = message.toLowerCase();
+
+  if (/refusing to push to default branch|branchname not allowed by forgeflow_allowed_push_prefixes/.test(lowerMessage)) {
+    return {
+      failureType: "preflight",
+      blocker: buildWorkerFailureBlocker("preflight", "branch_protection_hit", message),
+    };
+  }
+
+  if (/existing worktree already present|already checked out|failed to create worktree|failed to fetch origin|default branch ref|invalid git branch ref|invalid branchname/.test(lowerMessage)) {
+    return {
+      failureType: "preflight",
+      blocker: buildWorkerFailureBlocker("preflight", "workspace_prepare_failed", message),
+    };
+  }
+
+  if (/operation not permitted|permission denied|sandbox|forbidden|not allowed|blocked by environment/.test(lowerMessage)) {
+    return {
+      failureType: "preflight",
+      blocker: buildWorkerFailureBlocker("preflight", "environment_blocked", message),
+    };
+  }
+
+  if (/vitest|jest|pnpm test|typecheck|verification/.test(lowerMessage)) {
+    return {
+      failureType: "verification",
+      blocker: buildWorkerFailureBlocker("verification", "verification_failed", message),
+    };
+  }
+
+  if (/submitresult failed after|failed to push changes|push failed|push failure|failed to create pull request|pr create failed|dispatcher unavailable/.test(lowerMessage)) {
+    return {
+      failureType: "execution",
+      blocker: buildWorkerFailureBlocker("execution", "delivery_failed", message),
+    };
+  }
+
+  return {
+    failureType: "execution",
+    blocker: buildWorkerFailureBlocker("execution", "execution_failed", message),
+  };
+}
+
+function buildWorkerFailureEvidence(error: Error | string): NonNullable<WorkerResult["evidence"]> {
+  const classified = classifyWorkerDaemonFailure(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    failureType: classified.failureType,
+    failureSummary: message,
+    blockers: [classified.blocker],
+    findings: [],
+  };
 }
 
 function materializeAssignmentPackage(worktreeDir: string, payload: TaskPayload): string {
@@ -527,6 +614,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
         payload: {
           stage: "submit_result",
           error: lastError,
+          failureCode: "delivery_failed",
         },
       });
       throw new Error(`submitResult failed after ${submitResultMaxRetries} attempts: ${lastError}`);
@@ -583,6 +671,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
           allPassed: false,
           commands: [],
         },
+        evidence: buildWorkerFailureEvidence(errorMessage),
       };
 
       const failedOutputDir = path.join(input.repoDir, ".worktrees", "failed", safeTaskDirName(taskId));
@@ -627,6 +716,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
         payload: {
           stage: "failed_result_fallback",
           error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+          failureCode: "delivery_failed",
         },
       });
     }
@@ -648,6 +738,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
           taskId,
           payload: {
             error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+            failureCode: "cleanup_failed",
           },
         });
       }

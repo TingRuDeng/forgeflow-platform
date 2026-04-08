@@ -233,6 +233,7 @@ describe("runtime/worker", () => {
           filesChanged: "src/runtime/worker.ts,src/runtime/task-worktree.ts",
           remoteVerified: "true",
           remoteHeadSha: "abc123",
+          sessionId: "session-001",
         },
       },
     });

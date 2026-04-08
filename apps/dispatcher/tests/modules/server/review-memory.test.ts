@@ -18,7 +18,7 @@ const repoRoot = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   "../../../../../",
 );
-const memoryModulePath = path.join(repoRoot, "scripts/lib/review-memory.js");
+const memoryModulePath = new URL("../../../src/modules/server/review-memory.ts", import.meta.url).href;
 const serverModulePath = path.join(repoRoot, "scripts/lib/dispatcher-server.js");
 const tempRoots: string[] = [];
 

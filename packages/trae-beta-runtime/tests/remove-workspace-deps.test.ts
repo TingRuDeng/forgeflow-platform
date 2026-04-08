@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createRequire } from "node:module";
 
 import { describe, expect, it } from "vitest";
 
@@ -12,21 +11,29 @@ import { rewriteWorkspaceDependencies } from "../scripts/remove-workspace-deps.m
 
 describe("remove-workspace-deps publish preparation", () => {
   it("rewrites workspace dependencies using the default repo workspace root", () => {
-    const require = createRequire(import.meta.url);
-    const packageJsonPath = require.resolve("../package.json");
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "trae-publish-backup-"));
-    const backupPath = path.join(tempDir, "package.json.backup");
-    const originalContent = fs.readFileSync(packageJsonPath, "utf8");
-    fs.writeFileSync(backupPath, originalContent);
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "trae-publish-default-root-"));
+    const packageDir = path.join(tempRoot, "packages", "trae-beta-runtime");
+    const depDir = path.join(tempRoot, "packages", "automation-gateway-core");
+    fs.mkdirSync(packageDir, { recursive: true });
+    fs.mkdirSync(depDir, { recursive: true });
 
-    try {
-      rewriteWorkspaceDependencies(packageJsonPath);
+    fs.writeFileSync(path.join(packageDir, "package.json"), JSON.stringify({
+      name: "@tingrudeng/trae-beta-runtime",
+      version: "0.1.0-beta.59",
+      dependencies: {
+        "@tingrudeng/automation-gateway-core": "workspace:*",
+      },
+    }, null, 2));
+    fs.writeFileSync(path.join(depDir, "package.json"), JSON.stringify({
+      name: "@tingrudeng/automation-gateway-core",
+      version: "0.1.0-beta.3",
+    }, null, 2));
 
-      const updatedPkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
-      expect(updatedPkg.dependencies?.["@tingrudeng/automation-gateway-core"]).toBe("0.1.0-beta.3");
-    } finally {
-      fs.writeFileSync(packageJsonPath, originalContent);
-    }
+    const packageJsonPath = path.join(packageDir, "package.json");
+    rewriteWorkspaceDependencies(packageJsonPath);
+
+    const updatedPkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+    expect(updatedPkg.dependencies?.["@tingrudeng/automation-gateway-core"]).toBe("0.1.0-beta.3");
   });
 
   it("rewrites workspace dependencies to concrete workspace package versions", () => {

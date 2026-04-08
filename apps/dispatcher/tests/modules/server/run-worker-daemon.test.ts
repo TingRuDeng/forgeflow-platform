@@ -478,7 +478,7 @@ describe("worker daemon cycle", () => {
 
     const daemonMod = await import(daemonModulePath);
     const fakeRepoRoot = createFakeWorkerRepoRoot(tempDir);
-    const submittedPayloads: Array<{ result: { output: string }; changedFiles: string[] }> = [];
+    const submittedPayloads: Array<{ result: { output: string; evidence?: { blockers?: Array<{ code: string }> } }; changedFiles: string[] }> = [];
     const client = {
       registerWorker: async () => ({ ok: true }),
       heartbeat: async () => ({ ok: true }),
@@ -504,6 +504,7 @@ describe("worker daemon cycle", () => {
 
     expect(submittedPayloads).toHaveLength(1);
     expect(submittedPayloads[0].result.output).toContain("simulated push failure");
+    expect(submittedPayloads[0].result.evidence?.blockers?.[0]?.code).toBe("delivery_failed");
     expect(submittedPayloads[0].changedFiles).toEqual([]);
   });
 
@@ -512,7 +513,7 @@ describe("worker daemon cycle", () => {
     const repoDir = createRepoWithOrigin(tempDir, "master");
     const daemonMod = await import(daemonModulePath);
     const fakeRepoRoot = createFakeWorkerRepoRoot(tempDir);
-    const submittedPayloads: Array<{ result: { output: string } }> = [];
+    const submittedPayloads: Array<{ result: { output: string; evidence?: { blockers?: Array<{ code: string }> } } }> = [];
 
     const client = {
       registerWorker: async () => ({ ok: true }),
@@ -539,6 +540,7 @@ describe("worker daemon cycle", () => {
 
     expect(submittedPayloads).toHaveLength(1);
     expect(submittedPayloads[0].result.output).toContain("default branch");
+    expect(submittedPayloads[0].result.evidence?.blockers?.[0]?.code).toBe("branch_protection_hit");
   });
 
   it("fails explicitly and submits a failed result when PR creation fails", async () => {
@@ -546,7 +548,7 @@ describe("worker daemon cycle", () => {
     const repoDir = createRepoWithOrigin(tempDir, "master");
     const daemonMod = await import(daemonModulePath);
     const fakeRepoRoot = createFakeWorkerRepoRoot(tempDir);
-    const submittedPayloads: Array<{ result: { output: string } }> = [];
+    const submittedPayloads: Array<{ result: { output: string; evidence?: { blockers?: Array<{ code: string }> } } }> = [];
 
     process.env.GITHUB_TOKEN = "test-token";
     process.env.FORGEFLOW_WORKER_CREATE_PR = "1";
@@ -580,5 +582,6 @@ describe("worker daemon cycle", () => {
 
     expect(submittedPayloads).toHaveLength(1);
     expect(submittedPayloads[0].result.output).toContain("pr create failed");
+    expect(submittedPayloads[0].result.evidence?.blockers?.[0]?.code).toBe("delivery_failed");
   });
 });

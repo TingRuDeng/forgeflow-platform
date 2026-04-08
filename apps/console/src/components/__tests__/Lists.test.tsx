@@ -101,6 +101,7 @@ describe('Task drill-down', () => {
       <TaskDetailsPanel
         task={{
           id: 'dispatch-1:task-1',
+          traceId: 'trace-dispatch-1-task-1',
           title: 'Fix auth gate',
           status: 'blocked',
           branchName: 'codex/auth-fix',
@@ -128,6 +129,7 @@ describe('Task drill-down', () => {
           latestWorkerResult: {
             evidence: {
               failureType: 'verification',
+              blockers: [{ code: 'verification_failed' }],
               failureSummary: 'pnpm test failed',
             },
           },
@@ -151,6 +153,8 @@ describe('Task drill-down', () => {
     );
 
     expect(screen.getByText('Fix auth gate')).toBeInTheDocument();
+    expect(screen.getByText(/trace-dispatch-1-task-1/i)).toBeInTheDocument();
+    expect(screen.getByText(/verification_failed/i)).toBeInTheDocument();
     expect(screen.getByText(/test_gap/i)).toBeInTheDocument();
     expect(screen.getByText(/pnpm test failed/i)).toBeInTheDocument();
 

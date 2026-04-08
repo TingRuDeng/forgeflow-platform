@@ -135,6 +135,62 @@ function shouldCreatePullRequest() {
 function shouldRemoveWorktreeOnExit() {
     return process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT === "1";
 }
+function buildWorkerFailureBlocker(kind, code, message, details) {
+    return {
+        kind,
+        code,
+        message,
+        ...(details && Object.keys(details).length > 0 ? { details } : {}),
+    };
+}
+function classifyWorkerDaemonFailure(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const lowerMessage = message.toLowerCase();
+    if (/refusing to push to default branch|branchname not allowed by forgeflow_allowed_push_prefixes/.test(lowerMessage)) {
+        return {
+            failureType: "preflight",
+            blocker: buildWorkerFailureBlocker("preflight", "branch_protection_hit", message),
+        };
+    }
+    if (/existing worktree already present|already checked out|failed to create worktree|failed to fetch origin|default branch ref|invalid git branch ref|invalid branchname/.test(lowerMessage)) {
+        return {
+            failureType: "preflight",
+            blocker: buildWorkerFailureBlocker("preflight", "workspace_prepare_failed", message),
+        };
+    }
+    if (/operation not permitted|permission denied|sandbox|forbidden|not allowed|blocked by environment/.test(lowerMessage)) {
+        return {
+            failureType: "preflight",
+            blocker: buildWorkerFailureBlocker("preflight", "environment_blocked", message),
+        };
+    }
+    if (/vitest|jest|pnpm test|typecheck|verification/.test(lowerMessage)) {
+        return {
+            failureType: "verification",
+            blocker: buildWorkerFailureBlocker("verification", "verification_failed", message),
+        };
+    }
+    if (/submitresult failed after|failed to push changes|push failed|push failure|failed to create pull request|pr create failed|dispatcher unavailable/.test(lowerMessage)) {
+        return {
+            failureType: "execution",
+            blocker: buildWorkerFailureBlocker("execution", "delivery_failed", message),
+        };
+    }
+    return {
+        failureType: "execution",
+        blocker: buildWorkerFailureBlocker("execution", "execution_failed", message),
+    };
+}
+function buildWorkerFailureEvidence(error) {
+    const classified = classifyWorkerDaemonFailure(error);
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+        failureType: classified.failureType,
+        failureSummary: message,
+        blockers: [classified.blocker],
+        findings: [],
+    };
+}
 function materializeAssignmentPackage(worktreeDir, payload) {
     const assignmentDir = path.join(worktreeDir, ".orchestrator", "assignments", safeTaskDirName(payload.assignment.taskId));
     writeJson(path.join(assignmentDir, "assignment.json"), payload.assignment);
@@ -377,6 +433,7 @@ async function processTaskAssignment(input) {
                 payload: {
                     stage: "submit_result",
                     error: lastError,
+                    failureCode: "delivery_failed",
                 },
             });
             throw new Error(`submitResult failed after ${submitResultMaxRetries} attempts: ${lastError}`);
@@ -411,6 +468,7 @@ async function processTaskAssignment(input) {
                     allPassed: false,
                     commands: [],
                 },
+                evidence: buildWorkerFailureEvidence(errorMessage),
             };
             const failedOutputDir = path.join(input.repoDir, ".worktrees", "failed", safeTaskDirName(taskId));
             fs.mkdirSync(failedOutputDir, { recursive: true });
@@ -455,6 +513,7 @@ async function processTaskAssignment(input) {
                 payload: {
                     stage: "failed_result_fallback",
                     error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+                    failureCode: "delivery_failed",
                 },
             });
         }
@@ -472,6 +531,7 @@ async function processTaskAssignment(input) {
                     taskId,
                     payload: {
                         error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+                        failureCode: "cleanup_failed",
                     },
                 });
             }

@@ -136,7 +136,7 @@ const App: React.FC = () => {
       {data && (
         <div className="animate-fade-in">
           {/* Metrics Overview at the top */}
-          <MetricsGrid stats={data.stats} />
+          <MetricsGrid stats={data.stats} metrics={data.metrics} />
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
             {/* Main Column: Tasks and Terminal */}

@@ -5,11 +5,7 @@ import { spawnSync } from "node:child_process";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-const repoRoot = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "../../../../../",
-);
-const taskWorktreeModulePath = path.join(repoRoot, "scripts/lib/task-worktree.js");
+const taskWorktreeModulePath = new URL("../../../src/modules/server/task-worktree.ts", import.meta.url).href;
 const tempRoots: string[] = [];
 
 function makeTempDir() {

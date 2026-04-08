@@ -35,11 +35,16 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `reviewBacklog`
 - `avgAssignmentLagMs`
 - `maxAssignmentLagMs`
+- `retryRatePct`
 - `submitResultRetryCount`
 - `deliveryFailedCount`
 - `cleanupFailureCount`
 - `sessionInterruptionCount`
 - `stateLockTimeoutCount`
+- `branchProtectionHitCount`
+- `repoConcurrencySaturation`
+- `failureCodes`
+- `reviewReasonCodes`
 - `workers`
 - `tasks`
 
@@ -49,11 +54,16 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `plannedTasks`: 仍被 `dependsOn` 或其他前置条件锁住的任务数
 - `reviewBacklog`: 已到 review 但尚未 merge/block 的任务数
 - `avgAssignmentLagMs` / `maxAssignmentLagMs`: 从 ready 到 assigned 的等待时间
+- `retryRatePct`: 近期 task 级 redrive / retry 占比
 - `submitResultRetryCount`: worker 回写 dispatcher 前出现的回写重试信号
 - `deliveryFailedCount`: `submitResult`、push、draft PR 等交付链失败的控制面落账数
 - `cleanupFailureCount`: worktree cleanup 失败数
 - `sessionInterruptionCount`: 会话中断信号数
 - `stateLockTimeoutCount`: dispatcher 状态锁竞争超时数
+- `branchProtectionHitCount`: 保护分支/分支前缀策略命中数
+- `repoConcurrencySaturation`: 按 `repoDir` 聚合的活跃 worker 并发饱和度
+- `failureCodes`: 基于 worker evidence / blocker code 的失败码聚合
+- `reviewReasonCodes`: 基于 review evidence `reasonCode` 的阻断原因聚合
 
 ## 3. 指标来源
 
@@ -96,7 +106,7 @@ dispatcher 进程内还会记录：
 当前已落地：
 
 - 脚本侧 logger 默认会 redact `Authorization`、`DISPATCHER_API_TOKEN`、`GITHUB_TOKEN` 等敏感字段
-- dispatcher events、task state、worker id、task id、session id 已能提供最小相关性线索
+- dispatcher events、task state、worker id、task id、trace id、session id 已能提供最小相关性线索
 - console 现在支持 task drill-down，可直接查看 failure summary、reasonCode、canRedrive、lineage 和最近任务事件
 
 当前还没有完整长期版能力：
@@ -104,9 +114,12 @@ dispatcher 进程内还会记录：
 - 还没有统一 OTel collector / exporter 配置
 - 还没有所有组件共享的全链路 trace pipeline
 
+阶段二出口当前采用的是 OTel-ready 关联键和结构化 phase events，而不是绑定某个外部 collector 实现。
+
 因此当前 trace 实践应以这些关联键为主：
 
 - `taskId`
+- `traceId`
 - `workerId`
 - `sessionId`
 - `repo`

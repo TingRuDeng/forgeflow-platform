@@ -47,6 +47,7 @@ export async function watchTask(options: WatchOptions & {
           const summary = buildInspectSummaryFromSnapshot(snapshot, options.taskId);
           return {
             taskId: options.taskId,
+            traceId: summary.traceId,
             status,
             attempts,
             elapsedMs: Date.now() - startedAt,
@@ -91,6 +92,7 @@ export async function watchTask(options: WatchOptions & {
         const summary = buildInspectSummaryFromSnapshot(snapshot as Record<string, unknown>, options.taskId);
         return {
           taskId: options.taskId,
+          traceId: summary.traceId,
           status,
           attempts,
           elapsedMs: Date.now() - startedAt,

@@ -62,6 +62,14 @@ Current endpoint families:
     - `metrics.reviewBacklog`
     - `metrics.avgAssignmentLagMs`
     - `metrics.maxAssignmentLagMs`
+    - `metrics.retryRatePct`
+    - `metrics.branchProtectionHitCount`
+    - `metrics.repoConcurrencySaturation`
+    - `metrics.failureCodes`
+    - `metrics.reviewReasonCodes`
+  - Current task/event correlation additions:
+    - tasks now carry stable `traceId`
+    - recent events may include derived `summary`
 - `GET /api/metrics`
   - Returns a small control-plane metrics document for automation, dashboards, and alerts.
   - Current GET response sets `Cache-Control: no-store`.
@@ -72,11 +80,16 @@ Current endpoint families:
     - `reviewBacklog`
     - `avgAssignmentLagMs`
     - `maxAssignmentLagMs`
+    - `retryRatePct`
     - `submitResultRetryCount`
     - `deliveryFailedCount`
     - `cleanupFailureCount`
     - `sessionInterruptionCount`
     - `stateLockTimeoutCount`
+    - `branchProtectionHitCount`
+    - `repoConcurrencySaturation`
+    - `failureCodes`
+    - `reviewReasonCodes`
     - `workers`
     - `tasks`
 - `GET /api/workers`
@@ -131,6 +144,11 @@ Current endpoint families:
     - `worktree_cleanup_failed`
     - `session_interrupted`
     - Trae runtime phase events such as `fetch_task_start`, `prepare_session_done`, `artifact_check_failed`, `submit_result_done`
+  - Current producer payloads commonly carry:
+    - `traceId`
+    - `sessionId`
+    - `failureCode`
+    - `message`
 
 ### Dispatch and review endpoints
 
@@ -138,6 +156,7 @@ Current endpoint families:
   - Create a dispatch, task records, assignment records, and initial review placeholders.
   - Review-memory injection may mutate assignment context during this call.
   - Task payloads can also carry continuation metadata such as `continuationMode` and `continueFromTaskId`.
+  - Dispatcher now assigns each task a stable `traceId` and persists it into the assignment package.
   - Assignment packages may additionally persist prompt metadata such as:
     - `workerPromptMode`
     - `reportSchemaVersion`
@@ -180,6 +199,7 @@ Current endpoint families:
     - `chat_mode`
     - `continuation_mode`
     - `continue_from_task_id`
+    - `trace_id`
     - `worker_prompt_mode`
     - `report_schema_version`
 - `POST /api/trae/start-task`

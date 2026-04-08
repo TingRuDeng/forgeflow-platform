@@ -553,6 +553,7 @@ function handleTraeRouteImpl(
         status: "ok",
         task: {
           task_id: result.task.id,
+          trace_id: result.task.traceId ?? undefined,
           repo: result.task.repo,
           branch: result.task.branchName,
           default_branch: result.task.defaultBranch,
@@ -574,6 +575,7 @@ function handleTraeRouteImpl(
         status: "ok",
         task: {
           task_id: result.task.id,
+          trace_id: result.task.traceId ?? undefined,
           repo: result.task.repo,
           branch: result.task.branchName,
           default_branch: result.task.defaultBranch,

@@ -57,6 +57,7 @@ export interface Worker {
 export interface Task {
   id: string;
   externalTaskId: string;
+  traceId?: string | null;
   repo: string;
   defaultBranch: string;
   title: string;
@@ -85,11 +86,13 @@ export interface Event {
   taskId: string;
   type: string;
   at: string;
+  summary?: string | null;
   payload?: unknown;
 }
 
 export interface AssignmentPayload {
   taskId: string;
+  traceId?: string | null;
   workerId?: string | null;
   pool: string;
   status: AssignmentStatus;
@@ -366,10 +369,19 @@ export interface DashboardSnapshot {
     avgAssignmentLagMs: number;
     maxAssignmentLagMs: number;
     submitResultRetryCount: number;
+    retryRatePct: number;
     deliveryFailedCount: number;
     cleanupFailureCount: number;
     sessionInterruptionCount: number;
     stateLockTimeoutCount: number;
+    branchProtectionHitCount: number;
+    repoConcurrencySaturation: Record<string, {
+      activeWorkers: number;
+      busyWorkers: number;
+      saturationPct: number;
+    }>;
+    failureCodes: Record<string, number>;
+    reviewReasonCodes: Record<string, number>;
   };
   workers: Worker[];
   tasks: Task[];
@@ -405,6 +417,59 @@ function normalizeTimestamp(value: unknown, fallback: string): string {
 
 function normalizeString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
+}
+
+function buildTaskTraceId(taskId: string): string {
+  const normalized = String(taskId || "").trim().replace(/[^a-zA-Z0-9_-]+/g, "-");
+  return `trace-${normalized || "unknown-task"}`;
+}
+
+function resolveTaskTraceId(task: Pick<Task, "id" | "traceId"> | null | undefined): string | null {
+  if (!task) {
+    return null;
+  }
+  const traceId = normalizeString(task.traceId).trim();
+  return traceId || buildTaskTraceId(task.id);
+}
+
+function summarizeEvent(type: string, payload: unknown): string | null {
+  const record = isRecord(payload) ? payload : null;
+  const data = isRecord(record?.data) ? record?.data : null;
+  const message = normalizeString(record?.message).trim() || normalizeString(data?.message).trim();
+  if (message) {
+    return message;
+  }
+
+  if (type === "status_changed") {
+    const from = normalizeString(record?.from).trim();
+    const to = normalizeString(record?.to).trim();
+    if (from || to) {
+      return `${from || "unknown"} -> ${to || "unknown"}`;
+    }
+  }
+
+  if (type === "review_decided") {
+    const decision = normalizeString(record?.decision).trim();
+    const actor = normalizeString(record?.actor).trim();
+    if (decision) {
+      return actor ? `${decision} by ${actor}` : decision;
+    }
+  }
+
+  const failureCode = normalizeString(record?.failureCode).trim() || normalizeString(data?.failureCode).trim();
+  if (failureCode) {
+    return failureCode;
+  }
+
+  const sessionId = normalizeString(record?.sessionId).trim() || normalizeString(data?.sessionId).trim();
+  const traceId = normalizeString(record?.traceId).trim() || normalizeString(data?.traceId).trim();
+  if (sessionId || traceId) {
+    return [sessionId ? `session=${sessionId}` : "", traceId ? `trace=${traceId}` : ""]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return null;
 }
 
 function normalizeVerificationCommands(value: unknown): WorkerVerificationCommandResult[] {
@@ -587,7 +652,11 @@ function nextDispatchId(state: RuntimeState): { state: RuntimeState; dispatchId:
 }
 
 function appendEvent(state: RuntimeState, event: Event): RuntimeState {
-  const nextEvents = [...state.events, event];
+  const nextEvent: Event = {
+    ...event,
+    summary: event.summary ?? summarizeEvent(event.type, event.payload),
+  };
+  const nextEvents = [...state.events, nextEvent];
   return {
     ...state,
     events: nextEvents.length > RUNTIME_EVENTS_RETENTION_LIMIT
@@ -598,6 +667,132 @@ function appendEvent(state: RuntimeState, event: Event): RuntimeState {
 
 function countEventsByType(events: Event[], type: string): number {
   return events.filter((event) => event.type === type).length;
+}
+
+function countFailureCodes(reviews: Review[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const review of reviews) {
+    const blockers = Array.isArray(review.latestWorkerResult?.evidence?.blockers)
+      ? review.latestWorkerResult?.evidence?.blockers
+      : [];
+    for (const blocker of blockers) {
+      const code = normalizeString((blocker as { code?: unknown }).code).trim();
+      if (!code) {
+        continue;
+      }
+      counts[code] = (counts[code] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
+function computeRepoConcurrencySaturation(workers: Worker[]): Record<string, {
+  activeWorkers: number;
+  busyWorkers: number;
+  saturationPct: number;
+}> {
+  const grouped = new Map<string, { activeWorkers: number; busyWorkers: number }>();
+
+  for (const worker of workers) {
+    if (worker.disabledAt) {
+      continue;
+    }
+
+    const repoDir = normalizeString(worker.repoDir).trim();
+    if (!repoDir) {
+      continue;
+    }
+
+    const entry = grouped.get(repoDir) ?? { activeWorkers: 0, busyWorkers: 0 };
+    if (worker.status === "idle" || worker.status === "busy") {
+      entry.activeWorkers += 1;
+    }
+    if (worker.status === "busy") {
+      entry.busyWorkers += 1;
+    }
+    grouped.set(repoDir, entry);
+  }
+
+  return Object.fromEntries(
+    [...grouped.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([repoDir, entry]) => {
+        const saturationPct = entry.activeWorkers > 0
+          ? Number(((entry.busyWorkers / entry.activeWorkers) * 100).toFixed(1))
+          : 0;
+        return [repoDir, {
+          activeWorkers: entry.activeWorkers,
+          busyWorkers: entry.busyWorkers,
+          saturationPct,
+        }];
+      }),
+  );
+}
+
+function countReviewReasonCodes(reviews: Review[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const review of reviews) {
+    const code = normalizeString(review.evidence?.reasonCode).trim();
+    if (!code) {
+      continue;
+    }
+    counts[code] = (counts[code] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function computeRetryRatePct(tasks: Task[], events: Event[]): number {
+  const terminalTasks = tasks.filter((task) =>
+    ["review", "merged", "blocked", "failed", "cancelled"].includes(task.status)
+  ).length;
+  if (terminalTasks === 0) {
+    return 0;
+  }
+  const retryCount = countEventsByType(events, "submit_result_retry_failed");
+  return Number(((retryCount / terminalTasks) * 100).toFixed(2));
+}
+
+function backfillTraceMetadata(state: RuntimeState, at: string): RuntimeState {
+  let changed = false;
+
+  const tasks = state.tasks.map((task) => {
+    const traceId = resolveTaskTraceId(task);
+    if (task.traceId === traceId) {
+      return task;
+    }
+    changed = true;
+    return {
+      ...task,
+      traceId,
+    };
+  });
+
+  const assignments = state.assignments.map((assignment) => {
+    const task = tasks.find((candidate) => candidate.id === assignment.taskId);
+    const traceId = resolveTaskTraceId(task);
+    if ((assignment.assignment.traceId ?? null) === traceId) {
+      return assignment;
+    }
+    changed = true;
+    return {
+      ...assignment,
+      assignment: {
+        ...assignment.assignment,
+        traceId,
+      },
+    };
+  });
+
+  if (!changed) {
+    return state;
+  }
+
+  return {
+    ...state,
+    updatedAt: at,
+    tasks,
+    assignments,
+  };
 }
 
 function upsertWorker(workers: Worker[], worker: Worker): Worker[] {
@@ -794,7 +989,7 @@ function isAssignmentTimedOut(assignment: Assignment | undefined, worker: Worker
 
 export function reconcileRuntimeState(state: RuntimeState, options: ReconcileOptions = {}): RuntimeState {
   const at = options.now ?? nowIso();
-  let nextState = state;
+  let nextState = backfillTraceMetadata(state, at);
 
   for (const worker of state.workers) {
     const assignedTask = worker.currentTaskId
@@ -1023,6 +1218,7 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
     const task: Task = {
       id: taskId,
       externalTaskId: taskInput.id,
+      traceId: buildTaskTraceId(taskId),
       repo: input.repo,
       defaultBranch: input.defaultBranch,
       title: taskInput.title,
@@ -1049,7 +1245,10 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
       taskId,
       type: "created",
       at: createdAt,
-      payload: { status: "planned" },
+      payload: {
+        status: "planned",
+        traceId: task.traceId,
+      },
     });
     if (initialTaskStatus !== "planned") {
       nextState = appendEvent(nextState, {
@@ -1078,6 +1277,7 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
         taskId,
         workerId: worker?.id ?? null,
         status: worker ? "assigned" : "pending",
+        traceId: task.traceId,
         branchName: task.branchName,
         targetWorkerId,
         repo: input.repo,
@@ -1738,6 +1938,24 @@ export function cancelTask(state: RuntimeState, input: CancelTaskInput): Runtime
 }
 
 export function recordWorkerEvent(state: RuntimeState, input: RecordWorkerEventInput): RuntimeState {
+  const taskId = input.taskId ?? state.workers.find((candidate) => candidate.id === input.workerId)?.currentTaskId ?? "system";
+  const task = state.tasks.find((candidate) => candidate.id === taskId);
+  const traceId = resolveTaskTraceId(task);
+  const payload = isRecord(input.payload)
+    ? {
+        workerId: input.workerId,
+        ...(traceId ? { traceId } : {}),
+        ...(typeof input.payload.message === "string" ? { message: input.payload.message } : {}),
+        ...(typeof input.payload.sessionId === "string" ? { sessionId: input.payload.sessionId } : {}),
+        ...(typeof input.payload.failureCode === "string" ? { failureCode: input.payload.failureCode } : {}),
+        data: clone(input.payload),
+      }
+    : {
+        workerId: input.workerId,
+        ...(traceId ? { traceId } : {}),
+        ...(input.payload === undefined ? {} : { data: clone(input.payload) }),
+      };
+
   const worker = state.workers.find((candidate) => candidate.id === input.workerId);
   if (!worker) {
     if (!input.type.startsWith("register_")) {
@@ -1749,23 +1967,15 @@ export function recordWorkerEvent(state: RuntimeState, input: RecordWorkerEventI
       taskId: input.taskId ?? "system",
       type: input.type,
       at,
-      payload: {
-        workerId: input.workerId,
-        ...(input.payload === undefined ? {} : { data: clone(input.payload) }),
-      },
+      payload,
     });
   }
-
-  const taskId = input.taskId ?? worker.currentTaskId ?? "system";
   const at = input.at ?? nowIso();
   return appendEvent(state, {
     taskId,
     type: input.type,
     at,
-    payload: {
-      workerId: input.workerId,
-      ...(input.payload === undefined ? {} : { data: clone(input.payload) }),
-    },
+    payload,
   });
 }
 
@@ -1816,6 +2026,9 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
   const reconciledState = reconcileRuntimeState(state, options);
   const workers = resolveWorkerStatuses(reconciledState.workers, options);
   const assignmentLag = computeAssignmentLagMetrics(reconciledState.tasks, reconciledState.assignments);
+  const failureCodes = countFailureCodes(reconciledState.reviews);
+  const reviewReasonCodes = countReviewReasonCodes(reconciledState.reviews);
+  const repoConcurrencySaturation = computeRepoConcurrencySaturation(workers);
 
   return {
     updatedAt: reconciledState.updatedAt,
@@ -1845,10 +2058,15 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
       avgAssignmentLagMs: assignmentLag.avgAssignmentLagMs,
       maxAssignmentLagMs: assignmentLag.maxAssignmentLagMs,
       submitResultRetryCount: countEventsByType(reconciledState.events, "submit_result_retry_failed"),
+      retryRatePct: computeRetryRatePct(reconciledState.tasks, reconciledState.events),
       deliveryFailedCount: countEventsByType(reconciledState.events, "delivery_failed"),
       cleanupFailureCount: countEventsByType(reconciledState.events, "worktree_cleanup_failed"),
       sessionInterruptionCount: countEventsByType(reconciledState.events, "session_interrupted"),
       stateLockTimeoutCount: countEventsByType(reconciledState.events, "state_lock_timeout"),
+      branchProtectionHitCount: failureCodes.branch_protection_hit ?? 0,
+      repoConcurrencySaturation,
+      failureCodes,
+      reviewReasonCodes,
     },
     workers,
     tasks: clone([...reconciledState.tasks].reverse()),

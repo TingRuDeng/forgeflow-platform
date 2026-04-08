@@ -4,6 +4,7 @@ import { Badge } from './UI';
 
 interface Task {
   id: string;
+  traceId?: string | null;
   title: string;
   status: string;
   assignedWorkerId?: string;
@@ -51,6 +52,7 @@ interface Review {
   latestWorkerResult?: {
     evidence?: {
       failureType?: string;
+      blockers?: Array<{ code?: string }>;
       failureSummary?: string;
     } | null;
   } | null;
@@ -70,7 +72,16 @@ interface EventRecord {
   summary?: string;
   payload?: {
     message?: string;
+    traceId?: string;
+    sessionId?: string;
+    failureCode?: string;
     failureSummary?: string;
+    data?: {
+      message?: string;
+      traceId?: string;
+      sessionId?: string;
+      failureCode?: string;
+    } | null;
   } | null;
 }
 
@@ -95,6 +106,15 @@ function extractFailureSummary(review: Review | null, events: EventRecord[]): st
 
 function extractLatestProgress(events: EventRecord[]) {
   return [...events].find((event) => event.type === 'progress_reported') || null;
+}
+
+function extractEventSummary(event: EventRecord) {
+  return event.summary
+    || event.payload?.message
+    || event.payload?.data?.message
+    || event.payload?.failureCode
+    || event.payload?.data?.failureCode
+    || '--';
 }
 
 function canCancelTask(status?: string) {
@@ -212,6 +232,7 @@ export const TaskDetailsPanel: React.FC<{
   const latestProgress = extractLatestProgress(events);
   const failureSummary = extractFailureSummary(review || null, events);
   const failureType = review?.latestWorkerResult?.evidence?.failureType || null;
+  const failureCode = review?.latestWorkerResult?.evidence?.blockers?.[0]?.code || null;
   const reasonCode = review?.evidence?.reasonCode || null;
   const mustFix = review?.evidence?.mustFix || [];
   const canRedriveValue = typeof review?.evidence?.canRedrive === 'boolean'
@@ -264,6 +285,7 @@ export const TaskDetailsPanel: React.FC<{
 
       <section className="glass-card rounded-xl p-4 space-y-2">
         <div className="text-[11px] uppercase tracking-wide text-white/45">{t('lineage')}</div>
+        <div className="text-sm text-white/80">{t('traceId')}: <span className="font-mono break-all">{task.traceId || '--'}</span></div>
         <div className="text-sm text-white/80">{t('parentTask')}: <span className="font-mono break-all">{parentTaskId || '--'}</span></div>
         <div className="text-sm text-white/80">{t('continueFrom')}: <span className="font-mono break-all">{task.continueFromTaskId || '--'}</span></div>
         <div className="text-sm text-white/80">{t('followUpOf')}: <span className="font-mono break-all">{task.followUpOfTaskId || '--'}</span></div>
@@ -284,6 +306,7 @@ export const TaskDetailsPanel: React.FC<{
       <section className="glass-card rounded-xl p-4 space-y-2">
         <div className="text-[11px] uppercase tracking-wide text-white/45">{t('latestFailure')}</div>
         <div className="text-sm text-white/80">{t('failureType')}: <span className="font-mono">{failureType || '--'}</span></div>
+        <div className="text-sm text-white/80">{t('failureCode')}: <span className="font-mono">{failureCode || '--'}</span></div>
         <div className="text-sm text-white/80">{t('failureSummary')}: <span className="break-all">{failureSummary || '--'}</span></div>
         <div className="text-sm text-white/80">{t('latestProgress')}: <span className="break-all">{latestProgress?.payload?.message || latestProgress?.summary || '--'}</span></div>
       </section>
@@ -302,7 +325,7 @@ export const TaskDetailsPanel: React.FC<{
             <div key={`${event.type}-${event.at || 'unknown'}`} className="border-l border-cyan-400/30 pl-3">
               <div className="text-xs font-mono text-white/45">{formatTime(event.at)}</div>
               <div className="text-sm text-white/85">{event.type}</div>
-              <div className="text-xs text-white/55 break-all">{event.summary || event.payload?.message || '--'}</div>
+              <div className="text-xs text-white/55 break-all">{extractEventSummary(event)}</div>
             </div>
           )) : (
             <div className="text-sm text-white/45">{t('noRecentEvents')}</div>

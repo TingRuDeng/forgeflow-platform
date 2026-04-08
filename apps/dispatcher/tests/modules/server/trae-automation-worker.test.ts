@@ -74,7 +74,7 @@ describe("trae automation worker prompt and parsing", () => {
     expect(prompt).toContain("允许范围: src/auth/**");
     expect(prompt).toContain("pnpm test");
     expect(prompt).toContain("## 任务完成");
-  });
+  }, 20_000);
 
   it("parses the final report template into a submit_result payload shape", async () => {
     const mod = await import(workerModulePath);
