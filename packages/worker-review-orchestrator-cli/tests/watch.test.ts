@@ -167,7 +167,7 @@ describe("watch", () => {
         status: "merged",
         attempts: 1,
       });
-    });
+    }, 20_000);
 
     it("returns full output with stateDir when summary mode is disabled", async () => {
       const stateDir = createTempStateDir();

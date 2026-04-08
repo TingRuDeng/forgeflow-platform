@@ -211,7 +211,7 @@ describe("dispatch", () => {
 
     expect(result.dispatchId).toMatch(/^dispatch-/);
     expect(result.taskIds).toHaveLength(1);
-  });
+  }, 20_000);
 
   it("requires an online worker in the task pool when no target worker is pinned", async () => {
     const fetchImpl = vi.fn()

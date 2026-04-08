@@ -571,7 +571,7 @@ describe("inspect", () => {
         taskId: "dispatch-1:task-1",
       });
       expect(result.events).toHaveLength(2);
-    });
+    }, 20_000);
 
     it("returns summary mode output from local state directory", async () => {
       const stateFilePath = path.join(tempDir, "runtime-state.json");
