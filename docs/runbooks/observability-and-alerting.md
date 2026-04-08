@@ -1,6 +1,6 @@
 # Observability And Alerting
 
-这份 runbook 说明当前阶段二主链的最小观测面：metrics、runtime events、日志脱敏、告警建议。
+这份 runbook 说明当前阶段二到阶段三核心平台的观测面：metrics、runtime events、lease 指标、SLO / burn-rate、日志脱敏、告警建议。
 
 它描述的是当前仓库已落地实现，不代表已经完成长期版 OTel 体系。
 
@@ -26,6 +26,19 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
   http://127.0.0.1:8787/api/dashboard/snapshot
 ```
 
+阶段三额外可观察入口：
+
+```bash
+curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
+  http://127.0.0.1:8787/api/query/projection-health
+
+curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
+  http://127.0.0.1:8787/api/slo
+
+curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
+  http://127.0.0.1:8787/api/dr/status
+```
+
 ## 2. `/api/metrics` 字段
 
 当前最小指标包括：
@@ -41,6 +54,9 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `cleanupFailureCount`
 - `sessionInterruptionCount`
 - `stateLockTimeoutCount`
+- `leaseConflictCount`
+- `leaseReclaimCount`
+- `activeLeases`
 - `branchProtectionHitCount`
 - `repoConcurrencySaturation`
 - `failureCodes`
@@ -60,6 +76,9 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `cleanupFailureCount`: worktree cleanup 失败数
 - `sessionInterruptionCount`: 会话中断信号数
 - `stateLockTimeoutCount`: dispatcher 状态锁竞争超时数
+- `leaseConflictCount`: assignment/session/repo/branch ownership 争用次数
+- `leaseReclaimCount`: reconcile 回收过期 lease 的次数
+- `activeLeases`: 当前活跃 lease 总数和按资源类型聚合
 - `branchProtectionHitCount`: 保护分支/分支前缀策略命中数
 - `repoConcurrencySaturation`: 按 `repoDir` 聚合的活跃 worker 并发饱和度
 - `failureCodes`: 基于 worker evidence / blocker code 的失败码聚合
@@ -67,10 +86,11 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 
 ## 3. 指标来源
 
-当前指标来源不是单一 exporter，而是两类合并：
+当前指标来源不是单一 exporter，而是三类合并：
 
 - dispatcher snapshot 直接计算出的 backlog / lag / queue 指标
 - dispatcher runtime events 聚合出的失败计数
+- dispatcher runtime ownership 派生出的 lease 指标
 
 当前 worker 侧会尽力上送这些事件到 `POST /api/workers/:workerId/events`：
 
@@ -94,6 +114,8 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 dispatcher 进程内还会记录：
 
 - `state_lock_timeout`
+- `lease_conflict`
+- `lease_reclaimed`
 
 注意：
 
@@ -114,7 +136,7 @@ dispatcher 进程内还会记录：
 - 还没有统一 OTel collector / exporter 配置
 - 还没有所有组件共享的全链路 trace pipeline
 
-阶段二出口当前采用的是 OTel-ready 关联键和结构化 phase events，而不是绑定某个外部 collector 实现。
+阶段三核心当前采用的是 OTel-ready 关联键和结构化 phase events，而不是绑定某个外部 collector 实现。
 
 因此当前 trace 实践应以这些关联键为主：
 
@@ -133,10 +155,12 @@ dispatcher 进程内还会记录：
 
 - `deliveryFailedCount` 在短时间窗口内递增
 - `stateLockTimeoutCount` 持续递增
+- `leaseConflictCount` 在短时间窗口内递增
 - `reviewBacklog` 长时间不下降
 - `queueDepth` 持续堆积且 `avgAssignmentLagMs` 上升
 - `cleanupFailureCount` 连续出现
 - `sessionInterruptionCount` 在同一 worker 或同一 repo 下集中出现
+- `/api/slo` 的 `burnRate.triggered=true`
 
 推荐观察组合：
 
@@ -148,6 +172,8 @@ dispatcher 进程内还会记录：
   - 看无人值守执行环境是否不稳定
 - `stateLockTimeoutCount + recent events`
   - 看控制面是否存在写冲突或卡锁
+- `leaseConflictCount + leaseReclaimCount`
+  - 看 ownership 是否在抖动、是否存在 stale owner reclaim
 - `artifact_check_* + send_chat_*`
   - 看 Trae 失败是聊天交互问题还是远端产物验证问题
 - `workspace_prepare_* + start_task_*`
@@ -157,27 +183,31 @@ dispatcher 进程内还会记录：
 
 1. 先看 `/health`
 2. 再看 `/api/metrics`
-3. 再看 `/api/dashboard/snapshot` 里的 recent events
-4. 最后再看 worker 日志和 `.worktrees/failed/`
+3. 再看 `/api/query/projection-health`
+4. 再看 `/api/slo` 和 `/api/dr/status`
+5. 最后再看 worker 日志和 `.worktrees/failed/`
 
 常见入口：
 
 - 交付失败：`delivery-failed-recovery.md`
 - 锁竞争：`auth-and-state-lock.md`
 - 清理失败：`worktree-cleanup.md`
+- 备份与恢复：`runtime-state-backup-restore-repair.md`
 - 主链操作：`phase2-mainline-operations.md`
+- 阶段三核心平台：`stage3-core-platform-operations.md`
 
 ## 7. 当前边界
 
-这份 runbook 覆盖的是阶段二最小可观测闭环：
+这份 runbook 覆盖的是阶段二到阶段三核心底座的最小可观测闭环：
 
 - control-plane metrics
 - runtime event 聚合
+- lease / projection / burn-rate 可视化入口
 - 日志脱敏
 - 最小阈值告警建议
 
 它不声明以下能力已经完成：
 
 - 完整 OTel logs / traces / metrics 全量贯通
-- 多实例观测
-- SLO / burn-rate 正式治理
+- 多实例观测平台
+- 对外统一 observability SDK / collector 平台

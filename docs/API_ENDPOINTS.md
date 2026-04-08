@@ -50,6 +50,9 @@ Current endpoint families:
 
 - `GET /health`
   - Liveness probe.
+  - Current payload also includes:
+    - `readOnly`
+    - `structuredReads`
 - `GET /dashboard`
   - HTML dashboard view.
   - Current GET response sets `Cache-Control: no-store`.
@@ -86,6 +89,9 @@ Current endpoint families:
     - `cleanupFailureCount`
     - `sessionInterruptionCount`
     - `stateLockTimeoutCount`
+    - `leaseConflictCount`
+    - `leaseReclaimCount`
+    - `activeLeases`
     - `branchProtectionHitCount`
     - `repoConcurrencySaturation`
     - `failureCodes`
@@ -95,6 +101,54 @@ Current endpoint families:
 - `GET /api/workers`
   - Returns worker list from the current snapshot.
   - Current GET response sets `Cache-Control: no-store`.
+- `GET /api/leases`
+  - Returns the current reconciled lease list from dispatcher runtime state.
+  - Current GET response sets `Cache-Control: no-store`.
+- `GET /api/query/tasks`
+  - Returns structured task projection rows from the SQLite query store.
+- `GET /api/query/events`
+  - Returns structured event projection rows from the SQLite query store.
+- `GET /api/query/reviews`
+  - Returns structured review projection rows from the SQLite query store.
+- `GET /api/query/leases`
+  - Returns structured lease projection rows from the SQLite query store.
+- `GET /api/query/dashboard-snapshot`
+  - Builds dashboard snapshot from the structured query store path.
+- `GET /api/query/projection-health`
+  - Compares snapshot-derived counts with the SQLite structured projection tables.
+- `GET /api/slo`
+  - Returns stage-3 SLO targets, live indicators, and burn-rate reasons.
+  - Current thresholds are controlled by:
+    - `DISPATCHER_SLO_MAX_QUEUE_DEPTH`
+    - `DISPATCHER_SLO_MAX_REVIEW_BACKLOG`
+    - `DISPATCHER_SLO_MAX_ASSIGNMENT_LAG_MS`
+    - `DISPATCHER_SLO_MAX_DELIVERY_FAILED`
+    - `DISPATCHER_SLO_MAX_LEASE_CONFLICTS`
+- `GET /api/dr/status`
+  - Returns current DR posture summary.
+  - Current payload includes:
+    - `readOnly`
+    - `structuredReads`
+    - `shadowMode`
+    - `projectionHealth`
+    - `backups`
+
+### Structured reads, read-only, and shadow modes
+
+- `DISPATCHER_STRUCTURED_READS=1`
+  - Makes dispatcher prefer the SQLite structured query store for:
+    - `/api/dashboard/snapshot`
+    - `/api/metrics`
+    - `/api/workers`
+- `DISPATCHER_READ_ONLY_MODE=1`
+  - Keeps query endpoints available while rejecting mutation routes with:
+    - HTTP `503`
+    - `{ "error": "dispatcher is in read-only mode", "code": "read_only_mode" }`
+- `DISPATCHER_SHADOW_MODE=shadow-write`
+- `DISPATCHER_POSTGRES_URL=postgres://...`
+- `DISPATCHER_QUEUE_SHADOW_MODE=shadow-write`
+  - Enable best-effort Postgres / queue shadow projection.
+  - SQLite remains the main runtime truth source.
 
 ### Generic worker endpoints
 
@@ -119,6 +173,7 @@ Current endpoint families:
   - The only generic worker claim path.
   - May return an already assigned task for that worker, or atomically claim a `ready` task from the same pool.
   - Tasks whose `dependsOn` prerequisites are not yet merged stay in `planned` and are excluded until dispatcher unlocks them to `ready`.
+  - Assignment claim is now also guarded by dispatcher lease ownership; conflicting claims are recorded as `lease_conflict` audit events.
 - `POST /api/workers/:workerId/start-task`
   - Move task from `assigned` to `in_progress`.
 - `POST /api/workers/:workerId/result`

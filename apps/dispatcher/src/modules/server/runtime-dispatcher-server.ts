@@ -91,6 +91,7 @@ function overwriteRuntimeState(target: RuntimeState, source: RuntimeState): void
   target.reviews = source.reviews;
   target.pullRequests = source.pullRequests;
   target.dispatches = source.dispatches;
+  target.leases = source.leases;
 }
 
 export type { WorkerStatus } from "./runtime-glue-types.js";

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: forgeflow-config
+data:
+  DISPATCHER_AUTH_MODE: {{ .Values.dispatcher.authMode | quote }}
+  DISPATCHER_STRUCTURED_READS: {{ .Values.dispatcher.structuredReads | quote }}
+  DISPATCHER_READ_ONLY_MODE: {{ .Values.dispatcher.readOnlyMode | quote }}
+  DISPATCHER_SHADOW_MODE: {{ .Values.dispatcher.shadowMode | quote }}
+  TRAE_REMOTE_DEBUGGING_PORT: {{ .Values.runtime.remoteDebuggingPort | quote }}

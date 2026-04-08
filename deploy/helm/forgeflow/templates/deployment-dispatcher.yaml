@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forgeflow-dispatcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: forgeflow-dispatcher
+  template:
+    metadata:
+      labels:
+        app: forgeflow-dispatcher
+    spec:
+      containers:
+        - name: dispatcher
+          image: {{ .Values.dispatcher.image }}
+          envFrom:
+            - configMapRef:
+                name: forgeflow-config
+          ports:
+            - containerPort: 8787

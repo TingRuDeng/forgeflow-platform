@@ -8,6 +8,9 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@forgeflow/dispatcher-queue-postgres": "workspace:*",
+    "@forgeflow/dispatcher-store-core": "workspace:*",
+    "@forgeflow/dispatcher-store-postgres": "workspace:*",
     "@forgeflow/provider-registry": "workspace:*",
     "@forgeflow/result-contracts": "workspace:*",
     "@forgeflow/task-schema": "workspace:*",

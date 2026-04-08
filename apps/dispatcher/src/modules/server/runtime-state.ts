@@ -1,6 +1,14 @@
 import { jsonStore } from "./runtime-state-json.js";
+import {
+  DEFAULT_LEASE_TTL_MS,
+  acquireLease,
+  listActiveLeases,
+  reclaimExpiredLeases,
+  releaseLease,
+} from "./leases.js";
 import { sqliteStore } from "./runtime-state-sqlite.js";
 import type { RuntimeStateStore } from "./runtime-state-store.js";
+import type { LeaseResourceType, RuntimeLease } from "./leases.js";
 import type {
   ReviewDecisionEvidence,
   WorkerEvidence,
@@ -180,6 +188,7 @@ export interface RuntimeState {
   reviews: Review[];
   pullRequests: PullRequest[];
   dispatches: Dispatch[];
+  leases: RuntimeLease[];
 }
 
 export interface RegisterWorkerInput {
@@ -375,6 +384,12 @@ export interface DashboardSnapshot {
     sessionInterruptionCount: number;
     stateLockTimeoutCount: number;
     branchProtectionHitCount: number;
+    leaseConflictCount: number;
+    leaseReclaimCount: number;
+    activeLeases: {
+      total: number;
+      byResourceType: Record<LeaseResourceType, number>;
+    };
     repoConcurrencySaturation: Record<string, {
       activeWorkers: number;
       busyWorkers: number;
@@ -390,6 +405,7 @@ export interface DashboardSnapshot {
   pullRequests: PullRequest[];
   events: Event[];
   dispatches: Dispatch[];
+  leases: RuntimeLease[];
 }
 
 function nowIso(): string {
@@ -669,6 +685,21 @@ function countEventsByType(events: Event[], type: string): number {
   return events.filter((event) => event.type === type).length;
 }
 
+function countActiveLeasesByResourceType(leases: RuntimeLease[], at: string): Record<LeaseResourceType, number> {
+  const counts: Record<LeaseResourceType, number> = {
+    assignment: 0,
+    session: 0,
+    repo: 0,
+    branch: 0,
+  };
+
+  for (const lease of listActiveLeases(leases, at)) {
+    counts[lease.resourceType] += 1;
+  }
+
+  return counts;
+}
+
 function countFailureCodes(reviews: Review[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const review of reviews) {
@@ -856,6 +887,86 @@ function upsertAssignment(assignments: Assignment[], assignment: Assignment): As
   return next;
 }
 
+function acquireAssignmentLease(
+  state: RuntimeState,
+  taskId: string,
+  workerId: string,
+  at: string,
+): {
+  state: RuntimeState;
+  acquired: boolean;
+} {
+  const result = acquireLease(state.leases ?? [], {
+    resourceType: "assignment",
+    resourceId: taskId,
+    ownerId: workerId,
+    ownerToken: `assignment:${workerId}`,
+    at,
+    ttlMs: DEFAULT_LEASE_TTL_MS,
+    metadata: {
+      taskId,
+      workerId,
+    },
+  });
+
+  let nextState: RuntimeState = {
+    ...state,
+    leases: result.leases,
+  };
+
+  nextState = appendEvent(nextState, {
+    taskId,
+    type: result.acquired ? "lease_acquired" : "lease_conflict",
+    at,
+    payload: {
+      resourceType: "assignment",
+      resourceId: taskId,
+      ownerId: workerId,
+      conflictingOwnerId: result.conflictedWith?.ownerId ?? null,
+    },
+  });
+
+  return {
+    state: nextState,
+    acquired: result.acquired,
+  };
+}
+
+function releaseAssignmentLease(
+  state: RuntimeState,
+  taskId: string,
+  workerId: string,
+  at: string,
+  reclaimReason?: string | null,
+): RuntimeState {
+  const result = releaseLease(state.leases ?? [], {
+    resourceType: "assignment",
+    resourceId: taskId,
+    ownerId: workerId,
+    ownerToken: `assignment:${workerId}`,
+    at,
+    reclaimReason: reclaimReason ?? null,
+  });
+  if (!result.releasedLease) {
+    return state;
+  }
+
+  return appendEvent({
+    ...state,
+    leases: result.leases,
+  }, {
+    taskId,
+    type: reclaimReason ? "lease_reclaimed" : "lease_released",
+    at,
+    payload: {
+      resourceType: "assignment",
+      resourceId: taskId,
+      ownerId: workerId,
+      reclaimReason: reclaimReason ?? null,
+    },
+  });
+}
+
 function resolveHeartbeatTimeoutMs(options: ReconcileOptions = {}): number {
   return options.heartbeatTimeoutMs ?? 5 * 60_000;
 }
@@ -990,6 +1101,27 @@ function isAssignmentTimedOut(assignment: Assignment | undefined, worker: Worker
 export function reconcileRuntimeState(state: RuntimeState, options: ReconcileOptions = {}): RuntimeState {
   const at = options.now ?? nowIso();
   let nextState = backfillTraceMetadata(state, at);
+  const reclaimedLeases = reclaimExpiredLeases(nextState.leases ?? [], at, "expired");
+  if (reclaimedLeases.reclaimed.length > 0) {
+    nextState = {
+      ...nextState,
+      updatedAt: at,
+      leases: reclaimedLeases.leases,
+    };
+    for (const reclaimed of reclaimedLeases.reclaimed) {
+      nextState = appendEvent(nextState, {
+        taskId: reclaimed.lease.resourceType === "assignment" ? reclaimed.lease.resourceId : "system",
+        type: "lease_reclaimed",
+        at,
+        payload: {
+          resourceType: reclaimed.lease.resourceType,
+          resourceId: reclaimed.lease.resourceId,
+          ownerId: reclaimed.lease.ownerId,
+          reclaimReason: reclaimed.reason,
+        },
+      });
+    }
+  }
 
   for (const worker of state.workers) {
     const assignedTask = worker.currentTaskId
@@ -1021,6 +1153,7 @@ export function reconcileRuntimeState(state: RuntimeState, options: ReconcileOpt
       shouldRequeueBecauseOffline ||
       shouldRequeueBecauseTimeout
     ) {
+      nextState = releaseAssignmentLease(nextState, assignedTask.id, worker.id, at, shouldRequeueBecauseOffline ? "worker_offline" : "assignment_timeout");
       nextState = appendEvent(nextState, {
         taskId: assignedTask.id,
         type: "status_changed",
@@ -1430,9 +1563,17 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
     const assignedTask = reconciledState.tasks.find((candidate) => candidate.id === existingAssignment.task.id);
     const assignmentRecord = reconciledState.assignments.find((candidate) => candidate.taskId === existingAssignment.task.id);
     let nextState = reconciledState;
+    const leaseResult = acquireAssignmentLease(nextState, existingAssignment.task.id, input.workerId, at);
+    nextState = leaseResult.state;
+    if (!leaseResult.acquired) {
+      return {
+        state: nextState,
+        assignment: null,
+      };
+    }
     if (assignedTask?.status === "assigned" && assignmentRecord?.status === "assigned" && !assignmentRecord.claimedAt) {
       nextState = {
-        ...appendEvent(reconciledState, {
+        ...appendEvent(nextState, {
           taskId: assignedTask.id,
           type: "assignment_claimed",
           at,
@@ -1441,7 +1582,7 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
           },
         }),
         updatedAt: at,
-        assignments: upsertAssignment(reconciledState.assignments, {
+        assignments: upsertAssignment(nextState.assignments, {
           ...assignmentRecord,
           claimedAt: at,
         }),
@@ -1467,9 +1608,17 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
     }
 
     let nextState = reconciledState;
+    const leaseResult = acquireAssignmentLease(nextState, preAssignedTask.id, input.workerId, at);
+    nextState = leaseResult.state;
+    if (!leaseResult.acquired) {
+      return {
+        state: nextState,
+        assignment: null,
+      };
+    }
     if (!assignmentRecord.claimedAt) {
       nextState = {
-        ...appendEvent(reconciledState, {
+        ...appendEvent(nextState, {
           taskId: preAssignedTask.id,
           type: "assignment_claimed",
           at,
@@ -1478,7 +1627,7 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
           },
         }),
         updatedAt: at,
-        assignments: upsertAssignment(reconciledState.assignments, {
+        assignments: upsertAssignment(nextState.assignments, {
           ...assignmentRecord,
           claimedAt: at,
         }),
@@ -1561,6 +1710,15 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
     },
   });
 
+  const leaseResult = acquireAssignmentLease(nextState, readyTask.id, worker.id, at);
+  nextState = leaseResult.state;
+  if (!leaseResult.acquired) {
+    return {
+      state: nextState,
+      assignment: null,
+    };
+  }
+
   nextState = {
     ...nextState,
     updatedAt: at,
@@ -1636,7 +1794,11 @@ export function beginTaskForWorker(state: RuntimeState, input: BeginTaskInput): 
   }
 
   const at = input.at ?? nowIso();
-  let nextState = appendEvent(state, {
+  const leaseResult = acquireAssignmentLease(state, input.taskId, input.workerId, at);
+  if (!leaseResult.acquired) {
+    throw new Error(`assignment lease not available: ${input.taskId}`);
+  }
+  let nextState = appendEvent(leaseResult.state, {
     taskId: input.taskId,
     type: "status_changed",
     at,
@@ -1690,6 +1852,11 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   }
   if (task.assignedWorkerId !== input.workerId) {
     throw new Error(`task not assigned to worker: ${input.workerId}`);
+  }
+  const activeAssignmentLease = listActiveLeases(state.leases ?? [], input.result.generatedAt ?? nowIso())
+    .find((lease) => lease.resourceType === "assignment" && lease.resourceId === task.id);
+  if (activeAssignmentLease && activeAssignmentLease.ownerId !== input.workerId) {
+    throw new Error(`assignment lease owned by another worker: ${activeAssignmentLease.ownerId}`);
   }
   if (!["assigned", "in_progress"].includes(task.status)) {
     throw new Error(`task not executable: ${task.id}`);
@@ -1782,7 +1949,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     };
   }
 
-  return nextState;
+  return releaseAssignmentLease(nextState, task.id, input.workerId, canonicalResult.generatedAt);
 }
 
 export function recordReviewDecision(state: RuntimeState, input: RecordReviewDecisionInput): RuntimeState {
@@ -1860,7 +2027,10 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
     };
   }
 
-  return nextState;
+  if (!task.assignedWorkerId) {
+    return nextState;
+  }
+  return releaseAssignmentLease(nextState, task.id, task.assignedWorkerId, input.at ?? nowIso());
 }
 
 export function cancelTask(state: RuntimeState, input: CancelTaskInput): RuntimeState {
@@ -1931,8 +2101,12 @@ export function cancelTask(state: RuntimeState, input: CancelTaskInput): Runtime
     };
   });
 
+  const releasedState = task.assignedWorkerId
+    ? releaseAssignmentLease(nextState, task.id, task.assignedWorkerId, at, "cancelled")
+    : nextState;
+
   return {
-    ...nextState,
+    ...releasedState,
     workers: affectedWorkers,
   };
 }
@@ -2029,6 +2203,11 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
   const failureCodes = countFailureCodes(reconciledState.reviews);
   const reviewReasonCodes = countReviewReasonCodes(reconciledState.reviews);
   const repoConcurrencySaturation = computeRepoConcurrencySaturation(workers);
+  const activeLeasesByResourceType = countActiveLeasesByResourceType(
+    reconciledState.leases ?? [],
+    options.now ?? reconciledState.updatedAt,
+  );
+  const activeLeaseTotal = Object.values(activeLeasesByResourceType).reduce((sum, value) => sum + value, 0);
 
   return {
     updatedAt: reconciledState.updatedAt,
@@ -2064,6 +2243,12 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
       sessionInterruptionCount: countEventsByType(reconciledState.events, "session_interrupted"),
       stateLockTimeoutCount: countEventsByType(reconciledState.events, "state_lock_timeout"),
       branchProtectionHitCount: failureCodes.branch_protection_hit ?? 0,
+      leaseConflictCount: countEventsByType(reconciledState.events, "lease_conflict"),
+      leaseReclaimCount: countEventsByType(reconciledState.events, "lease_reclaimed"),
+      activeLeases: {
+        total: activeLeaseTotal,
+        byResourceType: activeLeasesByResourceType,
+      },
       repoConcurrencySaturation,
       failureCodes,
       reviewReasonCodes,
@@ -2075,6 +2260,7 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
     pullRequests: clone(reconciledState.pullRequests),
     events: clone(reconciledState.events.slice(-50).reverse()),
     dispatches: clone(reconciledState.dispatches),
+    leases: clone(reconciledState.leases ?? []),
   };
 }
 
@@ -2160,7 +2346,7 @@ export function markWorkerOffline(state: RuntimeState, input: MarkWorkerOfflineI
   }
 
   const at = input.at ?? nowIso();
-  const nextState = appendEvent(state, {
+  let nextState = appendEvent(state, {
     taskId: worker.currentTaskId ?? "system",
     type: "worker_offline",
     at,
@@ -2169,6 +2355,10 @@ export function markWorkerOffline(state: RuntimeState, input: MarkWorkerOfflineI
       reason: input.reason ?? null,
     },
   });
+
+  if (worker.currentTaskId) {
+    nextState = releaseAssignmentLease(nextState, worker.currentTaskId, input.workerId, at, input.reason ?? "worker_offline");
+  }
 
   return {
     ...nextState,

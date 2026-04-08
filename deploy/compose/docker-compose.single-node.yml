@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  dispatcher:
+    image: ghcr.io/tingrudeng/forgeflow-dispatcher:main
+    environment:
+      DISPATCHER_AUTH_MODE: token
+      DISPATCHER_API_TOKEN: ${DISPATCHER_API_TOKEN}
+      DISPATCHER_STRUCTURED_READS: ${DISPATCHER_STRUCTURED_READS:-0}
+      DISPATCHER_READ_ONLY_MODE: ${DISPATCHER_READ_ONLY_MODE:-0}
+    volumes:
+      - forgeflow_state:/var/lib/forgeflow/state
+    ports:
+      - "8787:8787"
+
+volumes:
+  forgeflow_state:

@@ -2348,6 +2348,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
       reviews: [],
       pullRequests: [],
       dispatches: [],
+      leases: [],
     });
     expect(state.updatedAt).toBeDefined();
   });

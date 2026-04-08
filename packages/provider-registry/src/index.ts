@@ -1,4 +1,4 @@
-export type ProviderId = "claude" | "codex" | "gemini" | "opencode" | "qwen";
+export type ProviderId = "claude" | "codex" | "gemini" | "opencode" | "qwen" | "trae";
 export type EnforcementMode = "strict" | "best_effort";
 export type TaskMode = "run" | "review";
 
@@ -41,6 +41,12 @@ const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
   qwen: {
     id: "qwen",
     supportedPermissionKeys: [],
+    defaultPermissions: {},
+    supportedModes: ["run", "review"],
+  },
+  trae: {
+    id: "trae",
+    supportedPermissionKeys: ["automation_url", "remote_debugging_port", "git_ssh_command"],
     defaultPermissions: {},
     supportedModes: ["run", "review"],
   },

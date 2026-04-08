@@ -16,6 +16,12 @@ describe("provider registry", () => {
     expect(gemini.supportedPermissionKeys).not.toContain("sandbox");
   });
 
+  it("declares trae automation-specific permissions", () => {
+    const trae = getProviderDefinition("trae");
+    expect(trae.supportedPermissionKeys).toContain("automation_url");
+    expect(trae.supportedModes).toContain("run");
+  });
+
   it("fails closed in strict mode for unsupported permissions", () => {
     expect(() =>
       normalizePermissions("gemini", { sandbox: "workspace-write" }, "strict"),

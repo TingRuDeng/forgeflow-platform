@@ -114,6 +114,7 @@ function createTestState(): RuntimeState {
         taskIds: ["dispatch-1:task-1"],
       },
     ],
+    leases: [],
   };
 }
 

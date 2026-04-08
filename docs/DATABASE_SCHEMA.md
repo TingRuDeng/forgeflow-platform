@@ -42,6 +42,7 @@ Top-level collections currently include:
 - `reviews`
 - `pullRequests`
 - `dispatches`
+- `leases`
 
 `events` 当前除了 `created` / `status_changed` / `assignment_claimed` / `review_decided` / `progress_reported` 外，还会承载主链指标事件，例如：
 
@@ -183,6 +184,31 @@ Pull request records track review-side Git metadata:
 - `createdAt`
 - `updatedAt`
 
+### 2.5 Leases
+
+Stage-3 runtime ownership is now persisted in `leases[]`.
+
+Verified core lease fields include:
+
+- `id`
+- `resourceType`
+- `resourceId`
+- `ownerId`
+- `ownerToken`
+- `acquiredAt`
+- `renewedAt`
+- `expiresAt`
+- `releasedAt`
+- `reclaimReason`
+- `metadata`
+
+Verified active resource types:
+
+- `assignment`
+- `session`
+- `repo`
+- `branch`
+
 ## 3. Review Memory Store
 
 `memory.json` is owned by `apps/dispatcher/src/modules/server/review-memory.ts` and accessed through the thin wrapper `scripts/lib/review-memory.js`.
@@ -254,6 +280,45 @@ The active runtime SQLite backend currently uses an append-only snapshot schema 
     - `checksum_sha256` (`TEXT`)
     - `created_at` (`TEXT`)
 
+Stage-3 query-first projection tables now also live in the same SQLite file:
+
+- `workers`
+- `tasks`
+- `assignments`
+- `reviews`
+- `pull_requests`
+- `dispatches`
+- `runtime_events`
+- `leases`
+- `sessions`
+
+Current role of those tables:
+
+- they are dispatcher-owned structured projections
+- they support `/api/query/*`, structured reads, and projection health checks
+- they do not replace `snapshots` as the runtime truth source
+
+Current stage-3 optional shadow path:
+
+- environment:
+  - `DISPATCHER_SHADOW_MODE`
+  - `DISPATCHER_POSTGRES_URL`
+  - `DISPATCHER_QUEUE_SHADOW_MODE`
+- shadow tables currently include:
+  - `dispatcher_workers`
+  - `dispatcher_tasks`
+  - `dispatcher_assignments`
+  - `dispatcher_reviews`
+  - `dispatcher_events`
+  - `dispatcher_leases`
+- assignment delivery queue shadow is stored separately through the queue shadow adapter
+
+Current shadow semantics:
+
+- SQLite remains the authority
+- Postgres / queue writes are best-effort shadow projection
+- drift should be detected through projection / shadow health checks, not assumed away
+
 This is intentionally not a fully normalized operational schema. The current design optimizes for:
 
 - revision history for audit / rescue
@@ -278,3 +343,5 @@ Update this document when you change:
 - review-memory lesson shape
 - session-store fields or default storage paths
 - dispatcher backend defaults, JSON fallback behavior, or JSON-to-SQLite import behavior
+- lease fields or resource ownership semantics
+- SQLite structured projection tables or shadow store behavior

@@ -35,6 +35,7 @@ The current main runtime is hybrid:
 - the dispatcher TypeScript foundation now owns major runtime logic under `apps/dispatcher/src/modules/server/`
 - current live bridges import built output from `apps/dispatcher/dist/`
 - dispatcher-generated `traceId` is now the stable stage-2 correlation key across snapshot, worker events, CLI summaries, console drill-down, and Trae worker evidence
+- dispatcher runtime state now also owns explicit stage-3 lease semantics and a query-first SQLite projection layer
 
 Verified bridge points:
 
@@ -62,12 +63,13 @@ Do not assume `apps/dispatcher/src/index.ts` is the live server entry. It is not
 
 ## 3. Persistence Model
 
-Current mainline persistence is hybrid, with SQLite now active for dispatcher runtime state:
+Current mainline persistence is hybrid, with SQLite now active for dispatcher runtime state and structured reads:
 
 - Dispatcher runtime state truth source: `.forgeflow-dispatcher/runtime-state.db`
   - Default backend in `apps/dispatcher/src/modules/server/runtime-state.ts`
   - Implemented through `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts`
   - Uses `node:sqlite`
+  - Stores both append-only snapshots and dispatcher-owned structured projection tables
 - Dispatcher JSON fallback and import source: `.forgeflow-dispatcher/runtime-state.json`
   - Only used when `RUNTIME_STATE_BACKEND=json` or `--persistence-backend json` is explicitly selected
   - Also used as one-time import source when SQLite is the default but only a JSON snapshot exists
@@ -76,6 +78,9 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
   - accessed through the thin wrapper `scripts/lib/review-memory.js`
 - Script-local Trae gateway sessions: `.forgeflow-trae-gateway/sessions.json`
 - Packaged Trae runtime sessions: `~/.forgeflow-trae-beta/sessions/sessions.json`
+- Optional Postgres / queue shadow path:
+  - enabled with `DISPATCHER_SHADOW_MODE` / `DISPATCHER_POSTGRES_URL`
+  - current role is shadow projection / queue shadow, not dispatcher truth source
 
 `apps/dispatcher/src/db/schema.ts` still defines standalone SQLite schema constants, but dispatcher runtime persistence is now owned by the runtime-state SQLite backend rather than those constants directly.
 
@@ -86,6 +91,7 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
 1. Control layer creates a dispatch payload.
 2. Dispatcher records tasks, assignments, reviews, and events.
    - Each task receives a stable `traceId`.
+   - Assignment ownership is guarded by dispatcher lease acquisition.
 3. Worker daemon registers and heartbeats against dispatcher.
 4. Worker daemon claims an assigned task or a ready task in its pool.
 5. Worker daemon creates a per-task worktree from the latest fetched default branch.
@@ -130,12 +136,21 @@ Current review states verified in code:
 - task states: `ready`, `assigned`, `in_progress`, `review`, `merged`, `failed`, `blocked`
 - assignment state also uses `pending` before a worker is bound
 
+Current stage-3 ownership additions:
+
+- runtime state now includes `leases[]`
+- active resource types include `assignment`, `session`, `repo`, `branch`
+- reconcile may reclaim expired leases and emit audit events
+- read paths can prefer structured projection when `DISPATCHER_STRUCTURED_READS=1`
+- write paths can be frozen by `DISPATCHER_READ_ONLY_MODE=1`
+- SQLite writes may best-effort shadow to Postgres / queue, but those external stores are not the primary authority yet
+
 The control layer should not rewrite state arbitrarily. It should go through the dispatcher review flow.
 
 ## 6. What This Repo Is Not
 
 - It is not a repo where Trae is the top-level scheduler.
-- It is not a fully relational, query-first database-centric control plane; dispatcher uses SQLite as the default runtime state backend, but still persists review memory and several worker-side stores as JSON files.
+- It is not yet a fully externalized Postgres-first control plane; dispatcher now has a query-first SQLite projection and optional Postgres / queue shadow path, but SQLite snapshots remain the truth source.
 - It is not a single-service API with one uniform response envelope.
 - It is not a complete knowledge-base system; review memory is selective injection, not a general long-term memory layer.
 
