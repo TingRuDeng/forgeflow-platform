@@ -55,7 +55,7 @@ function parseInstalledVersionFromNpmList(packageName: string, output: string): 
 export async function updateLocalCheckout(options: UpdateOptions = {}): Promise<UpdateResult> {
   const packageName = "@tingrudeng/trae-beta-runtime";
   const previousVersion = resolveInstalledVersion(options.installedVersion);
-  const distTag = String(options.defaultBranch || "latest").trim() || "latest";
+  const distTag = String(options.defaultBranch || "beta").trim() || "beta";
   const packageSpecifier = `${packageName}@${distTag}`;
   const args = ["install", "-g", packageSpecifier];
   const performedCommand = `npm ${args.join(" ")}`;

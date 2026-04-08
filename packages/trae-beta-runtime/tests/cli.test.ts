@@ -377,7 +377,7 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
       packageName: "@tingrudeng/trae-beta-runtime",
       previousVersion: "0.1.0-beta.2",
       installedVersion: "0.1.0-beta.3",
-      performedCommand: "npm install -g @tingrudeng/trae-beta-runtime@latest",
+      performedCommand: "npm install -g @tingrudeng/trae-beta-runtime@beta",
       stdout: "updated",
       stderr: "",
       message: "Updated the global ForgeFlow Trae beta runtime package. Restart long-running gateway/worker processes to use the new version.",
@@ -398,7 +398,7 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     });
 
     expect(updateCmd).toHaveBeenCalledWith({
-      defaultBranch: "latest",
+      defaultBranch: "beta",
     });
     expect(log).toHaveBeenCalledWith(expect.stringContaining("Package: @tingrudeng/trae-beta-runtime"));
     expect(log).toHaveBeenCalledWith(expect.stringContaining("Previous version: 0.1.0-beta.2"));
@@ -412,7 +412,7 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
       packageName: "@tingrudeng/trae-beta-runtime",
       previousVersion: "0.1.0-beta.2",
       installedVersion: "0.1.0-beta.3",
-      performedCommand: "npm install -g @tingrudeng/trae-beta-runtime@latest",
+      performedCommand: "npm install -g @tingrudeng/trae-beta-runtime@beta",
       stdout: "updated",
       stderr: "",
       message: "Updated the global ForgeFlow Trae beta runtime package. Restart long-running gateway/worker processes to use the new version.",
@@ -433,9 +433,9 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     });
 
     expect(updateCmd).toHaveBeenCalledWith({
-      defaultBranch: "latest",
+      defaultBranch: "beta",
     });
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("\"performedCommand\": \"npm install -g @tingrudeng/trae-beta-runtime@latest\""));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("\"performedCommand\": \"npm install -g @tingrudeng/trae-beta-runtime@beta\""));
   });
 
   it("prints the package version for version command and --version flag", async () => {

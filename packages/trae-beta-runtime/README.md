@@ -121,6 +121,8 @@ forgeflow-trae-beta stop gateway
 forgeflow-trae-beta stop worker
 ```
 
+`forgeflow-trae-beta update` 默认安装 npm `beta` dist-tag，对应当前公开 beta 版本；如果你需要显式切到其他 tag，再传 `--default-branch <tag>`。
+
 Runtime behavior notes:
 
 - `forgeflow-trae-beta` always uses the saved config in `~/.forgeflow-trae-beta/config.json`; running the command from a different current working directory does not change the target project automatically
