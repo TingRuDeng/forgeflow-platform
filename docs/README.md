@@ -88,8 +88,9 @@
 1. `STATE_MACHINE.md`
 2. `runbooks/phase2-mainline-operations.md`
 3. `runbooks/observability-and-alerting.md`
-4. `API_ENDPOINTS.md`
-5. `CONTRIBUTING.md`
+4. `runbooks/stage2-exit-validation.md`
+5. `API_ENDPOINTS.md`
+6. `CONTRIBUTING.md`
 
 阶段一恢复 / 故障 / 发布节奏：
 
@@ -140,7 +141,7 @@ Trae MCP fallback 维护：
 ## Current Positioning
 
 - `dispatcher` 是任务与状态真相源。
-- Phase 1 运行时合并到 TypeScript 已完成；当前主链入口仍在 `scripts/*.js`，但 `worker-daemon`、`review-decision`、`dispatcher-state`、`dispatcher-server` 已桥接到 `apps/dispatcher/dist` 的 TypeScript foundation。
+- Phase 1 运行时合并到 TypeScript 已完成；当前主链入口仍在 `scripts/*.js`，但 `worker-daemon`、`review-decision`、`dispatcher-state`、`dispatcher-server` 已桥接到 `apps/dispatcher/dist` 的 TypeScript foundation；`review-memory` 与 `task-worktree` 的权威实现也已下沉到 `apps/dispatcher`。
 - `scripts/` 根目录当前只保留主线入口、`worker-daemon` deferred 链路入口和少量兼容脚本；旧的本地 codex drill 脚本、staging shell wrapper、`trigger-ai-dispatch.*` 与未消费的 checked-in `.d.ts` 已清理或归档。
 - Phase 2 持久化主线已切到 SQLite：dispatcher 默认写 `.forgeflow-dispatcher/runtime-state.db`，显式 `--persistence-backend json` 或 `RUNTIME_STATE_BACKEND=json` 才回退到 JSON。
 - dispatcher HTTP 面支持三种认证模式（通过 `DISPATCHER_AUTH_MODE` 控制）：
@@ -158,8 +159,9 @@ Trae MCP fallback 维护：
   - `POST /api/workers/:workerId/claim-task` 才会真正 claim / assign
 - review decision 现在显式支持 `merge`、`block`、`rework`、`changes_requested`，其中后两者都会把任务落到 `blocked`，但保留原始 decision 供 redrive 和审计使用。
 - dispatcher 现在会 canonicalize worker result 的 `workerId/pool/repo/defaultBranch/branchName`，worker 不能再覆盖这些 dispatcher-owned 字段。
-- dashboard snapshot 现在附带最小控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`。
-- dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`。
+- dispatcher 现在会给每个任务生成稳定 `traceId`，并在 snapshot、Trae fetch-task、worker events、CLI summary 与 console drill-down 暴露该关联键。
+- dashboard snapshot 现在附带阶段二控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`、`retryRatePct`、`branchProtectionHitCount`、`repoConcurrencySaturation`、`failureCodes`、`reviewReasonCodes`。
+- dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，同时输出 `retryRatePct`、失败码聚合和 review reason 聚合。
 - dispatcher 任务状态机现在包含 `cancelled`，控制面和 console 都可以显式作废非终态任务。
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - Trae 的首选无人值守路径是 `automation gateway` + `automation worker`。
@@ -170,8 +172,8 @@ Trae MCP fallback 维护：
 - follow-up / rework 分支只有在源任务已经交付过可验证的远端产物、且目标 worker 不变时才允许复用；否则控制层应新开 `-rN` 分支继续。
 - Trae review-ready 的成功门槛现在包含远端 SHA 校验与短暂重试窗口；只有远端分支 HEAD 与最终回执 commit SHA 一致时，结果才会进入 review。
 - `new_chat` 模式下的 Trae 采样现在会缩到最后一个可见 chat root，并在读取到上一个已完成任务的 `任务ID` 时提前报 stale-session 错误，而不是继续把旧对话当成本次任务基线。
-- control-layer CLI 现在补齐了 `dispatch/dispatch-task/watch/inspect/decide` 的 `--state-dir` 本地 dispatcher fallback，并统一了 `watch --summary` / `inspect --summary` 的 review/failure/redrive/progress 摘要字段。
-- Trae runtime 现在会把结构化 phase events 和 failure blocker codes 写回 dispatcher worker events；控制层 redrive 会优先读 blocker `code`，再回退到旧的文本 pattern。
+- control-layer CLI 现在补齐了 `dispatch/dispatch-task/watch/inspect/decide` 的 `--state-dir` 本地 dispatcher fallback，并统一了 `watch --summary` / `inspect --summary` 的 review/failure/redrive/progress/trace 摘要字段。
+- Trae runtime 现在会把结构化 phase events 和 failure blocker codes 写回 dispatcher worker events；generic worker daemon 的 failed result 也会带 blocker code。控制层 redrive 会优先读 blocker `code`，再回退到旧的文本 pattern。
 
 ## Supporting Docs
 
@@ -221,9 +223,12 @@ Trae MCP fallback 维护：
   - 远程 Trae beta 试运行顺序、观察点与问题记录入口。
 - `runbooks/phase2-mainline-operations.md`
   - 阶段二主链操作入口。
-  - 包含 `dependsOn`、claim POST、redrive / continuation、worker result canonicalization 和 `/api/metrics` 最小检查方式。
+  - 包含 `dependsOn`、claim POST、redrive / continuation、worker result canonicalization、`traceId` 关联和 `/api/metrics` 最小检查方式。
 - `runbooks/observability-and-alerting.md`
-  - 阶段二 metrics / runtime events / alert 说明入口。
+  - 阶段二 metrics / runtime events / trace correlation / alert 说明入口。
+- `runbooks/stage2-exit-validation.md`
+  - 阶段二出口验证入口。
+  - 收口 `runtime ownership`、`metrics/trace`、failure taxonomy 与可重复回归命令。
 - `runbooks/single-machine-deployment.md`
   - 阶段一单机控制面部署与恢复入口。
 - `runbooks/auth-and-state-lock.md`

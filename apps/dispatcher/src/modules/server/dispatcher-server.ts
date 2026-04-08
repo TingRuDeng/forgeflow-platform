@@ -29,8 +29,8 @@ import {
   filterLessonsForInjection,
   injectLessonsIntoContext,
   loadMemoryStore,
-} from "../../../../../scripts/lib/review-memory.js";
-import { safeTaskDirName } from "../../../../../scripts/lib/task-worktree.js";
+} from "./review-memory.js";
+import { safeTaskDirName } from "./task-worktree.js";
 import { formatLocalTimestamp } from "../time.js";
 import { getDispatcherAuthMode, getDispatcherApiToken } from "./dispatcher-config.js";
 
@@ -642,10 +642,15 @@ export function handleDispatcherHttpRequest(input) {
             avgAssignmentLagMs: snapshot.metrics.avgAssignmentLagMs,
             maxAssignmentLagMs: snapshot.metrics.maxAssignmentLagMs,
             submitResultRetryCount: snapshot.metrics.submitResultRetryCount,
+            retryRatePct: snapshot.metrics.retryRatePct,
             deliveryFailedCount: snapshot.metrics.deliveryFailedCount,
             cleanupFailureCount: snapshot.metrics.cleanupFailureCount,
             sessionInterruptionCount: snapshot.metrics.sessionInterruptionCount,
             stateLockTimeoutCount: snapshot.metrics.stateLockTimeoutCount + stateLockTimeoutCount,
+            branchProtectionHitCount: snapshot.metrics.branchProtectionHitCount,
+            repoConcurrencySaturation: snapshot.metrics.repoConcurrencySaturation,
+            failureCodes: snapshot.metrics.failureCodes,
+            reviewReasonCodes: snapshot.metrics.reviewReasonCodes,
             workers: snapshot.stats.workers,
             tasks: snapshot.stats.tasks,
           },

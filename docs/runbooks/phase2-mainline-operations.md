@@ -1,6 +1,6 @@
 # Phase 2 Mainline Operations
 
-这份 runbook 只覆盖阶段二主链能力：`dependsOn`、claim POST、review redrive / continuation、worker result canonicalization、控制层 `state-dir` fallback、任务取消、最小指标导出。
+这份 runbook 只覆盖阶段二主链能力：`dependsOn`、claim POST、review redrive / continuation、worker result canonicalization、控制层 `state-dir` fallback、任务取消、`traceId` 关联、最小指标导出。
 
 它不是仓库规则文件。规则仍以 `../AGENTS.md` 为准，接口字段仍以 `API_ENDPOINTS.md` 和 `contracts/*` 为准。
 
@@ -127,7 +127,9 @@ forgeflow-review-orchestrator watch \
 当前 `--summary` 至少会收口：
 
 - `reviewState`
+- `traceId`
 - `latestResultEvidence.failureSummary`
+- `latestResultEvidence.failureCode`
 - `canRedrive`
 - `latestProgressAt`
 - `latestProgressSummary`
@@ -193,11 +195,16 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `reviewBacklog`
 - `avgAssignmentLagMs`
 - `maxAssignmentLagMs`
+- `retryRatePct`
 - `submitResultRetryCount`
 - `deliveryFailedCount`
 - `cleanupFailureCount`
 - `sessionInterruptionCount`
 - `stateLockTimeoutCount`
+- `branchProtectionHitCount`
+- `repoConcurrencySaturation`
+- `failureCodes`
+- `reviewReasonCodes`
 - `workers`
 - `tasks`
 
@@ -208,14 +215,35 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `submitResult` / push / 自动 draft PR 失败，不应再当成 completed 成功
 - worker 失败结果会显式回写 failed 语义，控制层再决定 redrive / rework
 - worktree cleanup 失败现在会尽力回写 worker event，并体现在 `/api/metrics.cleanupFailureCount`
-- Trae runtime 现在还会回写结构化 phase events 与 failure blocker codes；redrive 优先读 blocker `code`，再回退到旧文本 pattern
+- Trae runtime 现在还会回写结构化 phase events 与 failure blocker codes；generic worker daemon 的 failed result 也会带 blocker code。redrive 优先读 blocker `code`，再回退到旧文本 pattern
 - 排障时仍要联合 worker 侧日志和 `.worktrees/failed/` 证据查看
 
-## 9. 收尾检查
+## 9. Stage 2 Exit Checks
+
+阶段二收尾时，建议至少确认这几组能力都能跑通：
+
+- dispatcher ownership：
+  - `review-memory` / `task-worktree` 权威实现位于 `apps/dispatcher/src/modules/server/*`
+  - `scripts/lib/*` 仅保留 bootstrap wrapper
+- 最小观测面：
+  - snapshot / `/api/metrics` / CLI summary / console 都能看到 `traceId`
+  - `/api/metrics` 暴露 `retryRatePct`、`failureCodes`、`reviewReasonCodes`
+- worker 证据：
+  - Trae runtime 会回写 phase events、`sessionId`、`traceId`、`failureCode`
+- 最小出口验证：
+  - dispatcher server / runtime-state / review-memory / task-worktree
+  - orchestrator CLI `watch` / `inspect`
+  - console task detail
+  - Trae runtime worker evidence
+- 可重复验证入口：
+  - `pnpm verify:stage2`
+  - `git diff --check`
+## 10. 收尾检查
 
 阶段二相关改动收尾前至少执行：
 
 ```bash
+pnpm verify:stage2
 pnpm test
 pnpm typecheck
 git diff --check

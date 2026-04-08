@@ -23,6 +23,7 @@ import {
   getAssignedTaskForWorker,
   heartbeatWorker,
   loadRuntimeState,
+  reconcileRuntimeState,
   recordReviewDecision,
   recordWorkerResult,
   registerWorker,
@@ -95,10 +96,61 @@ describe("dispatcher runtime state (TypeScript)", () => {
 
     expect(task?.createdAt).toMatch(/[+-]\d{2}:\d{2}$/);
     expect(task?.createdAt.endsWith("Z")).toBe(false);
+    expect(task?.traceId).toBe("trace-dispatch-1-task-local-time");
     expect(createdEvent?.at).toMatch(/[+-]\d{2}:\d{2}$/);
     expect(createdEvent?.at.endsWith("Z")).toBe(false);
+    expect((createdEvent?.payload as { traceId?: string } | undefined)?.traceId).toBe("trace-dispatch-1-task-local-time");
     expect(dispatch.state.updatedAt).toMatch(/[+-]\d{2}:\d{2}$/);
     expect(dispatch.state.updatedAt.endsWith("Z")).toBe(false);
+  });
+
+  it("backfills trace ids for legacy tasks during reconciliation", () => {
+    const state = createEmptyRuntimeState();
+    state.tasks.push({
+      id: "dispatch-42:legacy-task",
+      externalTaskId: "legacy-task",
+      repo: "owner/repo",
+      defaultBranch: "main",
+      title: "Legacy task",
+      pool: "trae",
+      allowedPaths: [],
+      acceptance: [],
+      dependsOn: [],
+      branchName: "ai/trae/legacy-task",
+      verification: { mode: "run" },
+      chatMode: "new_chat",
+      continuationMode: undefined,
+      continueFromTaskId: null,
+      followUpOfTaskId: null,
+      workerChangeReason: null,
+      status: "ready",
+      assignedWorkerId: null,
+      lastAssignedWorkerId: null,
+      requestedBy: "test",
+      createdAt: "2026-04-08T10:00:00+08:00",
+    });
+    state.assignments.push({
+      taskId: "dispatch-42:legacy-task",
+      workerId: null,
+      pool: "trae",
+      status: "pending",
+      assignment: {
+        taskId: "dispatch-42:legacy-task",
+        workerId: null,
+        pool: "trae",
+        status: "pending",
+        branchName: "ai/trae/legacy-task",
+        repo: "owner/repo",
+        defaultBranch: "main",
+      },
+    });
+
+    const reconciled = reconcileRuntimeState(state, {
+      now: "2026-04-08T10:05:00+08:00",
+    });
+
+    expect(reconciled.tasks[0]?.traceId).toBe("trace-dispatch-42-legacy-task");
+    expect(reconciled.assignments[0]?.assignment.traceId).toBe("trace-dispatch-42-legacy-task");
   });
 
   it("persists worker prompt metadata from dispatch packages into assignments", () => {
@@ -3295,5 +3347,200 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(snapshot.metrics.reviewBacklog).toBe(1);
     expect(snapshot.metrics.avgAssignmentLagMs).toBeGreaterThanOrEqual(0);
     expect(snapshot.metrics.maxAssignmentLagMs).toBeGreaterThanOrEqual(snapshot.metrics.avgAssignmentLagMs);
+    expect(snapshot.metrics.retryRatePct).toBe(0);
+    expect(snapshot.metrics.branchProtectionHitCount).toBe(0);
+    expect(snapshot.metrics.repoConcurrencySaturation).toEqual({
+      "/repo": {
+        activeWorkers: 1,
+        busyWorkers: 0,
+        saturationPct: 0,
+      },
+    });
+    expect(snapshot.metrics.failureCodes).toEqual({});
+    expect(snapshot.metrics.reviewReasonCodes).toEqual({});
+  });
+
+  it("buildDashboardSnapshot surfaces failure-code and review-reason-code breakdowns", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "trae-observability",
+      pool: "trae",
+      hostname: "obs-host",
+      labels: [],
+      repoDir: "/repo",
+      at: "2026-04-08T11:00:00+08:00",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "owner/repo",
+      defaultBranch: "main",
+      requestedBy: "tester",
+      tasks: [
+        {
+          id: "task-observability",
+          title: "Observability task",
+          pool: "trae",
+          branchName: "ai/trae/task-observability",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-observability",
+          assignment: {
+            taskId: "task-observability",
+            workerId: null,
+            pool: "trae",
+            status: "pending",
+            branchName: "ai/trae/task-observability",
+            repo: "owner/repo",
+            defaultBranch: "main",
+          },
+        },
+      ],
+      createdAt: "2026-04-08T11:00:00+08:00",
+    });
+
+    state = recordWorkerResult(dispatch.state, {
+      workerId: "trae-observability",
+      result: {
+        taskId: dispatch.taskIds[0],
+        workerId: "trae-observability",
+        provider: "trae",
+        pool: "trae",
+        branchName: "ai/trae/task-observability",
+        repo: "owner/repo",
+        defaultBranch: "main",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-04-08T11:00:05+08:00",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+        evidence: {
+          blockers: [
+            {
+              kind: "verification",
+              code: "artifact_remote_unverified",
+              message: "remote artifact check still pending",
+            },
+          ],
+          findings: [],
+        },
+      },
+      changedFiles: [],
+      pullRequest: null,
+    });
+
+    state = recordReviewDecision(state, {
+      taskId: dispatch.taskIds[0],
+      decision: "rework",
+      actor: "codex-control",
+      notes: "retry after verification",
+      at: "2026-04-08T11:00:06+08:00",
+      evidence: {
+        reasonCode: "artifact_gate",
+        canRedrive: true,
+        mustFix: [],
+      },
+    });
+
+    const snapshot = buildDashboardSnapshot(state, {
+      now: "2026-04-08T11:00:07+08:00",
+    });
+
+    expect(snapshot.metrics.failureCodes).toMatchObject({
+      artifact_remote_unverified: 1,
+    });
+    expect(snapshot.metrics.reviewReasonCodes).toMatchObject({
+      artifact_gate: 1,
+    });
+    expect(snapshot.metrics.branchProtectionHitCount).toBe(0);
+  });
+
+  it("buildDashboardSnapshot counts branch protection hits from structured worker failure codes", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-branch-protection",
+      pool: "codex",
+      hostname: "bp-host",
+      labels: [],
+      repoDir: "/repo",
+      at: "2026-04-08T12:00:00+08:00",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "owner/repo",
+      defaultBranch: "main",
+      requestedBy: "tester",
+      tasks: [
+        {
+          id: "task-branch-protection",
+          title: "Branch protection",
+          pool: "codex",
+          branchName: "main",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-branch-protection",
+          assignment: {
+            taskId: "task-branch-protection",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "main",
+            repo: "owner/repo",
+            defaultBranch: "main",
+          },
+        },
+      ],
+      createdAt: "2026-04-08T12:00:00+08:00",
+    });
+
+    state = recordWorkerResult(dispatch.state, {
+      workerId: "codex-branch-protection",
+      result: {
+        taskId: dispatch.taskIds[0],
+        workerId: "codex-branch-protection",
+        provider: "codex",
+        pool: "codex",
+        branchName: "main",
+        repo: "owner/repo",
+        defaultBranch: "main",
+        mode: "run",
+        output: "ERROR: refusing to push to default branch",
+        generatedAt: "2026-04-08T12:00:05+08:00",
+        verification: {
+          allPassed: false,
+          commands: [],
+        },
+        evidence: {
+          failureType: "preflight",
+          failureSummary: "refusing to push to default branch",
+          blockers: [
+            {
+              kind: "preflight",
+              code: "branch_protection_hit",
+              message: "refusing to push to default branch",
+            },
+          ],
+          findings: [],
+        },
+      },
+      changedFiles: [],
+      pullRequest: null,
+    });
+
+    const snapshot = buildDashboardSnapshot(state, {
+      now: "2026-04-08T12:00:06+08:00",
+    });
+
+    expect(snapshot.metrics.failureCodes).toMatchObject({
+      branch_protection_hit: 1,
+    });
+    expect(snapshot.metrics.branchProtectionHitCount).toBe(1);
   });
 });

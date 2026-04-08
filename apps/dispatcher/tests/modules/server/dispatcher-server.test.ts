@@ -322,10 +322,21 @@ describe("dispatcher server", () => {
       plannedTasks: 1,
       reviewBacklog: 0,
       submitResultRetryCount: 0,
+      retryRatePct: 0,
       deliveryFailedCount: 0,
       cleanupFailureCount: 0,
       sessionInterruptionCount: 0,
       stateLockTimeoutCount: 0,
+      branchProtectionHitCount: 0,
+      repoConcurrencySaturation: {
+        "/repo": {
+          activeWorkers: 1,
+          busyWorkers: 0,
+          saturationPct: 0,
+        },
+      },
+      failureCodes: {},
+      reviewReasonCodes: {},
       workers: {
         total: 1,
       },
@@ -407,6 +418,7 @@ describe("dispatcher server", () => {
       deliveryFailedCount: 1,
       cleanupFailureCount: 1,
       sessionInterruptionCount: 1,
+      retryRatePct: 0,
     });
   });
 
@@ -925,6 +937,7 @@ describe("dispatcher server", () => {
     });
     expect(response.status).toBe(200);
     expect(response.json.status).toBe("ok");
+    expect(response.json.task.trace_id).toBe("trace-dispatch-1-task-1");
     expect(response.json.task.goal).toBe("Test task");
     expect(response.json.task.default_branch).toBe("main");
     expect(response.json.task.worktree_dir).toBe(`${repoDir}/.worktrees/dispatch-1-task-1`);

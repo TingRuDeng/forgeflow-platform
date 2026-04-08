@@ -137,7 +137,7 @@ interface MemoryStore {
 ### 存储位置
 
 - **本地运行时**：`.forgeflow-dispatcher/memory.json`
-- **dispatcher dispatch 时加载**：`scripts/lib/dispatcher-server.js`
+- **dispatcher dispatch 时加载**：`apps/dispatcher/src/modules/server/review-memory.ts`（通过 `scripts/lib/review-memory.js` 薄包装接入 live runtime）
 
 ## 与现有契约的关系
 

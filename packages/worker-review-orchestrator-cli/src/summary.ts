@@ -36,6 +36,71 @@ function extractArrayOfStrings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function extractTraceId(
+  task: Record<string, unknown>,
+  assignment: Record<string, unknown> | null,
+): string | null {
+  const taskTraceId = extractStringValue(task, "traceId");
+  if (taskTraceId) {
+    return taskTraceId;
+  }
+  const assignmentTraceId = extractStringValue(assignment, "traceId");
+  if (assignmentTraceId) {
+    return assignmentTraceId;
+  }
+  const assignmentPayload = assignment?.assignment as Record<string, unknown> | undefined;
+  return assignmentPayload ? extractStringValue(assignmentPayload, "traceId") : null;
+}
+
+function extractEventSummary(event: Record<string, unknown> | null): string | null {
+  if (!event) {
+    return null;
+  }
+  const explicitSummary = extractStringValue(event, "summary");
+  if (explicitSummary) {
+    return explicitSummary;
+  }
+
+  const payload = event.payload as Record<string, unknown> | undefined;
+  const payloadMessage = typeof payload?.message === "string" ? payload.message : null;
+  if (payloadMessage) {
+    return payloadMessage;
+  }
+
+  const payloadData = payload?.data as Record<string, unknown> | undefined;
+  const nestedMessage = typeof payloadData?.message === "string" ? payloadData.message : null;
+  if (nestedMessage) {
+    return nestedMessage;
+  }
+
+  const failureCode = typeof payload?.failureCode === "string"
+    ? payload.failureCode
+    : typeof payloadData?.failureCode === "string"
+      ? payloadData.failureCode
+      : null;
+  if (failureCode) {
+    return failureCode;
+  }
+
+  const traceId = typeof payload?.traceId === "string"
+    ? payload.traceId
+    : typeof payloadData?.traceId === "string"
+      ? payloadData.traceId
+      : null;
+  const sessionId = typeof payload?.sessionId === "string"
+    ? payload.sessionId
+    : typeof payloadData?.sessionId === "string"
+      ? payloadData.sessionId
+      : null;
+  if (traceId || sessionId) {
+    return [sessionId ? `session=${sessionId}` : null, traceId ? `trace=${traceId}` : null]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return null;
+}
+
 function extractResultEvidence(
   reviews: Array<Record<string, unknown>>,
   events: Array<Record<string, unknown>>,
@@ -46,6 +111,8 @@ function extractResultEvidence(
   const reviewEvidence = latestReview?.evidence as Record<string, unknown> | null;
 
   const failureType = typeof workerEvidence?.failureType === "string" ? workerEvidence.failureType : null;
+  const blockerList = Array.isArray(workerEvidence?.blockers) ? workerEvidence.blockers as Array<Record<string, unknown>> : [];
+  const failureCode = blockerList.length > 0 && typeof blockerList[0]?.code === "string" ? blockerList[0].code : null;
   const failureSummary = typeof workerEvidence?.failureSummary === "string" ? workerEvidence.failureSummary : null;
   const reasonCode = typeof reviewEvidence?.reasonCode === "string" ? reviewEvidence.reasonCode : null;
   const mustFix = extractArrayOfStrings(reviewEvidence?.mustFix);
@@ -61,7 +128,7 @@ function extractResultEvidence(
       const pushStatus = pullRequest ? extractStringValue(pullRequest, "status") : null;
       const testOutput = checks ? (checks.map((candidate) => extractStringValue(candidate, "command") ?? "").join("; ") || null) : null;
       if (commit || pushStatus || testOutput) {
-        return { commit, pushStatus, testOutput, failureType, failureSummary, reasonCode, mustFix, canRedrive, redriveStrategy };
+        return { commit, pushStatus, testOutput, failureType, failureCode, failureSummary, reasonCode, mustFix, canRedrive, redriveStrategy };
       }
     }
   }
@@ -75,6 +142,7 @@ function extractResultEvidence(
       pushStatus: github ? extractStringValue(github, "push_status") : null,
       testOutput: extractStringValue(payload ?? null, "test_output"),
       failureType,
+      failureCode,
       failureSummary,
       reasonCode,
       mustFix,
@@ -83,7 +151,7 @@ function extractResultEvidence(
     };
   }
 
-  return { commit: null, pushStatus: null, testOutput: null, failureType, failureSummary, reasonCode, mustFix, canRedrive, redriveStrategy };
+  return { commit: null, pushStatus: null, testOutput: null, failureType, failureCode, failureSummary, reasonCode, mustFix, canRedrive, redriveStrategy };
 }
 
 export function buildInspectSummaryFromSnapshot(
@@ -106,6 +174,7 @@ export function buildInspectSummaryFromSnapshot(
 
   return {
     taskId: extractStringValue(task, "id") ?? "",
+    traceId: extractTraceId(task, assignment),
     status: extractStringValue(task, "status"),
     branch: extractStringValue(task, "branchName"),
     repo: assignment ? extractStringValue(assignment, "repo") : extractStringValue(task, "repo"),
@@ -117,7 +186,7 @@ export function buildInspectSummaryFromSnapshot(
       .map((event) => ({
         type: extractStringValue(event, "type") ?? "unknown",
         at: extractStringValue(event, "at"),
-        summary: extractStringValue(event, "summary"),
+        summary: extractEventSummary(event),
       })),
     reviewState: latestReview
       ? {
@@ -135,7 +204,9 @@ export function buildInspectSummaryFromSnapshot(
       : null,
     canRedrive: latestResultEvidence.canRedrive,
     latestProgressAt: extractStringValue(latestProgressEvent ?? null, "at"),
-    latestProgressSummary: extractStringValue(latestProgressPayload ?? null, "message") ?? extractStringValue(latestProgressEvent ?? null, "summary"),
+    latestProgressSummary: extractStringValue(latestProgressPayload ?? null, "message")
+      ?? extractStringValue(latestProgressPayload?.data as Record<string, unknown> | null, "message")
+      ?? extractStringValue(latestProgressEvent ?? null, "summary"),
     lineage: {
       continueFromTaskId: extractStringValue(task, "continueFromTaskId"),
       followUpOfTaskId: extractStringValue(task, "followUpOfTaskId"),

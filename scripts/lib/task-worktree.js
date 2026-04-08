@@ -1,83 +1,11 @@
-import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
-function ensureSuccess(result, message) {
-    if ((result.status ?? 1) !== 0) {
-        const details = String(result.stderr || result.stdout || "").trim();
-        throw new Error(details ? `${message}: ${details}` : message);
-    }
-}
-export function safeTaskDirName(taskId) {
-    return String(taskId || "")
-        .replace(/[^\p{L}\p{N}._-]+/gu, "-")
-        .replace(/^-+|-+$/g, "");
-}
-function runGit(args, cwd) {
-    const result = spawnSync("git", args, {
-        cwd,
-        encoding: "utf8",
-    });
-    return {
-        status: result.status ?? 1,
-        stdout: (result.stdout || "").trim(),
-        stderr: (result.stderr || "").trim(),
-    };
-}
-function resolveBaseRef(repoDir, defaultBranch) {
-    const originRef = `origin/${defaultBranch}`;
-    const originCheck = runGit(["rev-parse", "--verify", originRef], repoDir);
-    if ((originCheck.status ?? 1) === 0) {
-        return originRef;
-    }
-    throw new Error(`default branch ref ${originRef} is unavailable after fetch`);
-}
-function resetExistingWorktree(worktreeDir) {
-    ensureSuccess(runGit(["reset", "--hard", "HEAD"], worktreeDir), `failed to reset worktree ${worktreeDir}`);
-    ensureSuccess(runGit(["clean", "-fd"], worktreeDir), `failed to clean worktree ${worktreeDir}`);
-}
-export function prepareTaskWorktree(repoDir, task, options = {}) {
-    const taskId = String(task?.taskId || task?.task_id || "").trim();
-    if (!taskId) {
-        throw new Error("taskId is required");
-    }
-    const branchName = String(task?.branchName || task?.branch || "").trim();
-    if (!branchName) {
-        throw new Error(`branchName is required for ${taskId}`);
-    }
-    const defaultBranch = String(task?.defaultBranch || task?.default_branch || "main").trim() || "main";
-    if (branchName === defaultBranch) {
-        throw new Error(`refusing to use default branch as task worktree branch: ${defaultBranch}`);
-    }
-    const worktreeRoot = path.join(repoDir, ".worktrees");
-    const worktreeDir = path.join(worktreeRoot, safeTaskDirName(taskId));
-    fs.mkdirSync(worktreeRoot, { recursive: true });
-    if (fs.existsSync(worktreeDir)) {
-        if (options.allowReuse) {
-            if (options.resetOnReuse) {
-                resetExistingWorktree(worktreeDir);
-            }
-            return worktreeDir;
-        }
-        throw new Error(`existing worktree already present for ${taskId}`);
-    }
-    const fetchResult = runGit(["fetch", "origin", defaultBranch], repoDir);
-    ensureSuccess(fetchResult, `failed to fetch origin/${defaultBranch}`);
-    const baseRef = resolveBaseRef(repoDir, defaultBranch);
-    const addResult = runGit([
-        "worktree",
-        "add",
-        worktreeDir,
-        "-B",
-        branchName,
-        baseRef,
-    ], repoDir);
-    ensureSuccess(addResult, `failed to create worktree for ${taskId}`);
-    return worktreeDir;
-}
-export function removeTaskWorktree(repoDir, taskId) {
-    const worktreeDir = path.join(repoDir, ".worktrees", safeTaskDirName(taskId));
-    if (!fs.existsSync(worktreeDir)) {
-        return;
-    }
-    ensureSuccess(runGit(["worktree", "remove", "--force", worktreeDir], repoDir), `failed to remove worktree for ${taskId}`);
-}
+import { fileURLToPath, pathToFileURL } from "node:url";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, "..", "..");
+const distPath = path.join(repoRoot, "apps", "dispatcher", "dist", "modules", "server", "task-worktree.js");
+await import("./dispatcher-state.js");
+const tsModule = await import(pathToFileURL(distPath).href);
+export const safeTaskDirName = tsModule.safeTaskDirName;
+export const prepareTaskWorktree = tsModule.prepareTaskWorktree;
+export const removeTaskWorktree = tsModule.removeTaskWorktree;

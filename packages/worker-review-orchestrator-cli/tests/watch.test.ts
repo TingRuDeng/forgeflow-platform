@@ -55,6 +55,7 @@ describe("watch", () => {
         tasks: [
           {
             id: "dispatch-2:task-2",
+            traceId: "trace-dispatch-2-task-2",
             status: "blocked",
             branchName: "ai/trae/task-2",
             repo: "owner/repo",
@@ -80,6 +81,11 @@ describe("watch", () => {
             latestWorkerResult: {
               evidence: {
                 failureType: "execution",
+                blockers: [
+                  {
+                    code: "workspace_prepare_failed",
+                  },
+                ],
                 failureSummary: "workspace_prepare_failed: branch already checked out elsewhere",
               },
             },
@@ -109,11 +115,13 @@ describe("watch", () => {
 
     expect(result).toMatchObject({
       taskId: "dispatch-2:task-2",
+      traceId: "trace-dispatch-2-task-2",
       status: "blocked",
       reviewState: {
         decision: "rework",
       },
       latestResultEvidence: {
+        failureCode: "workspace_prepare_failed",
         failureSummary: "workspace_prepare_failed: branch already checked out elsewhere",
       },
       canRedrive: true,

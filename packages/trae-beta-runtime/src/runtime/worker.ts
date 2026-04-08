@@ -88,6 +88,8 @@ export interface WorkerDiscoveryHints {
 
 export interface WorkerRuntimeTask {
   task_id: string;
+  traceId?: string;
+  trace_id?: string;
   repo?: string;
   branch?: string;
   default_branch?: string;
@@ -240,6 +242,15 @@ function basenameFromPath(value: unknown) {
   }
   const parts = normalized.split(/[\\/]/).filter(Boolean);
   return parts.at(-1) || "";
+}
+
+function extractTaskTraceId(task: Pick<WorkerRuntimeTask, "traceId" | "trace_id"> | undefined): string | null {
+  const traceId = typeof task?.trace_id === "string" && task.trace_id.trim()
+    ? task.trace_id.trim()
+    : typeof task?.traceId === "string" && task.traceId.trim()
+      ? task.traceId.trim()
+      : "";
+  return traceId || null;
 }
 
 export function buildAutomationPrompt(task: WorkerRuntimeTask) {
@@ -449,7 +460,12 @@ function isRetryableRemoteCheckFailure(reason: string) {
 function buildSuccessEvidence(
   parsed: WorkerRuntimeReport,
   source = "chat_completion",
-  verification: { remoteVerified?: boolean; remoteHeadSha?: string | null } = {},
+  verification: {
+    remoteVerified?: boolean;
+    remoteHeadSha?: string | null;
+    traceId?: string | null;
+    sessionId?: string | null;
+  } = {},
 ): WorkerEvidence {
   const artifacts: Record<string, string> = {
     source,
@@ -471,6 +487,12 @@ function buildSuccessEvidence(
   }
   if (verification.remoteHeadSha) {
     artifacts.remoteHeadSha = verification.remoteHeadSha;
+  }
+  if (verification.traceId) {
+    artifacts.traceId = verification.traceId;
+  }
+  if (verification.sessionId) {
+    artifacts.sessionId = verification.sessionId;
   }
 
   return {
@@ -753,6 +775,7 @@ export function materializeTaskWorkspace(task: WorkerRuntimeTask, repoDir: strin
 
   const assignmentPayload = {
     taskId,
+    traceId: extractTaskTraceId(task),
     repo: task.repo || "",
     branchName: task.branch || "",
     defaultBranch: task.default_branch || task.defaultBranch || "",
@@ -902,6 +925,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
   }
 
   async function submitParsedResult(task: WorkerRuntimeTask, parsed: WorkerRuntimeReport, sessionId: string | null) {
+    const traceId = extractTaskTraceId(task);
     const successRequested = parsed.result === "成功";
     const successAllowed = hasCodeChangeEvidence(parsed) || isEnvironmentOnlySuccess(parsed);
     let status = successRequested && successAllowed ? "review_ready" : "failed";
@@ -957,6 +981,8 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       ? buildSuccessEvidence(parsed, "chat_completion", {
           remoteVerified: artifactCheck?.evidence.remoteVerified,
           remoteHeadSha: artifactCheck?.evidence.remoteHeadSha ?? null,
+          traceId,
+          sessionId,
         })
       : invalidSuccessMessage
         ? buildInvalidSuccessFailureEvidence(invalidSuccessMessage)
@@ -1008,11 +1034,20 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     phase = "execution",
   ) {
     const classified = classifyWorkerFailure(error, phase);
+    const traceId = extractTaskTraceId(task);
     const evidence: WorkerEvidence = {
       failureType: classified.failureType,
       failureSummary: error.message,
       blockers: [classified.blocker],
       findings: [],
+      ...(traceId || sessionId
+        ? {
+            artifacts: {
+              ...(traceId ? { traceId } : {}),
+              ...(sessionId ? { sessionId } : {}),
+            },
+          }
+        : {}),
     };
 
     await emitPhaseEvent("submit_result_start", {

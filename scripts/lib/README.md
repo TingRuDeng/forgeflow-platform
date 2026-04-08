@@ -9,8 +9,7 @@ This directory contains the code that actually wires together:
 - dispatcher HTTP handling
 - dispatcher runtime state loading/saving and live bridges
 - worker-daemon loops
-- task worktree creation
-- review-memory injection
+- thin bootstrap wrappers for dispatcher-owned review-memory and task-worktree modules
 - Trae automation gateway and worker behavior
 
 Top-level `scripts/*.js` files are mostly thin CLI wrappers around this directory.
@@ -21,6 +20,8 @@ Several mainline dispatcher paths are now bridged into `apps/dispatcher/dist` ra
 - `dispatcher-state.js` bridges state transitions to `runtime-state.js`
 - `worker-daemon.js` bridges dispatcher client glue to `runtime-glue-dispatcher-client.js`
 - `review-decision.js` bridges review submission logic to `runtime-glue-review-decision.js`
+- `review-memory.js` bridges lesson loading/extraction to `apps/dispatcher/dist/modules/server/review-memory.js`
+- `task-worktree.js` bridges worktree planning/reuse logic to `apps/dispatcher/dist/modules/server/task-worktree.js`
 
 ## High-Value Entry Files
 
@@ -31,9 +32,9 @@ Several mainline dispatcher paths are now bridged into `apps/dispatcher/dist` ra
 - `worker-daemon.js`
   - unattended worker loop for `codex` and `gemini`
 - `task-worktree.js`
-  - fetches default branch and creates per-task worktrees
+  - thin wrapper for dispatcher-owned worktree planning helpers
 - `review-memory.js`
-  - lesson extraction and selective context injection
+  - thin wrapper for dispatcher-owned lesson extraction and selective context injection
 - `trae-automation-gateway.js`
   - local HTTP bridge for Trae automation
 - `trae-automation-worker.js`

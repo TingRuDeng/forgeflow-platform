@@ -68,6 +68,7 @@ export interface WatchResult {
 
 export interface WatchSummaryResult {
   taskId: string;
+  traceId?: string | null;
   status: string;
   attempts: number;
   elapsedMs: number;
@@ -140,6 +141,7 @@ export interface InspectResult {
 
 export interface InspectSummaryResult {
   taskId: string;
+  traceId: string | null;
   status: string | null;
   branch: string | null;
   repo: string | null;
@@ -149,6 +151,7 @@ export interface InspectSummaryResult {
     pushStatus: string | null;
     testOutput: string | null;
     failureType: string | null;
+    failureCode: string | null;
     failureSummary: string | null;
     reasonCode: string | null;
     mustFix: string[];

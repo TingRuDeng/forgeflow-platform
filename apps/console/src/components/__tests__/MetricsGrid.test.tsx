@@ -9,6 +9,18 @@ const mockStats = {
   tasks: { total: 25, review: 5, merged: 15 }
 };
 
+const mockMetrics = {
+  queueDepth: 12,
+  plannedTasks: 4,
+  reviewBacklog: 5,
+  avgAssignmentLagMs: 12_300,
+  maxAssignmentLagMs: 54_000,
+  submitResultRetryCount: 2,
+  retryRatePct: 16.7,
+  deliveryFailedCount: 3,
+  cleanupFailureCount: 1
+};
+
 const renderWithProviders = (ui: React.ReactElement) => {
   return render(
     <LanguageProvider>
@@ -23,32 +35,27 @@ describe('MetricsGrid', () => {
   });
 
   it('should render correct worker counts', () => {
-    renderWithProviders(<MetricsGrid stats={mockStats} />);
-    
-    // Using exact text match for the containers that hold only the number
+    renderWithProviders(<MetricsGrid stats={mockStats} metrics={mockMetrics} />);
+
     expect(screen.getByText('10')).toBeInTheDocument();
-    
-    // For idle/busy, they are in the same div but separate nodes. 
-    // JSDOM/Testing-Library findByText('7') should work if they are distinct text nodes.
-    const idleBusyContainer = screen.getByText(/空闲/i).closest('div')?.nextElementSibling;
-    expect(idleBusyContainer).toHaveTextContent('7');
-    expect(idleBusyContainer).toHaveTextContent('3');
+    expect(screen.getByText(/空闲 \/ 忙碌: 7 \/ 3/i)).toBeInTheDocument();
   });
 
   it('should render correct task counts', () => {
-    renderWithProviders(<MetricsGrid stats={mockStats} />);
-    
-    expect(screen.getByText('25')).toBeInTheDocument();
-    
-    const reviewMergedContainer = screen.getByText(/待审查/i).closest('div')?.nextElementSibling;
-    expect(reviewMergedContainer).toHaveTextContent('5');
-    expect(reviewMergedContainer).toHaveTextContent('15');
+    renderWithProviders(<MetricsGrid stats={mockStats} metrics={mockMetrics} />);
+
+    expect(screen.getByText((_, node) => node?.textContent === '12 / 5')).toBeInTheDocument();
+    expect(screen.getByText(/待依赖: 4/i)).toBeInTheDocument();
+    expect(screen.getByText((_, node) => node?.textContent === '16.7%')).toBeInTheDocument();
+    expect(screen.getByText(/交付失败: 3 · 清理失败: 1/i)).toBeInTheDocument();
   });
 
   it('should render localized labels (default to zh)', () => {
-    renderWithProviders(<MetricsGrid stats={mockStats} />);
-    
+    renderWithProviders(<MetricsGrid stats={mockStats} metrics={mockMetrics} />);
+
     expect(screen.getByText(/活跃工作节点/i)).toBeInTheDocument();
-    expect(screen.getByText(/任务总数/i)).toBeInTheDocument();
+    expect(screen.getByText(/排队 \/ 审查/i)).toBeInTheDocument();
+    expect(screen.getByText(/分配延迟/i)).toBeInTheDocument();
+    expect(screen.getByText(/重试率/i)).toBeInTheDocument();
   });
 });

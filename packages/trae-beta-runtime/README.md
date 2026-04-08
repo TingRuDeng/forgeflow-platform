@@ -20,6 +20,7 @@ It depends on `@tingrudeng/automation-gateway-core` for shared final-report pars
 Current unattended runtime guards:
 - `new_chat` sampling is narrowed to the last visible chat root instead of scanning the whole page by default
 - when baseline sampling still exposes a different completed task id, the runtime fails early with a stale-session error instead of continuing to read the old chat
+- the runtime now reports structured phase events plus `traceId` / `sessionId` / `failureCode` hints back to dispatcher when the control plane is reachable
 
 ## Commands
 
@@ -106,7 +107,7 @@ If Trae is installed at a non-default path, add `--trae-bin "/Applications/Trae.
 If the machine defaults to a mirrored registry such as `https://registry.npmmirror.com`, newly published shared dependencies may lag behind the npmjs registry and cause dependency 404 errors during install or upgrade. In that case, install from the official registry explicitly:
 
 ```bash
-npm install -g @tingrudeng/trae-beta-runtime@0.1.0-beta.42 --registry=https://registry.npmjs.org/
+npm install -g @tingrudeng/trae-beta-runtime --registry=https://registry.npmjs.org/
 ```
 
 Common lifecycle commands:
@@ -123,7 +124,7 @@ forgeflow-trae-beta stop worker
 If `forgeflow-trae-beta update` fails because a mirrored registry has not synced the latest shared dependency yet, rerun the upgrade with:
 
 ```bash
-npm install -g @tingrudeng/trae-beta-runtime@0.1.0-beta.42 --registry=https://registry.npmjs.org/
+npm install -g @tingrudeng/trae-beta-runtime --registry=https://registry.npmjs.org/
 ```
 
 To force a fresh local instance instead of reusing an existing one:

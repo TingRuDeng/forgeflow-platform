@@ -34,21 +34,27 @@ async function resolveHandler() {
   }
 
   for (const root of candidateRepoRoots()) {
-    const candidate = path.join(root, "scripts/lib/dispatcher-server.js");
-    if (!fs.existsSync(candidate)) {
-      continue;
-    }
-    const mod = await import(pathToFileURL(candidate).href) as {
-      handleDispatcherHttpRequest?: LocalDispatcherHandler;
-    };
-    if (typeof mod.handleDispatcherHttpRequest === "function") {
-      cachedHandler = mod.handleDispatcherHttpRequest;
-      return cachedHandler;
+    const candidates = [
+      path.join(root, "apps/dispatcher/dist/modules/server/dispatcher-server.js"),
+      path.join(root, "scripts/lib/dispatcher-server.js"),
+    ];
+
+    for (const candidate of candidates) {
+      if (!fs.existsSync(candidate)) {
+        continue;
+      }
+      const mod = await import(pathToFileURL(candidate).href) as {
+        handleDispatcherHttpRequest?: LocalDispatcherHandler;
+      };
+      if (typeof mod.handleDispatcherHttpRequest === "function") {
+        cachedHandler = mod.handleDispatcherHttpRequest;
+        return cachedHandler;
+      }
     }
   }
 
   throw new Error(
-    "state-dir mode requires a local forgeflow-platform checkout with scripts/lib/dispatcher-server.js available",
+    "state-dir mode requires a local forgeflow-platform checkout with apps/dispatcher/dist/modules/server/dispatcher-server.js or scripts/lib/dispatcher-server.js available",
   );
 }
 
@@ -70,8 +76,16 @@ export async function runLocalDispatcherRequest(input: {
 }
 
 export async function loadLocalSnapshot(stateDir: string) {
+  const resolvedStateDir = path.resolve(stateDir);
+  const jsonSnapshotPath = path.join(resolvedStateDir, "runtime-state.json");
+  const sqliteSnapshotPath = path.join(resolvedStateDir, "runtime-state.db");
+
+  if (fs.existsSync(jsonSnapshotPath) && !fs.existsSync(sqliteSnapshotPath)) {
+    return JSON.parse(fs.readFileSync(jsonSnapshotPath, "utf8")) as Record<string, unknown>;
+  }
+
   const response = await runLocalDispatcherRequest({
-    stateDir,
+    stateDir: resolvedStateDir,
     method: "GET",
     pathname: "/api/dashboard/snapshot",
   });

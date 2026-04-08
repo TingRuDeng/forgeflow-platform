@@ -76,7 +76,7 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 最小验收点：
 
 - `/health` 返回可用
-- `/api/metrics` 可返回 `queueDepth`、`reviewBacklog`、`deliveryFailedCount`
+- `/api/metrics` 可返回 `queueDepth`、`reviewBacklog`、`retryRatePct`、`deliveryFailedCount`
 - `/api/dashboard/snapshot` 能看到 workers / tasks / events
 - 未带 token 访问受保护接口时返回 `401`
 
@@ -148,4 +148,3 @@ forgeflow-trae-beta start all
 - 外部 DB / queue
 - 生产级 HA
 - 自动 OTel trace 全链路
-

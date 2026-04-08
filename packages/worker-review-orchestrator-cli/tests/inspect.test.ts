@@ -12,6 +12,7 @@ const mockSnapshot = {
   tasks: [
     {
       id: "dispatch-1:task-1",
+      traceId: "trace-dispatch-1-task-1",
       status: "review",
       title: "Test Task",
       repo: "owner/repo",
@@ -170,6 +171,7 @@ describe("inspect", () => {
     })) as InspectSummaryResult;
 
     expect(result.taskId).toBe("dispatch-1:task-1");
+    expect(result.traceId).toBe("trace-dispatch-1-task-1");
     expect(result.status).toBe("review");
     expect(result.branch).toBe("feature/test");
     expect(result.repo).toBe("owner/repo");
@@ -411,6 +413,11 @@ describe("inspect", () => {
           latestWorkerResult: {
             evidence: {
               failureType: "verification",
+              blockers: [
+                {
+                  code: "verification_failed",
+                },
+              ],
               failureSummary: "Tests failed after changes",
             },
           },
@@ -438,6 +445,7 @@ describe("inspect", () => {
     })) as InspectSummaryResult;
 
     expect(result.latestResultEvidence.failureType).toBe("verification");
+    expect(result.latestResultEvidence.failureCode).toBe("verification_failed");
     expect(result.latestResultEvidence.failureSummary).toBe("Tests failed after changes");
     expect(result.latestResultEvidence.reasonCode).toBe("test_gap");
     expect(result.latestResultEvidence.mustFix).toEqual(["补充失败场景覆盖", "修复类型错误"]);
