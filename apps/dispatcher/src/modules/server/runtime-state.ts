@@ -2118,6 +2118,12 @@ export interface EnableWorkerInput {
   at?: string;
 }
 
+export interface MarkWorkerOfflineInput {
+  workerId: string;
+  at?: string;
+  reason?: string | null;
+}
+
 export function enableWorker(state: RuntimeState, input: EnableWorkerInput): RuntimeState {
   const worker = state.workers.find((candidate) => candidate.id === input.workerId);
   if (!worker) {
@@ -2142,6 +2148,34 @@ export function enableWorker(state: RuntimeState, input: EnableWorkerInput): Run
       status: "idle",
       disabledAt: null,
       disabledBy: null,
+      lastHeartbeatAt: at,
+    }),
+  };
+}
+
+export function markWorkerOffline(state: RuntimeState, input: MarkWorkerOfflineInput): RuntimeState {
+  const worker = state.workers.find((candidate) => candidate.id === input.workerId);
+  if (!worker) {
+    throw new Error(`worker not found: ${input.workerId}`);
+  }
+
+  const at = input.at ?? nowIso();
+  const nextState = appendEvent(state, {
+    taskId: worker.currentTaskId ?? "system",
+    type: "worker_offline",
+    at,
+    payload: {
+      workerId: input.workerId,
+      reason: input.reason ?? null,
+    },
+  });
+
+  return {
+    ...nextState,
+    updatedAt: at,
+    workers: upsertWorker(nextState.workers, {
+      ...worker,
+      status: "offline",
       lastHeartbeatAt: at,
     }),
   };

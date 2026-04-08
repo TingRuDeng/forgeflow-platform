@@ -692,6 +692,38 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining("gateway: stopped 1 process(es)"));
   });
 
+  it("marks the configured worker offline before stopping worker", async () => {
+    const log = vi.fn();
+    const stopProcesses = vi.fn(() => createStopResult("worker", {
+      stoppedPids: [3002],
+    }));
+    const markWorkerOffline = vi.fn(async () => undefined);
+
+    await runCli(["stop", "worker"], {
+      readConfig: vi.fn(() => exampleConfig),
+      initConfig: vi.fn(),
+      doctor: vi.fn(),
+      formatDoctor: vi.fn(),
+      startLaunchCmd: vi.fn(),
+      startGatewayCmd: vi.fn(),
+      startWorkerCmd: vi.fn(),
+      listProcesses: vi.fn(),
+      stopProcesses,
+      stopLaunchCmd: vi.fn(),
+      updateCmd: vi.fn(),
+      markWorkerOffline,
+      log,
+    });
+
+    expect(markWorkerOffline).toHaveBeenCalledWith({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      dispatcherToken: undefined,
+      workerId: "trae-remote",
+      reason: "cli_stop_worker",
+    });
+    expect(stopProcesses).toHaveBeenCalledWith("worker");
+  });
+
   it("stops only the requested managed process kind with JSON output when --json is passed", async () => {
     const log = vi.fn();
     const stopProcesses = vi.fn(() => createStopResult("gateway", {
@@ -956,6 +988,7 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     }));
     const stopProcesses = vi.fn(() => createStopResult("worker"));
     const stopLaunchCmd = vi.fn(() => createStopResult("launch"));
+    const markWorkerOffline = vi.fn(async () => undefined);
 
     await runCli(["restart", "all", "--log-file-dir", "/tmp/restart-logs"], {
       readConfig: vi.fn(() => exampleConfig),
@@ -969,12 +1002,19 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
       stopProcesses,
       stopLaunchCmd,
       updateCmd: vi.fn(),
+      markWorkerOffline,
       waitForRemoteDebuggingReady,
       waitForAutomationReady,
       waitForDispatcherHealth,
       log,
     });
 
+    expect(markWorkerOffline).toHaveBeenCalledWith({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      dispatcherToken: undefined,
+      workerId: "trae-remote",
+      reason: "cli_restart_all",
+    });
     expect(mkdirSyncSpy).toHaveBeenCalledWith("/tmp/restart-logs", { recursive: true });
     expect(startLaunchCmd).toHaveBeenCalledWith(expect.objectContaining({
       logFile: "/tmp/restart-logs/launch.log",

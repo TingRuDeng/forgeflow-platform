@@ -1674,6 +1674,53 @@ describe("dispatcher server", () => {
     expect(enableResponse.json.workers.find((w: { id: string }) => w.id === "test-worker-1").status).toBe("idle");
   });
 
+  it("marks workers offline immediately via API", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "test-worker-offline-1",
+        pool: "trae",
+        hostname: "test-host",
+        labels: ["test"],
+        repoDir: "/test",
+        at: "2026-04-08T11:40:28.471Z",
+      },
+    });
+
+    const offlineResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/test-worker-offline-1/offline",
+      body: {
+        at: "2026-04-08T11:45:26.000Z",
+        reason: "runtime_restart",
+      },
+    });
+    expect(offlineResponse.status).toBe(200);
+    expect(offlineResponse.json.status).toBe("offline");
+
+    const worker = offlineResponse.json.workers.find((w: { id: string }) => w.id === "test-worker-offline-1");
+    expect(worker).toMatchObject({
+      id: "test-worker-offline-1",
+      status: "offline",
+      lastHeartbeatAt: "2026-04-08T11:45:26.000Z",
+    });
+
+    const snapshotResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dashboard/snapshot",
+    });
+    expect(snapshotResponse.status).toBe(200);
+    expect(snapshotResponse.json.stats.workers.offline).toBe(1);
+    expect(snapshotResponse.json.stats.workers.idle).toBe(0);
+  });
+
   it("keeps disabled workers visible as disabled in dashboard snapshots", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);

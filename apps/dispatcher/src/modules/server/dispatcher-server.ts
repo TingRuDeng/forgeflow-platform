@@ -17,6 +17,7 @@ import {
   getAssignedTaskForWorker,
   heartbeatWorker,
   loadRuntimeState,
+  markWorkerOffline,
   reconcileRuntimeState,
   recordReviewDecision,
   recordWorkerEvent,
@@ -702,6 +703,23 @@ export function handleDispatcherHttpRequest(input) {
       });
       return createJsonResponse(200, {
         status: "heartbeat",
+        workers: result.state.workers,
+      });
+    }
+
+    const offlineMatch = method === "POST"
+      ? pathname.match(/^\/api\/workers\/([^/]+)\/offline$/)
+      : null;
+    if (offlineMatch) {
+      const result = withState(stateDir, (state) => ({
+        state: markWorkerOffline(state, {
+          workerId: decodeURIComponent(offlineMatch[1]),
+          at: body.at,
+          reason: typeof body.reason === "string" ? body.reason : null,
+        }),
+      }));
+      return createJsonResponse(200, {
+        status: "offline",
         workers: result.state.workers,
       });
     }

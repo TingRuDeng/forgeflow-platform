@@ -244,6 +244,12 @@ npm install -g @tingrudeng/trae-beta-runtime --registry=https://registry.npmjs.o
 - automation gateway `/ready` 可用
 - dispatcher `/health` 可用
 
+另外：
+
+- runtime CLI 固定读取 `~/.forgeflow-trae-beta/config.json`；如果需要切换业务仓，先重新执行 `forgeflow-trae-beta init --overwrite`
+- `restart launch` / `restart all` 在 macOS clean relaunch 时会先等待旧 CDP 端口释放，再拉起新 Trae 实例
+- `stop worker` / `restart worker` / `stop all` / `restart all` 会 best-effort 先把对应 worker 标记为 dispatcher `offline`，避免 dashboard 在 heartbeat 租约窗口内继续显示在线
+
 这条链路已经覆盖：
 
 1. `register`

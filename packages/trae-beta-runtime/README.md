@@ -121,6 +121,13 @@ forgeflow-trae-beta stop gateway
 forgeflow-trae-beta stop worker
 ```
 
+Runtime behavior notes:
+
+- `forgeflow-trae-beta` always uses the saved config in `~/.forgeflow-trae-beta/config.json`; running the command from a different current working directory does not change the target project automatically
+- if you need to switch the managed business repo, rerun `forgeflow-trae-beta init --overwrite --project-path /abs/path/to/repo`
+- `stop worker` / `restart worker` / `stop all` / `restart all` now best-effort mark the configured worker `offline` in dispatcher before stopping the local process, so the dashboard does not stay falsely online during the heartbeat lease window
+- `restart launch` / `restart all` now wait for the old CDP debugger port to drain during clean macOS relaunch before spawning the new Trae app instance
+
 If `forgeflow-trae-beta update` fails because a mirrored registry has not synced the latest shared dependency yet, rerun the upgrade with:
 
 ```bash
