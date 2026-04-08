@@ -3,6 +3,8 @@ import path from "node:path";
 import type { WatchOptions, WatchResult, WatchSummaryResult } from "./types.js";
 
 import { createJsonHttpClient, loadRuntimeState } from "./http.js";
+import { loadLocalSnapshot } from "./local-dispatcher.js";
+import { buildInspectSummaryFromSnapshot } from "./summary.js";
 
 const TERMINAL_TASK_STATUSES = new Set(["review", "failed", "merged", "blocked"]);
 
@@ -16,29 +18,44 @@ function findTask(snapshot: { tasks?: Array<Record<string, unknown>> }, taskId: 
 
 export async function watchTask(options: WatchOptions & {
   fetchImpl?: typeof globalThis.fetch;
-  stateDir?: string;
 }): Promise<WatchResult | WatchSummaryResult> {
   const intervalMs = Number(options.intervalMs || 2000);
   const timeoutMs = Number(options.timeoutMs || 600_000);
   const startedAt = Date.now();
   let attempts = 0;
 
+  if (!options.dispatcherUrl && !options.stateDir) {
+    throw new Error("dispatcherUrl or stateDir is required");
+  }
+
   if (options.stateDir) {
     const stateDir = path.resolve(options.stateDir);
     while (true) {
       attempts += 1;
-      const state = loadRuntimeState(stateDir);
-      const snapshot = state as unknown as { tasks?: Array<Record<string, unknown>> };
+      let snapshot: Record<string, unknown>;
+      try {
+        snapshot = await loadLocalSnapshot(stateDir);
+      } catch {
+        const state = loadRuntimeState(stateDir);
+        snapshot = state as unknown as Record<string, unknown>;
+      }
       const task = findTask(snapshot, options.taskId);
       const status = String(task?.status || "");
 
       if (task && TERMINAL_TASK_STATUSES.has(status)) {
         if (options.summary === true) {
+          const summary = buildInspectSummaryFromSnapshot(snapshot, options.taskId);
           return {
             taskId: options.taskId,
             status,
             attempts,
             elapsedMs: Date.now() - startedAt,
+            latestResultEvidence: summary.latestResultEvidence,
+            reviewState: summary.reviewState,
+            canRedrive: summary.canRedrive,
+            latestProgressAt: summary.latestProgressAt,
+            latestProgressSummary: summary.latestProgressSummary,
+            lineage: summary.lineage,
           };
         }
         return {
@@ -59,7 +76,7 @@ export async function watchTask(options: WatchOptions & {
     }
   }
 
-  const client = createJsonHttpClient(options.dispatcherUrl, {
+  const client = createJsonHttpClient(options.dispatcherUrl!, {
     fetchImpl: options.fetchImpl,
   });
 
@@ -71,11 +88,18 @@ export async function watchTask(options: WatchOptions & {
 
     if (task && TERMINAL_TASK_STATUSES.has(status)) {
       if (options.summary === true) {
+        const summary = buildInspectSummaryFromSnapshot(snapshot as Record<string, unknown>, options.taskId);
         return {
           taskId: options.taskId,
           status,
           attempts,
           elapsedMs: Date.now() - startedAt,
+          latestResultEvidence: summary.latestResultEvidence,
+          reviewState: summary.reviewState,
+          canRedrive: summary.canRedrive,
+          latestProgressAt: summary.latestProgressAt,
+          latestProgressSummary: summary.latestProgressSummary,
+          lineage: summary.lineage,
         };
       }
       return {

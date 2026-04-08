@@ -159,6 +159,7 @@ node scripts/run-dispatcher-server.js \
 - dispatcher 当前会在状态目录下维护 `.runtime-state.lock`；锁竞争超时返回 `503`，调用方应重试。相关环境变量为 `DISPATCHER_STATE_LOCK_TIMEOUT_MS`、`DISPATCHER_STATE_LOCK_RETRY_MS`、`DISPATCHER_STATE_LOCK_STALE_MS`
 - 阶段二新增只读 `GET /api/metrics`，适合脚本直接获取 `queueDepth/reviewBacklog/assignment lag`
 - `/api/metrics` 现在还会给出 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`
+- 阶段二还新增了 `POST /api/tasks/:taskId/cancel`，可手动作废非终态任务；console 页面现在也提供了任务详情和作废按钮
 
 调用方连通性检查示例：
 
@@ -202,6 +203,12 @@ node /abs/path/to/forgeflow-platform/scripts/run-dispatcher-server.js \
 npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator -g -y
 npm install -g @tingrudeng/worker-review-orchestrator-cli
 ```
+
+控制层 CLI 当前推荐能力：
+
+- `dispatch` / `dispatch-task` 支持 `--state-dir`，在本机无法直接发 HTTP 时可走本地 dispatcher bridge
+- `watch --summary` / `inspect --summary` 会统一输出 review decision、failure summary、can-redrive、latest progress、lineage
+- 直接 dispatch 到 `pool=trae` 且显式 `targetWorkerId` 时，默认会检查 worker 在线；`redrive` 属于显式 continuation/rework 入口，当前默认允许排队生成后续任务
 
 ### 4.3 Trae 首选无人值守链路
 

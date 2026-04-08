@@ -10,6 +10,7 @@ Terminal or branch states:
 
 - `review -> blocked`
 - `assigned|in_progress -> failed`
+- `ready|assigned|in_progress|review|blocked -> cancelled`
 
 Current rules:
 
@@ -23,7 +24,7 @@ Current rules:
 
 ## Assignment States
 
-`pending -> assigned -> in_progress -> review|blocked|failed|merged`
+`pending -> assigned -> in_progress -> review|blocked|failed|merged|cancelled`
 
 Current rules:
 
@@ -52,6 +53,7 @@ Redriveability:
 
 - `failed` tasks may be redriven by failure policy
 - `blocked` tasks are only redriveable when latest review decision is `rework` or `changes_requested` and review evidence does not disable redrive
+- `cancelled` is terminal and not redriveable in-place; follow-up or fresh dispatch should create a new task id
 
 ## Continuation And Follow-up
 
@@ -94,6 +96,8 @@ Worker-owned payload remains:
 - `generatedAt`
 - `verification`
 - `evidence`
+
+Current worker evidence may additionally carry structured blocker `code`s. Current control-plane redrive policy prefers those explicit codes, then falls back to legacy text-pattern matching for older history.
 
 ## Snapshot Metrics
 

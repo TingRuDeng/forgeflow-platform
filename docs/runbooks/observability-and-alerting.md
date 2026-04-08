@@ -68,6 +68,18 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `delivery_failed`
 - `worktree_cleanup_failed`
 - `session_interrupted`
+- Trae runtime structured phase events:
+  - `register_*`
+  - `fetch_task_*`
+  - `workspace_prepare_*`
+  - `start_task_*`
+  - `readiness_wait_*`
+  - `prepare_session_*`
+  - `send_chat_*`
+  - `session_recovery_*`
+  - `artifact_check_*`
+  - `submit_result_*`
+  - `session_release_*`
 
 dispatcher 进程内还会记录：
 
@@ -85,6 +97,7 @@ dispatcher 进程内还会记录：
 
 - 脚本侧 logger 默认会 redact `Authorization`、`DISPATCHER_API_TOKEN`、`GITHUB_TOKEN` 等敏感字段
 - dispatcher events、task state、worker id、task id、session id 已能提供最小相关性线索
+- console 现在支持 task drill-down，可直接查看 failure summary、reasonCode、canRedrive、lineage 和最近任务事件
 
 当前还没有完整长期版能力：
 
@@ -122,6 +135,10 @@ dispatcher 进程内还会记录：
   - 看无人值守执行环境是否不稳定
 - `stateLockTimeoutCount + recent events`
   - 看控制面是否存在写冲突或卡锁
+- `artifact_check_* + send_chat_*`
+  - 看 Trae 失败是聊天交互问题还是远端产物验证问题
+- `workspace_prepare_* + start_task_*`
+  - 看失败是 worktree / branch 预处理，还是 dispatcher 状态流转本身
 
 ## 6. 排障顺序
 
@@ -151,4 +168,3 @@ dispatcher 进程内还会记录：
 - 完整 OTel logs / traces / metrics 全量贯通
 - 多实例观测
 - SLO / burn-rate 正式治理
-

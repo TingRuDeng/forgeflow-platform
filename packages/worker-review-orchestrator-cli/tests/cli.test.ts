@@ -115,6 +115,33 @@ describe("worker-review-orchestrator-cli", () => {
     });
   });
 
+  it("passes stateDir through watch when dispatcher HTTP is unavailable", async () => {
+    const log = vi.fn();
+    const watchTask = vi.fn().mockResolvedValue({
+      taskId: "dispatch-1:task-1",
+      status: "blocked",
+      attempts: 1,
+      elapsedMs: 50,
+    });
+
+    await runCli(
+      ["watch", "--state-dir", "/tmp/.forgeflow-dispatcher", "--task-id", "dispatch-1:task-1", "--summary"],
+      {
+        watchTask,
+        log,
+      },
+    );
+
+    expect(watchTask).toHaveBeenCalledWith({
+      dispatcherUrl: undefined,
+      stateDir: "/tmp/.forgeflow-dispatcher",
+      taskId: "dispatch-1:task-1",
+      intervalMs: undefined,
+      timeoutMs: undefined,
+      summary: true,
+    });
+  });
+
   it("routes dispatch output through the injected dependency", async () => {
     const log = vi.fn();
     const runDispatch = vi.fn().mockResolvedValue({
@@ -131,13 +158,12 @@ describe("worker-review-orchestrator-cli", () => {
       },
     );
 
-    expect(runDispatch).toHaveBeenCalledWith({
+    expect(runDispatch).toHaveBeenCalledWith(expect.objectContaining({
       dispatcherUrl: "http://127.0.0.1:8787",
       input: "-",
       requestTimeoutMs: undefined,
-      requireExistingWorker: false,
       targetWorkerId: undefined,
-    });
+    }));
     expect(result).toMatchObject({
       dispatchId: "dispatch-1",
     });
@@ -168,13 +194,12 @@ describe("worker-review-orchestrator-cli", () => {
       },
     );
 
-    expect(runDispatch).toHaveBeenCalledWith({
+    expect(runDispatch).toHaveBeenCalledWith(expect.objectContaining({
       dispatcherUrl: "http://127.0.0.1:8787",
       input: "dispatch.json",
       requestTimeoutMs: undefined,
-      requireExistingWorker: false,
       targetWorkerId: "trae-remote-forgeflow",
-    });
+    }));
   });
 
   it("passes requireExistingWorker through dispatch", async () => {
@@ -251,7 +276,6 @@ describe("worker-review-orchestrator-cli", () => {
       dispatcherUrl: "http://127.0.0.1:8787",
       input: "-",
       requestTimeoutMs: undefined,
-      requireExistingWorker: false,
       targetWorkerId: "trae-remote-forgeflow",
       payload: expect.objectContaining({
         repo: "TingRuDeng/ForgeFlow",

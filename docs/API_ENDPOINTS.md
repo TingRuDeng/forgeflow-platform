@@ -130,6 +130,7 @@ Current endpoint families:
     - `delivery_failed`
     - `worktree_cleanup_failed`
     - `session_interrupted`
+    - Trae runtime phase events such as `fetch_task_start`, `prepare_session_done`, `artifact_check_failed`, `submit_result_done`
 
 ### Dispatch and review endpoints
 
@@ -157,6 +158,17 @@ Current endpoint families:
   - Blocked tasks with latest review decision `rework` or `changes_requested` are redriveable in the orchestrator CLI.
   - Returns `404` when the task or assignment does not exist.
   - Returns `409` when the task exists but is not currently in `review`.
+- `POST /api/tasks/:taskId/cancel`
+  - Explicitly move a non-terminal task to `cancelled`.
+  - Current request body may include:
+    - `actor`
+    - `reason`
+    - `at`
+  - Current dispatcher behavior:
+    - rejects `merged` / `failed` / invalid-task transitions with `409`
+    - returns `404` when the task or assignment does not exist
+    - frees the bound worker when the task was still assigned or running
+    - appends both `status_changed` and `task_cancelled` events
 
 ### Trae-specific dispatcher endpoints
 
@@ -180,6 +192,15 @@ Current endpoint families:
   - Packaged runtime may briefly retry remote verification after push before downgrading the report to `failed`.
   - Delivery evidence may include a remote-verified push state plus `remoteHeadSha`.
   - Dispatcher now rebuilds canonical worker result metadata for Trae too; route-local payload no longer overrides dispatcher-owned task identity fields.
+  - Failure evidence may now carry structured blocker codes such as:
+    - `workspace_prepare_failed`
+    - `worktree_mismatch`
+    - `branch_mismatch`
+    - `preflight_workspace_mismatch`
+    - `transient_gateway_timeout`
+    - `transient_model_3003`
+    - `artifact_remote_unverified`
+    - `prompt_contract_mismatch`
 - `POST /api/trae/heartbeat`
   - Heartbeat endpoint for Trae workers.
 

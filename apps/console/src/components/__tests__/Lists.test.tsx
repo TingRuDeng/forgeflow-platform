@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { TaskList } from '../Lists';
+import { TaskDetailsPanel, TaskList } from '../Lists';
 import { LanguageProvider } from '../../lib/i18n';
 
 // Mock Tasks
@@ -78,5 +78,86 @@ describe('TaskList Pagination', () => {
     fireEvent.click(prevBtn);
     expect(screen.getByTestId('page-indicator').textContent).toContain('1');
     expect(screen.getByText('Task 1')).toBeInTheDocument();
+  });
+});
+
+describe('Task drill-down', () => {
+  it('highlights the selected task and emits selection changes', () => {
+    const onSelect = vi.fn();
+
+    renderWithProviders(
+      <TaskList tasks={mockTasks(2)} selectedTaskId="T-2" onSelect={onSelect} />
+    );
+
+    fireEvent.click(screen.getByText('Task 1'));
+
+    expect(onSelect).toHaveBeenCalledWith('T-1');
+  });
+
+  it('renders task details and exposes the cancel action for cancellable tasks', () => {
+    const onCancel = vi.fn();
+
+    renderWithProviders(
+      <TaskDetailsPanel
+        task={{
+          id: 'dispatch-1:task-1',
+          title: 'Fix auth gate',
+          status: 'blocked',
+          branchName: 'codex/auth-fix',
+          repo: 'owner/repo',
+          pool: 'trae',
+          continueFromTaskId: 'dispatch-1:task-0',
+        }}
+        assignment={{
+          taskId: 'dispatch-1:task-1',
+          workerId: 'trae-remote-forgeflow',
+          repo: 'owner/repo',
+          pool: 'trae',
+        }}
+        review={{
+          taskId: 'dispatch-1:task-1',
+          decision: 'rework',
+          actor: 'codex-control',
+          decidedAt: '2026-04-08T10:00:00Z',
+          evidence: {
+            reasonCode: 'test_gap',
+            canRedrive: true,
+            redriveStrategy: 'same_worker_continue',
+            mustFix: ['补齐失败测试'],
+          },
+          latestWorkerResult: {
+            evidence: {
+              failureType: 'verification',
+              failureSummary: 'pnpm test failed',
+            },
+          },
+        }}
+        pullRequest={{
+          taskId: 'dispatch-1:task-1',
+          number: 42,
+          status: 'draft',
+          url: 'https://example.com/pr/42',
+        }}
+        events={[
+          {
+            taskId: 'dispatch-1:task-1',
+            type: 'progress_reported',
+            at: '2026-04-08T10:01:00Z',
+            payload: { message: 'running tests' },
+          },
+        ]}
+        onCancel={onCancel}
+      />
+    );
+
+    expect(screen.getByText('Fix auth gate')).toBeInTheDocument();
+    expect(screen.getByText(/test_gap/i)).toBeInTheDocument();
+    expect(screen.getByText(/pnpm test failed/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /作废任务|cancel task/i }));
+
+    expect(onCancel).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'dispatch-1:task-1',
+    }));
   });
 });

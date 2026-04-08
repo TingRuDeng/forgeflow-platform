@@ -9,6 +9,7 @@ import { buildDashboardHtml } from "./dashboard.js";
 import {
   beginTaskForWorker,
   buildDashboardSnapshot,
+  cancelTask,
   claimAssignedTaskForWorker,
   createDispatch,
   disableWorker,
@@ -234,6 +235,20 @@ function classifyReviewDecisionError(error) {
     return 404;
   }
   if (message.startsWith("task not in review:")) {
+    return 409;
+  }
+  return 500;
+}
+
+function classifyTaskCancellationError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    message.startsWith("task not found:")
+    || message.startsWith("assignment not found for task:")
+  ) {
+    return 404;
+  }
+  if (message.startsWith("task not cancellable from state:")) {
     return 409;
   }
   return 500;
@@ -810,6 +825,32 @@ export function handleDispatcherHttpRequest(input) {
         status: "enabled",
         workers: result.state.workers,
       });
+    }
+
+    const cancelTaskMatch = method === "POST"
+      ? pathname.match(/^\/api\/tasks\/([^/]+)\/cancel$/)
+      : null;
+    if (cancelTaskMatch) {
+      try {
+        const result = withState(stateDir, (state) => ({
+          state: cancelTask(state, {
+            taskId: decodeURIComponent(cancelTaskMatch[1]),
+            actor: String(body.actor || "").trim() || "codex-control",
+            reason: typeof body.reason === "string" ? body.reason : undefined,
+            at: body.at,
+          }),
+        }));
+        const taskId = decodeURIComponent(cancelTaskMatch[1]);
+        return createJsonResponse(200, {
+          status: "cancelled",
+          task: result.state.tasks.find((candidate) => candidate.id === taskId) ?? null,
+          workers: result.state.workers,
+        });
+      } catch (error) {
+        return createJsonResponse(classifyTaskCancellationError(error), {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     if (method === "POST" && pathname === "/api/dispatches") {

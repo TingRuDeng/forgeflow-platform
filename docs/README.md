@@ -159,6 +159,7 @@ Trae MCP fallback 维护：
 - dispatcher 现在会 canonicalize worker result 的 `workerId/pool/repo/defaultBranch/branchName`，worker 不能再覆盖这些 dispatcher-owned 字段。
 - dashboard snapshot 现在附带最小控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`。
 - dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`。
+- dispatcher 任务状态机现在包含 `cancelled`，控制面和 console 都可以显式作废非终态任务。
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - Trae 的首选无人值守路径是 `automation gateway` + `automation worker`。
 - Trae MCP worker 已降级为 deprecated/fallback 接入。
@@ -168,6 +169,8 @@ Trae MCP fallback 维护：
 - follow-up / rework 分支只有在源任务已经交付过可验证的远端产物、且目标 worker 不变时才允许复用；否则控制层应新开 `-rN` 分支继续。
 - Trae review-ready 的成功门槛现在包含远端 SHA 校验与短暂重试窗口；只有远端分支 HEAD 与最终回执 commit SHA 一致时，结果才会进入 review。
 - `new_chat` 模式下的 Trae 采样现在会缩到最后一个可见 chat root，并在读取到上一个已完成任务的 `任务ID` 时提前报 stale-session 错误，而不是继续把旧对话当成本次任务基线。
+- control-layer CLI 现在补齐了 `dispatch/dispatch-task/watch/inspect/decide` 的 `--state-dir` 本地 dispatcher fallback，并统一了 `watch --summary` / `inspect --summary` 的 review/failure/redrive/progress 摘要字段。
+- Trae runtime 现在会把结构化 phase events 和 failure blocker codes 写回 dispatcher worker events；控制层 redrive 会优先读 blocker `code`，再回退到旧的文本 pattern。
 
 ## Supporting Docs
 

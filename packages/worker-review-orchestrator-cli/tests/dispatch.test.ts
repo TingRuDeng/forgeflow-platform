@@ -143,6 +143,76 @@ describe("dispatch", () => {
     );
   });
 
+  it("defaults to requiring an online target worker for trae tasks with explicit targetWorkerId", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          workers: [
+            { id: "trae-remote-forgeflow", pool: "trae", status: "offline" },
+          ],
+        }),
+      });
+
+    await expect(runDispatch({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      input: "-",
+      payload: {
+        repo: "/repo",
+        defaultBranch: "main",
+        tasks: [
+          {
+            id: "task-1",
+            pool: "trae",
+            targetWorkerId: "trae-remote-forgeflow",
+          },
+        ],
+        packages: [],
+      },
+      fetchImpl: fetchImpl as typeof globalThis.fetch,
+    })).rejects.toThrow('target worker "trae-remote-forgeflow" is not online');
+  });
+
+  it("supports dispatching directly to a local stateDir when HTTP is unavailable", async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-dispatch-state-dir-"));
+
+    const result = await runDispatch({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      stateDir,
+      input: "-",
+      payload: {
+        repo: "/repo",
+        defaultBranch: "main",
+        tasks: [
+          {
+            id: "task-local-dispatch",
+            title: "Local dispatch",
+            pool: "codex",
+            branchName: "codex/task-local-dispatch",
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-local-dispatch",
+            assignment: {
+              taskId: "task-local-dispatch",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "codex/task-local-dispatch",
+              repo: "/repo",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(result.dispatchId).toMatch(/^dispatch-/);
+    expect(result.taskIds).toHaveLength(1);
+  });
+
   it("requires an online worker in the task pool when no target worker is pinned", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce({
@@ -327,6 +397,18 @@ describe("dispatch", () => {
             },
           ],
           events: [],
+          workers: [
+            { id: "trae-local-forgeflow", pool: "trae", status: "idle" },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          workers: [
+            { id: "trae-local-forgeflow", pool: "trae", status: "idle" },
+          ],
         }),
       })
       .mockResolvedValueOnce({
@@ -362,23 +444,33 @@ describe("dispatch", () => {
     expect(result).toMatchObject({
       dispatchId: "dispatch-follow-up",
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
   it("verifies every returned assignment against the intended target worker", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      text: async () =>
-        JSON.stringify({
-          dispatchId: "dispatch-verify-all",
-          taskIds: ["dispatch-verify-all:task-1", "dispatch-verify-all:task-2"],
-          assignments: [
-            { taskId: "dispatch-verify-all:task-1", workerId: "trae-remote-forgeflow" },
-            { taskId: "dispatch-verify-all:task-2", workerId: "wrong-worker" },
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          workers: [
+            { id: "trae-remote-forgeflow", pool: "trae", status: "idle" },
           ],
         }),
-    });
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            dispatchId: "dispatch-verify-all",
+            taskIds: ["dispatch-verify-all:task-1", "dispatch-verify-all:task-2"],
+            assignments: [
+              { taskId: "dispatch-verify-all:task-1", workerId: "trae-remote-forgeflow" },
+              { taskId: "dispatch-verify-all:task-2", workerId: "wrong-worker" },
+            ],
+          }),
+      });
 
     await expect(
       runDispatch({

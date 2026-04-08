@@ -2,9 +2,11 @@ import type { DispatchInput, DispatchResult, DispatchTaskInputOptions } from "./
 
 import { createJsonHttpClient, readJsonInput } from "./http.js";
 import { readFileSync } from "node:fs";
+import { loadLocalSnapshot, runLocalDispatcherRequest } from "./local-dispatcher.js";
 
 export interface DispatchOptions {
-  dispatcherUrl: string;
+  dispatcherUrl?: string;
+  stateDir?: string;
   input: string;
   payload?: DispatchInput;
   targetWorkerId?: string;
@@ -447,21 +449,16 @@ function buildSuggestedFollowUpBranch(originalBranchName: string) {
 
 async function ensureExistingWorkersAvailable(
   payload: DispatchInput,
-  options: Pick<DispatchOptions, "dispatcherUrl" | "fetchImpl" | "requestTimeoutMs">,
+  options: Pick<DispatchOptions, "dispatcherUrl" | "stateDir" | "fetchImpl" | "requestTimeoutMs">,
 ) {
-  const client = createJsonHttpClient(options.dispatcherUrl, {
-    fetchImpl: options.fetchImpl,
-    requestTimeoutMs: options.requestTimeoutMs,
-  });
-  const snapshot = await client.request("/api/dashboard/snapshot") as Record<string, unknown>;
+  const snapshot = options.stateDir
+    ? await loadLocalSnapshot(options.stateDir)
+    : await createJsonHttpClient(options.dispatcherUrl!, {
+        fetchImpl: options.fetchImpl,
+        requestTimeoutMs: options.requestTimeoutMs,
+      }).request("/api/dashboard/snapshot") as Record<string, unknown>;
   const workers = Array.isArray(snapshot.workers) ? snapshot.workers as SnapshotWorkerRecord[] : [];
   const onlineWorkers = workers.filter((worker) => isOnlineWorkerStatus(worker.status));
-
-  if (onlineWorkers.length === 0) {
-    throw new Error(
-      `require-existing-worker check failed: dispatcher snapshot has no online workers. Snapshot workers: ${formatWorkerInventory(workers)}`,
-    );
-  }
 
   const tasks = Array.isArray(payload.tasks) ? payload.tasks : [];
   const targetWorkerIds = [...new Set(tasks.map((task) =>
@@ -478,6 +475,12 @@ async function ensureExistingWorkersAvailable(
       }
     }
     return;
+  }
+
+  if (onlineWorkers.length === 0) {
+    throw new Error(
+      `require-existing-worker check failed: dispatcher snapshot has no online workers. Snapshot workers: ${formatWorkerInventory(workers)}`,
+    );
   }
 
   const requiredPools = [...new Set(tasks.map((task) => normalizeString(task.pool)).filter((value): value is string => Boolean(value)))];
@@ -499,13 +502,14 @@ async function ensureExistingWorkersAvailable(
 
 async function fetchSourceTask(
   followUpOfTaskId: string,
-  options: Pick<DispatchOptions, "dispatcherUrl" | "fetchImpl" | "requestTimeoutMs">,
+  options: Pick<DispatchOptions, "dispatcherUrl" | "stateDir" | "fetchImpl" | "requestTimeoutMs">,
 ): Promise<SourceTaskInfo> {
-  const client = createJsonHttpClient(options.dispatcherUrl, {
-    fetchImpl: options.fetchImpl,
-    requestTimeoutMs: options.requestTimeoutMs,
-  });
-  const snapshot = await client.request("/api/dashboard/snapshot") as Record<string, unknown>;
+  const snapshot = options.stateDir
+    ? await loadLocalSnapshot(options.stateDir)
+    : await createJsonHttpClient(options.dispatcherUrl!, {
+        fetchImpl: options.fetchImpl,
+        requestTimeoutMs: options.requestTimeoutMs,
+      }).request("/api/dashboard/snapshot") as Record<string, unknown>;
 
   const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks as Array<Record<string, unknown>> : [];
   const sourceTask = tasks.find((task) => task.id === followUpOfTaskId);
@@ -624,19 +628,34 @@ export async function runDispatch(options: DispatchOptions): Promise<DispatchRes
     verifyFollowUpBranchReuse(payload, sourceTaskInfo, options.targetWorkerId);
   }
 
-  if (options.requireExistingWorker) {
+  const shouldRequireExistingWorker = options.requireExistingWorker === true || (options.requireExistingWorker !== false && (
+    (payload.tasks ?? []).some((task) => normalizeString((task as Record<string, unknown>).pool) === "trae"
+      && Boolean(normalizeString((task as Record<string, unknown>).targetWorkerId) || normalizeString((task as Record<string, unknown>).target_worker_id)))
+  ));
+
+  if (shouldRequireExistingWorker) {
     await ensureExistingWorkersAvailable(payload, options);
   }
 
-  const client = createJsonHttpClient(options.dispatcherUrl, {
-    fetchImpl: options.fetchImpl,
-    requestTimeoutMs: options.requestTimeoutMs,
-  });
-
-  const dispatchResult = await client.request("/api/dispatches", {
-    method: "POST",
-    body: payload,
-  }) as DispatchResult;
+  let dispatchResult: DispatchResult;
+  if (options.stateDir) {
+    const response = await runLocalDispatcherRequest({
+      stateDir: options.stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: payload,
+    });
+    dispatchResult = response.json as DispatchResult;
+  } else {
+    const client = createJsonHttpClient(options.dispatcherUrl!, {
+      fetchImpl: options.fetchImpl,
+      requestTimeoutMs: options.requestTimeoutMs,
+    });
+    dispatchResult = await client.request("/api/dispatches", {
+      method: "POST",
+      body: payload,
+    }) as DispatchResult;
+  }
 
   verifyDispatchAssignment(dispatchResult, options.targetWorkerId);
 

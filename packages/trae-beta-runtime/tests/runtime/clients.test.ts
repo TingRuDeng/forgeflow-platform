@@ -281,4 +281,33 @@ describe("runtime/clients", () => {
     });
     expect(body.evidence).toBeUndefined();
   });
+
+  it("sends worker events through dispatcher reportEvent", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await dispatcher.reportEvent("trae-remote", {
+      type: "fetch_task_start",
+      taskId: "task-1",
+      payload: { repoDir: "/tmp/project" },
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:8787/api/workers/trae-remote/events",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          type: "fetch_task_start",
+          taskId: "task-1",
+          at: undefined,
+          payload: { repoDir: "/tmp/project" },
+        }),
+      }),
+    );
+  });
 });
