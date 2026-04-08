@@ -8,6 +8,7 @@ export interface StartLaunchOptions {
   projectPath?: string;
   remoteDebuggingPort?: number;
   timeoutMs?: number;
+  forceCleanLaunch?: boolean;
   nodePath?: string;
   env?: NodeJS.ProcessEnv;
   stdio?: StdioOptions;
@@ -121,6 +122,9 @@ export function startLaunch(options: StartLaunchOptions = {}): SpawnedForgeFlowC
 
   if (options.timeoutMs !== undefined) {
     args.push("--timeout-ms", String(Number(options.timeoutMs)));
+  }
+  if (options.forceCleanLaunch) {
+    args.push("--force-clean-launch");
   }
 
   return spawnNodeScript(scriptPath, args, options);

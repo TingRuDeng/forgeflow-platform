@@ -7,6 +7,7 @@ function parseArgs(argv) {
     projectPath: "",
     remoteDebuggingPort: undefined,
     timeoutMs: undefined,
+    forceCleanLaunch: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -33,6 +34,10 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--force-clean-launch") {
+      args.forceCleanLaunch = true;
+      continue;
+    }
     if (arg === "--help") {
       args.help = true;
       continue;
@@ -51,7 +56,8 @@ Usage:
     --trae-bin /Applications/Trae.app \\
     --project-path /abs/path/to/repo \\
     [--remote-debugging-port 9222] \\
-    [--timeout-ms 15000]
+    [--timeout-ms 15000] \\
+    [--force-clean-launch]
 `);
 }
 

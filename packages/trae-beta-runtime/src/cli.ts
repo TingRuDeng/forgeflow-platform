@@ -708,6 +708,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
         projectPath: requireConfigValue(config, "projectPath"),
         remoteDebuggingPort: requireConfigValue(config, "remoteDebuggingPort"),
         timeoutMs: typeof parsed.options.timeoutMs === "number" ? parsed.options.timeoutMs : undefined,
+        forceCleanLaunch: true,
         ...(parsed.options.detach === true && { detached: true }),
         ...(typeof parsed.options.logFile === "string" && { logFile: parsed.options.logFile }),
       });
@@ -791,6 +792,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
         projectPath,
         remoteDebuggingPort,
         timeoutMs: typeof parsed.options.timeoutMs === "number" ? parsed.options.timeoutMs : undefined,
+        forceCleanLaunch: true,
         ...(parsed.options.detach === true && { detached: true }),
         logFile: `${logFileDir}/launch.log`,
       });
