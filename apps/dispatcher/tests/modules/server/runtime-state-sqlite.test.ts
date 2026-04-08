@@ -218,6 +218,40 @@ describe("runtime-state-sqlite", () => {
     expect(reloaded.workers[0].id).toBe("test-worker-1");
   });
 
+  it("throws a descriptive error when the latest snapshot payload is malformed", () => {
+    const stateDir = makeTempDir();
+    const dbPath = path.join(stateDir, "runtime-state.db");
+    const malformedSnapshot = "{broken";
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS snapshots (
+        revision INTEGER PRIMARY KEY AUTOINCREMENT,
+        data TEXT NOT NULL,
+        checksum_sha256 TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `);
+    db.prepare(`
+      INSERT INTO snapshots (data, checksum_sha256, created_at)
+      VALUES (?, ?, ?)
+    `).run(
+      malformedSnapshot,
+      crypto.createHash("sha256").update(malformedSnapshot, "utf8").digest("hex"),
+      "2026-04-08T00:00:00.000Z",
+    );
+    db.close();
+
+    expect(() => loadRuntimeState(stateDir)).toThrow(/failed to parse snapshot at revision/i);
+  });
+
+  it("throws a descriptive error when JSON import content is malformed", () => {
+    const stateDir = makeTempDir();
+
+    expect(() => sqliteStore.importFromJson(stateDir, "{broken")).toThrow(/failed to parse JSON import content/i);
+  });
+
   it("persists state after reopening backend", () => {
     const stateDir = makeTempDir();
     const state1 = createTestState();

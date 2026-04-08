@@ -36,6 +36,15 @@ function checksumSha256(content: string): string {
   return crypto.createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+function parseJsonContent<T>(value: string, label: string): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${label}: ${message}`);
+  }
+}
+
 function asJson(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
@@ -44,7 +53,7 @@ function fromJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) {
     return fallback;
   }
-  return JSON.parse(value) as T;
+  return parseJsonContent<T>(value, "failed to parse structured runtime state JSON");
 }
 
 function applyPragmas(db: InstanceType<typeof DatabaseSync>): void {
@@ -473,7 +482,9 @@ export function loadRuntimeState(stateDir: string): RuntimeState {
       throw new Error(`snapshot checksum mismatch at revision ${row.revision}`);
     }
 
-    return coerceRuntimeState(JSON.parse(row.data));
+    return coerceRuntimeState(
+      parseJsonContent(row.data, `failed to parse snapshot at revision ${row.revision}`),
+    );
   } catch (error) {
     return loadFromJsonFallback(stateDir, error);
   } finally {
@@ -511,7 +522,9 @@ export function saveRuntimeState(stateDir: string, state: RuntimeState): void {
 }
 
 export function importFromJson(stateDir: string, jsonContent: string): RuntimeState {
-  const state = coerceRuntimeState(JSON.parse(jsonContent));
+  const state = coerceRuntimeState(
+    parseJsonContent(jsonContent, "failed to parse JSON import content"),
+  );
   const filePath = dbFilePath(stateDir);
 
   if (fs.existsSync(filePath)) {
@@ -688,7 +701,9 @@ export function readStructuredRuntimeState(stateDir: string): RuntimeState {
       LIMIT 1
     `).get() as { data: string } | undefined;
     if (latestSnapshot) {
-      const parsed = coerceRuntimeState(JSON.parse(latestSnapshot.data));
+      const parsed = coerceRuntimeState(
+        parseJsonContent(latestSnapshot.data, "failed to parse latest structured snapshot"),
+      );
       base.version = parsed.version;
       base.updatedAt = parsed.updatedAt;
       base.sequence = parsed.sequence;

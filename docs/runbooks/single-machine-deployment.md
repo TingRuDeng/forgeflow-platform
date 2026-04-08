@@ -49,10 +49,12 @@ pnpm install
 
 ```bash
 node scripts/run-dispatcher-server.js \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8787 \
   --state-dir "${FORGEFLOW_STATE_DIR}"
 ```
+
+默认建议保持 loopback 绑定；需要对外暴露时，再显式覆盖 `--host` 并配好认证或反向代理。
 
 当前主线路径默认：
 

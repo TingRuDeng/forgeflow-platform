@@ -11,10 +11,12 @@
 ```bash
 pnpm install
 node scripts/run-dispatcher-server.js \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8787 \
   --state-dir .forgeflow-dispatcher
 ```
+
+如果要监听非 loopback 地址，显式覆盖 `--host`，并确保 token 或反向代理已经配置到位。
 
 远端 Trae worker：
 

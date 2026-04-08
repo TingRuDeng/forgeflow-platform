@@ -40,4 +40,13 @@ describe("Gemini runtime", () => {
       output: "ui done",
     });
   });
+
+  it("rejects verification commands containing shell meta characters", () => {
+    const runtime = createGeminiRuntime();
+
+    expect(() => runtime.runVerification({
+      cwd: ".worktrees/task-3",
+      commands: ["pnpm test && echo owned"],
+    })).toThrow(/shell meta-characters/i);
+  });
 });

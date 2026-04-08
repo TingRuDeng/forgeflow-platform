@@ -75,3 +75,12 @@ export interface WorkerRuntime {
   runVerification(input: RuntimeVerificationInput): RuntimeLaunchCommand[];
   supportsMode(mode: RuntimeMode): boolean;
 }
+
+const UNSAFE_VERIFICATION_COMMAND_PATTERN = /[\0;&|<>`$()\\\n\r]/;
+
+export function sanitizeVerificationCommand(command: string): string {
+  if (UNSAFE_VERIFICATION_COMMAND_PATTERN.test(command)) {
+    throw new Error("verification commands must not contain shell meta-characters");
+  }
+  return command;
+}
