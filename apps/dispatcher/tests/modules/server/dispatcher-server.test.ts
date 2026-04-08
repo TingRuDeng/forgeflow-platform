@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
@@ -14,6 +14,7 @@ const tempRoots: string[] = [];
 
 const originalEnv = process.env.DISPATCHER_API_TOKEN;
 const originalAuthMode = process.env.DISPATCHER_AUTH_MODE;
+const originalConfigPath = process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH;
 const originalStateLockTimeout = process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS;
 const originalStateLockRetry = process.env.DISPATCHER_STATE_LOCK_RETRY_MS;
 const originalStateLockStale = process.env.DISPATCHER_STATE_LOCK_STALE_MS;
@@ -28,9 +29,19 @@ beforeAll(() => {
   process.env.DISPATCHER_AUTH_MODE = "open";
 });
 
+beforeEach(() => {
+  const configRoot = makeTempDir();
+  process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH = path.join(configRoot, ".forgeflow-dispatcher.json");
+});
+
 afterEach(() => {
   for (const tempDir of tempRoots.splice(0)) {
     fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+  if (originalConfigPath === undefined) {
+    delete process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH;
+  } else {
+    process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH = originalConfigPath;
   }
   if (originalEnv === undefined) {
     delete process.env.DISPATCHER_API_TOKEN;
