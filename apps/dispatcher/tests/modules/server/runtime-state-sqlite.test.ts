@@ -358,6 +358,34 @@ describe("runtime-state-sqlite", () => {
     expect(state.workers).toHaveLength(0);
   });
 
+  it("loads the latest snapshot without requiring write access to the sqlite directory", () => {
+    const stateDir = makeTempDir();
+    const state = createTestState();
+
+    saveRuntimeState(stateDir, state);
+
+    const dbPath = path.join(stateDir, "runtime-state.db");
+    const walPath = `${dbPath}-wal`;
+    const shmPath = `${dbPath}-shm`;
+    if (fs.existsSync(walPath)) {
+      fs.unlinkSync(walPath);
+    }
+    if (fs.existsSync(shmPath)) {
+      fs.unlinkSync(shmPath);
+    }
+
+    fs.chmodSync(dbPath, 0o444);
+    fs.chmodSync(stateDir, 0o555);
+
+    try {
+      const reloaded = loadRuntimeState(stateDir);
+      expect(reloaded.workers[0].id).toBe("test-worker-1");
+    } finally {
+      fs.chmodSync(stateDir, 0o755);
+      fs.chmodSync(dbPath, 0o644);
+    }
+  });
+
   it("throws for a corrupted db by default and rescues from JSON only with the explicit env switch", () => {
     const stateDir = makeTempDir();
     const dbPath = path.join(stateDir, "runtime-state.db");
