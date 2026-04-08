@@ -73,7 +73,7 @@
 1. `../README.md`
 2. `../scripts/start-control-plane.sh`
 3. `../packages/trae-beta-runtime/README.md`
-4. 如果需要维护已延期的 control-layer 旧入口，再看 `archive/codex-control-usage.md`
+4. 如果需要维护已延期的 control-layer 或双 Codex 演练旧入口，再看 `archive/codex-control-usage.md` 和 `archive/two-machine-codex-drill.md`
 5. 再回到 `../scripts/`、`../packages/` 和实际命令验证
 
 业务仓接入或模板调整：
@@ -141,6 +141,7 @@ Trae MCP fallback 维护：
 
 - `dispatcher` 是任务与状态真相源。
 - Phase 1 运行时合并到 TypeScript 已完成；当前主链入口仍在 `scripts/*.js`，但 `worker-daemon`、`review-decision`、`dispatcher-state`、`dispatcher-server` 已桥接到 `apps/dispatcher/dist` 的 TypeScript foundation。
+- `scripts/` 根目录当前只保留主线入口、`worker-daemon` deferred 链路入口和少量兼容脚本；旧的本地 codex drill 脚本、staging shell wrapper、`trigger-ai-dispatch.*` 与未消费的 checked-in `.d.ts` 已清理或归档。
 - Phase 2 持久化主线已切到 SQLite：dispatcher 默认写 `.forgeflow-dispatcher/runtime-state.db`，显式 `--persistence-backend json` 或 `RUNTIME_STATE_BACKEND=json` 才回退到 JSON。
 - dispatcher HTTP 面支持三种认证模式（通过 `DISPATCHER_AUTH_MODE` 控制）：
   - `token`（默认）：强制认证模式，必须设置 `DISPATCHER_API_TOKEN`，除 `/health` 外所有接口需要认证

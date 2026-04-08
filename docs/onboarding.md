@@ -79,10 +79,11 @@
 1. 手工触发 `ai-dispatch`
 2. 确认 workflow 能读取 `.orchestrator/project.yaml`
 3. 下载 `dispatch-plan` artifact
-4. 用 `run-dispatch-assignments.js` 跑本地最小执行闭环
-5. 提一个测试 PR
-6. 看 `ai-ci` 是否跑通
-7. 看 `ai-verify-merge` 是否跑通
+4. 启动 dispatcher 控制面与目标 worker runtime
+5. 用 `forgeflow-review-orchestrator watch --summary` / `inspect --summary` 观察任务进入 `review` 或 `failed`
+6. 提一个测试 PR 或提交一次 review decision
+7. 看 `ai-ci` 是否跑通
+8. 看 `ai-verify-merge` 是否跑通
 
 完整检查项见 `e2e-smoke-checklist.md`。
 
@@ -103,11 +104,16 @@
 
 ### 4.1 本地最小闭环
 
-适合先验证 assignment package 与结果回写：
+旧的 `.orchestrator` 本地执行脚本闭环已经退役，不再推荐：
 
-- 触发 `ai-dispatch`
-- 生成 `.orchestrator`
-- 用 `scripts/run-dispatch-assignments.js` 顺序执行 `assigned` 任务
+- `scripts/run-codex-control-flow.js`
+- `scripts/run-dispatch-assignments.js`
+
+如果要做当前主线路径的最小验证，请改用：
+
+- `scripts/start-control-plane.sh`
+- `forgeflow-review-orchestrator dispatch-task/watch/inspect/decide`
+- `@tingrudeng/trae-beta-runtime` 或 deferred 的 `scripts/run-worker-daemon.js`
 
 ### 4.2 `codex` / `gemini` 多机链路（deferred）
 
