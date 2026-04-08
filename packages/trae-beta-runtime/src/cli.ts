@@ -308,6 +308,27 @@ function requireConfigValue<K extends keyof TraeBetaConfig>(
   return value;
 }
 
+function buildGatewayRuntimeEnv(input: {
+  projectPath?: string;
+  remoteDebuggingPort?: number;
+}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    TRAE_CDP_HOST: "127.0.0.1",
+  };
+
+  const projectPath = String(input.projectPath || "").trim();
+  if (projectPath) {
+    env.FORGEFLOW_REPO_DIR = projectPath;
+  }
+
+  const remoteDebuggingPort = Number(input.remoteDebuggingPort);
+  if (Number.isFinite(remoteDebuggingPort) && remoteDebuggingPort > 0) {
+    env.TRAE_REMOTE_DEBUGGING_PORT = String(remoteDebuggingPort);
+  }
+
+  return env;
+}
+
 function formatInitResultHuman(result: Awaited<ReturnType<typeof initTraeBetaConfig>>): string {
   const lines: string[] = [];
   if (result.created) {
@@ -725,9 +746,15 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
     if (parsed.subcommand === "gateway") {
       const stoppedResult = deps.stopProcesses("gateway");
       const gatewayBind = resolveGatewayBindFromAutomationUrl(config);
+      const projectPath = requireConfigValue(config, "projectPath");
+      const remoteDebuggingPort = requireConfigValue(config, "remoteDebuggingPort");
       const result = deps.startGatewayCmd({
         host: typeof parsed.options.host === "string" ? parsed.options.host : gatewayBind.host,
         port: typeof parsed.options.port === "number" ? parsed.options.port : gatewayBind.port,
+        env: buildGatewayRuntimeEnv({
+          projectPath,
+          remoteDebuggingPort,
+        }),
         ...(parsed.options.debug === true && { debug: true }),
         force: true,
         ...(parsed.options.detach === true && { detached: true }),
@@ -807,6 +834,10 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
       const startGatewayResult = deps.startGatewayCmd({
         host: typeof parsed.options.host === "string" ? parsed.options.host : gatewayBind.host,
         port: typeof parsed.options.port === "number" ? parsed.options.port : gatewayBind.port,
+        env: buildGatewayRuntimeEnv({
+          projectPath,
+          remoteDebuggingPort,
+        }),
         ...(parsed.options.debug === true && { debug: true }),
         force: true,
         ...(parsed.options.detach === true && { detached: true }),
@@ -887,9 +918,19 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
 
   if (parsed.subcommand === "gateway") {
     const gatewayBind = resolveGatewayBindFromAutomationUrl(config);
+    const projectPath =
+      (typeof parsed.options.projectPath === "string" ? parsed.options.projectPath : undefined)
+      || requireConfigValue(config, "projectPath");
+    const remoteDebuggingPort =
+      (typeof parsed.options.remoteDebuggingPort === "number" ? parsed.options.remoteDebuggingPort : undefined)
+      || requireConfigValue(config, "remoteDebuggingPort");
     const result = deps.startGatewayCmd({
       host: typeof parsed.options.host === "string" ? parsed.options.host : gatewayBind.host,
       port: typeof parsed.options.port === "number" ? parsed.options.port : gatewayBind.port,
+      env: buildGatewayRuntimeEnv({
+        projectPath,
+        remoteDebuggingPort,
+      }),
       ...(parsed.options.debug === true && { debug: true }),
       force: parsed.options.force === true,
       ...(parsed.options.detach === true && { detached: true }),
@@ -985,6 +1026,10 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
     const startGatewayResult = deps.startGatewayCmd({
       host: typeof parsed.options.host === "string" ? parsed.options.host : gatewayBind.host,
       port: typeof parsed.options.port === "number" ? parsed.options.port : gatewayBind.port,
+      env: buildGatewayRuntimeEnv({
+        projectPath,
+        remoteDebuggingPort,
+      }),
       ...(parsed.options.debug === true && { debug: true }),
       force: parsed.options.force === true,
       ...(parsed.options.detach === true && { detached: true }),

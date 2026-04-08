@@ -584,6 +584,11 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(startGatewayCmd).toHaveBeenCalledWith({
       host: "0.0.0.0",
       port: 9999,
+      env: {
+        FORGEFLOW_REPO_DIR: "/tmp/project",
+        TRAE_CDP_HOST: "127.0.0.1",
+        TRAE_REMOTE_DEBUGGING_PORT: "9222",
+      },
       force: false,
       detached: undefined,
       logFile: undefined,
@@ -615,6 +620,11 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(startGatewayCmd).toHaveBeenCalledWith({
       host: "127.0.0.1",
       port: 8790,
+      env: {
+        FORGEFLOW_REPO_DIR: "/tmp/project",
+        TRAE_CDP_HOST: "127.0.0.1",
+        TRAE_REMOTE_DEBUGGING_PORT: "9222",
+      },
       force: false,
       detached: true,
       logFile: "/tmp/gateway.log",
@@ -648,6 +658,11 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(startGatewayCmd).toHaveBeenCalledWith({
       host: "0.0.0.0",
       port: 9911,
+      env: {
+        FORGEFLOW_REPO_DIR: "/tmp/project",
+        TRAE_CDP_HOST: "127.0.0.1",
+        TRAE_REMOTE_DEBUGGING_PORT: "9222",
+      },
       force: false,
     });
   });
@@ -967,6 +982,11 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     }));
     expect(startGatewayCmd).toHaveBeenCalledWith(expect.objectContaining({
       logFile: "/tmp/restart-logs/gateway.log",
+      env: {
+        FORGEFLOW_REPO_DIR: "/tmp/project",
+        TRAE_CDP_HOST: "127.0.0.1",
+        TRAE_REMOTE_DEBUGGING_PORT: "9222",
+      },
     }));
     expect(startWorkerCmd).toHaveBeenCalledWith(expect.objectContaining({
       logFile: "/tmp/restart-logs/worker.log",
@@ -983,6 +1003,46 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(log).toHaveBeenCalledWith("all: runtime restart complete");
 
     mkdirSyncSpy.mockRestore();
+  });
+
+  it("restarts gateway with CDP discovery env from config", async () => {
+    const log = vi.fn();
+    const startGatewayCmd = vi.fn(() => createSpawnedCommandMock({
+      scriptPath: "/tmp/forgeflow/packages/trae-beta-runtime/dist/runtime/run-trae-automation-gateway.js",
+    }));
+    const stopProcesses = vi.fn(() => createStopResult("gateway"));
+
+    await runCli(["restart", "gateway"], {
+      readConfig: vi.fn(() => exampleConfig),
+      initConfig: vi.fn(),
+      doctor: vi.fn(),
+      formatDoctor: vi.fn(),
+      startLaunchCmd: vi.fn(),
+      startGatewayCmd,
+      startWorkerCmd: vi.fn(),
+      listProcesses: vi.fn(),
+      stopProcesses,
+      stopLaunchCmd: vi.fn(),
+      updateCmd: vi.fn(),
+      waitForRemoteDebuggingReady: vi.fn(async () => undefined),
+      waitForAutomationReady: vi.fn(async () => undefined),
+      waitForDispatcherHealth: vi.fn(async () => undefined),
+      log,
+    });
+
+    expect(stopProcesses).toHaveBeenCalledWith("gateway");
+    expect(startGatewayCmd).toHaveBeenCalledWith({
+      host: "127.0.0.1",
+      port: 8790,
+      env: {
+        FORGEFLOW_REPO_DIR: "/tmp/project",
+        TRAE_CDP_HOST: "127.0.0.1",
+        TRAE_REMOTE_DEBUGGING_PORT: "9222",
+      },
+      force: true,
+      detached: undefined,
+      logFile: undefined,
+    });
   });
 
   it("parses stop --help with help option", () => {
