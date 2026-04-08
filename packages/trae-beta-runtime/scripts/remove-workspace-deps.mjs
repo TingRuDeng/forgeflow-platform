@@ -5,7 +5,29 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const packageJsonPath = path.join(__dirname, "..", "package.json");
-const workspaceRoot = path.join(__dirname, "..", "..");
+
+function resolveWorkspaceRoot(startDir) {
+  let currentDir = path.resolve(startDir);
+
+  while (true) {
+    const packagesDir = path.join(currentDir, "packages");
+    const packageDir = path.join(packagesDir, "trae-beta-runtime");
+    const workspaceFile = path.join(currentDir, "pnpm-workspace.yaml");
+    if (
+      fs.existsSync(packagesDir)
+      && fs.existsSync(packageDir)
+      && fs.existsSync(workspaceFile)
+    ) {
+      return currentDir;
+    }
+
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) {
+      throw new Error(`Unable to resolve workspace root from ${startDir}`);
+    }
+    currentDir = parentDir;
+  }
+}
 
 function findWorkspacePackageVersion(packageName, rootDir) {
   const packagesDir = path.join(rootDir, "packages");
@@ -29,7 +51,7 @@ function findWorkspacePackageVersion(packageName, rootDir) {
 }
 
 export function rewriteWorkspaceDependencies(targetPackageJsonPath, options = {}) {
-  const rootDir = options.workspaceRoot || workspaceRoot;
+  const rootDir = options.workspaceRoot || resolveWorkspaceRoot(__dirname);
   const pkg = JSON.parse(fs.readFileSync(targetPackageJsonPath, "utf8"));
 
   let changed = false;
