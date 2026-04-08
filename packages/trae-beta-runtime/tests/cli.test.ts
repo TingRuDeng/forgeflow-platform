@@ -525,6 +525,42 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining("Started launch:"));
   });
 
+  it("uses a clean launch when restarting launch", async () => {
+    const log = vi.fn();
+    const startLaunchCmd = vi.fn(() => createSpawnedCommandMock({
+      scriptPath: "/tmp/forgeflow/packages/trae-beta-runtime/dist/runtime/run-trae-automation-launch.js",
+    }));
+    const stopLaunchCmd = vi.fn(() => createStopResult("launch"));
+
+    await runCli(["restart", "launch", "--log-file", "/tmp/restart-launch.log"], {
+      readConfig: vi.fn(() => exampleConfig),
+      initConfig: vi.fn(),
+      doctor: vi.fn(),
+      formatDoctor: vi.fn(),
+      startLaunchCmd,
+      startGatewayCmd: vi.fn(),
+      startWorkerCmd: vi.fn(),
+      listProcesses: vi.fn(),
+      stopProcesses: vi.fn(),
+      stopLaunchCmd,
+      updateCmd: vi.fn(),
+      waitForRemoteDebuggingReady: vi.fn(async () => undefined),
+      waitForAutomationReady: vi.fn(async () => undefined),
+      waitForDispatcherHealth: vi.fn(async () => undefined),
+      log,
+    });
+
+    expect(stopLaunchCmd).toHaveBeenCalledTimes(1);
+    expect(startLaunchCmd).toHaveBeenCalledWith({
+      traeBin: "/Applications/Trae CN.app",
+      projectPath: "/tmp/project",
+      remoteDebuggingPort: 9222,
+      timeoutMs: undefined,
+      forceCleanLaunch: true,
+      logFile: "/tmp/restart-launch.log",
+    });
+  });
+
   it("starts gateway with cli host and port overrides with human-readable output", async () => {
     const log = vi.fn();
     const startGatewayCmd = vi.fn(() => createSpawnedCommandMock({
@@ -927,6 +963,7 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(mkdirSyncSpy).toHaveBeenCalledWith("/tmp/restart-logs", { recursive: true });
     expect(startLaunchCmd).toHaveBeenCalledWith(expect.objectContaining({
       logFile: "/tmp/restart-logs/launch.log",
+      forceCleanLaunch: true,
     }));
     expect(startGatewayCmd).toHaveBeenCalledWith(expect.objectContaining({
       logFile: "/tmp/restart-logs/gateway.log",

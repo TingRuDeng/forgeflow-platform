@@ -1,7 +1,7 @@
 // @ts-nocheck
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 
 import { discoverTraeTarget, getDebuggerVersion } from "./trae-cdp-discovery.js";
 
@@ -102,11 +102,37 @@ export function resolveTraeLaunchTarget(options = {}) {
   }
 
   return {
+    bundlePath: configuredCommand,
     command,
     args,
     projectPath,
     remoteDebuggingPort,
   };
+}
+
+export function resolveMacAppName(bundlePath, options = {}) {
+  const pathImpl = options.pathImpl || path;
+  const platform = options.platform || process.platform;
+  const normalized = String(bundlePath || "").trim();
+  if (platform !== "darwin" || !normalized.toLowerCase().endsWith(".app")) {
+    return null;
+  }
+  return pathImpl.basename(normalized, ".app");
+}
+
+export async function quitExistingMacApp(options = {}) {
+  const execFileImpl = options.execFileImpl || execFile;
+  const sleepImpl = options.sleepImpl || sleep;
+  const appName = String(options.appName || "").trim();
+  if (!appName) {
+    return false;
+  }
+
+  await new Promise((resolve) => {
+    execFileImpl("osascript", ["-e", `tell application "${appName}" to quit`], () => resolve(undefined));
+  });
+  await sleepImpl(Number(options.postQuitDelayMs || 1000));
+  return true;
 }
 
 export async function waitForTraeDebugger(options = {}) {
@@ -141,7 +167,9 @@ export async function launchTraeForAutomation(options = {}) {
   const spawnImpl = options.spawnImpl || spawn;
   const titleContains = options.titleContains || [path.basename(String(options.projectPath || "").trim())].filter(Boolean);
   const target = resolveTraeLaunchTarget(options);
-  const preferExisting = options.preferExisting !== false;
+  const platform = options.platform || process.platform;
+  const forceCleanLaunch = options.forceCleanLaunch === true;
+  const preferExisting = !forceCleanLaunch && options.preferExisting !== false;
 
   if (preferExisting) {
     try {
@@ -166,6 +194,19 @@ export async function launchTraeForAutomation(options = {}) {
       };
     } catch {
       // No reusable debugger target available; fall back to spawning a new Trae process.
+    }
+  }
+
+  if (forceCleanLaunch && platform === "darwin") {
+    const appName = resolveMacAppName(target.bundlePath, { platform });
+    const quitExistingApp = options.quitExistingApp || quitExistingMacApp;
+    if (appName) {
+      await quitExistingApp({
+        appName,
+        bundlePath: target.bundlePath,
+        platform,
+        sleepImpl: options.sleepImpl,
+      });
     }
   }
 

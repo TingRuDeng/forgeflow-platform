@@ -89,4 +89,21 @@ describe("@tingrudeng/trae-beta-runtime startLaunch", () => {
       }),
     );
   });
+
+  it("forwards forceCleanLaunch to the launch runner", async () => {
+    process.env.FORGEFLOW_TRAE_BIN = "/Applications/Trae CN.app";
+    process.env.TRAE_PROJECT_PATH = "/tmp/project";
+
+    const { startLaunch } = await import("../src/start-launch.js");
+    const result = startLaunch({
+      forceCleanLaunch: true,
+    });
+    await result.ready;
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      process.execPath,
+      expect.arrayContaining(["--force-clean-launch"]),
+      expect.any(Object),
+    );
+  });
 });
