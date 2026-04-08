@@ -89,7 +89,7 @@
 
 如果接入流程、主链路定位或运行方式发生变化，收尾时还要检查 `DOC_SYNC_CHECKLIST.md`，同步更新受影响的入口文档。
 
-阶段一单机部署入口见 `runbooks/single-machine-deployment.md`。阶段二主链的最小运维 / redrive / metrics 检查入口见 `runbooks/phase2-mainline-operations.md` 和 `runbooks/observability-and-alerting.md`。
+阶段一单机部署入口见 `runbooks/single-machine-deployment.md`。阶段二主链的最小运维 / redrive / metrics 检查入口见 `runbooks/phase2-mainline-operations.md` 和 `runbooks/observability-and-alerting.md`。阶段三核心底座的 structured reads / shadow write / SLO / DR / 参考部署入口见 `runbooks/stage3-core-platform-operations.md`。
 
 ## 4. 运行时接入模式
 
@@ -216,6 +216,17 @@ npm install -g @tingrudeng/worker-review-orchestrator-cli
 - `watch --summary` / `inspect --summary` 会统一输出 review decision、failure summary、can-redrive、latest progress、lineage
 - 直接 dispatch 到 `pool=trae` 且显式 `targetWorkerId` 时，默认会检查 worker 在线；`redrive` 属于显式 continuation/rework 入口，当前默认允许排队生成后续任务
 
+如果你在业务仓 staging 环境启用阶段三核心能力，推荐增加这些 dispatcher 环境变量：
+
+- `DISPATCHER_STRUCTURED_READS=1`
+- `DISPATCHER_SHADOW_MODE=shadow-write`
+- `DISPATCHER_POSTGRES_URL=postgres://...`
+- `DISPATCHER_QUEUE_SHADOW_MODE=shadow-write`
+
+如果要做 DR drill 或冻结写入，再临时启用：
+
+- `DISPATCHER_READ_ONLY_MODE=1`
+
 ### 4.3 Trae 首选无人值守链路
 
 如果目标是让 Trae 在 dispatcher 驱动下长期无人值守执行，当前推荐路径是 npm 运行时：
@@ -251,6 +262,18 @@ npm install -g @tingrudeng/trae-beta-runtime --registry=https://registry.npmjs.o
 - runtime CLI 固定读取 `~/.forgeflow-trae-beta/config.json`；如果需要切换业务仓，先重新执行 `forgeflow-trae-beta init --overwrite`
 - `restart launch` / `restart all` 在 macOS clean relaunch 时会先等待旧 CDP 端口释放，再拉起新 Trae 实例
 - `stop worker` / `restart worker` / `stop all` / `restart all` 会 best-effort 先把对应 worker 标记为 dispatcher `offline`，避免 dashboard 在 heartbeat 租约窗口内继续显示在线
+
+阶段三核心接入完成后，建议额外做一次平台级 smoke：
+
+```bash
+pnpm verify:stage3
+curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
+  http://127.0.0.1:8787/api/query/projection-health
+curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
+  http://127.0.0.1:8787/api/slo
+curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
+  http://127.0.0.1:8787/api/dr/status
+```
 
 这条链路已经覆盖：
 

@@ -92,6 +92,16 @@
 5. `API_ENDPOINTS.md`
 6. `CONTRIBUTING.md`
 
+阶段三核心平台运维 / 演练：
+
+1. `ARCHITECTURE.md`
+2. `DATABASE_SCHEMA.md`
+3. `contracts/runtime-state-query-v1.md`
+4. `runbooks/stage3-core-platform-operations.md`
+5. `runbooks/observability-and-alerting.md`
+6. `runbooks/runtime-state-backup-restore-repair.md`
+7. `API_ENDPOINTS.md`
+
 阶段一恢复 / 故障 / 发布节奏：
 
 1. `runbooks/single-machine-deployment.md`
@@ -163,6 +173,7 @@ Trae MCP fallback 维护：
 - dashboard snapshot 现在附带阶段二控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`、`retryRatePct`、`branchProtectionHitCount`、`repoConcurrencySaturation`、`failureCodes`、`reviewReasonCodes`。
 - dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，同时输出 `retryRatePct`、失败码聚合和 review reason 聚合。
 - dispatcher 任务状态机现在包含 `cancelled`，控制面和 console 都可以显式作废非终态任务。
+- 阶段三核心底座现在已进入主线：runtime state 增加显式 `leases[]`，SQLite 真相源同步维护 query-first 结构化投影，dispatcher 可选启用 structured reads、read-only 降级、Postgres / queue shadow write、SLO / burn-rate 与 DR 状态检查。
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - Trae 的首选无人值守路径是 `automation gateway` + `automation worker`。
 - Trae MCP worker 已降级为 deprecated/fallback 接入。
@@ -229,12 +240,17 @@ Trae MCP fallback 维护：
 - `runbooks/stage2-exit-validation.md`
   - 阶段二出口验证入口。
   - 收口 `runtime ownership`、`metrics/trace`、failure taxonomy 与可重复回归命令。
+- `contracts/runtime-state-query-v1.md`
+  - 阶段三结构化查询、lease、shadow mode、read-only 契约入口。
+- `runbooks/stage3-core-platform-operations.md`
+  - 阶段三核心底座操作入口。
+  - 收口 structured reads、shadow write、SLO、DR 与参考部署。
 - `runbooks/single-machine-deployment.md`
   - 阶段一单机控制面部署与恢复入口。
 - `runbooks/auth-and-state-lock.md`
   - 阶段一认证与状态锁排障入口。
 - `runbooks/runtime-state-backup-restore-repair.md`
-  - SQLite 备份、恢复和显式救援入口。
+  - SQLite 备份、恢复、manifest 与显式救援入口。
 - `runbooks/worktree-cleanup.md`
   - worktree 巡检与清理入口。
 - `runbooks/delivery-failed-recovery.md`

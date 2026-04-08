@@ -1,0 +1,16 @@
+{
+  "name": "@forgeflow/dispatcher-store-postgres",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@forgeflow/dispatcher-store-core": "workspace:*",
+    "pg": "^8.16.3"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  }
+}

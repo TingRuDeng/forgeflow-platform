@@ -1838,6 +1838,7 @@ describe("dispatcher runtime state", () => {
       reviews: [],
       pullRequests: [],
       dispatches: [],
+      leases: [],
     });
     expect(state.updatedAt).toBeDefined();
   });

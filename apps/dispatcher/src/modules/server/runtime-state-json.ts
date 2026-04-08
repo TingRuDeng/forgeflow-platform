@@ -24,6 +24,7 @@ export function createEmptyRuntimeState(): RuntimeState {
     reviews: [],
     pullRequests: [],
     dispatches: [],
+    leases: [],
   };
 }
 

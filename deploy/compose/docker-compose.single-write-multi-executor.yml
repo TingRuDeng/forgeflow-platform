@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  dispatcher:
+    image: ghcr.io/tingrudeng/forgeflow-dispatcher:main
+    environment:
+      DISPATCHER_AUTH_MODE: token
+      DISPATCHER_API_TOKEN: ${DISPATCHER_API_TOKEN}
+      DISPATCHER_STRUCTURED_READS: ${DISPATCHER_STRUCTURED_READS:-1}
+      DISPATCHER_SHADOW_MODE: ${DISPATCHER_SHADOW_MODE:-shadow-write}
+      DISPATCHER_POSTGRES_URL: ${DISPATCHER_POSTGRES_URL:-}
+    volumes:
+      - forgeflow_state:/var/lib/forgeflow/state
+    ports:
+      - "8787:8787"
+
+  trae-worker:
+    image: ghcr.io/tingrudeng/forgeflow-trae-runtime:beta
+    environment:
+      FORGEFLOW_DISPATCHER_URL: http://dispatcher:8787
+      DISPATCHER_API_TOKEN: ${DISPATCHER_API_TOKEN}
+      TRAE_REMOTE_DEBUGGING_PORT: ${TRAE_REMOTE_DEBUGGING_PORT:-9222}
+    depends_on:
+      - dispatcher
+
+volumes:
+  forgeflow_state:

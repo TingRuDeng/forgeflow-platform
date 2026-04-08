@@ -18,6 +18,8 @@ const originalConfigPath = process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH;
 const originalStateLockTimeout = process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS;
 const originalStateLockRetry = process.env.DISPATCHER_STATE_LOCK_RETRY_MS;
 const originalStateLockStale = process.env.DISPATCHER_STATE_LOCK_STALE_MS;
+const originalStructuredReads = process.env.DISPATCHER_STRUCTURED_READS;
+const originalReadOnlyMode = process.env.DISPATCHER_READ_ONLY_MODE;
 
 function makeTempDir() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-dispatcher-server-"));
@@ -67,6 +69,16 @@ afterEach(() => {
     delete process.env.DISPATCHER_STATE_LOCK_STALE_MS;
   } else {
     process.env.DISPATCHER_STATE_LOCK_STALE_MS = originalStateLockStale;
+  }
+  if (originalStructuredReads === undefined) {
+    delete process.env.DISPATCHER_STRUCTURED_READS;
+  } else {
+    process.env.DISPATCHER_STRUCTURED_READS = originalStructuredReads;
+  }
+  if (originalReadOnlyMode === undefined) {
+    delete process.env.DISPATCHER_READ_ONLY_MODE;
+  } else {
+    process.env.DISPATCHER_READ_ONLY_MODE = originalReadOnlyMode;
   }
   process.env.DISPATCHER_AUTH_MODE = "open";
 });
@@ -345,6 +357,130 @@ describe("dispatcher server", () => {
         ready: 1,
       },
     });
+    expect(response.json).toHaveProperty("leaseConflictCount");
+    expect(response.json).toHaveProperty("activeLeases");
+  });
+
+  it("serves structured query endpoints and projection health", async () => {
+    const stateDir = makeTempDir();
+    process.env.DISPATCHER_STRUCTURED_READS = "1";
+    const mod = await import(serverModulePath);
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/query",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [
+          {
+            id: "task-query",
+            title: "Query task",
+            pool: "codex",
+            allowedPaths: ["docs/**"],
+            acceptance: [],
+            dependsOn: [],
+            branchName: "ai/codex/task-query",
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-query",
+            assignment: {
+              taskId: "task-query",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/task-query",
+              allowedPaths: ["docs/**"],
+              repo: "test/query",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+
+    const tasksResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/query/tasks",
+    });
+    expect(tasksResponse.status).toBe(200);
+    expect(tasksResponse.json).toHaveLength(1);
+
+    const snapshotResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/query/dashboard-snapshot",
+    });
+    expect(snapshotResponse.status).toBe(200);
+    expect(snapshotResponse.json.tasks).toHaveLength(1);
+
+    const projectionHealth = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/query/projection-health",
+    });
+    expect(projectionHealth.status).toBe(200);
+    expect(projectionHealth.json.matches).toBe(true);
+  });
+
+  it("exposes stage-three slo and dr status endpoints", async () => {
+    const stateDir = makeTempDir();
+    const backupDir = path.join(stateDir, "backups");
+    fs.mkdirSync(backupDir, { recursive: true });
+    fs.writeFileSync(path.join(backupDir, "2026-04-08-manifest.json"), JSON.stringify({ ok: true }));
+    const mod = await import(serverModulePath);
+
+    const sloResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/slo",
+    });
+    expect(sloResponse.status).toBe(200);
+    expect(sloResponse.json).toHaveProperty("targets");
+    expect(sloResponse.json).toHaveProperty("burnRate");
+
+    const drResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dr/status",
+    });
+    expect(drResponse.status).toBe(200);
+    expect(drResponse.json.backups).toHaveLength(1);
+    expect(drResponse.json).toHaveProperty("projectionHealth");
+  });
+
+  it("rejects mutation routes when read-only mode is enabled", async () => {
+    const stateDir = makeTempDir();
+    process.env.DISPATCHER_READ_ONLY_MODE = "1";
+    const mod = await import(serverModulePath);
+
+    const mutationResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/readonly",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [],
+        packages: [],
+      },
+    });
+    expect(mutationResponse.status).toBe(503);
+    expect(mutationResponse.json.code).toBe("read_only_mode");
+
+    const healthResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/health",
+    });
+    expect(healthResponse.status).toBe(200);
+    expect(healthResponse.json.readOnly).toBe(true);
   });
 
   it("accepts worker events and rolls them into dispatcher metrics", async () => {

@@ -7,6 +7,12 @@ import { URL } from "node:url";
 
 import { buildDashboardHtml } from "./dashboard.js";
 import {
+  buildStructuredDashboardSnapshot,
+  loadStructuredRuntimeState,
+  readStructuredProjectionHealth,
+} from "./runtime-state-query-store.js";
+import { getRuntimeStateShadowMode } from "./runtime-state-shadow.js";
+import {
   beginTaskForWorker,
   buildDashboardSnapshot,
   cancelTask,
@@ -31,6 +37,7 @@ import {
   injectLessonsIntoContext,
   loadMemoryStore,
 } from "./review-memory.js";
+import { buildStage3SloStatus } from "./slo.js";
 import { safeTaskDirName } from "./task-worktree.js";
 import { formatLocalTimestamp } from "../time.js";
 import { getDispatcherAuthMode, getDispatcherApiToken } from "./dispatcher-config.js";
@@ -40,12 +47,22 @@ const STATE_LOCK_FILENAME = ".runtime-state.lock";
 const DEFAULT_STATE_LOCK_TIMEOUT_MS = 2000;
 const DEFAULT_STATE_LOCK_RETRY_MS = 25;
 const DEFAULT_STATE_LOCK_STALE_MS = 30000;
+const STRUCTURED_READS_ENV = "DISPATCHER_STRUCTURED_READS";
+const READ_ONLY_MODE_ENV = "DISPATCHER_READ_ONLY_MODE";
 const STATE_LOCK_SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 let stateLockTimeoutCount = 0;
 
 const AUTH_WHITELIST_PATHS = ["/health"];
 
 type AuthMode = "legacy" | "token" | "open";
+
+function useStructuredReads() {
+  return process.env[STRUCTURED_READS_ENV] === "1";
+}
+
+function isReadOnlyModeEnabled() {
+  return process.env[READ_ONLY_MODE_ENV] === "1";
+}
 
 function isLoopbackAddress(clientAddress?: string): boolean {
   if (!clientAddress) {
@@ -599,6 +616,53 @@ function routeNotFound(response) {
   });
 }
 
+function isMutationRequest(method, pathname) {
+  if (method !== "POST") {
+    return false;
+  }
+  if (pathname === "/api/workers/register") {
+    return true;
+  }
+  if (/^\/api\/workers\/[^/]+\/(heartbeat|offline)$/.test(pathname)) {
+    return true;
+  }
+  if (pathname === "/api/dispatches") {
+    return true;
+  }
+  if (pathname === "/api/reviews/decision") {
+    return true;
+  }
+  if (/^\/api\/tasks\/[^/]+\/cancel$/.test(pathname)) {
+    return true;
+  }
+  if (/^\/api\/workers\/[^/]+\/disable$/.test(pathname) || /^\/api\/workers\/[^/]+\/enable$/.test(pathname)) {
+    return true;
+  }
+  if (/^\/api\/workers\/[^/]+\/events$/.test(pathname)) {
+    return true;
+  }
+  if (pathname.startsWith("/api/trae/")) {
+    return true;
+  }
+  return false;
+}
+
+function listBackupManifests(stateDir) {
+  const backupDir = path.join(stateDir, "backups");
+  if (!fs.existsSync(backupDir)) {
+    return [];
+  }
+  return fs.readdirSync(backupDir)
+    .filter((entry) => entry.endsWith("manifest.json"))
+    .sort()
+    .reverse()
+    .slice(0, 5)
+    .map((entry) => ({
+      name: entry,
+      path: path.join(backupDir, entry),
+    }));
+}
+
 export function handleDispatcherHttpRequest(input) {
   const { stateDir, method, pathname, body = {}, authHeader, clientAddress, internalCall } = input;
 
@@ -608,8 +672,19 @@ export function handleDispatcherHttpRequest(input) {
   }
 
   try {
+    if (isReadOnlyModeEnabled() && isMutationRequest(method, pathname)) {
+      return createJsonResponse(503, {
+        error: "dispatcher is in read-only mode",
+        code: "read_only_mode",
+      });
+    }
+
     if (method === "GET" && pathname === "/health") {
-      return createNoStoreJsonResponse(200, { status: "ok" });
+      return createNoStoreJsonResponse(200, {
+        status: "ok",
+        readOnly: isReadOnlyModeEnabled(),
+        structuredReads: useStructuredReads(),
+      });
     }
 
     if (method === "GET" && pathname === "/dashboard") {
@@ -619,56 +694,148 @@ export function handleDispatcherHttpRequest(input) {
     }
 
     if (method === "GET" && pathname === "/api/dashboard/snapshot") {
-      const snapshot = withState(stateDir, (state) => {
-        const nextState = reconcileRuntimeState(state);
-        return {
-          state: nextState,
-          snapshot: buildDashboardSnapshot(nextState),
-        };
-      });
+      const snapshot = useStructuredReads()
+        ? { snapshot: buildStructuredDashboardSnapshot(stateDir) }
+        : withState(stateDir, (state) => {
+          const nextState = reconcileRuntimeState(state);
+          return {
+            state: nextState,
+            snapshot: buildDashboardSnapshot(nextState),
+          };
+        });
       return createNoStoreJsonResponse(200, snapshot.snapshot);
     }
 
     if (method === "GET" && pathname === "/api/metrics") {
-      const payload = withState(stateDir, (state) => {
-        const nextState = reconcileRuntimeState(state);
-        const snapshot = buildDashboardSnapshot(nextState);
-        return {
-          state: nextState,
-          metrics: {
-            updatedAt: snapshot.updatedAt,
-            queueDepth: snapshot.metrics.queueDepth,
-            plannedTasks: snapshot.metrics.plannedTasks,
-            reviewBacklog: snapshot.metrics.reviewBacklog,
-            avgAssignmentLagMs: snapshot.metrics.avgAssignmentLagMs,
-            maxAssignmentLagMs: snapshot.metrics.maxAssignmentLagMs,
-            submitResultRetryCount: snapshot.metrics.submitResultRetryCount,
-            retryRatePct: snapshot.metrics.retryRatePct,
-            deliveryFailedCount: snapshot.metrics.deliveryFailedCount,
-            cleanupFailureCount: snapshot.metrics.cleanupFailureCount,
-            sessionInterruptionCount: snapshot.metrics.sessionInterruptionCount,
-            stateLockTimeoutCount: snapshot.metrics.stateLockTimeoutCount + stateLockTimeoutCount,
-            branchProtectionHitCount: snapshot.metrics.branchProtectionHitCount,
-            repoConcurrencySaturation: snapshot.metrics.repoConcurrencySaturation,
-            failureCodes: snapshot.metrics.failureCodes,
-            reviewReasonCodes: snapshot.metrics.reviewReasonCodes,
-            workers: snapshot.stats.workers,
-            tasks: snapshot.stats.tasks,
-          },
-        };
-      });
+      const payload = (useStructuredReads()
+        ? (() => {
+          const snapshot = buildStructuredDashboardSnapshot(stateDir);
+          return {
+            metrics: {
+              updatedAt: snapshot.updatedAt,
+              queueDepth: snapshot.metrics.queueDepth,
+              plannedTasks: snapshot.metrics.plannedTasks,
+              reviewBacklog: snapshot.metrics.reviewBacklog,
+              avgAssignmentLagMs: snapshot.metrics.avgAssignmentLagMs,
+              maxAssignmentLagMs: snapshot.metrics.maxAssignmentLagMs,
+              submitResultRetryCount: snapshot.metrics.submitResultRetryCount,
+              retryRatePct: snapshot.metrics.retryRatePct,
+              deliveryFailedCount: snapshot.metrics.deliveryFailedCount,
+              cleanupFailureCount: snapshot.metrics.cleanupFailureCount,
+              sessionInterruptionCount: snapshot.metrics.sessionInterruptionCount,
+              stateLockTimeoutCount: snapshot.metrics.stateLockTimeoutCount + stateLockTimeoutCount,
+              branchProtectionHitCount: snapshot.metrics.branchProtectionHitCount,
+              leaseConflictCount: snapshot.metrics.leaseConflictCount,
+              leaseReclaimCount: snapshot.metrics.leaseReclaimCount,
+              activeLeases: snapshot.metrics.activeLeases,
+              repoConcurrencySaturation: snapshot.metrics.repoConcurrencySaturation,
+              failureCodes: snapshot.metrics.failureCodes,
+              reviewReasonCodes: snapshot.metrics.reviewReasonCodes,
+              workers: snapshot.stats.workers,
+              tasks: snapshot.stats.tasks,
+            },
+          };
+        })()
+        : withState(stateDir, (state) => {
+          const nextState = reconcileRuntimeState(state);
+          const snapshot = buildDashboardSnapshot(nextState);
+          return {
+            state: nextState,
+            metrics: {
+              updatedAt: snapshot.updatedAt,
+              queueDepth: snapshot.metrics.queueDepth,
+              plannedTasks: snapshot.metrics.plannedTasks,
+              reviewBacklog: snapshot.metrics.reviewBacklog,
+              avgAssignmentLagMs: snapshot.metrics.avgAssignmentLagMs,
+              maxAssignmentLagMs: snapshot.metrics.maxAssignmentLagMs,
+              submitResultRetryCount: snapshot.metrics.submitResultRetryCount,
+              retryRatePct: snapshot.metrics.retryRatePct,
+              deliveryFailedCount: snapshot.metrics.deliveryFailedCount,
+              cleanupFailureCount: snapshot.metrics.cleanupFailureCount,
+              sessionInterruptionCount: snapshot.metrics.sessionInterruptionCount,
+              stateLockTimeoutCount: snapshot.metrics.stateLockTimeoutCount + stateLockTimeoutCount,
+              branchProtectionHitCount: snapshot.metrics.branchProtectionHitCount,
+              leaseConflictCount: snapshot.metrics.leaseConflictCount,
+              leaseReclaimCount: snapshot.metrics.leaseReclaimCount,
+              activeLeases: snapshot.metrics.activeLeases,
+              repoConcurrencySaturation: snapshot.metrics.repoConcurrencySaturation,
+              failureCodes: snapshot.metrics.failureCodes,
+              reviewReasonCodes: snapshot.metrics.reviewReasonCodes,
+              workers: snapshot.stats.workers,
+              tasks: snapshot.stats.tasks,
+            },
+          };
+        }));
       return createNoStoreJsonResponse(200, payload.metrics);
     }
 
-    if (method === "GET" && pathname === "/api/workers") {
-      const snapshot = withState(stateDir, (state) => {
-        const nextState = reconcileRuntimeState(state);
-        return {
-          state: nextState,
-          snapshot: buildDashboardSnapshot(nextState),
-        };
+    if (method === "GET" && pathname === "/api/slo") {
+      const snapshot = useStructuredReads()
+        ? buildStructuredDashboardSnapshot(stateDir)
+        : withState(stateDir, (state) => {
+          const nextState = reconcileRuntimeState(state);
+          return {
+            state: nextState,
+            snapshot: buildDashboardSnapshot(nextState),
+          };
+        }).snapshot;
+      return createNoStoreJsonResponse(200, buildStage3SloStatus(snapshot));
+    }
+
+    if (method === "GET" && pathname === "/api/dr/status") {
+      return createNoStoreJsonResponse(200, {
+        readOnly: isReadOnlyModeEnabled(),
+        structuredReads: useStructuredReads(),
+        shadowMode: getRuntimeStateShadowMode(),
+        projectionHealth: readStructuredProjectionHealth(stateDir),
+        backups: listBackupManifests(stateDir),
       });
+    }
+
+    if (method === "GET" && pathname === "/api/workers") {
+      const snapshot = useStructuredReads()
+        ? { snapshot: buildStructuredDashboardSnapshot(stateDir) }
+        : withState(stateDir, (state) => {
+          const nextState = reconcileRuntimeState(state);
+          return {
+            state: nextState,
+            snapshot: buildDashboardSnapshot(nextState),
+          };
+        });
       return createNoStoreJsonResponse(200, snapshot.snapshot.workers);
+    }
+
+    if (method === "GET" && pathname === "/api/leases") {
+      const state = useStructuredReads()
+        ? loadStructuredRuntimeState(stateDir)
+        : withState(stateDir, (currentState) => ({
+          state: reconcileRuntimeState(currentState),
+        })).state;
+      return createNoStoreJsonResponse(200, state.leases ?? []);
+    }
+
+    if (method === "GET" && pathname === "/api/query/tasks") {
+      return createNoStoreJsonResponse(200, loadStructuredRuntimeState(stateDir).tasks);
+    }
+
+    if (method === "GET" && pathname === "/api/query/events") {
+      return createNoStoreJsonResponse(200, loadStructuredRuntimeState(stateDir).events);
+    }
+
+    if (method === "GET" && pathname === "/api/query/reviews") {
+      return createNoStoreJsonResponse(200, loadStructuredRuntimeState(stateDir).reviews);
+    }
+
+    if (method === "GET" && pathname === "/api/query/leases") {
+      return createNoStoreJsonResponse(200, loadStructuredRuntimeState(stateDir).leases ?? []);
+    }
+
+    if (method === "GET" && pathname === "/api/query/dashboard-snapshot") {
+      return createNoStoreJsonResponse(200, buildStructuredDashboardSnapshot(stateDir));
+    }
+
+    if (method === "GET" && pathname === "/api/query/projection-health") {
+      return createNoStoreJsonResponse(200, readStructuredProjectionHealth(stateDir));
     }
 
     if (method === "POST" && pathname === "/api/workers/register") {

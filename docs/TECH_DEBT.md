@@ -36,8 +36,27 @@ Impact:
 Desired direction:
 
 - keep the SQLite snapshot backend and JSON fallback explicitly documented, or further consolidate the remaining duplicate persistence representations
+- decide whether `apps/dispatcher/src/db/schema.ts` should survive as a compatibility constant set now that runtime SQLite + structured projection tables are the live path
 
-## 3. Trae automation gateway has duplicated implementations with behavior drift
+## 3. Postgres / queue shadow path exists, but external stores are not primary yet
+
+Current situation:
+
+- dispatcher now has query-first SQLite projection tables
+- optional Postgres / queue shadow write also exists
+- SQLite snapshots remain the truth source
+
+Impact:
+
+- external drift detection and rollout discipline still matter
+- it is easy to overstate stage-3 maturity as “already migrated to Postgres”
+
+Desired direction:
+
+- keep shadow mode / primary mode boundaries explicit
+- add stronger drift reporting and eventual cutover / rollback discipline before any primary-store switch
+
+## 4. Trae automation gateway has duplicated implementations with behavior drift
 
 Verified drift:
 
@@ -54,7 +73,7 @@ Desired direction:
 
 - reduce duplication or add an explicit sync rule and shared compatibility test coverage
 
-## 4. Stable agent-facing docs were previously concentrated in rule/nav docs but lacked a durable knowledge layer
+## 5. Stable agent-facing docs were previously concentrated in rule/nav docs but lacked a durable knowledge layer
 
 Impact:
 
@@ -68,3 +87,19 @@ Current status:
 Remaining need:
 
 - keep these docs synced whenever runtime boundaries or API surfaces change
+
+## 6. Stage 3 ecosystem wave is intentionally deferred
+
+Current situation:
+
+- stage-3 core platform waves are now in place
+- external API / SDK / third-party admission remains intentionally postponed
+
+Impact:
+
+- internal platform maturity is ahead of public integration maturity
+- consumers should not assume stable public API/SDK guarantees yet
+
+Desired direction:
+
+- keep Wave 5 explicitly out of “already supported” docs until governance and compatibility policy are finalized

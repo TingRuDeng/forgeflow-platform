@@ -1,0 +1,11 @@
+dispatcher:
+  image: ghcr.io/tingrudeng/forgeflow-dispatcher:main
+  authMode: token
+  structuredReads: "1"
+  readOnlyMode: "0"
+  shadowMode: shadow-write
+  postgresUrlSecretRef: forgeflow-postgres-url
+
+runtime:
+  traeImage: ghcr.io/tingrudeng/forgeflow-trae-runtime:beta
+  remoteDebuggingPort: 9222
