@@ -247,30 +247,3 @@ jobs:
           cd packages/${{ matrix.package.name }}
           npm publish --access public --provenance --tag ${{ steps.preflight.outputs.dist_tag }}
           echo "✅ Published @tingrudeng/${{ matrix.package.name }}@${{ matrix.package.version }}"
-
-  scorecard:
-    needs: [publish-manual, publish-auto]
-    if: always() && (needs.publish-manual.result == 'success' || needs.publish-auto.result == 'success')
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      id-token: write
-      contents: read
-      actions: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Run OpenSSF Scorecard
-        uses: ossf/scorecard-action@v2.3.3
-        with:
-          results_file: scorecard.sarif
-          results_format: sarif
-          publish_results: true
-
-      - name: Upload Scorecard SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: scorecard.sarif

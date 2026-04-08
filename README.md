@@ -197,7 +197,7 @@ node scripts/release-package.js --package automation-gateway-core --bump prerele
 node scripts/release-package.js --package trae-beta-runtime --bump prerelease --tag beta --publish --ci
 ```
 
-该助手默认为 dry-run 模式，只有显式传入 `--publish` 才会真正修改 `package.json` 并发布到 npm。`--publish` 现在是 CI-only 门禁，本地直接执行会失败；推荐入口是 `.github/workflows/release.yml`，由 GitHub Actions 用 OIDC + provenance 执行发布，并在发布后跑 Scorecard。
+该助手默认为 dry-run 模式，只有显式传入 `--publish` 才会真正修改 `package.json` 并发布到 npm。`--publish` 现在是 CI-only 门禁，本地直接执行会失败；推荐入口是 `.github/workflows/release.yml`，由 GitHub Actions 用 OIDC + provenance 执行发布；发布后的 OpenSSF Scorecard 改由独立的 `.github/workflows/release-scorecard.yml` 在 `Release` 成功后跟跑。
 
 自动发布还有两条硬门禁：
 
@@ -207,7 +207,7 @@ node scripts/release-package.js --package trae-beta-runtime --bump prerelease --
 
 当前还要注意一个外部前置条件：
 
-- 仓库内阶段一发布链已经切到 CI-only + OIDC + provenance + Scorecard，但 npm 侧 Trusted Publisher 绑定仍需要与当前 GitHub 仓库身份对齐后，自动正式发版才会真正恢复。
+- 仓库内阶段一发布链已经切到 CI-only + OIDC + provenance；OpenSSF Scorecard 现在单独挂在 `Release` 成功后的 `release-scorecard.yml` 上，避免后置评分把发包主 workflow 拉红。
 
 如需安装发包助手 skill：
 

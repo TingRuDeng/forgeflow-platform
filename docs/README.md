@@ -176,8 +176,11 @@ Trae MCP fallback 维护：
   - 定义 push/pull_request 触发条件与验证步骤。
 - `../.github/workflows/release.yml`
   - GitHub Actions 发布入口。
-  - 用 OIDC + provenance 执行 npm 发布，并在发布后跑 Scorecard。
+  - 用 OIDC + provenance 执行 npm 发布。
   - 发布前会校验包元数据是否与当前仓库 `TingRuDeng/forgeflow-platform` 对齐，并要求 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 作为自动发布显式门禁。
+- `../.github/workflows/release-scorecard.yml`
+  - Release 成功后的独立 OpenSSF Scorecard workflow。
+  - 避免把 Trusted Publishing 所需的 `id-token` 权限和 scorecard 的 workflow 限制混在同一个发布 workflow 里。
 - `codex-session-bootstrap.md`
   - Codex-control 专用会话提示助手。
   - 不替代 `AGENTS.md` 或本文件。
