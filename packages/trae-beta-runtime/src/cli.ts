@@ -63,7 +63,7 @@ Commands:
   status                        Show runtime and process status
   stop <subcommand>             Stop a runtime component (launch|gateway|worker|all)
   restart <subcommand>          Restart a runtime component (launch|gateway|worker|all)
-  update                        Update the runtime package to latest version
+  update                        Update the runtime package to the beta dist-tag by default
   version                       Print the package version
 
 Options:
@@ -761,7 +761,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
 
   if (parsed.command === "update") {
     const result = await deps.updateCmd({
-      defaultBranch: typeof parsed.options.defaultBranch === "string" ? parsed.options.defaultBranch : "latest",
+      defaultBranch: typeof parsed.options.defaultBranch === "string" ? parsed.options.defaultBranch : "beta",
     });
     if (jsonOutput) {
       deps.log(JSON.stringify(result, null, 2));

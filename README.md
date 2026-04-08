@@ -188,6 +188,8 @@ forgeflow-trae-beta version
 npm ls -g --depth=0 @tingrudeng/trae-beta-runtime
 ```
 
+`forgeflow-trae-beta update` 默认跟踪 npm `beta` dist-tag，不再默认拉 `latest`。
+
 补充：`forgeflow-trae-beta start all` / `restart all` 现在会在返回成功前依次等待：
 
 - Trae remote debugging endpoint（`/json/version`）可用

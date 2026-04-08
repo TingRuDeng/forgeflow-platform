@@ -38,7 +38,7 @@ describe("@tingrudeng/trae-beta-runtime update", () => {
       packageName: "@tingrudeng/trae-beta-runtime",
       previousVersion: "0.1.0-beta.3",
       installedVersion: "0.1.0-beta.5",
-      performedCommand: "npm install -g @tingrudeng/trae-beta-runtime@latest",
+      performedCommand: "npm install -g @tingrudeng/trae-beta-runtime@beta",
       stdout: "changed 1 package in 2s",
       stderr: "",
       message: "Updated the global ForgeFlow Trae beta runtime package. Restart long-running gateway/worker processes to use the new version.",
@@ -46,7 +46,7 @@ describe("@tingrudeng/trae-beta-runtime update", () => {
     expect(execFile).toHaveBeenCalledWith("npm", [
       "install",
       "-g",
-      "@tingrudeng/trae-beta-runtime@latest",
+      "@tingrudeng/trae-beta-runtime@beta",
     ]);
     expect(execFile).toHaveBeenCalledWith("npm", [
       "list",

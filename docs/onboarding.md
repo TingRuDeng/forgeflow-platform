@@ -238,6 +238,8 @@ forgeflow-trae-beta start all
 npm install -g @tingrudeng/trae-beta-runtime --registry=https://registry.npmjs.org/
 ```
 
+`forgeflow-trae-beta update` 默认也会跟踪 npm `beta` dist-tag，而不是 `latest`。
+
 补充：`forgeflow-trae-beta start all` / `restart all` 会在返回成功前依次等待：
 
 - Trae remote debugging endpoint（`/json/version`）可用
