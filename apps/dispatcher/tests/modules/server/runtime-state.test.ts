@@ -14,6 +14,7 @@ import type {
 import {
   beginTaskForWorker,
   buildDashboardSnapshot,
+  cancelTask,
   claimAssignedTaskForWorker,
   createDispatch,
   createEmptyRuntimeState,
@@ -3108,6 +3109,93 @@ describe("dispatcher runtime state (TypeScript)", () => {
     const worker = snapshot.workers.find((w) => w.id === "codex-preserve-test");
     expect(worker).toBeDefined();
     expect(worker?.disabledAt).toBeDefined();
+  });
+
+  it("cancelTask marks the task as cancelled and frees the assigned worker", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-cancel-test",
+      pool: "codex",
+      hostname: "cancel-host",
+      labels: ["codex"],
+      repoDir: "/repos/test",
+      at: "2026-04-08T10:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/forgeflow-platform",
+      defaultBranch: "main",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-cancel",
+          title: "Cancel me",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["pnpm test"],
+          dependsOn: [],
+          branchName: "ai/codex/task-cancel",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-cancel",
+          assignment: {
+            taskId: "task-cancel",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "ai/codex/task-cancel",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/forgeflow-platform",
+            defaultBranch: "main",
+          },
+          workerPrompt: "Test prompt",
+        },
+      ],
+      createdAt: "2026-04-08T10:00:01.000Z",
+    });
+    state = dispatch.state;
+
+    const claimed = claimAssignedTaskForWorker(state, {
+      workerId: "codex-cancel-test",
+      at: "2026-04-08T10:00:02.000Z",
+    });
+    state = beginTaskForWorker(claimed.state, {
+      workerId: "codex-cancel-test",
+      taskId: dispatch.taskIds[0],
+      at: "2026-04-08T10:00:03.000Z",
+    });
+
+    state = cancelTask(state, {
+      taskId: dispatch.taskIds[0],
+      actor: "codex-control",
+      reason: "voided by operator",
+      at: "2026-04-08T10:00:04.000Z",
+    });
+
+    const task = state.tasks.find((candidate) => candidate.id === dispatch.taskIds[0]);
+    const assignment = state.assignments.find((candidate) => candidate.taskId === dispatch.taskIds[0]);
+    const worker = state.workers.find((candidate) => candidate.id === "codex-cancel-test");
+    const cancelEvent = state.events.find((event) =>
+      event.taskId === dispatch.taskIds[0] && event.type === "task_cancelled");
+
+    expect(task?.status).toBe("cancelled");
+    expect(assignment?.status).toBe("cancelled");
+    expect((assignment?.assignment as unknown as Record<string, unknown> | undefined)?.status).toBe("cancelled");
+    expect(worker).toMatchObject({
+      status: "idle",
+      currentTaskId: undefined,
+      lastHeartbeatAt: "2026-04-08T10:00:04.000Z",
+    });
+    expect(cancelEvent).toMatchObject({
+      at: "2026-04-08T10:00:04.000Z",
+      payload: {
+        actor: "codex-control",
+        reason: "voided by operator",
+      },
+    });
   });
 
   it("buildDashboardSnapshot exposes queue depth, review backlog, and assignment lag metrics", () => {

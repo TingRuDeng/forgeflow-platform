@@ -264,6 +264,94 @@ describe("redrive", () => {
     expect(result.continueFromTaskId).toBe("dispatch-1:task-3");
   });
 
+  it("prefers structured blocker codes over legacy text matching for failed tasks", async () => {
+    const snapshot = {
+      tasks: [
+        {
+          id: "dispatch-1:task-structured",
+          status: "failed",
+          title: "Structured failure",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/structured",
+          pool: "trae",
+        },
+      ],
+      assignments: [
+        {
+          taskId: "dispatch-1:task-structured",
+          workerId: "worker-1",
+          pool: "trae",
+          status: "failed",
+          repo: "owner/repo",
+          defaultBranch: "main",
+          branchName: "feature/structured",
+          targetWorkerId: "trae-remote-forgeflow",
+        },
+      ],
+      reviews: [
+        {
+          taskId: "dispatch-1:task-structured",
+          latestWorkerResult: {
+            evidence: {
+              failureSummary: "generic failure summary without legacy keywords",
+              blockers: [
+                {
+                  kind: "execution",
+                  code: "transient_model_3003",
+                  message: "Model unavailable: 3003",
+                },
+              ],
+            },
+          },
+        },
+      ],
+      events: [
+        {
+          taskId: "dispatch-1:task-structured",
+          type: "status_changed",
+          at: "2026-03-29T02:00:00Z",
+          payload: {
+            from: "in_progress",
+            to: "failed",
+            summary: "generic failure summary without legacy keywords",
+          },
+        },
+      ],
+    };
+
+    const snapshotFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(snapshot)),
+    });
+    const dispatchFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({
+        dispatchId: "dispatch-redrive-structured",
+        taskIds: ["dispatch-70:redrive-structured"],
+        assignments: [],
+      })),
+    });
+
+    let fetchCallCount = 0;
+    const combinedFetch = async (url: string, init?: RequestInit) => {
+      fetchCallCount += 1;
+      if (fetchCallCount === 1) {
+        return snapshotFetch(url, init);
+      }
+      return dispatchFetch(url, init);
+    };
+
+    const result = await runRedrive({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-structured",
+      fetchImpl: combinedFetch as typeof globalThis.fetch,
+    });
+
+    expect(result.newTaskId).toBe("dispatch-70:redrive-structured");
+    expect(result.failureSummary).toContain("generic failure summary");
+  });
+
   it("throws error when task is not found", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,

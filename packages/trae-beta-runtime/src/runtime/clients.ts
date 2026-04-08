@@ -4,8 +4,10 @@ import * as https from "node:https";
 import { readDispatcherTokenFromConfig } from "../config.js";
 
 interface WorkerFailure {
-  type: string;
+  kind: "preflight" | "execution" | "verification" | "unknown";
+  code: string;
   message: string;
+  details?: Record<string, unknown>;
 }
 
 interface WorkerEvidence {
@@ -206,6 +208,23 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
       return http.request("/api/trae/report-progress", {
         method: "POST",
         body: { task_id: taskId, message, worker_id: workerId },
+        timeoutMs: requestTimeoutMs,
+      });
+    },
+    async reportEvent(workerId: string, input: {
+      type: string;
+      taskId?: string;
+      at?: string;
+      payload?: Record<string, unknown>;
+    }) {
+      return http.request(`/api/workers/${encodeURIComponent(workerId)}/events`, {
+        method: "POST",
+        body: {
+          type: input.type,
+          taskId: input.taskId,
+          at: input.at,
+          payload: input.payload,
+        },
         timeoutMs: requestTimeoutMs,
       });
     },

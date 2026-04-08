@@ -8,8 +8,10 @@ import {
 } from "@tingrudeng/automation-gateway-core";
 
 interface WorkerFailure {
-  type: string;
+  kind: "preflight" | "execution" | "verification" | "unknown";
+  code: string;
   message: string;
+  details?: Record<string, unknown>;
 }
 
 interface WorkerEvidence {
@@ -18,6 +20,13 @@ interface WorkerEvidence {
   blockers?: WorkerFailure[];
   findings?: unknown[];
   artifacts?: Record<string, string>;
+}
+
+type WorkerFailureKind = WorkerFailure["kind"];
+
+interface ClassifiedWorkerFailure {
+  failureType: WorkerFailureKind;
+  blocker: WorkerFailure;
 }
 
 import {
@@ -472,11 +481,117 @@ function buildSuccessEvidence(
 }
 
 function buildInvalidSuccessFailureEvidence(message: string): WorkerEvidence {
+  const classified = classifyWorkerFailure(message, "submit_result");
   return {
-    failureType: "unknown",
+    failureType: classified.failureType,
     failureSummary: message,
-    blockers: [],
+    blockers: [classified.blocker],
     findings: [],
+  };
+}
+
+function buildWorkerFailure(
+  kind: WorkerFailureKind,
+  code: string,
+  message: string,
+  details?: Record<string, unknown>,
+): WorkerFailure {
+  return {
+    kind,
+    code,
+    message,
+    ...(details && Object.keys(details).length > 0 ? { details } : {}),
+  };
+}
+
+function classifyWorkerFailure(error: Error | string, phase = "execution"): ClassifiedWorkerFailure {
+  const message = error instanceof Error ? error.message : String(error);
+  const lowerMessage = message.toLowerCase();
+  const details = { phase };
+
+  if (/worktree[_ ]mismatch/.test(lowerMessage)) {
+    return {
+      failureType: "preflight",
+      blocker: buildWorkerFailure("preflight", "worktree_mismatch", message, details),
+    };
+  }
+
+  if (/branch[_ ]mismatch/.test(lowerMessage)) {
+    return {
+      failureType: "preflight",
+      blocker: buildWorkerFailure("preflight", "branch_mismatch", message, details),
+    };
+  }
+
+  if (/preflight.*workspace.*mismatch|workspace.*preflight.*mismatch/.test(lowerMessage)) {
+    return {
+      failureType: "preflight",
+      blocker: buildWorkerFailure("preflight", "preflight_workspace_mismatch", message, details),
+    };
+  }
+
+  if (
+    /workspace_prepare_failed|branch .*already checked out|failed to create worktree|failed to fetch origin|default branch ref/.test(lowerMessage)
+    || phase === "workspace_prepare"
+  ) {
+    return {
+      failureType: "preflight",
+      blocker: buildWorkerFailure("preflight", "workspace_prepare_failed", message, details),
+    };
+  }
+
+  if (/artifact not reviewable|remote artifact|remote verification failed|remote branch .*not found on remote|remote head/.test(lowerMessage)) {
+    return {
+      failureType: "verification",
+      blocker: buildWorkerFailure("verification", "artifact_remote_unverified", message, details),
+    };
+  }
+
+  if (/template echo|required template|final report did not match|task id mismatch|placeholder/.test(lowerMessage)) {
+    return {
+      failureType: "unknown",
+      blocker: buildWorkerFailure("unknown", "prompt_contract_mismatch", message, details),
+    };
+  }
+
+  if (/missing code-change evidence|missing branch\/commit evidence/.test(lowerMessage)) {
+    return {
+      failureType: "unknown",
+      blocker: buildWorkerFailure("unknown", "invalid_success_report", message, details),
+    };
+  }
+
+  if (/3003/.test(lowerMessage)) {
+    return {
+      failureType: "execution",
+      blocker: buildWorkerFailure("execution", "transient_model_3003", message, details),
+    };
+  }
+
+  if (/timeout|timed out|request timeout|gateway is not ready|fetch failed|socket hang up|econnreset|network/.test(lowerMessage)) {
+    return {
+      failureType: "execution",
+      blocker: buildWorkerFailure("execution", "transient_gateway_timeout", message, details),
+    };
+  }
+
+  if (/operation not permitted|permission denied|sandbox|forbidden|not allowed|blocked by environment/.test(lowerMessage)) {
+    return {
+      failureType: "preflight",
+      blocker: buildWorkerFailure("preflight", "environment_blocked", message, details),
+    };
+  }
+
+  if (/vitest|jest|pnpm test|typecheck|verification/.test(lowerMessage)) {
+    return {
+      failureType: "verification",
+      blocker: buildWorkerFailure("verification", "verification_failed", message, details),
+    };
+  }
+
+  return {
+    failureType: "execution",
+    blocker: buildWorkerFailure("execution", "execution_failed", message, details),
   };
 }
 
@@ -736,15 +851,46 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     throw new Error("dispatcherClient, automationClient, workerId, and repoDir are required");
   }
 
+  async function emitPhaseEvent(
+    type: string,
+    payload: Record<string, unknown> = {},
+    taskId?: string | null,
+  ) {
+    if (typeof dispatcherClient.reportEvent !== "function") {
+      return;
+    }
+
+    try {
+      await dispatcherClient.reportEvent(workerId, {
+        type,
+        taskId: taskId || undefined,
+        at: new Date().toISOString(),
+        payload,
+      });
+    } catch (error) {
+      debugLog("dispatcher.report_event.error", {
+        type,
+        taskId: taskId || null,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   async function releaseTaskSession(sessionId: string | null) {
     if (!sessionId) {
       return;
     }
+    await emitPhaseEvent("session_release_start", { sessionId });
     debugLog("session.release.start", { sessionId });
     try {
       await automationClient.releaseSession(sessionId);
+      await emitPhaseEvent("session_release_done", { sessionId });
       debugLog("session.release.done", { sessionId });
     } catch (error) {
+      await emitPhaseEvent("session_release_failed", {
+        sessionId,
+        message: error instanceof Error ? error.message : String(error),
+      });
       debugLog("session.release.error", {
         sessionId,
         message: error instanceof Error ? error.message : String(error),
@@ -819,6 +965,11 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       ? invalidSuccessMessage
       : parsed.notes || parsed.environmentEvidence || parsed.result;
 
+    await emitPhaseEvent("submit_result_start", {
+      status,
+      sessionId,
+      pushStatus: parsed.github.pushStatus,
+    }, task.task_id);
     debugLog("dispatcher.submit_result.start", {
       taskId: task.task_id,
       status,
@@ -840,6 +991,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         github: parsed.github,
         ...(evidence ? { evidence } : {}),
       });
+      await emitPhaseEvent("submit_result_done", { status, sessionId }, task.task_id);
       debugLog("dispatcher.submit_result.done", { taskId: task.task_id, status });
     } finally {
       heartbeat.promoteToIdle();
@@ -848,21 +1000,34 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     return status;
   }
 
-  async function submitFailure(task: WorkerRuntimeTask, error: Error, rawOutput = "", sessionId: string | null = null) {
-    const failureType = /test|vitest|jest|pnpm test/i.test(error.message) ? "verification" : "execution";
+  async function submitFailure(
+    task: WorkerRuntimeTask,
+    error: Error,
+    rawOutput = "",
+    sessionId: string | null = null,
+    phase = "execution",
+  ) {
+    const classified = classifyWorkerFailure(error, phase);
     const evidence: WorkerEvidence = {
-      failureType,
+      failureType: classified.failureType,
       failureSummary: error.message,
-      blockers: [],
+      blockers: [classified.blocker],
       findings: [],
     };
 
+    await emitPhaseEvent("submit_result_start", {
+      status: "failed",
+      sessionId,
+      failureCode: classified.blocker.code,
+      phase,
+    }, task.task_id);
     debugLog("dispatcher.submit_result.start", {
       taskId: task.task_id,
       status: "failed",
       sessionId,
       summary: error.message,
-      failureType,
+      failureType: classified.failureType,
+      failureCode: classified.blocker.code,
     });
     try {
       await dispatcherClient.submitResult({
@@ -882,6 +1047,11 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         },
         evidence,
       });
+      await emitPhaseEvent("submit_result_done", {
+        status: "failed",
+        failureCode: classified.blocker.code,
+        phase,
+      }, task.task_id);
       debugLog("dispatcher.submit_result.done", { taskId: task.task_id, status: "failed" });
     } finally {
       heartbeat.promoteToIdle();
@@ -1039,50 +1209,94 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
 
   const runtime = {
     async register() {
+      await emitPhaseEvent("register_start", { repoDir });
       debugLog("worker.register.start", { workerId, repoDir });
-      await dispatcherClient.register({
-        workerId,
-        pool: "trae",
-        repoDir,
-        labels: ["automation-gateway"],
-      });
-      heartbeat.start("idle");
-      const readiness = await automationClient.ready({
-        discovery: deriveRegisterDiscoveryHints(repoDir),
-      });
-      debugLog("worker.register.done", { workerId, ready: isAutomationGatewayReady(readiness) });
-      return readiness;
+      try {
+        await dispatcherClient.register({
+          workerId,
+          pool: "trae",
+          repoDir,
+          labels: ["automation-gateway"],
+        });
+        heartbeat.start("idle");
+        const readiness = await automationClient.ready({
+          discovery: deriveRegisterDiscoveryHints(repoDir),
+        });
+        await emitPhaseEvent("register_done", { ready: isAutomationGatewayReady(readiness) });
+        debugLog("worker.register.done", { workerId, ready: isAutomationGatewayReady(readiness) });
+        return readiness;
+      } catch (error) {
+        await emitPhaseEvent("register_failed", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
     },
 
     async runOnce() {
-      const fetched = await dispatcherClient.fetchTask(workerId, repoDir);
+      await emitPhaseEvent("fetch_task_start", { repoDir });
+      let fetched: unknown;
+      try {
+        fetched = await dispatcherClient.fetchTask(workerId, repoDir);
+      } catch (error) {
+        await emitPhaseEvent("fetch_task_failed", {
+          repoDir,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
       if (!fetched || (fetched as { status?: string }).status === "no_task") {
+        await emitPhaseEvent("fetch_task_done", { status: "no_task" });
         debugLog("worker.fetch_task.no_task", { workerId, repoDir });
         return { status: "no_task" };
       }
 
       const task = (fetched as { task: WorkerRuntimeTask }).task;
+      await emitPhaseEvent("fetch_task_done", {
+        status: "task",
+        taskId: task.task_id,
+        branch: task.branch || null,
+      }, task.task_id);
       debugLog("worker.fetch_task.assigned", {
         workerId,
         taskId: task.task_id,
         branch: task.branch || null,
         repo: task.repo || null,
       });
+      let startTaskFailed = false;
       try {
+        await emitPhaseEvent("workspace_prepare_start", { branch: task.branch || null }, task.task_id);
         materializeTaskWorkspace(task, repoDir);
+        await emitPhaseEvent("workspace_prepare_done", {
+          worktreeDir: task.worktree_dir || null,
+          assignmentDir: task.assignment_dir || null,
+        }, task.task_id);
         task.execution_dir = repoDir;
-        await dispatcherClient.startTask(workerId, task.task_id);
+        await emitPhaseEvent("start_task_start", {}, task.task_id);
+        try {
+          await dispatcherClient.startTask(workerId, task.task_id);
+          await emitPhaseEvent("start_task_done", {}, task.task_id);
+        } catch (error) {
+          startTaskFailed = true;
+          await emitPhaseEvent("start_task_failed", {
+            message: error instanceof Error ? error.message : String(error),
+          }, task.task_id);
+          throw error;
+        }
         heartbeat.start("high");
         await dispatcherClient.reportProgress(task.task_id, "Trae automation worker started task", workerId);
       } catch (error) {
         const normalizedError = error instanceof Error ? error : new Error(String(error));
         const summary = classifyPreStartFailure(normalizedError);
+        if (!startTaskFailed) {
+          await emitPhaseEvent("workspace_prepare_failed", { message: summary }, task.task_id);
+        }
         try {
           await dispatcherClient.reportProgress(task.task_id, `Task bootstrap failed: ${summary}`, workerId);
         } catch {
           // progress reporting failure should not block terminal failure submission
         }
-        await submitFailure(task, new Error(summary), "");
+        await submitFailure(task, new Error(summary), "", null, "workspace_prepare");
         return {
           status: "failed",
           taskId: task.task_id,
@@ -1099,20 +1313,29 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       let sessionId: string | null = null;
       const startedAt = Date.now();
       try {
+        await emitPhaseEvent("readiness_wait_start", {}, task.task_id);
         await dispatcherClient.reportProgress(
           task.task_id,
           "Trae automation gateway is waiting for task target readiness",
           workerId,
         );
-        await waitForAutomationGatewayReady({
-          automationClient,
-          repoDir,
-          discovery,
-          logger,
-          timeoutMs: DEFAULT_READINESS_TIMEOUT_MS,
-          retryIntervalMs: DEFAULT_READINESS_RETRY_MS,
-          sleep,
-        });
+        try {
+          await waitForAutomationGatewayReady({
+            automationClient,
+            repoDir,
+            discovery,
+            logger,
+            timeoutMs: DEFAULT_READINESS_TIMEOUT_MS,
+            retryIntervalMs: DEFAULT_READINESS_RETRY_MS,
+            sleep,
+          });
+        } catch (error) {
+          await emitPhaseEvent("readiness_wait_failed", {
+            message: error instanceof Error ? error.message : String(error),
+          }, task.task_id);
+          throw error;
+        }
+        await emitPhaseEvent("readiness_wait_done", {}, task.task_id);
         await dispatcherClient.reportProgress(task.task_id, "Trae automation gateway is preparing session", workerId);
         const continuationMode = (task as WorkerRuntimeTask & { continuationMode?: string; continuation_mode?: string }).continuationMode
           || (task as WorkerRuntimeTask & { continuation_mode?: string }).continuation_mode;
@@ -1121,13 +1344,24 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         const chatMode = continuationMode === "continue"
           ? "continue"
           : (explicitChatMode || "new_chat");
-        const prepareResult = await automationClient.prepareSession({
-          discovery,
-          chatMode,
-        });
+        await emitPhaseEvent("prepare_session_start", { chatMode }, task.task_id);
+        let prepareResult: unknown;
+        try {
+          prepareResult = await automationClient.prepareSession({
+            discovery,
+            chatMode,
+          });
+        } catch (error) {
+          await emitPhaseEvent("prepare_session_failed", {
+            chatMode,
+            message: error instanceof Error ? error.message : String(error),
+          }, task.task_id);
+          throw error;
+        }
         sessionId = (prepareResult as { data?: { sessionId?: string }; sessionId?: string } | undefined)?.data?.sessionId
           || (prepareResult as { sessionId?: string } | undefined)?.sessionId
           || null;
+        await emitPhaseEvent("prepare_session_done", { sessionId, chatMode }, task.task_id);
         debugLog("gateway.prepare_session.done", {
           taskId: task.task_id,
           sessionId,
@@ -1140,6 +1374,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         const chatTimeoutMs = softTimeoutMs + DEFAULT_CHAT_REQUEST_TIMEOUT_BUFFER_MS;
 
         try {
+          await emitPhaseEvent("send_chat_start", { sessionId, chatMode }, task.task_id);
           debugLog("gateway.send_chat.start", {
             taskId: task.task_id,
             sessionId,
@@ -1159,6 +1394,10 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
             timeoutMs: chatTimeoutMs,
           });
           const finalText = getResponseText(response);
+          await emitPhaseEvent("send_chat_done", {
+            sessionId,
+            responseLength: finalText.length,
+          }, task.task_id);
           debugLog("gateway.send_chat.done", {
             taskId: task.task_id,
             sessionId,
@@ -1187,6 +1426,10 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
             responseText: finalText,
           };
         } catch (chatError) {
+          await emitPhaseEvent("send_chat_failed", {
+            sessionId,
+            message: chatError instanceof Error ? chatError.message : String(chatError),
+          }, task.task_id);
           debugLog("gateway.send_chat.error", {
             taskId: task.task_id,
             sessionId,
@@ -1211,6 +1454,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           }
 
           await dispatcherClient.reportProgress(task.task_id, "Chat timeout, checking session status", workerId);
+          await emitPhaseEvent("session_recovery_start", { sessionId }, task.task_id);
 
           let sessionStatus = await pollSessionStatus(
             sessionId,
@@ -1227,6 +1471,10 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
                   "Session completed, extracting stored response",
                   workerId
                 );
+                await emitPhaseEvent("session_recovery_done", {
+                  sessionId,
+                  mode: "completed_with_response",
+                }, task.task_id);
                 const finalText = sessionResponseText.trim();
                 debugLog("session.recovery.completed_with_response", {
                   taskId: task.task_id,
@@ -1298,7 +1546,13 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           }
 
           const artifactCheck = checkArtifactReviewability(task);
+          await emitPhaseEvent("artifact_check_start", { sessionId }, task.task_id);
           if (artifactCheck.reviewable && artifactCheck.evidence.remoteVerified) {
+            await emitPhaseEvent("artifact_check_done", {
+              reviewable: true,
+              remoteVerified: true,
+              branchName: artifactCheck.evidence.branchName,
+            }, task.task_id);
             await submitParsedResult(task, {
               result: "成功",
               taskId: task.task_id,
@@ -1325,8 +1579,18 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           }
 
           if (artifactCheck.reviewable && !artifactCheck.evidence.remoteVerified) {
+            await emitPhaseEvent("artifact_check_failed", {
+              reviewable: true,
+              remoteVerified: false,
+              reason: artifactCheck.evidence.remoteCheckReason || "remote verification failed",
+            }, task.task_id);
             throw new Error(`Artifact not reviewable: ${artifactCheck.evidence.remoteCheckReason || "remote verification failed"}`);
           }
+
+          await emitPhaseEvent("artifact_check_failed", {
+            reviewable: false,
+            reason: artifactCheck.reason,
+          }, task.task_id);
 
           if ((sessionStatus as { activityStopped?: boolean }).activityStopped) {
             const idleDuration = (sessionStatus as { idleDuration?: number }).idleDuration || 0;
@@ -1341,8 +1605,19 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           sessionId,
           message: error instanceof Error ? error.message : String(error),
         });
+        await emitPhaseEvent("session_recovery_failed", {
+          sessionId,
+          message: error instanceof Error ? error.message : String(error),
+        }, task.task_id);
         const artifactCheck = checkArtifactReviewability(task);
+        await emitPhaseEvent("artifact_check_start", { sessionId, source: "task_error" }, task.task_id);
         if (artifactCheck.reviewable && artifactCheck.evidence.remoteVerified) {
+          await emitPhaseEvent("artifact_check_done", {
+            reviewable: true,
+            remoteVerified: true,
+            branchName: artifactCheck.evidence.branchName,
+            source: "task_error",
+          }, task.task_id);
           await submitParsedResult(task, {
             result: "成功",
             taskId: task.task_id,
@@ -1367,7 +1642,13 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
             responseText: `Recovered via artifact check: ${artifactCheck.reason}`,
           };
         }
-        await submitFailure(task, error instanceof Error ? error : new Error(String(error)), "", sessionId);
+        await emitPhaseEvent("artifact_check_failed", {
+          reviewable: artifactCheck.reviewable,
+          remoteVerified: artifactCheck.evidence.remoteVerified,
+          reason: artifactCheck.evidence.remoteCheckReason || artifactCheck.reason,
+          source: "task_error",
+        }, task.task_id);
+        await submitFailure(task, error instanceof Error ? error : new Error(String(error)), "", sessionId, "task_execution");
         return {
           status: "failed",
           taskId: task.task_id,

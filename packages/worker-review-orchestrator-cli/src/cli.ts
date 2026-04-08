@@ -199,10 +199,11 @@ Examples:
   }
 
   if (parsed.command === "dispatch") {
-    const dispatcherUrl = getDispatcherUrl(options);
+    const stateDir = typeof options.stateDir === "string" ? options.stateDir : undefined;
+    const dispatcherUrl = stateDir ? undefined : getDispatcherUrl(options);
     const input = typeof options.input === "string" ? options.input : "-";
-    if (!dispatcherUrl) {
-      throw new Error("--dispatcher-url is required");
+    if (!dispatcherUrl && !stateDir) {
+      throw new Error("--dispatcher-url or --state-dir is required");
     }
     const followUpOfTaskId = typeof options.followUpOfTaskId === "string" ? options.followUpOfTaskId : undefined;
     const targetWorkerId = typeof options.targetWorkerId === "string" ? options.targetWorkerId : undefined;
@@ -211,8 +212,9 @@ Examples:
     }
     const result = await deps.runDispatch({
       dispatcherUrl,
+      stateDir,
       input,
-      requireExistingWorker: options.requireExistingWorker === true,
+      requireExistingWorker: options.requireExistingWorker === true ? true : undefined,
       targetWorkerId,
       requestTimeoutMs: typeof options.requestTimeoutMs === "number" ? options.requestTimeoutMs : undefined,
       followUpOfTaskId,
@@ -223,15 +225,16 @@ Examples:
   }
 
   if (parsed.command === "dispatch-task") {
-    const dispatcherUrl = getDispatcherUrl(options);
+    const stateDir = typeof options.stateDir === "string" ? options.stateDir : undefined;
+    const dispatcherUrl = stateDir ? undefined : getDispatcherUrl(options);
     const repo = typeof options.repo === "string" ? options.repo : undefined;
     const defaultBranch = typeof options.defaultBranch === "string" ? options.defaultBranch : undefined;
     const taskId = typeof options.taskId === "string" ? options.taskId : undefined;
     const title = typeof options.title === "string" ? options.title : undefined;
     const pool = typeof options.pool === "string" ? options.pool : undefined;
     const branchName = typeof options.branchName === "string" ? options.branchName : undefined;
-    if (!dispatcherUrl) {
-      throw new Error("--dispatcher-url is required");
+    if (!dispatcherUrl && !stateDir) {
+      throw new Error("--dispatcher-url or --state-dir is required");
     }
     if (!repo || !defaultBranch || !taskId || !title || !pool || !branchName) {
       throw new Error("--repo, --default-branch, --task-id, --title, --pool, and --branch-name are required");
@@ -281,9 +284,10 @@ Examples:
 
     const result = await deps.runDispatch({
       dispatcherUrl,
+      stateDir,
       input: "-",
       payload,
-      requireExistingWorker: options.requireExistingWorker === true,
+      requireExistingWorker: options.requireExistingWorker === true ? true : undefined,
       requestTimeoutMs: typeof options.requestTimeoutMs === "number" ? options.requestTimeoutMs : undefined,
       targetWorkerId,
       followUpOfTaskId,
@@ -312,16 +316,18 @@ Examples:
   }
 
   if (parsed.command === "watch") {
-    const dispatcherUrl = getDispatcherUrl(options);
+    const stateDir = typeof options.stateDir === "string" ? options.stateDir : undefined;
+    const dispatcherUrl = stateDir ? undefined : getDispatcherUrl(options);
     const taskId = typeof options.taskId === "string" ? options.taskId : undefined;
-    if (!dispatcherUrl) {
-      throw new Error("--dispatcher-url is required");
+    if (!dispatcherUrl && !stateDir) {
+      throw new Error("--dispatcher-url or --state-dir is required");
     }
     if (!taskId) {
       throw new Error("--task-id is required");
     }
     const result = await deps.watchTask({
       dispatcherUrl,
+      stateDir,
       taskId,
       intervalMs: typeof options.intervalMs === "number" ? options.intervalMs : undefined,
       timeoutMs: typeof options.timeoutMs === "number" ? options.timeoutMs : undefined,
@@ -332,6 +338,8 @@ Examples:
   }
 
   if (parsed.command === "decide") {
+    const stateDir = typeof options.stateDir === "string" ? options.stateDir : undefined;
+    const dispatcherUrl = stateDir ? undefined : getDispatcherUrl(options);
     const taskId = typeof options.taskId === "string" ? options.taskId : undefined;
     const decision = typeof options.decision === "string" ? options.decision : undefined;
     if (!taskId) {
@@ -346,17 +354,17 @@ Examples:
       actor: typeof options.actor === "string" ? options.actor : undefined,
       notes: typeof options.notes === "string" ? options.notes : undefined,
       at: typeof options.at === "string" ? options.at : undefined,
-      dispatcherUrl: getDispatcherUrl(options),
-      stateDir: typeof options.stateDir === "string" ? options.stateDir : undefined,
+      dispatcherUrl,
+      stateDir,
     });
     deps.log(JSON.stringify(result, null, 2));
     return result;
   }
 
   if (parsed.command === "inspect") {
-    const dispatcherUrl = getDispatcherUrl(options);
-    const taskId = typeof options.taskId === "string" ? options.taskId : undefined;
     const stateDir = typeof options.stateDir === "string" ? options.stateDir : undefined;
+    const dispatcherUrl = stateDir ? undefined : getDispatcherUrl(options);
+    const taskId = typeof options.taskId === "string" ? options.taskId : undefined;
     if (!dispatcherUrl && !stateDir) {
       throw new Error("--dispatcher-url or --state-dir is required");
     }

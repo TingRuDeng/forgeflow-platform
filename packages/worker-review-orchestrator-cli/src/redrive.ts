@@ -5,6 +5,17 @@ import { buildSingleTaskDispatchInput, runDispatch } from "./dispatch.js";
 import type { DispatchInput, DispatchResult } from "./types.js";
 import { compareTimestampDesc } from "./time.js";
 
+const REDRIVEABLE_FAILURE_CODES = new Set<RedriveFailureType>([
+  "worktree_mismatch",
+  "branch_mismatch",
+  "preflight_workspace_mismatch",
+  "workspace_prepare_failed",
+  "transient_gateway_timeout",
+  "transient_model_3003",
+  "artifact_remote_unverified",
+  "prompt_contract_mismatch",
+]);
+
 const REDRIVEABLE_FAILURE_PATTERNS: Array<{ type: RedriveFailureType; patterns: RegExp[] }> = [
   {
     type: "worktree_mismatch",
@@ -17,6 +28,26 @@ const REDRIVEABLE_FAILURE_PATTERNS: Array<{ type: RedriveFailureType; patterns: 
   {
     type: "preflight_workspace_mismatch",
     patterns: [/preflight.*workspace.*mismatch/i, /workspace.*preflight.*mismatch/i],
+  },
+  {
+    type: "workspace_prepare_failed",
+    patterns: [/workspace_prepare_failed/i],
+  },
+  {
+    type: "transient_gateway_timeout",
+    patterns: [/request timeout/i, /gateway is not ready/i, /timed out/i],
+  },
+  {
+    type: "transient_model_3003",
+    patterns: [/3003/],
+  },
+  {
+    type: "artifact_remote_unverified",
+    patterns: [/artifact not reviewable/i, /remote artifact/i, /remote verification failed/i],
+  },
+  {
+    type: "prompt_contract_mismatch",
+    patterns: [/template echo/i, /task id mismatch/i, /required template/i, /placeholder/i],
   },
 ];
 
@@ -39,6 +70,32 @@ function findFailureType(failureSummary: string): RedriveFailureType | null {
     }
   }
   return null;
+}
+
+function extractStructuredFailureCode(
+  reviews: Array<Record<string, unknown>>,
+  taskId: string,
+): RedriveFailureType | null {
+  const latestReview = reviews
+    .filter((review) => extractStringValue(review, "taskId") === taskId)
+    .sort((left, right) => {
+      const leftAt = extractStringValue(left, "decidedAt") ?? extractStringValue(left, "at") ?? "";
+      const rightAt = extractStringValue(right, "decidedAt") ?? extractStringValue(right, "at") ?? "";
+      return compareTimestampDesc(leftAt, rightAt);
+    })[0] ?? null;
+
+  const latestWorkerResult = latestReview?.latestWorkerResult as Record<string, unknown> | undefined;
+  const evidence = latestWorkerResult?.evidence as Record<string, unknown> | undefined;
+  const blockers = Array.isArray(evidence?.blockers) ? evidence?.blockers as Array<Record<string, unknown>> : [];
+  for (const blocker of blockers) {
+    const code = extractStringValue(blocker, "code");
+    if (code && REDRIVEABLE_FAILURE_CODES.has(code as RedriveFailureType)) {
+      return code as RedriveFailureType;
+    }
+  }
+
+  const failureSummary = extractStringValue(evidence ?? null, "failureSummary");
+  return failureSummary ? findFailureType(failureSummary) : null;
 }
 
 function extractFailedSummaryFromEvents(events: Array<Record<string, unknown>>): string | null {
@@ -239,7 +296,7 @@ export async function runRedrive(options: RedriveOptions): Promise<RedriveResult
     if (!failureSummary) {
       throw new Error(`task ${options.taskId} has no failure summary to analyze`);
     }
-    const failureType = findFailureType(failureSummary);
+    const failureType = extractStructuredFailureCode(reviews, options.taskId) ?? findFailureType(failureSummary);
     if (!failureType) {
       throw new Error(
         `task ${options.taskId} failed for a non-redriveable reason: ${failureSummary.slice(0, 100)}`,
@@ -303,6 +360,7 @@ export async function runRedrive(options: RedriveOptions): Promise<RedriveResult
     dispatcherUrl: options.dispatcherUrl,
     input: "-",
     payload,
+    requireExistingWorker: false,
     requestTimeoutMs: 30_000,
     fetchImpl: options.fetchImpl,
   }) as DispatchResult;

@@ -47,6 +47,81 @@ describe("watch", () => {
     });
   });
 
+  it("summary mode includes review, failure, redrive, and latest progress signals", async () => {
+    const fetchImpl = async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        tasks: [
+          {
+            id: "dispatch-2:task-2",
+            status: "blocked",
+            branchName: "ai/trae/task-2",
+            repo: "owner/repo",
+          },
+        ],
+        assignments: [
+          {
+            taskId: "dispatch-2:task-2",
+            workerId: "trae-remote-01",
+            repo: "owner/repo",
+          },
+        ],
+        reviews: [
+          {
+            taskId: "dispatch-2:task-2",
+            decision: "rework",
+            actor: "codex-control",
+            decidedAt: "2026-04-08T10:00:03Z",
+            evidence: {
+              canRedrive: true,
+              redriveStrategy: "same_worker_continue",
+            },
+            latestWorkerResult: {
+              evidence: {
+                failureType: "execution",
+                failureSummary: "workspace_prepare_failed: branch already checked out elsewhere",
+              },
+            },
+          },
+        ],
+        events: [
+          {
+            taskId: "dispatch-2:task-2",
+            type: "progress_reported",
+            at: "2026-04-08T10:00:02Z",
+            payload: {
+              message: "workspace prepare started",
+            },
+          },
+        ],
+      }),
+    });
+
+    const result = await watchTask({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-2:task-2",
+      intervalMs: 10,
+      timeoutMs: 5000,
+      summary: true,
+      fetchImpl: fetchImpl as unknown as typeof globalThis.fetch,
+    });
+
+    expect(result).toMatchObject({
+      taskId: "dispatch-2:task-2",
+      status: "blocked",
+      reviewState: {
+        decision: "rework",
+      },
+      latestResultEvidence: {
+        failureSummary: "workspace_prepare_failed: branch already checked out elsewhere",
+      },
+      canRedrive: true,
+      latestProgressAt: "2026-04-08T10:00:02Z",
+      latestProgressSummary: "workspace prepare started",
+    });
+  });
+
   it("returns full output when summary mode is disabled", async () => {
     const fetchImpl = async () => ({
       ok: true,
@@ -92,7 +167,7 @@ describe("watch", () => {
         status: "merged",
         attempts: 1,
       });
-    });
+    }, 20_000);
 
     it("returns full output with stateDir when summary mode is disabled", async () => {
       const stateDir = createTempStateDir();

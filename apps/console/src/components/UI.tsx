@@ -4,12 +4,16 @@ export const Badge: React.FC<{ status: string; children: React.ReactNode }> = ({
   const statusConfig: Record<string, { colors: string; dot: string }> = {
     idle: { colors: 'bg-white/10 text-white/60 border-white/20', dot: 'bg-white/40' },
     busy: { colors: 'bg-amber-500/20 text-amber-300 border-amber-500/30', dot: 'bg-amber-400' },
+    ready: { colors: 'bg-sky-500/20 text-sky-300 border-sky-500/30', dot: 'bg-sky-400' },
+    pending: { colors: 'bg-white/10 text-white/60 border-white/20', dot: 'bg-white/40' },
     assigned: { colors: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30', dot: 'bg-cyan-400' },
     in_progress: { colors: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30', dot: 'bg-cyan-400' },
     review: { colors: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30', dot: 'bg-fuchsia-400' },
     merged: { colors: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30', dot: 'bg-emerald-400' },
     failed: { colors: 'bg-rose-500/20 text-rose-300 border-rose-500/30', dot: 'bg-rose-400' },
     blocked: { colors: 'bg-rose-500/20 text-rose-300 border-rose-500/30', dot: 'bg-rose-400' },
+    cancelled: { colors: 'bg-zinc-500/20 text-zinc-300 border-zinc-500/30', dot: 'bg-zinc-400' },
+    offline: { colors: 'bg-zinc-500/20 text-zinc-300 border-zinc-500/30', dot: 'bg-zinc-400' },
     disabled: { colors: 'bg-white/5 text-white/30 border-white/10 line-through', dot: 'bg-white/20' },
   };
 

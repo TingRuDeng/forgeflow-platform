@@ -399,6 +399,38 @@ describe("dispatcher server", () => {
     });
   });
 
+  it("accepts register phase events before the worker record exists", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    const eventResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/trae-pre-register/events",
+      body: {
+        type: "register_start",
+        payload: { repoDir: "/repo" },
+      },
+    });
+
+    expect(eventResponse.status).toBe(200);
+
+    const snapshotResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dashboard/snapshot",
+    });
+
+    expect(snapshotResponse.json.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "register_start",
+        payload: expect.objectContaining({
+          workerId: "trae-pre-register",
+        }),
+      }),
+    ]));
+  });
+
   it("returns 404 when review decision task does not exist", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);
@@ -1655,6 +1687,108 @@ describe("dispatcher server", () => {
       status: "disabled",
       disabledAt: "2026-04-03T00:00:05.000Z",
     });
+  });
+
+  it("cancels tasks via API and releases the assigned worker", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "cancel-worker-1",
+        pool: "codex",
+        hostname: "test-host",
+        labels: ["test"],
+        repoDir: "/test",
+      },
+    });
+
+    const dispatchResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "TingRuDeng/forgeflow-platform",
+        defaultBranch: "main",
+        requestedBy: "codex-control",
+        tasks: [
+          {
+            id: "cancel-task-1",
+            title: "Cancel task from API",
+            pool: "codex",
+            allowedPaths: ["src/**"],
+            acceptance: ["pnpm test"],
+            dependsOn: [],
+            branchName: "ai/codex/cancel-task-1",
+            verification: { mode: "run" },
+          },
+        ],
+        packages: [
+          {
+            taskId: "cancel-task-1",
+            assignment: {
+              taskId: "cancel-task-1",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/cancel-task-1",
+              repo: "TingRuDeng/forgeflow-platform",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+
+    const taskId = dispatchResponse.json.taskIds[0];
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/cancel-worker-1/claim-task",
+      body: { at: "2026-04-08T10:10:00.000Z" },
+    });
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/cancel-worker-1/start-task",
+      body: { taskId, at: "2026-04-08T10:10:01.000Z" },
+    });
+
+    const cancelResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: `/api/tasks/${encodeURIComponent(taskId)}/cancel`,
+      body: {
+        actor: "codex-control",
+        reason: "voided in console",
+        at: "2026-04-08T10:10:02.000Z",
+      },
+    });
+
+    expect(cancelResponse.status).toBe(200);
+    expect(cancelResponse.json.status).toBe("cancelled");
+    expect(cancelResponse.json.task).toMatchObject({
+      id: taskId,
+      status: "cancelled",
+    });
+    expect(cancelResponse.json.workers.find((candidate: { id: string }) => candidate.id === "cancel-worker-1")?.currentTaskId).toBeUndefined();
+
+    const snapshotResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dashboard/snapshot",
+    });
+
+    const task = snapshotResponse.json.tasks.find((candidate: { id: string }) => candidate.id === taskId);
+    const worker = snapshotResponse.json.workers.find((candidate: { id: string }) => candidate.id === "cancel-worker-1");
+    expect(task).toMatchObject({
+      status: "cancelled",
+    });
+    expect(worker?.currentTaskId).toBeUndefined();
   });
 
   it("dashboard includes a fallback link to the standalone console app", async () => {

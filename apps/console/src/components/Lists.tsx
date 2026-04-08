@@ -10,6 +10,11 @@ interface Task {
   branchName?: string;
   updatedAt?: string;
   createdAt?: string;
+  repo?: string;
+  pool?: string;
+  continueFromTaskId?: string;
+  followUpOfTaskId?: string;
+  lastAssignedWorkerId?: string;
 }
 
 interface Worker {
@@ -18,6 +23,55 @@ interface Worker {
   status: string;
   currentTaskId?: string;
   hostname?: string;
+}
+
+interface Assignment {
+  taskId: string;
+  workerId?: string;
+  branchName?: string;
+  repo?: string;
+  pool?: string;
+  status?: string;
+  targetWorkerId?: string;
+}
+
+interface Review {
+  taskId: string;
+  decision?: string | null;
+  actor?: string | null;
+  decidedAt?: string;
+  at?: string;
+  notes?: string | null;
+  evidence?: {
+    reasonCode?: string;
+    mustFix?: string[];
+    canRedrive?: boolean;
+    redriveStrategy?: string;
+  } | null;
+  latestWorkerResult?: {
+    evidence?: {
+      failureType?: string;
+      failureSummary?: string;
+    } | null;
+  } | null;
+}
+
+interface PullRequest {
+  taskId: string;
+  url?: string;
+  status?: string;
+  number?: number;
+}
+
+interface EventRecord {
+  taskId: string;
+  type: string;
+  at?: string;
+  summary?: string;
+  payload?: {
+    message?: string;
+    failureSummary?: string;
+  } | null;
 }
 
 const formatTime = (isoString?: string): string => {
@@ -29,7 +83,29 @@ const formatTime = (isoString?: string): string => {
   return `${hours}:${minutes}:${seconds}`;
 };
 
-export const TaskList: React.FC<{ tasks: Task[] }> = ({ tasks }) => {
+function extractFailureSummary(review: Review | null, events: EventRecord[]): string | null {
+  const reviewFailure = review?.latestWorkerResult?.evidence?.failureSummary?.trim();
+  if (reviewFailure) {
+    return reviewFailure;
+  }
+
+  const failedStatusEvent = [...events].find((event) => event.type === 'status_changed' && event.payload?.failureSummary);
+  return failedStatusEvent?.payload?.failureSummary?.trim() || null;
+}
+
+function extractLatestProgress(events: EventRecord[]) {
+  return [...events].find((event) => event.type === 'progress_reported') || null;
+}
+
+function canCancelTask(status?: string) {
+  return !['merged', 'failed', 'cancelled'].includes(String(status || '').toLowerCase());
+}
+
+export const TaskList: React.FC<{
+  tasks: Task[];
+  selectedTaskId?: string | null;
+  onSelect?: (taskId: string) => void;
+}> = ({ tasks, selectedTaskId, onSelect }) => {
   const { t } = useTranslation();
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
@@ -51,7 +127,8 @@ export const TaskList: React.FC<{ tasks: Task[] }> = ({ tasks }) => {
         {currentTasks.map(task => (
           <div
             key={task.id}
-            className="group relative p-4 border-l-[3px] border-transparent hover:border-cyan-400 hover:bg-white/5 transition-all duration-200"
+            className={`group relative p-4 border-l-[3px] transition-all duration-200 ${selectedTaskId === task.id ? 'border-cyan-400 bg-cyan-500/10' : 'border-transparent hover:border-cyan-400 hover:bg-white/5'} ${onSelect ? 'cursor-pointer' : ''}`}
+            onClick={() => onSelect?.(task.id)}
           >
             <div className="flex justify-between items-start mb-2">
               <div className="flex flex-col gap-2 flex-1 min-w-0">
@@ -110,6 +187,129 @@ export const TaskList: React.FC<{ tasks: Task[] }> = ({ tasks }) => {
         </div>
       )}
     </div>
+  );
+};
+
+export const TaskDetailsPanel: React.FC<{
+  task: Task | null;
+  assignment?: Assignment | null;
+  review?: Review | null;
+  pullRequest?: PullRequest | null;
+  events?: EventRecord[];
+  cancellingTaskId?: string | null;
+  onCancel?: (task: Task) => void;
+}> = ({ task, assignment, review, pullRequest, events = [], cancellingTaskId, onCancel }) => {
+  const { t } = useTranslation();
+
+  if (!task) {
+    return (
+      <div className="h-full border-l border-white/10 p-5 text-sm text-white/45">
+        {t('selectTaskHint')}
+      </div>
+    );
+  }
+
+  const latestProgress = extractLatestProgress(events);
+  const failureSummary = extractFailureSummary(review || null, events);
+  const failureType = review?.latestWorkerResult?.evidence?.failureType || null;
+  const reasonCode = review?.evidence?.reasonCode || null;
+  const mustFix = review?.evidence?.mustFix || [];
+  const canRedriveValue = typeof review?.evidence?.canRedrive === 'boolean'
+    ? (review?.evidence?.canRedrive ? t('yes') : t('no'))
+    : '--';
+  const workerId = assignment?.workerId || task.lastAssignedWorkerId || task.assignedWorkerId || '--';
+  const parentTaskId = task.continueFromTaskId || task.followUpOfTaskId || null;
+
+  return (
+    <aside className="border-l border-white/10 bg-black/10 p-5 flex flex-col gap-5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-300/60 font-semibold">{t('taskDetails')}</div>
+          <h3 className="mt-2 text-lg font-semibold text-white break-all">{task.title || task.id}</h3>
+          <div className="mt-2 text-xs font-mono text-white/45">{task.id}</div>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <Badge status={task.status}>{t(`status.${task.status}`)}</Badge>
+          {canCancelTask(task.status) && onCancel && (
+            <button
+              type="button"
+              onClick={() => onCancel(task)}
+              disabled={cancellingTaskId === task.id}
+              className="px-3 py-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-200 text-xs font-semibold uppercase tracking-wide transition-colors hover:bg-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {cancellingTaskId === task.id ? t('cancellingTask') : t('cancelTask')}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <div className="glass-card rounded-xl p-3">
+          <div className="text-[11px] uppercase tracking-wide text-white/45">{t('worker')}</div>
+          <div className="mt-1 font-mono text-white/80 break-all">{workerId}</div>
+        </div>
+        <div className="glass-card rounded-xl p-3">
+          <div className="text-[11px] uppercase tracking-wide text-white/45">{t('branch')}</div>
+          <div className="mt-1 font-mono text-white/80 break-all">{task.branchName || assignment?.branchName || '--'}</div>
+        </div>
+        <div className="glass-card rounded-xl p-3">
+          <div className="text-[11px] uppercase tracking-wide text-white/45">{t('repo')}</div>
+          <div className="mt-1 font-mono text-white/80 break-all">{task.repo || assignment?.repo || '--'}</div>
+        </div>
+        <div className="glass-card rounded-xl p-3">
+          <div className="text-[11px] uppercase tracking-wide text-white/45">{t('pool')}</div>
+          <div className="mt-1 font-mono text-white/80 break-all">{task.pool || assignment?.pool || '--'}</div>
+        </div>
+      </div>
+
+      <section className="glass-card rounded-xl p-4 space-y-2">
+        <div className="text-[11px] uppercase tracking-wide text-white/45">{t('lineage')}</div>
+        <div className="text-sm text-white/80">{t('parentTask')}: <span className="font-mono break-all">{parentTaskId || '--'}</span></div>
+        <div className="text-sm text-white/80">{t('continueFrom')}: <span className="font-mono break-all">{task.continueFromTaskId || '--'}</span></div>
+        <div className="text-sm text-white/80">{t('followUpOf')}: <span className="font-mono break-all">{task.followUpOfTaskId || '--'}</span></div>
+      </section>
+
+      <section className="glass-card rounded-xl p-4 space-y-2">
+        <div className="text-[11px] uppercase tracking-wide text-white/45">{t('latestReview')}</div>
+        <div className="text-sm text-white/80">{t('decision')}: <span className="font-mono">{review?.decision || '--'}</span></div>
+        <div className="text-sm text-white/80">{t('actor')}: <span className="font-mono break-all">{review?.actor || '--'}</span></div>
+        <div className="text-sm text-white/80">{t('updatedAtLabel')}: <span className="font-mono">{formatTime(review?.decidedAt || review?.at)}</span></div>
+        <div className="text-sm text-white/80">{t('reasonCode')}: <span className="font-mono break-all">{reasonCode || '--'}</span></div>
+        <div className="text-sm text-white/80">{t('canRedrive')}: <span className="font-mono">{canRedriveValue}</span></div>
+        <div className="text-sm text-white/80">{t('redriveStrategy')}: <span className="font-mono break-all">{review?.evidence?.redriveStrategy || '--'}</span></div>
+        <div className="text-sm text-white/80">{t('notes')}: <span className="break-all">{review?.notes || '--'}</span></div>
+        <div className="text-sm text-white/80">{t('mustFix')}: <span className="break-all">{mustFix.length > 0 ? mustFix.join('; ') : '--'}</span></div>
+      </section>
+
+      <section className="glass-card rounded-xl p-4 space-y-2">
+        <div className="text-[11px] uppercase tracking-wide text-white/45">{t('latestFailure')}</div>
+        <div className="text-sm text-white/80">{t('failureType')}: <span className="font-mono">{failureType || '--'}</span></div>
+        <div className="text-sm text-white/80">{t('failureSummary')}: <span className="break-all">{failureSummary || '--'}</span></div>
+        <div className="text-sm text-white/80">{t('latestProgress')}: <span className="break-all">{latestProgress?.payload?.message || latestProgress?.summary || '--'}</span></div>
+      </section>
+
+      <section className="glass-card rounded-xl p-4 space-y-2">
+        <div className="text-[11px] uppercase tracking-wide text-white/45">PR</div>
+        <div className="text-sm text-white/80">{t('statusLabel')}: <span className="font-mono">{pullRequest?.status || '--'}</span></div>
+        <div className="text-sm text-white/80">{t('prNumber')}: <span className="font-mono">{pullRequest?.number ?? '--'}</span></div>
+        <div className="text-sm text-white/80">{t('url')}: {pullRequest?.url ? <a className="text-cyan-300 underline break-all" href={pullRequest.url} target="_blank" rel="noreferrer">{pullRequest.url}</a> : '--'}</div>
+      </section>
+
+      <section className="glass-card rounded-xl p-4">
+        <div className="text-[11px] uppercase tracking-wide text-white/45 mb-3">{t('recentTaskEvents')}</div>
+        <div className="space-y-3">
+          {events.length > 0 ? events.slice(0, 5).map((event) => (
+            <div key={`${event.type}-${event.at || 'unknown'}`} className="border-l border-cyan-400/30 pl-3">
+              <div className="text-xs font-mono text-white/45">{formatTime(event.at)}</div>
+              <div className="text-sm text-white/85">{event.type}</div>
+              <div className="text-xs text-white/55 break-all">{event.summary || event.payload?.message || '--'}</div>
+            </div>
+          )) : (
+            <div className="text-sm text-white/45">{t('noRecentEvents')}</div>
+          )}
+        </div>
+      </section>
+    </aside>
   );
 };
 

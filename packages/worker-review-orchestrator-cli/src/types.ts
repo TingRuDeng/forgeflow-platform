@@ -49,11 +49,12 @@ export interface DispatchTaskInputOptions {
 }
 
 export interface WatchOptions {
-  dispatcherUrl: string;
+  dispatcherUrl?: string;
   taskId: string;
   intervalMs?: number;
   timeoutMs?: number;
   summary?: boolean;
+  stateDir?: string;
 }
 
 export interface WatchResult {
@@ -70,6 +71,12 @@ export interface WatchSummaryResult {
   status: string;
   attempts: number;
   elapsedMs: number;
+  latestResultEvidence?: InspectSummaryResult["latestResultEvidence"];
+  reviewState?: InspectSummaryResult["reviewState"];
+  canRedrive?: boolean | null;
+  latestProgressAt?: string | null;
+  latestProgressSummary?: string | null;
+  lineage?: InspectSummaryResult["lineage"];
 }
 
 export interface DecideOptions {
@@ -163,9 +170,25 @@ export interface InspectSummaryResult {
     status: string | null;
     number: number | null;
   } | null;
+  canRedrive: boolean | null;
+  latestProgressAt: string | null;
+  latestProgressSummary: string | null;
+  lineage: {
+    continueFromTaskId: string | null;
+    followUpOfTaskId: string | null;
+    parentTaskId: string | null;
+  };
 }
 
-export type RedriveFailureType = "worktree_mismatch" | "branch_mismatch" | "preflight_workspace_mismatch";
+export type RedriveFailureType =
+  | "worktree_mismatch"
+  | "branch_mismatch"
+  | "preflight_workspace_mismatch"
+  | "workspace_prepare_failed"
+  | "transient_gateway_timeout"
+  | "transient_model_3003"
+  | "artifact_remote_unverified"
+  | "prompt_contract_mismatch";
 
 export interface RedriveOptions {
   dispatcherUrl: string;

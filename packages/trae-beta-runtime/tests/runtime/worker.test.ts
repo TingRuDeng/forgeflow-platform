@@ -564,6 +564,50 @@ describe("runtime/worker", () => {
     runtime.stop();
   });
 
+  it("emits structured dispatcher phase events when reportEvent is available", async () => {
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      fetchTask: vi.fn(async () => ({ status: "no_task" })),
+      startTask: vi.fn(async () => ({})),
+      reportProgress: vi.fn(async () => ({})),
+      submitResult: vi.fn(async () => ({})),
+      reportEvent: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => ({})),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-001" } })),
+      sendChat: vi.fn(async () => ({ response: { text: "" } })),
+      releaseSession: vi.fn(async () => ({ data: { sessionId: "session-001", released: true } })),
+    };
+
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-events",
+      repoDir: "/tmp/project",
+      logger: { warn: vi.fn(), log: vi.fn() },
+      sleep: vi.fn(async () => undefined),
+      setIntervalImpl: vi.fn(() => ({}) as never),
+      clearIntervalImpl: vi.fn(),
+    });
+
+    await runtime.register();
+    await runtime.runOnce();
+
+    const eventCalls = dispatcherClient.reportEvent.mock.calls as unknown as Array<[string, { type?: string }]>;
+    const eventTypes = eventCalls.map((call) => call[1]?.type);
+    expect(eventTypes).toEqual(expect.arrayContaining([
+      "register_start",
+      "register_done",
+      "fetch_task_start",
+      "fetch_task_done",
+    ]));
+
+    runtime.stop();
+  });
+
   it("polls session status after a soft timeout and extracts stored response", async () => {
     const dispatcherClient = {
       register: vi.fn(async () => ({})),
@@ -2491,6 +2535,11 @@ describe("runtime/worker", () => {
       summary: expect.stringContaining("missing code-change evidence"),
       evidence: expect.objectContaining({
         failureType: "unknown",
+        blockers: expect.arrayContaining([
+          expect.objectContaining({
+            code: "invalid_success_report",
+          }),
+        ]),
       }),
     }));
     expect(result).toEqual({

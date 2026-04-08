@@ -33,9 +33,9 @@ export function saveRuntimeState(stateDir: string, state: RuntimeState): void {
 
 export type WorkerStatus = "idle" | "busy" | "offline" | "disabled";
 
-export type TaskStatus = "planned" | "ready" | "assigned" | "in_progress" | "review" | "merged" | "blocked" | "failed";
+export type TaskStatus = "planned" | "ready" | "assigned" | "in_progress" | "review" | "merged" | "blocked" | "failed" | "cancelled";
 
-export type AssignmentStatus = "pending" | "assigned" | "in_progress" | "review" | "merged" | "blocked" | "failed";
+export type AssignmentStatus = "pending" | "assigned" | "in_progress" | "review" | "merged" | "blocked" | "failed" | "cancelled";
 
 export type ReviewDecision = "pending" | "merge" | "block" | "rework" | "changes_requested";
 
@@ -325,6 +325,13 @@ export interface RecordWorkerEventInput {
   payload?: unknown;
 }
 
+export interface CancelTaskInput {
+  taskId: string;
+  actor: string;
+  reason?: string;
+  at?: string;
+}
+
 export interface ReconcileOptions {
   now?: string;
   heartbeatTimeoutMs?: number;
@@ -349,6 +356,7 @@ export interface DashboardSnapshot {
       review: number;
       merged: number;
       failed: number;
+      cancelled: number;
     };
   };
   metrics: {
@@ -1655,10 +1663,97 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
   return nextState;
 }
 
+export function cancelTask(state: RuntimeState, input: CancelTaskInput): RuntimeState {
+  const task = state.tasks.find((candidate) => candidate.id === input.taskId);
+  if (!task) {
+    throw new Error(`task not found: ${input.taskId}`);
+  }
+
+  if (task.status === "cancelled") {
+    return state;
+  }
+  if (task.status === "merged" || task.status === "failed") {
+    throw new Error(`task not cancellable from state: ${task.status}`);
+  }
+
+  const assignment = state.assignments.find((candidate) => candidate.taskId === input.taskId);
+  if (!assignment) {
+    throw new Error(`assignment not found for task: ${input.taskId}`);
+  }
+
+  const at = input.at ?? nowIso();
+  const fromStatus = task.status;
+  let nextState = appendEvent(state, {
+    taskId: input.taskId,
+    type: "status_changed",
+    at,
+    payload: {
+      from: fromStatus,
+      to: "cancelled",
+    },
+  });
+  nextState = appendEvent(nextState, {
+    taskId: input.taskId,
+    type: "task_cancelled",
+    at,
+    payload: {
+      actor: input.actor,
+      reason: input.reason ?? "",
+    },
+  });
+
+  nextState = {
+    ...nextState,
+    updatedAt: at,
+    tasks: upsertTask(nextState.tasks, {
+      ...task,
+      status: "cancelled",
+    }),
+    assignments: upsertAssignment(nextState.assignments, {
+      ...assignment,
+      status: "cancelled",
+      assignment: {
+        ...assignment.assignment,
+        status: "cancelled",
+      },
+    }),
+  };
+
+  const affectedWorkers: Worker[] = nextState.workers.map((worker) => {
+    if (worker.currentTaskId !== input.taskId) {
+      return worker;
+    }
+    return {
+      ...worker,
+      status: (worker.disabledAt ? "disabled" : "idle") as WorkerStatus,
+      currentTaskId: undefined,
+      lastHeartbeatAt: at,
+    };
+  });
+
+  return {
+    ...nextState,
+    workers: affectedWorkers,
+  };
+}
+
 export function recordWorkerEvent(state: RuntimeState, input: RecordWorkerEventInput): RuntimeState {
   const worker = state.workers.find((candidate) => candidate.id === input.workerId);
   if (!worker) {
-    throw new Error(`worker not found: ${input.workerId}`);
+    if (!input.type.startsWith("register_")) {
+      throw new Error(`worker not found: ${input.workerId}`);
+    }
+
+    const at = input.at ?? nowIso();
+    return appendEvent(state, {
+      taskId: input.taskId ?? "system",
+      type: input.type,
+      at,
+      payload: {
+        workerId: input.workerId,
+        ...(input.payload === undefined ? {} : { data: clone(input.payload) }),
+      },
+    });
   }
 
   const taskId = input.taskId ?? worker.currentTaskId ?? "system";
@@ -1740,6 +1835,7 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
         review: reconciledState.tasks.filter((task) => task.status === "review").length,
         merged: reconciledState.tasks.filter((task) => task.status === "merged").length,
         failed: reconciledState.tasks.filter((task) => task.status === "failed").length,
+        cancelled: reconciledState.tasks.filter((task) => task.status === "cancelled").length,
       },
     },
     metrics: {
