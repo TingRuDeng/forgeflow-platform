@@ -7,6 +7,9 @@ import { discoverTraeTarget, getDebuggerVersion } from "./trae-cdp-discovery.js"
 
 export const DEFAULT_START_TIMEOUT_MS = Number(process.env.TRAE_CDP_START_TIMEOUT_MS || 15000);
 export const DEFAULT_REMOTE_DEBUGGING_PORT = Number(process.env.TRAE_REMOTE_DEBUGGING_PORT || 9222);
+export const DEFAULT_CLEAN_RELAUNCH_DRAIN_TIMEOUT_MS = Number(
+  process.env.TRAE_CDP_CLEAN_RELAUNCH_DRAIN_TIMEOUT_MS || 5000,
+);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -163,6 +166,24 @@ export async function waitForTraeDebugger(options = {}) {
   throw new Error(`Trae did not expose a debugger target within ${timeoutMs}ms`);
 }
 
+export async function waitForDebuggerPortToDrain(options = {}) {
+  const getVersion = options.getVersion || getDebuggerVersion;
+  const sleepImpl = options.sleepImpl || sleep;
+  const timeoutMs = Number(options.timeoutMs || DEFAULT_CLEAN_RELAUNCH_DRAIN_TIMEOUT_MS);
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      await getVersion({ port: options.port });
+      await sleepImpl(250);
+    } catch {
+      return;
+    }
+  }
+
+  throw new Error(`Existing Trae debugger endpoint on port ${options.port} did not drain within ${timeoutMs}ms`);
+}
+
 export async function launchTraeForAutomation(options = {}) {
   const spawnImpl = options.spawnImpl || spawn;
   const titleContains = options.titleContains || [path.basename(String(options.projectPath || "").trim())].filter(Boolean);
@@ -205,6 +226,12 @@ export async function launchTraeForAutomation(options = {}) {
         appName,
         bundlePath: target.bundlePath,
         platform,
+        sleepImpl: options.sleepImpl,
+      });
+      await waitForDebuggerPortToDrain({
+        port: target.remoteDebuggingPort,
+        timeoutMs: options.cleanRelaunchDrainTimeoutMs,
+        getVersion: options.getVersion,
         sleepImpl: options.sleepImpl,
       });
     }

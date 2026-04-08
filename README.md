@@ -194,6 +194,12 @@ npm ls -g --depth=0 @tingrudeng/trae-beta-runtime
 - automation gateway `/ready` 可用
 - dispatcher `/health` 可用
 
+补充：
+
+- `forgeflow-trae-beta` 的 `start` / `restart` 读取的是 `~/.forgeflow-trae-beta/config.json`，不会因为你在别的 shell 目录执行命令就自动切换 `projectPath`
+- `restart launch` / `restart all` 现在会在 clean relaunch 时先等待旧 CDP 端口 drain，再拉起新的 Trae 进程，减少 launch 误判 ready、但 gateway `/ready` 随后失败的竞态
+- `stop worker` / `restart worker` / `stop all` / `restart all` 现在会 best-effort 把对应 worker 先标记为 dispatcher `offline`，避免页面在 heartbeat 租约未过期时继续显示在线
+
 它适合远程机器上的 Trae 无人值守执行，不替代控制平面仓库本身。
 
 如果本机还没有安装控制层 CLI，可在 forgeflow-platform 仓库内临时用 `node packages/worker-review-orchestrator-cli/dist/cli.js ...` 作为 fallback，但不应把仓库内 `dist` 当成默认长期入口。

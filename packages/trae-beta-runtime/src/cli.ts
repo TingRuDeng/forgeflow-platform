@@ -32,6 +32,12 @@ export interface CliDeps {
   listProcesses: typeof listManagedProcesses;
   stopProcesses: typeof stopManagedProcesses;
   stopLaunchCmd: typeof stopLaunch;
+  markWorkerOffline: (input: {
+    dispatcherUrl: string;
+    dispatcherToken?: string;
+    workerId: string;
+    reason: string;
+  }) => Promise<void>;
   updateCmd: typeof updateLocalCheckout;
   waitForRemoteDebuggingReady: (input: { remoteDebuggingPort: number }) => Promise<void>;
   waitForAutomationReady: (input: { automationUrl: string }) => Promise<void>;
@@ -483,6 +489,45 @@ async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<{ s
   }
 }
 
+async function postJsonWithTimeout(
+  url: string,
+  body: unknown,
+  options: {
+    timeoutMs?: number;
+    headers?: Record<string, string>;
+  } = {},
+): Promise<{ statusCode: number; body: unknown }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 2_000);
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        ...(options.headers || {}),
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+    const text = await response.text();
+    let parsed: unknown = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = text;
+    }
+
+    return {
+      statusCode: response.status,
+      body: parsed,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function waitForReadiness(
   label: string,
   probe: () => Promise<void>,
@@ -557,6 +602,56 @@ async function waitForDispatcherHealth(input: { dispatcherUrl: string }): Promis
   });
 }
 
+async function markWorkerOffline(input: {
+  dispatcherUrl: string;
+  dispatcherToken?: string;
+  workerId: string;
+  reason: string;
+}): Promise<void> {
+  const url = withPath(
+    input.dispatcherUrl,
+    `/api/workers/${encodeURIComponent(input.workerId)}/offline`,
+  );
+  const headers: Record<string, string> = {};
+  if (input.dispatcherToken) {
+    headers.Authorization = `Bearer ${input.dispatcherToken}`;
+  }
+  const { statusCode, body } = await postJsonWithTimeout(url, {
+    at: new Date().toISOString(),
+    reason: input.reason,
+  }, {
+    headers,
+  });
+  if (statusCode !== 200) {
+    const parsed = body as Record<string, unknown> | null;
+    const message = typeof parsed?.error === "string" ? parsed.error : `HTTP ${statusCode}`;
+    throw new Error(`unexpected response from ${url}: ${message}`);
+  }
+}
+
+async function bestEffortMarkWorkerOffline(
+  deps: CliDeps,
+  config: TraeBetaConfig | null,
+  logProgress: (message: string) => void,
+  reason: string,
+): Promise<void> {
+  if (!config) {
+    return;
+  }
+
+  try {
+    await deps.markWorkerOffline({
+      dispatcherUrl: requireConfigValue(config, "dispatcherUrl"),
+      dispatcherToken: config.dispatcherToken,
+      workerId: requireConfigValue(config, "workerId"),
+      reason,
+    });
+    logProgress(`worker: marked ${config.workerId} offline in dispatcher`);
+  } catch (error) {
+    logProgress(`worker: failed to mark ${config.workerId} offline in dispatcher: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {}) {
   const deps: CliDeps = {
     readConfig: readTraeBetaConfig,
@@ -569,6 +664,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
     listProcesses: listManagedProcesses,
     stopProcesses: stopManagedProcesses,
     stopLaunchCmd: stopLaunch,
+    markWorkerOffline,
     updateCmd: updateLocalCheckout,
     waitForRemoteDebuggingReady,
     waitForAutomationReady,
@@ -687,6 +783,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
     } = {};
 
     if (parsed.subcommand === "all") {
+      await bestEffortMarkWorkerOffline(deps, config, logProgress, "cli_stop_all");
       const workerResult = deps.stopProcesses("worker");
       results.worker = { stoppedPids: workerResult.stoppedPids, skippedPids: workerResult.skippedPids };
       const gatewayResult = deps.stopProcesses("gateway");
@@ -698,6 +795,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
       const gatewayResult = deps.stopProcesses("gateway");
       results.gateway = { stoppedPids: gatewayResult.stoppedPids, skippedPids: gatewayResult.skippedPids };
     } else if (parsed.subcommand === "worker") {
+      await bestEffortMarkWorkerOffline(deps, config, logProgress, "cli_stop_worker");
       const workerResult = deps.stopProcesses("worker");
       results.worker = { stoppedPids: workerResult.stoppedPids, skippedPids: workerResult.skippedPids };
     }
@@ -771,6 +869,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
     }
 
     if (parsed.subcommand === "worker") {
+      await bestEffortMarkWorkerOffline(deps, config, logProgress, "cli_restart_worker");
       const stoppedResult = deps.stopProcesses("worker");
       const result = deps.startWorkerCmd({
         repoDir: requireConfigValue(config, "projectPath"),
@@ -806,6 +905,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
 
       fs.mkdirSync(logFileDir, { recursive: true });
 
+      await bestEffortMarkWorkerOffline(deps, config, logProgress, "cli_restart_all");
       const stoppedWorkerResult = deps.stopProcesses("worker");
       const stoppedGatewayResult = deps.stopProcesses("gateway");
       const stoppedLaunchResult = deps.stopLaunchCmd();

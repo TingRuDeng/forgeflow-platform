@@ -102,6 +102,16 @@ Current endpoint families:
   - Register or refresh a generic worker.
 - `POST /api/workers/:workerId/heartbeat`
   - Update worker heartbeat.
+- `POST /api/workers/:workerId/offline`
+  - Best-effort operator/runtime path to mark a worker `offline` immediately instead of waiting for heartbeat lease expiry.
+  - Current request body may include:
+    - `at`
+    - `reason`
+  - Current mainline callers:
+    - `forgeflow-trae-beta stop worker`
+    - `forgeflow-trae-beta restart worker`
+    - `forgeflow-trae-beta stop all`
+    - `forgeflow-trae-beta restart all`
 - `GET /api/workers/:workerId/assigned-task`
   - Read-only lookup for the task currently bound to that worker.
   - Current GET response sets `Cache-Control: no-store`.
