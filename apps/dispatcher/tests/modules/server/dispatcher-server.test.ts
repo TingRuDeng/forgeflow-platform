@@ -1755,6 +1755,15 @@ describe("dispatcher server", () => {
     });
   });
 
+  it("rejects malformed JSON request bodies before route handling", async () => {
+    const mod = await import(serverModulePath);
+
+    await expect(mod.readJsonBody(Readable.from(["{broken"]))).rejects.toMatchObject({
+      code: "invalid_json_body",
+      status: 400,
+    });
+  });
+
   it("dashboard html redirects to the standalone console app", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import crypto from "node:crypto";
 import http from "node:http";
 import fs from "node:fs";
@@ -31,6 +30,7 @@ import {
   registerWorker,
   saveRuntimeState,
 } from "./runtime-state.js";
+import type { RuntimeState, Task } from "./runtime-state.js";
 import { handleTraeRoute } from "./runtime-dispatcher-server.js";
 import {
   filterLessonsForInjection,
@@ -55,6 +55,23 @@ let stateLockTimeoutCount = 0;
 const AUTH_WHITELIST_PATHS = ["/health"];
 
 type AuthMode = "legacy" | "token" | "open";
+type HeaderMap = Record<string, string>;
+type JsonResponse = {
+  status: number;
+  headers: HeaderMap;
+  json?: unknown;
+  text: string;
+  html?: string;
+};
+type DispatcherRequestInput = {
+  stateDir: string;
+  method: string;
+  pathname: string;
+  body?: Record<string, any>;
+  authHeader?: string;
+  clientAddress?: string;
+  internalCall?: boolean;
+};
 
 function useStructuredReads() {
   return process.env[STRUCTURED_READS_ENV] === "1";
@@ -164,11 +181,11 @@ function createAuthMiddleware(input: { method: string; pathname: string; authHea
   return null;
 }
 
-function nowIso() {
+function nowIso(): string {
   return formatLocalTimestamp();
 }
 
-function buildTraeWorktreeAndAssignmentDirs(stateDir, repoDir, task) {
+function buildTraeWorktreeAndAssignmentDirs(stateDir: string, repoDir: string | undefined, task: Task) {
   const baseWorktreeRoot = repoDir
     ? path.join(repoDir, ".worktrees")
     : path.join(stateDir, "..", "worktrees");
@@ -182,14 +199,14 @@ function buildTraeWorktreeAndAssignmentDirs(stateDir, repoDir, task) {
   return { worktree_dir: worktreeDir, assignment_dir: assignmentDir };
 }
 
-function normalizeDispatchBody(body) {
+function normalizeDispatchBody(body: any): any {
   if (!body || !Array.isArray(body.tasks) || !Array.isArray(body.packages)) {
     return body;
   }
 
   return {
     ...body,
-    tasks: body.tasks.map((task) => {
+    tasks: body.tasks.map((task: any) => {
       const targetWorkerId = task?.targetWorkerId ?? task?.target_worker_id ?? null;
       const followUpOfTaskId = task?.followUpOfTaskId ?? task?.follow_up_of_task_id ?? null;
       const workerChangeReason = task?.workerChangeReason ?? task?.worker_change_reason ?? null;
@@ -200,7 +217,7 @@ function normalizeDispatchBody(body) {
         ...(workerChangeReason ? { workerChangeReason } : {}),
       };
     }),
-    packages: body.packages.map((pkg) => {
+    packages: body.packages.map((pkg: any) => {
       const assignment = pkg?.assignment ?? {};
       const targetWorkerId = assignment?.targetWorkerId ?? assignment?.target_worker_id ?? null;
       const followUpOfTaskId = assignment?.followUpOfTaskId ?? assignment?.follow_up_of_task_id ?? null;
@@ -218,7 +235,7 @@ function normalizeDispatchBody(body) {
   };
 }
 
-function sendJson(response, statusCode, value, headers = {}) {
+function sendJson(response: http.ServerResponse, statusCode: number, value: unknown, headers: HeaderMap = {}): void {
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     ...headers,
@@ -226,7 +243,7 @@ function sendJson(response, statusCode, value, headers = {}) {
   response.end(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-function createJsonResponse(status, value, extraHeaders = {}) {
+function createJsonResponse(status: number, value: unknown, extraHeaders: HeaderMap = {}): JsonResponse {
   return {
     status,
     headers: {
@@ -238,13 +255,13 @@ function createJsonResponse(status, value, extraHeaders = {}) {
   };
 }
 
-function createNoStoreJsonResponse(status, value) {
+function createNoStoreJsonResponse(status: number, value: unknown): JsonResponse {
   return createJsonResponse(status, value, {
     "cache-control": "no-store",
   });
 }
 
-function classifyReviewDecisionError(error) {
+function classifyReviewDecisionError(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   if (
     message.startsWith("task not found:")
@@ -258,7 +275,7 @@ function classifyReviewDecisionError(error) {
   return 500;
 }
 
-function classifyTaskCancellationError(error) {
+function classifyTaskCancellationError(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   if (
     message.startsWith("task not found:")
@@ -272,7 +289,7 @@ function classifyTaskCancellationError(error) {
   return 500;
 }
 
-function classifyWorkerResultError(error) {
+function classifyWorkerResultError(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   if (
     message.startsWith("task not found:")
@@ -306,7 +323,7 @@ function classifyWorkerResultError(error) {
   return 500;
 }
 
-function classifyWorkerEventError(error) {
+function classifyWorkerEventError(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   if (message.startsWith("worker not found:")) {
     return 404;
@@ -322,11 +339,11 @@ function classifyWorkerEventError(error) {
   return 500;
 }
 
-function isPlainObject(value) {
+function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function validateReviewDecisionBody(body) {
+function validateReviewDecisionBody(body: unknown): Record<string, any> {
   if (!isPlainObject(body)) {
     throw Object.assign(new Error("review decision body must be a JSON object"), { status: 400 });
   }
@@ -373,7 +390,7 @@ function validateReviewDecisionBody(body) {
   };
 }
 
-function validateWorkerResultBody(body) {
+function validateWorkerResultBody(body: unknown): Record<string, any> {
   if (!isPlainObject(body)) {
     throw new Error("worker result body must be a JSON object");
   }
@@ -424,7 +441,7 @@ function validateWorkerResultBody(body) {
   return body;
 }
 
-function validateWorkerEventBody(body) {
+function validateWorkerEventBody(body: unknown): { type: string; taskId: string | null; at: string | undefined; payload: unknown } {
   if (!isPlainObject(body)) {
     throw new Error("worker event body must be a JSON object");
   }
@@ -446,7 +463,7 @@ function validateWorkerEventBody(body) {
   };
 }
 
-function createHtmlResponse(status, html, extraHeaders = {}) {
+function createHtmlResponse(status: number, html: string, extraHeaders: HeaderMap = {}): JsonResponse {
   return {
     status,
     headers: {
@@ -458,7 +475,7 @@ function createHtmlResponse(status, html, extraHeaders = {}) {
   };
 }
 
-function sendHtml(response, html, headers = {}) {
+function sendHtml(response: http.ServerResponse, html: string, headers: HeaderMap = {}): void {
   response.writeHead(200, {
     "content-type": "text/html; charset=utf-8",
     ...headers,
@@ -467,6 +484,8 @@ function sendHtml(response, html, headers = {}) {
 }
 
 class PayloadTooLargeError extends Error {
+  code: string;
+  status: number;
   constructor(message = "payload_too_large") {
     super(message);
     this.name = "PayloadTooLargeError";
@@ -475,8 +494,21 @@ class PayloadTooLargeError extends Error {
   }
 }
 
+class InvalidJsonBodyError extends Error {
+  code: string;
+  status: number;
+  constructor(message = "invalid_json_body") {
+    super(message);
+    this.name = "InvalidJsonBodyError";
+    this.code = "invalid_json_body";
+    this.status = 400;
+  }
+}
+
 class StateLockTimeoutError extends Error {
-  constructor(lockPath, timeoutMs) {
+  code: string;
+  status: number;
+  constructor(lockPath: string, timeoutMs: number) {
     super(`state lock timeout after ${timeoutMs}ms: ${lockPath}`);
     this.name = "StateLockTimeoutError";
     this.code = "state_lock_timeout";
@@ -496,22 +528,22 @@ function getStateLockStaleMs() {
   return Number(process.env.DISPATCHER_STATE_LOCK_STALE_MS || DEFAULT_STATE_LOCK_STALE_MS);
 }
 
-function sleepSync(ms) {
+function sleepSync(ms: number): void {
   if (ms <= 0) {
     return;
   }
   Atomics.wait(STATE_LOCK_SLEEP_BUFFER, 0, 0, ms);
 }
 
-export function getStateLockFilePath(stateDir) {
+export function getStateLockFilePath(stateDir: string): string {
   return path.join(stateDir, STATE_LOCK_FILENAME);
 }
 
-function isLockStale(lockPath, staleMs) {
+function isLockStale(lockPath: string, staleMs: number): boolean {
   try {
     const stats = fs.statSync(lockPath);
     return Date.now() - stats.mtimeMs >= staleMs;
-  } catch (error) {
+  } catch (error: any) {
     if (error?.code === "ENOENT") {
       return false;
     }
@@ -519,7 +551,7 @@ function isLockStale(lockPath, staleMs) {
   }
 }
 
-function acquireStateLock(stateDir) {
+function acquireStateLock(stateDir: string): () => void {
   fs.mkdirSync(stateDir, { recursive: true });
   const lockPath = getStateLockFilePath(stateDir);
   const timeoutMs = getStateLockTimeoutMs();
@@ -541,13 +573,13 @@ function acquireStateLock(stateDir) {
       return () => {
         try {
           fs.unlinkSync(lockPath);
-        } catch (error) {
+        } catch (error: any) {
           if (error?.code !== "ENOENT") {
             throw error;
           }
         }
       };
-    } catch (error) {
+    } catch (error: any) {
       if (fd !== null) {
         try {
           fs.closeSync(fd);
@@ -562,7 +594,7 @@ function acquireStateLock(stateDir) {
         try {
           fs.unlinkSync(lockPath);
           continue;
-        } catch (unlinkError) {
+        } catch (unlinkError: any) {
           if (unlinkError?.code === "ENOENT") {
             continue;
           }
@@ -578,31 +610,36 @@ function acquireStateLock(stateDir) {
   }
 }
 
-export async function readJsonBody(request, maxBytes = MAX_REQUEST_BODY_BYTES) {
-  const chunks = [];
+export async function readJsonBody(request: AsyncIterable<Buffer | string>, maxBytes = MAX_REQUEST_BODY_BYTES): Promise<Record<string, unknown>> {
+  const chunks: Uint8Array[] = [];
   let totalBytes = 0;
   for await (const chunk of request) {
     totalBytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
     if (totalBytes > maxBytes) {
       throw new PayloadTooLargeError();
     }
-    chunks.push(chunk);
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
 
   const payload = Buffer.concat(chunks).toString("utf8");
   if (!payload) {
     return {};
   }
-  return JSON.parse(payload);
+  try {
+    return JSON.parse(payload);
+  } catch {
+    throw new InvalidJsonBodyError();
+  }
 }
 
-function withState(stateDir, callback) {
+function withState<T>(stateDir: string, callback: (state: RuntimeState) => T): T {
   const releaseLock = acquireStateLock(stateDir);
   try {
     const state = loadRuntimeState(stateDir);
     const result = callback(state);
-    if (result?.state) {
-      saveRuntimeState(stateDir, result.state);
+    const nextState = (result as { state?: RuntimeState } | null | undefined)?.state;
+    if (nextState) {
+      saveRuntimeState(stateDir, nextState);
     }
     return result;
   } finally {
@@ -610,13 +647,13 @@ function withState(stateDir, callback) {
   }
 }
 
-function routeNotFound(response) {
+function routeNotFound(response: http.ServerResponse): void {
   sendJson(response, 404, {
     error: "not_found",
   });
 }
 
-function isMutationRequest(method, pathname) {
+function isMutationRequest(method: string, pathname: string): boolean {
   if (method !== "POST") {
     return false;
   }
@@ -647,7 +684,7 @@ function isMutationRequest(method, pathname) {
   return false;
 }
 
-function listBackupManifests(stateDir) {
+function listBackupManifests(stateDir: string): Array<{ name: string; path: string }> {
   const backupDir = path.join(stateDir, "backups");
   if (!fs.existsSync(backupDir)) {
     return [];
@@ -663,7 +700,7 @@ function listBackupManifests(stateDir) {
     }));
 }
 
-export function handleDispatcherHttpRequest(input) {
+export function handleDispatcherHttpRequest(input: DispatcherRequestInput): JsonResponse {
   const { stateDir, method, pathname, body = {}, authHeader, clientAddress, internalCall } = input;
 
   const authError = createAuthMiddleware({ method, pathname, authHeader, clientAddress, internalCall });
@@ -840,7 +877,7 @@ export function handleDispatcherHttpRequest(input) {
 
     if (method === "POST" && pathname === "/api/workers/register") {
       const result = withState(stateDir, (state) => {
-        const nextState = reconcileRuntimeState(registerWorker(state, body), {
+        const nextState = reconcileRuntimeState(registerWorker(state, body as any), {
           now: body.at,
         });
         return {
@@ -951,7 +988,7 @@ export function handleDispatcherHttpRequest(input) {
           status: "result_recorded",
           tasks: result.state.tasks,
         });
-      } catch (error) {
+      } catch (error: any) {
         return createJsonResponse(classifyWorkerResultError(error), {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -977,7 +1014,7 @@ export function handleDispatcherHttpRequest(input) {
           status: "event_recorded",
           events: result.state.events.slice(-5),
         });
-      } catch (error) {
+      } catch (error: any) {
         return createJsonResponse(classifyWorkerEventError(error), {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -1033,10 +1070,10 @@ export function handleDispatcherHttpRequest(input) {
         const taskId = decodeURIComponent(cancelTaskMatch[1]);
         return createJsonResponse(200, {
           status: "cancelled",
-          task: result.state.tasks.find((candidate) => candidate.id === taskId) ?? null,
+          task: result.state.tasks.find((candidate: Task) => candidate.id === taskId) ?? null,
           workers: result.state.workers,
         });
-      } catch (error) {
+      } catch (error: any) {
         return createJsonResponse(classifyTaskCancellationError(error), {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -1052,7 +1089,7 @@ export function handleDispatcherHttpRequest(input) {
 
         if (memoryStore && memoryStore.lessons && memoryStore.lessons.length > 0) {
           for (const assignment of dispatchResult.state.assignments) {
-            const task = dispatchResult.state.tasks.find((t) => t.id === assignment.taskId);
+            const task = dispatchResult.state.tasks.find((t: Task) => t.id === assignment.taskId);
             if (!task) continue;
 
             const criteria = {
@@ -1073,9 +1110,6 @@ export function handleDispatcherHttpRequest(input) {
                 relevantLessons,
               );
               assignment.contextMarkdown = injectedContext;
-              if (assignment.assignment) {
-                assignment.assignment.contextMarkdown = injectedContext;
-              }
             }
           }
         }
@@ -1110,7 +1144,7 @@ export function handleDispatcherHttpRequest(input) {
           status: "decision_recorded",
           tasks: result.state.tasks,
         });
-      } catch (error) {
+      } catch (error: any) {
         const status = typeof error?.status === "number" ? error.status : classifyReviewDecisionError(error);
         return createJsonResponse(status, {
           error: error instanceof Error ? error.message : String(error),
@@ -1133,7 +1167,7 @@ export function handleDispatcherHttpRequest(input) {
           handled: handleTraeRoute(state, { method, pathname, body }),
         }));
         return result.handled;
-      } catch (err) {
+      } catch (err: any) {
         console.error("[dispatcher-server] handleTraeRoute error:", err);
         const status = typeof err?.status === "number" ? err.status : 500;
         return createJsonResponse(status, { error: err instanceof Error ? err.message : String(err) });
@@ -1143,7 +1177,7 @@ export function handleDispatcherHttpRequest(input) {
     return createJsonResponse(404, {
       error: "not_found",
     });
-  } catch (error) {
+  } catch (error: any) {
     if (error?.code === "state_lock_timeout") {
       stateLockTimeoutCount += 1;
     }
@@ -1154,7 +1188,7 @@ export function handleDispatcherHttpRequest(input) {
   }
 }
 
-export async function startDispatcherServer(input) {
+export async function startDispatcherServer(input: { host?: string; port?: number; stateDir: string }) {
   const host = input.host ?? "127.0.0.1";
   const port = input.port ?? 8787;
   const stateDir = input.stateDir;
@@ -1179,10 +1213,16 @@ export async function startDispatcherServer(input) {
       } else {
         sendJson(response, handled.status, handled.json, handled.headers);
       }
-    } catch (error) {
+    } catch (error: any) {
       if (error?.code === "payload_too_large") {
         sendJson(response, error.status ?? 413, {
           error: "payload_too_large",
+        });
+        return;
+      }
+      if (error?.code === "invalid_json_body") {
+        sendJson(response, error.status ?? 400, {
+          error: "invalid_json_body",
         });
         return;
       }
@@ -1192,8 +1232,8 @@ export async function startDispatcherServer(input) {
     }
   });
 
-  await new Promise((resolve) => {
-    server.listen(port, host, resolve);
+  await new Promise<void>((resolve) => {
+    server.listen(port, host, () => resolve());
   });
 
   const address = server.address();
@@ -1204,7 +1244,7 @@ export async function startDispatcherServer(input) {
     host,
     port: resolvedPort,
     baseUrl: `http://${host}:${resolvedPort}`,
-    close: () => new Promise((resolve, reject) => {
+    close: () => new Promise<void>((resolve, reject) => {
       server.close((error) => {
         if (error) {
           reject(error);

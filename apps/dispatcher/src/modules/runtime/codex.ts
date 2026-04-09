@@ -7,6 +7,7 @@ import type {
   RuntimeVerificationInput,
   WorkerRuntime,
 } from "./types.js";
+import { sanitizeVerificationCommand } from "./types.js";
 
 export type CodexRuntimeRole = "control" | "worker";
 
@@ -30,7 +31,7 @@ function buildLaunchArgs(model: string | null, input: RuntimeLaunchInput): strin
 
 function buildVerificationCommands(input: RuntimeVerificationInput): RuntimeLaunchCommand[] {
   return input.commands.map((command) => ({
-    argv: ["zsh", "-lc", command],
+    argv: ["zsh", "-lc", sanitizeVerificationCommand(command)],
     cwd: input.cwd,
   }));
 }

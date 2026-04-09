@@ -100,4 +100,48 @@ describe("release-package CI gate", () => {
     expect(JSON.parse(fs.readFileSync(packageJsonPath, "utf8")).version).toBe("1.2.3");
     expect(fs.existsSync(fakePnpm.logPath)).toBe(false);
   });
+
+  it("rejects invalid npm dist-tags before publish", () => {
+    const tempDir = makeTempDir();
+    const packageDir = path.join(tempDir, "packages", "release-gate");
+    fs.mkdirSync(packageDir, { recursive: true });
+    const packageJsonPath = path.join(packageDir, "package.json");
+    fs.writeFileSync(
+      packageJsonPath,
+      `${JSON.stringify({
+        name: "@tingrudeng/release-gate",
+        version: "1.2.3",
+      }, null, 2)}\n`,
+    );
+
+    const fakePnpm = createFakePnpm(tempDir, packageDir);
+    const result = spawnSync(
+      "node",
+      [
+        releaseScriptPath,
+        "--package",
+        "release-gate",
+        "--bump",
+        "patch",
+        "--publish",
+        "--ci",
+        "--tag",
+        "beta;echo-pwned",
+      ],
+      {
+        cwd: tempDir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_ACTIONS: "true",
+          NPM_TRUSTED_PUBLISHING_ENABLED: "true",
+          ...fakePnpm.env,
+        },
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr || result.stdout).toMatch(/invalid dist-tag/i);
+    expect(JSON.parse(fs.readFileSync(packageJsonPath, "utf8")).version).toBe("1.2.3");
+  });
 });

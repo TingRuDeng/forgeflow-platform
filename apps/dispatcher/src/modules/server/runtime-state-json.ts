@@ -12,6 +12,15 @@ function stateFilePath(stateDir: string): string {
   return path.join(stateDir, "runtime-state.json");
 }
 
+function parseRuntimeStateJsonContent(content: string, sourceLabel: string): Partial<RuntimeState> {
+  try {
+    return JSON.parse(content) as Partial<RuntimeState>;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`failed to parse ${sourceLabel}: ${message}`);
+  }
+}
+
 export function createEmptyRuntimeState(): RuntimeState {
   return {
     version: 1,
@@ -34,7 +43,7 @@ export function loadRuntimeState(stateDir: string): RuntimeState {
     return createEmptyRuntimeState();
   }
 
-  const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const parsed = parseRuntimeStateJsonContent(fs.readFileSync(filePath, "utf8"), "runtime-state.json");
   return {
     ...createEmptyRuntimeState(),
     ...parsed,

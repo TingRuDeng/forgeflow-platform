@@ -7,12 +7,13 @@ import type {
   RuntimeVerificationInput,
   WorkerRuntime,
 } from "./types.js";
+import { sanitizeVerificationCommand } from "./types.js";
 
 const GEMINI_MODEL = "gemini-2.5-pro";
 
 function buildVerificationCommands(input: RuntimeVerificationInput): RuntimeLaunchCommand[] {
   return input.commands.map((command) => ({
-    argv: ["zsh", "-lc", command],
+    argv: ["zsh", "-lc", sanitizeVerificationCommand(command)],
     cwd: input.cwd,
   }));
 }

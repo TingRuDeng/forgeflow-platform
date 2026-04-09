@@ -127,6 +127,7 @@ Runtime behavior notes:
 
 - `forgeflow-trae-beta` always uses the saved config in `~/.forgeflow-trae-beta/config.json`; running the command from a different current working directory does not change the target project automatically
 - if you need to switch the managed business repo, rerun `forgeflow-trae-beta init --overwrite --project-path /abs/path/to/repo`
+- the recommended control-plane helper now binds dispatcher to `127.0.0.1` by default; if your Trae runtime talks to a remote control plane, set `--dispatcher-url` explicitly instead of assuming a non-loopback default bind
 - `stop worker` / `restart worker` / `stop all` / `restart all` now best-effort mark the configured worker `offline` in dispatcher before stopping the local process, so the dashboard does not stay falsely online during the heartbeat lease window
 - `restart launch` / `restart all` now wait for the old CDP debugger port to drain during clean macOS relaunch before spawning the new Trae app instance
 

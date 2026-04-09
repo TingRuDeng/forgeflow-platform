@@ -118,6 +118,7 @@ pnpm install
 - 基于脚本位置自动推导仓库根目录
 - 创建 `.forgeflow-dispatcher`
 - 启动 `scripts/run-dispatcher-server.js`
+- 默认把 dispatcher 绑定到 `127.0.0.1`
 - 输出当前 dispatcher 地址和 Trae 侧下一步命令提示
 
 如需覆盖默认值，可设置：
@@ -132,13 +133,14 @@ pnpm install
 ```bash
 pnpm install
 node scripts/run-dispatcher-server.js \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8787 \
   --state-dir .forgeflow-dispatcher
 ```
 
 说明：
 
+- 如果确实需要监听非 loopback 地址，必须显式传 `--host` 或设置 `FORGEFLOW_DISPATCHER_HOST`；不要再把 `0.0.0.0` 当成默认值。
 - 当前先放弃 `codex/gemini` 主线支持；当前保留的 `run-worker-daemon.js` 只服务 deferred 链路，不属于推荐启动路径。
 - 本地 `.orchestrator` drill 脚本已退役，控制层不再通过 `run-codex-control-flow.js` 触发旧闭环。
 - 控制平面启动后，当前推荐由远程 Trae 运行时机器执行 `forgeflow-trae-beta start all` 接入。
@@ -247,7 +249,7 @@ node scripts/release-package.js --package automation-gateway-core --bump prerele
 node scripts/release-package.js --package trae-beta-runtime --bump prerelease --tag beta --publish --ci
 ```
 
-该助手默认为 dry-run 模式，只有显式传入 `--publish` 才会真正修改 `package.json` 并发布到 npm。`--publish` 现在是 CI-only 门禁，本地直接执行会失败；推荐入口是 `.github/workflows/release.yml`，由 GitHub Actions 用 OIDC + provenance 执行发布；发布后的 OpenSSF Scorecard 改由独立的 `.github/workflows/release-scorecard.yml` 在 `Release` 成功后跟跑。
+该助手默认为 dry-run 模式，只有显式传入 `--publish` 才会真正修改 `package.json` 并发布到 npm。`--publish` 现在是 CI-only 门禁，本地直接执行会失败；推荐入口是 `.github/workflows/release.yml`，由 GitHub Actions 用 OIDC + provenance 执行发布；发布后的 OpenSSF Scorecard 改由独立的 `.github/workflows/release-scorecard.yml` 在 `Release` 成功后跟跑。发包前还会校验 npm `dist-tag`；包含 shell 元字符或非法字符的 tag 会在改版本号之前直接失败。
 
 自动发布还有两条硬门禁：
 
@@ -273,7 +275,7 @@ npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill p
 
 ```bash
 node scripts/run-dispatcher-server.js \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8787 \
   --state-dir .forgeflow-dispatcher
 ```
@@ -284,7 +286,7 @@ node scripts/run-dispatcher-server.js \
 # 默认 token 模式（推荐生产环境）
 export DISPATCHER_API_TOKEN="your-secret-token"
 node scripts/run-dispatcher-server.js \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8787 \
   --state-dir .forgeflow-dispatcher
 ```
@@ -305,7 +307,7 @@ dispatcher 状态锁说明：
 
 ```bash
 node scripts/run-dispatcher-server.js \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8787 \
   --state-dir .forgeflow-dispatcher \
   --persistence-backend json

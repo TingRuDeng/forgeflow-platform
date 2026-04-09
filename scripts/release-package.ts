@@ -2,7 +2,7 @@
 
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 interface ParsedArgs {
   [key: string]: string | boolean;
@@ -80,19 +80,40 @@ const shouldPublish = parsedArgs.publish === true;
 const isDryRun = !shouldPublish;
 const isCiExecution = parsedArgs.ci === true || process.env.GITHUB_ACTIONS === "true";
 const distTag = typeof parsedArgs.tag === "string" ? parsedArgs.tag : "";
+const DIST_TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
+
+function runCommand(command: string, commandArgs: string[], options: Parameters<typeof execFileSync>[2] = {}): string {
+  return execFileSync(command, commandArgs, {
+    encoding: "utf-8",
+    cwd: workspacePath,
+    ...options,
+  });
+}
+
+function validateDistTag(tag: string): void {
+  if (!tag) {
+    return;
+  }
+  if (!DIST_TAG_PATTERN.test(tag)) {
+    console.error(`Error: invalid dist-tag "${tag}"`);
+    process.exit(1);
+  }
+}
 
 if (shouldPublish && !isCiExecution) {
   console.error("Error: release-package publish is CI-only. Run it from GitHub Actions with --ci enabled.");
   process.exit(1);
 }
 
+validateDistTag(distTag);
+
 const workspacePath = resolve(process.cwd());
 let packagePath: string;
 
 try {
-  const pnpmListOutput = execSync(
-    `pnpm list --filter @tingrudeng/${packageName} --json --depth -1`,
-    { encoding: 'utf-8', cwd: workspacePath }
+  const pnpmListOutput = runCommand(
+    "pnpm",
+    ["list", "--filter", `@tingrudeng/${packageName}`, "--json", "--depth", "-1"],
   );
   const packages = JSON.parse(pnpmListOutput);
   if (!packages || packages.length === 0) {
@@ -233,9 +254,8 @@ try {
 
 console.log('\nBuilding package...');
 try {
-  execSync(`pnpm --filter @tingrudeng/${packageName} build`, {
+  runCommand("pnpm", ["--filter", `@tingrudeng/${packageName}`, "build"], {
     stdio: 'inherit',
-    cwd: workspacePath
   });
   console.log('✓ Build completed');
 } catch (error) {
@@ -245,14 +265,14 @@ try {
 
 console.log('\nPublishing to npm with Trusted Publishing (OIDC)...');
 try {
-  execSync(
-    `npm publish ${packagePath} --access public --provenance${distTag ? ` --tag ${distTag}` : ""}`,
-    {
+  const publishArgs = ["publish", packagePath, "--access", "public", "--provenance"];
+  if (distTag) {
+    publishArgs.push("--tag", distTag);
+  }
+  runCommand("npm", publishArgs, {
     stdio: 'inherit',
-    cwd: workspacePath,
     env: { ...process.env, GITHUB_ACTIONS: "true" }
-    }
-  );
+  });
   console.log(`✓ Successfully published @tingrudeng/${packageName}@${newVersion}`);
 } catch (error) {
   console.error('Error: Publish failed');

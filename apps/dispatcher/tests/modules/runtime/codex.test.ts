@@ -70,4 +70,13 @@ describe("Codex runtime", () => {
       output: "done",
     });
   });
+
+  it("rejects verification commands containing shell meta characters", () => {
+    const runtime = createCodexRuntime("worker");
+
+    expect(() => runtime.runVerification({
+      cwd: ".worktrees/task-2",
+      commands: ["pnpm test; rm -rf /tmp/nope"],
+    })).toThrow(/shell meta-characters/i);
+  });
 });

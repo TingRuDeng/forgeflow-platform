@@ -139,14 +139,14 @@ Dispatcher 支持三种认证模式，通过 `DISPATCHER_AUTH_MODE` 环境变量
 # 示例：使用默认 token 模式（推荐生产环境）
 export DISPATCHER_API_TOKEN="your-secret-token"
 node scripts/run-dispatcher-server.js \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8787 \
   --state-dir .forgeflow-dispatcher
 
 # 示例：使用 open 模式（本地开发）
 export DISPATCHER_AUTH_MODE="open"
 node scripts/run-dispatcher-server.js \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8787 \
   --state-dir .forgeflow-dispatcher
 ```
@@ -162,6 +162,7 @@ node scripts/run-dispatcher-server.js \
 通用行为：
 - `/health` 在所有模式下均可匿名访问
 - 认证失败返回 `401` + `{ "error": "unauthorized" }`
+- POST 路径收到非法 JSON body 时返回 `400` + `{ "error": "invalid_json_body" }`
 - dispatcher 当前会在状态目录下维护 `.runtime-state.lock`；锁竞争超时返回 `503`，调用方应重试。相关环境变量为 `DISPATCHER_STATE_LOCK_TIMEOUT_MS`、`DISPATCHER_STATE_LOCK_RETRY_MS`、`DISPATCHER_STATE_LOCK_STALE_MS`
 - 阶段二新增只读 `GET /api/metrics`，适合脚本直接获取 `queueDepth/reviewBacklog/assignment lag/retryRatePct`
 - `/api/metrics` 现在还会给出 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`failureCodes`、`reviewReasonCodes`
@@ -198,10 +199,12 @@ pnpm install
 ```bash
 pnpm install
 node /abs/path/to/forgeflow-platform/scripts/run-dispatcher-server.js \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8787 \
   --state-dir .forgeflow-dispatcher
 ```
+
+如果确实要让 dispatcher 监听非 loopback 地址，必须显式传 `--host` 或设置 `FORGEFLOW_DISPATCHER_HOST`，并同时配好 token 或反向代理，不要把 `0.0.0.0` 当成默认值。
 
 如果控制层需要标准 review/dispatch skill，可安装：
 

@@ -325,6 +325,7 @@ Examples:
 - worker mutation endpoints often return `{ status, ... }`
 - some Trae endpoints return `{ ok: true }`
 - not-found/error paths often return `{ error: ... }`
+- malformed JSON on POST now returns `400` with `{ error: "invalid_json_body" }`
 
 Trae automation gateway uses a different envelope:
 

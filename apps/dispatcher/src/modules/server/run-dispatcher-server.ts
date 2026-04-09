@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,8 +6,16 @@ import { startDispatcherServer } from "./dispatcher-server.js";
 
 const __filename = fileURLToPath(import.meta.url);
 
-export function parseArgs(argv) {
-  const args = {
+type DispatcherServerCliArgs = {
+  host: string;
+  port: number;
+  stateDir: string;
+  persistenceBackend: "json" | "sqlite";
+  help?: boolean;
+};
+
+export function parseArgs(argv: string[]): DispatcherServerCliArgs {
+  const args: DispatcherServerCliArgs = {
     host: "127.0.0.1",
     port: 8787,
     stateDir: ".forgeflow-dispatcher",
@@ -65,7 +71,7 @@ Usage:
 `);
 }
 
-export function applyPersistenceBackend(args) {
+export function applyPersistenceBackend(args: DispatcherServerCliArgs): void {
   process.env.RUNTIME_STATE_BACKEND = args.persistenceBackend;
 }
 
