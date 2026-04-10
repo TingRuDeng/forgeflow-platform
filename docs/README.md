@@ -71,10 +71,11 @@
 当前项目使用入口：
 
 1. `../README.md`
-2. `../scripts/start-control-plane.sh`
-3. `../packages/trae-beta-runtime/README.md`
-4. 如果需要维护已延期的 control-layer 或双 Codex 演练旧入口，再看 `archive/codex-control-usage.md` 和 `archive/two-machine-codex-drill.md`
-5. 再回到 `../scripts/`、`../packages/` 和实际命令验证
+2. 如果是源码仓运行，读 `../scripts/start-control-plane.sh`
+3. 如果是 install-and-run 控制面，读 `../packages/forgeflow-dispatcher/README.md`
+4. 远程 Trae worker 读 `../packages/trae-beta-runtime/README.md`
+5. 如果需要维护已延期的 control-layer 或双 Codex 演练旧入口，再看 `archive/codex-control-usage.md` 和 `archive/two-machine-codex-drill.md`
+6. 再回到 `../scripts/`、`../packages/` 和实际命令验证
 
 业务仓接入或模板调整：
 
@@ -160,7 +161,9 @@ Trae MCP fallback 维护：
   - `open`：完全开放模式，所有接口可匿名访问，适合本地开发
 - dispatcher 状态型 HTTP 路径现在共享跨进程 `.runtime-state.lock`；锁竞争超时会返回 `503`，陈旧锁会按 `DISPATCHER_STATE_LOCK_*` 环境变量自动回收。
 - dispatcher 默认 SQLite snapshot 现在按 revision 追加落盘，并携带 `checksum_sha256`；读取默认 fail-closed，只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 时才允许从 JSON 救援。
-- 控制中枢当前推荐入口是 `../scripts/start-control-plane.sh`，只负责拉起 Trae-first 的常驻 dispatcher 控制面。
+- 控制中枢当前推荐入口有两条：
+  - 源码仓运行：`../scripts/start-control-plane.sh`
+  - install-and-run runtime 包：`../packages/forgeflow-dispatcher/README.md`
 - `start-control-plane.sh` 现在默认把 dispatcher 绑定到 `127.0.0.1`；监听非 loopback 地址必须显式传 `FORGEFLOW_DISPATCHER_HOST` 或 `--host`。
 - `codex` / `gemini` 的 `worker daemon` 链路仍可用，但当前迭代策略是 Trae-first，相关扩展暂缓投入（deferred），不属于推荐启动路径。
 - `worker-daemon` / Trae runtime 现在只有在结果成功回写到 dispatcher 后才会对外呈现“完成”；`submitResult`、`git push`、自动 PR 创建失败都属于显式失败，而不是假完成。
@@ -213,6 +216,9 @@ Trae MCP fallback 维护：
 - `../packages/worker-review-orchestrator-cli/README.md`
   - 当前对外发布的 control-layer CLI 包入口。
   - 适合全局安装 `@tingrudeng/worker-review-orchestrator-cli` 后提供 `forgeflow-review-orchestrator` 命令。
+- `../packages/forgeflow-dispatcher/README.md`
+  - 当前对外发布的 dispatcher/control-plane runtime 包入口。
+  - 适合全局安装 `@tingrudeng/forgeflow-dispatcher` 后直接运行单机 SQLite dispatcher。
 - `../packages/trae-beta-runtime/README.md`
   - 当前对外发布的远程 Trae npm 包入口。
   - 适合远程机器用 `npm install -g @tingrudeng/trae-beta-runtime` 安装。

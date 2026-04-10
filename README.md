@@ -153,6 +153,20 @@ node scripts/run-dispatcher-server.js \
 
 ### 2. 安装控制层 skill
 
+当前仓库对外提供的 control-plane/operator 公开安装路径现在有两类：
+
+- dispatcher/control-plane runtime：`@tingrudeng/forgeflow-dispatcher`
+- control-layer review/dispatch CLI：`@tingrudeng/worker-review-orchestrator-cli`
+
+如果你只是想获得单机 dispatcher 能力，而不想 clone 源码仓库，优先安装 runtime 包：
+
+```bash
+npm install -g @tingrudeng/forgeflow-dispatcher
+forgeflow-dispatcher init
+forgeflow-dispatcher doctor
+forgeflow-dispatcher start
+```
+
 当前仓库对外提供的 control-layer skill 是 `worker-review-orchestrator`。它和控制层 CLI 是分开安装的两步路径：
 
 ```bash
@@ -194,7 +208,24 @@ git diff --check
 
 ### 3. 安装公开 npm 包
 
-当前公开发布的 npm 包是远程 Trae 运行时 `@tingrudeng/trae-beta-runtime`：
+当前公开发布的 npm 包包括：
+
+- 单机 dispatcher/control-plane runtime：`@tingrudeng/forgeflow-dispatcher`
+- 远程 Trae 运行时：`@tingrudeng/trae-beta-runtime`
+- control-layer CLI：`@tingrudeng/worker-review-orchestrator-cli`
+
+单机 dispatcher/control-plane runtime：
+
+```bash
+npm install -g @tingrudeng/forgeflow-dispatcher
+forgeflow-dispatcher init
+forgeflow-dispatcher doctor
+forgeflow-dispatcher start
+```
+
+它适合“不 clone 源码仓库，只安装包并运行 dispatcher”的场景。
+
+远程 Trae 运行时：
 
 ```bash
 npm install -g @tingrudeng/trae-beta-runtime
@@ -245,9 +276,11 @@ npm ls -g --depth=0 @tingrudeng/trae-beta-runtime
 
 ```bash
 # 预览发布（默认 dry-run，不会修改文件）
+node scripts/release-package.js --package forgeflow-dispatcher --bump prerelease
 node scripts/release-package.js --package trae-beta-runtime --bump prerelease
 
 # GitHub Actions 中实际发布
+node scripts/release-package.js --package forgeflow-dispatcher --bump prerelease --tag beta --publish --ci
 node scripts/release-package.js --package trae-beta-runtime --bump prerelease --tag beta --publish --ci
 ```
 
