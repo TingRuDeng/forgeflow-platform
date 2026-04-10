@@ -1,0 +1,47 @@
+{
+  "name": "@tingrudeng/forgeflow-dispatcher",
+  "description": "Self-contained ForgeFlow dispatcher/control-plane runtime CLI for single-node SQLite deployments.",
+  "version": "0.1.0-beta.1",
+  "private": false,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TingRuDeng/forgeflow-platform.git",
+    "directory": "packages/forgeflow-dispatcher"
+  },
+  "homepage": "https://github.com/TingRuDeng/forgeflow-platform/tree/main/packages/forgeflow-dispatcher",
+  "bugs": {
+    "url": "https://github.com/TingRuDeng/forgeflow-platform/issues"
+  },
+  "type": "module",
+  "bin": {
+    "forgeflow-dispatcher": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "PUBLISHING.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "forgeflow",
+    "dispatcher",
+    "control-plane",
+    "runtime",
+    "sqlite"
+  ],
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "prepack": "pnpm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.10"
+  }
+}

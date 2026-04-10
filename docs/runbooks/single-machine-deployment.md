@@ -21,11 +21,14 @@
 
 ## 2. 前置条件
 
-- 机器能运行 Node.js 与 `pnpm`
-- 仓库已完整 checkout
-- 已执行 `pnpm install`
+- 机器能运行 Node.js 22+
 - 已准备 dispatcher 认证 token
 - 对外暴露的 `8787` 端口已放进内网访问策略
+
+两种启动路径都支持：
+
+- install-and-run runtime 包：推荐给不想 clone 源码仓库的用户
+- 源码仓启动：推荐给开发、调试和仓库内联调
 
 推荐环境变量：
 
@@ -39,13 +42,24 @@ export FORGEFLOW_STATE_DIR="/abs/path/to/.forgeflow-dispatcher"
 
 推荐入口：
 
+### 路径 A：安装 runtime 包（推荐给外部用户）
+
+```bash
+npm install -g @tingrudeng/forgeflow-dispatcher
+forgeflow-dispatcher init
+forgeflow-dispatcher doctor
+forgeflow-dispatcher start
+```
+
+### 路径 B：源码仓启动（推荐给仓库开发）
+
 ```bash
 cd /abs/path/to/forgeflow-platform
 pnpm install
 ./scripts/start-control-plane.sh
 ```
 
-如需显式指定 host / port / state-dir：
+源码仓如需显式指定 host / port / state-dir：
 
 ```bash
 node scripts/run-dispatcher-server.js \
