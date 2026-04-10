@@ -173,6 +173,7 @@ npm install -g @tingrudeng/worker-review-orchestrator-cli
 
 ```bash
 pnpm lint
+pnpm coverage:critical
 pnpm verify:stage2
 git diff --check
 ```
@@ -188,6 +189,7 @@ git diff --check
 补充：
 
 - 仓库根目录现在提供了面向 `apps/dispatcher`、`packages/*`、`scripts/`、`services/*` 主源码路径的共享 `pnpm lint` / `pnpm lint:fix` 基线。
+- 仓库根目录现在提供 `pnpm coverage:critical`，会对 `apps/dispatcher`、`packages/trae-beta-runtime`、`packages/worker-review-orchestrator-cli` 生成最小关键覆盖率产物，并与 CI artifact 对齐。
 - `apps/console` 仍保留自己的本地 ESLint 配置，不在这条根级 lint 路径里统一处理。
 
 ### 3. 安装公开 npm 包

@@ -15,6 +15,12 @@ import {
 } from "./logger.js";
 import { recordTaskMetric } from "./metrics.js";
 import { getDispatcherAuthHeader } from "./dispatcher-auth.js";
+import {
+  buildWorkerEnv,
+  assertSafeBranchName,
+  shouldCreatePullRequest,
+  shouldRemoveWorktreeOnExit,
+} from "./worker-daemon-helpers.js";
 
 function resolveDispatcherDist(): { repoRoot: string; distPath: string } {
   const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
@@ -115,71 +121,6 @@ function runGit(args: string[], cwd: string): GitResult {
   };
 }
 
-function buildWorkerEnv(): NodeJS.ProcessEnv {
-  const defaultAllowlist = [
-    "PATH",
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "SHELL",
-    "LANG",
-    "LC_ALL",
-    "TERM",
-    "TMPDIR",
-    "OPENAI_API_KEY",
-    "GEMINI_API_KEY",
-    "FORGEFLOW_CODEX_MODEL",
-    "FORGEFLOW_EXEC_TIMEOUT_MS",
-    "FORGEFLOW_VERIFICATION_TIMEOUT_MS",
-    "FORGEFLOW_VERIFICATION_SHELL",
-    "FORGEFLOW_GIT_SSH_COMMAND",
-  ];
-  const allowlist = String(process.env.FORGEFLOW_WORKER_ENV_ALLOWLIST || defaultAllowlist.join(","))
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const env: NodeJS.ProcessEnv = {};
-  for (const key of allowlist) {
-    if (process.env[key] !== undefined) {
-      env[key] = process.env[key];
-    }
-  }
-  return env;
-}
-
-function assertSafeBranchName(repoDir: string, branchName: string, defaultBranch: string): void {
-  const normalizedBranch = branchName.trim();
-  if (!normalizedBranch) {
-    throw new Error("invalid branchName (empty)");
-  }
-  if (normalizedBranch !== branchName) {
-    throw new Error("invalid branchName (surrounding whitespace)");
-  }
-  if (normalizedBranch === defaultBranch) {
-    throw new Error(`refusing to push to default branch: ${defaultBranch}`);
-  }
-
-  const allowedPrefixes = String(process.env.FORGEFLOW_ALLOWED_PUSH_PREFIXES || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  if (allowedPrefixes.length > 0 && !allowedPrefixes.some((prefix) => normalizedBranch.startsWith(prefix))) {
-    throw new Error(`branchName not allowed by FORGEFLOW_ALLOWED_PUSH_PREFIXES: ${normalizedBranch}`);
-  }
-
-  ensureSuccess(
-    runGit(["check-ref-format", "--branch", normalizedBranch], repoDir),
-    `invalid git branch ref: ${normalizedBranch}`,
-  );
-}
-
-function shouldCreatePullRequest(): boolean {
-  return process.env.FORGEFLOW_WORKER_CREATE_PR === "1";
-}
-
-function shouldRemoveWorktreeOnExit(): boolean {
-  return process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT === "1";
-}
 
 interface TaskAssignment {
   taskId: string;
