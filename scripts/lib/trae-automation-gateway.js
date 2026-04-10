@@ -2,18 +2,8 @@ import http from "node:http";
 import { createTraeAutomationDriver } from "./trae-dom-driver.js";
 import { normalizeAutomationError } from "./trae-automation-errors.js";
 import { createSessionStore, DEFAULT_STATE_DIR } from "./trae-automation-session-store.js";
-class ApiError extends Error {
-    code;
-    statusCode;
-    details;
-    constructor(code, message, statusCode, details = {}) {
-        super(message);
-        this.name = "ApiError";
-        this.code = code;
-        this.statusCode = statusCode;
-        this.details = details;
-    }
-}
+import { logger } from "./logger.js";
+import { ApiError, normalizeApiError, isTimeoutError, parseDiscoveryFromQuery } from "./trae-automation-gateway-helpers.js";
 function writeJson(res, statusCode, payload) {
     res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(payload));
@@ -26,44 +16,13 @@ function writeSuccess(res, statusCode, data) {
     });
 }
 function writeError(res, error) {
-    const normalized = error instanceof ApiError
-        ? error
-        : new ApiError(error?.code || "INTERNAL_ERROR", error?.message || "Internal server error", 500, error?.details || {});
+    const normalized = normalizeApiError(error);
     writeJson(res, normalized.statusCode, {
         success: false,
         code: normalized.code,
         message: normalized.message,
         details: normalized.details || {},
     });
-}
-function isTimeoutError(error) {
-    if (!error) {
-        return false;
-    }
-    if (error.code === "AUTOMATION_RESPONSE_TIMEOUT") {
-        return true;
-    }
-    const message = error instanceof Error ? error.message : String(error?.message || "");
-    return /request timeout/i.test(message)
-        || /timed out waiting for trae to finish responding/i.test(message);
-}
-function parseDiscoveryFromQuery(query = {}) {
-    const titleContains = String(query.title_contains || "")
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean);
-    const urlContains = String(query.url_contains || "")
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean);
-    const discovery = {};
-    if (titleContains.length > 0) {
-        discovery.titleContains = titleContains;
-    }
-    if (urlContains.length > 0) {
-        discovery.urlContains = urlContains;
-    }
-    return Object.keys(discovery).length > 0 ? discovery : null;
 }
 async function readJsonBody(req) {
     return new Promise((resolve, reject) => {

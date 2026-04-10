@@ -283,9 +283,14 @@ Trae MCP fallback 维护：
     - `archive/release-v1.md`
     - `archive/phase-2-openclaw.md`
     - `archive/multi-repo-validation.md`
+- `CODE_REVIEW_REPORT.md`
+  - 2026-04-05 的历史审查快照。
+  - 可借鉴审查维度与部分工程观察，但不再代表当前阶段状态。
+  - 当前阶段结论优先查看 `external/5、权威文档执行状态回写（2026-04-08）.md` 与 `superpowers/plans/2026-04-09-stage3-execution-status-backfill.md`。
 
 ## Repo Maintenance Baseline
 
 - 仓库根目录现在提供共享的 `pnpm lint` / `pnpm lint:fix`，用于检查 `apps/dispatcher`、`packages/*`、`scripts/`、`services/*` 的主源码路径。
+- 仓库根目录同时提供 `pnpm coverage:critical`，用于为 `apps/dispatcher`、`packages/trae-beta-runtime`、`packages/worker-review-orchestrator-cli` 生成关键覆盖率产物，并与 CI artifact 对齐。
 - `apps/console` 继续使用自己的本地 `eslint.config.js`，暂不并入这条根级 lint 基线。
 - 根目录同时提供 `.editorconfig`，作为仓库级最小编辑器规范；这不是 Prettier 替代品，也不意味着当前仓库已经启用统一格式化门禁。

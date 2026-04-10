@@ -5,6 +5,7 @@ import { spawn, spawnSync, execSync } from "node:child_process";
 import { handleDispatcherHttpRequest } from "./dispatcher-server.js";
 import { prepareTaskWorktree, removeTaskWorktree, safeTaskDirName } from "./task-worktree.js";
 import { formatLocalTimestamp } from "./time.js";
+import { buildWorkerEnv, assertSafeBranchName, shouldCreatePullRequest, shouldRemoveWorktreeOnExit } from "./worker-daemon-helpers.js";
 function resolveDispatcherDist() {
     const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
     const distPath = path.join(repoRoot, "apps/dispatcher/dist/modules/server/runtime-glue-dispatcher-client.js");
@@ -77,63 +78,6 @@ function runGit(args, cwd) {
         stdout: (result.stdout || "").trim(),
         stderr: (result.stderr || "").trim(),
     };
-}
-function buildWorkerEnv() {
-    const defaultAllowlist = [
-        "PATH",
-        "HOME",
-        "USER",
-        "LOGNAME",
-        "SHELL",
-        "LANG",
-        "LC_ALL",
-        "TERM",
-        "TMPDIR",
-        "OPENAI_API_KEY",
-        "GEMINI_API_KEY",
-        "FORGEFLOW_CODEX_MODEL",
-        "FORGEFLOW_EXEC_TIMEOUT_MS",
-        "FORGEFLOW_VERIFICATION_TIMEOUT_MS",
-        "FORGEFLOW_VERIFICATION_SHELL",
-        "FORGEFLOW_GIT_SSH_COMMAND",
-    ];
-    const allowlist = String(process.env.FORGEFLOW_WORKER_ENV_ALLOWLIST || defaultAllowlist.join(","))
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean);
-    const env = {};
-    for (const key of allowlist) {
-        if (process.env[key] !== undefined) {
-            env[key] = process.env[key];
-        }
-    }
-    return env;
-}
-function assertSafeBranchName(repoDir, branchName, defaultBranch) {
-    const normalizedBranch = branchName.trim();
-    if (!normalizedBranch) {
-        throw new Error("invalid branchName (empty)");
-    }
-    if (normalizedBranch !== branchName) {
-        throw new Error("invalid branchName (surrounding whitespace)");
-    }
-    if (normalizedBranch === defaultBranch) {
-        throw new Error(`refusing to push to default branch: ${defaultBranch}`);
-    }
-    const allowedPrefixes = String(process.env.FORGEFLOW_ALLOWED_PUSH_PREFIXES || "")
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean);
-    if (allowedPrefixes.length > 0 && !allowedPrefixes.some((prefix) => normalizedBranch.startsWith(prefix))) {
-        throw new Error(`branchName not allowed by FORGEFLOW_ALLOWED_PUSH_PREFIXES: ${normalizedBranch}`);
-    }
-    ensureSuccess(runGit(["check-ref-format", "--branch", normalizedBranch], repoDir), `invalid git branch ref: ${normalizedBranch}`);
-}
-function shouldCreatePullRequest() {
-    return process.env.FORGEFLOW_WORKER_CREATE_PR === "1";
-}
-function shouldRemoveWorktreeOnExit() {
-    return process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT === "1";
 }
 function buildWorkerFailureBlocker(kind, code, message, details) {
     return {
