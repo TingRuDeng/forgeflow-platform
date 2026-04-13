@@ -73,9 +73,10 @@
 1. `../README.md`
 2. 如果是源码仓运行，读 `../scripts/start-control-plane.sh`
 3. 如果是 install-and-run 控制面，读 `../packages/forgeflow-dispatcher/README.md`
-4. 远程 Trae worker 读 `../packages/trae-beta-runtime/README.md`
-5. 如果需要维护已延期的 control-layer 或双 Codex 演练旧入口，再看 `archive/codex-control-usage.md` 和 `archive/two-machine-codex-drill.md`
-6. 再回到 `../scripts/`、`../packages/` 和实际命令验证
+4. 远程 Codex worker 读 `../packages/codex-beta-runtime/README.md`
+5. 远程 Trae worker 读 `../packages/trae-beta-runtime/README.md`
+6. 如果需要维护已延期的 control-layer 或双 Codex 演练旧入口，再看 `archive/codex-control-usage.md` 和 `archive/two-machine-codex-drill.md`
+7. 再回到 `../scripts/`、`../packages/` 和实际命令验证
 
 业务仓接入或模板调整：
 
@@ -179,6 +180,8 @@ Trae MCP fallback 维护：
 - dispatcher 任务状态机现在包含 `cancelled`，控制面和 console 都可以显式作废非终态任务。
 - 阶段三核心底座现在已进入主线：runtime state 增加显式 `leases[]`，SQLite 真相源同步维护 query-first 结构化投影，dispatcher 可选启用 structured reads、read-only 降级、Postgres / queue shadow write、SLO / burn-rate 与 DR 状态检查。
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
+- `codex` / `gemini` 多机执行主线是 `worker daemon`。
+- Codex 远程机器优先入口是 `@tingrudeng/codex-beta-runtime`。
 - Trae 的首选无人值守路径是 `automation gateway` + `automation worker`。
 - Trae MCP worker 已降级为 deprecated/fallback 接入。
 - review memory 已进入主线的 dispatch 注入路径，但仍不是完整知识库系统。
@@ -222,6 +225,9 @@ Trae MCP fallback 维护：
 - `../packages/trae-beta-runtime/README.md`
   - 当前对外发布的远程 Trae npm 包入口。
   - 适合远程机器用 `npm install -g @tingrudeng/trae-beta-runtime` 安装。
+- `../packages/codex-beta-runtime/README.md`
+  - 当前对外发布的远程 Codex npm 包入口。
+  - 适合远程机器用 `npm install -g @tingrudeng/codex-beta-runtime` 安装。
 - `../packages/automation-gateway-core/README.md`
   - 远程 Trae runtime 依赖的共享协议 helper 包。
   - 不是远程机器直接安装入口，主要用于发布和复用报告解析/任务 ID 校验逻辑。

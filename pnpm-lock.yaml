@@ -169,6 +169,18 @@ importers:
 
   packages/automation-gateway-core: {}
 
+  packages/codex-beta-runtime:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.13.4
+        version: 22.19.15
+      typescript:
+        specifier: ^5.8.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.8
+        version: 3.2.4(@types/node@22.19.15)(jiti@1.21.7)(jsdom@29.0.1)(lightningcss@1.32.0)
+
   packages/dispatcher-queue-core: {}
 
   packages/dispatcher-queue-postgres:
@@ -3371,7 +3383,7 @@ snapshots:
 
   '@types/pg@8.20.0':
     dependencies:
-      '@types/node': 24.12.2
+      '@types/node': 22.19.15
       pg-protocol: 1.13.0
       pg-types: 2.2.0
 
