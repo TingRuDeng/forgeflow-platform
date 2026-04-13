@@ -45,9 +45,11 @@ Behavior:
 
 Examples:
   # Dry-run: see what version would be published
+  node scripts/release-package.js --package codex-beta-runtime --bump prerelease
   node scripts/release-package.js --package trae-beta-runtime --bump prerelease
 
   # Actually publish
+  node scripts/release-package.js --package codex-beta-runtime --bump prerelease --publish
   node scripts/release-package.js --package trae-beta-runtime --bump prerelease --publish
 
   # Explicit dry-run

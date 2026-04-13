@@ -64,8 +64,9 @@
 1. `../README.md`
 2. `codex-control-usage.md`
 3. `../skills/worker-review-orchestrator/SKILL.md`
-4. `../packages/trae-beta-runtime/README.md`
-5. 再回到 `../scripts/`、`../packages/` 和实际命令验证
+4. `../packages/codex-beta-runtime/README.md`
+5. `../packages/trae-beta-runtime/README.md`
+6. 再回到 `../scripts/`、`../packages/` 和实际命令验证
 
 业务仓接入或模板调整：
 
@@ -115,6 +116,7 @@ Trae MCP fallback 维护：
 - Phase 2 持久化主线已切到 SQLite：dispatcher 默认写 `.forgeflow-dispatcher/runtime-state.db`，显式 `--persistence-backend json` 或 `RUNTIME_STATE_BACKEND=json` 才回退到 JSON。
 - dispatcher HTTP 面支持可选 token 认证：设置 `DISPATCHER_API_TOKEN` 后，除 `/health` 外接口需携带 `Authorization: Bearer <token>`。
 - `codex` / `gemini` 多机执行主线是 `worker daemon`。
+- Codex 远程机器优先入口是 `@tingrudeng/codex-beta-runtime`。
 - Trae 的首选无人值守路径是 `automation gateway` + `automation worker`。
 - Trae MCP worker 已降级为 deprecated/fallback 接入。
 - review memory 已进入主线的 dispatch 注入路径，但仍不是完整知识库系统。
@@ -145,6 +147,9 @@ Trae MCP fallback 维护：
 - `../packages/trae-beta-runtime/README.md`
   - 当前对外发布的远程 Trae npm 包入口。
   - 适合远程机器用 `npm install -g @tingrudeng/trae-beta-runtime` 安装。
+- `../packages/codex-beta-runtime/README.md`
+  - 当前对外发布的远程 Codex npm 包入口。
+  - 适合远程机器用 `npm install -g @tingrudeng/codex-beta-runtime` 安装。
 - `../prompts/dispatch-task-template.md`
   - 给 worker 派发代码任务时的通用骨架模板。
   - 适合和 `AGENT_STARTER_PROMPT.md` 叠加使用，而不是重复粘贴 starter 全文。

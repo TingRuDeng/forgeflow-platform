@@ -90,11 +90,12 @@
 
 ## 4. 运行时接入模式
 
-在当前主线路径里，推荐把“控制层启动”、“control-layer skill 安装”和“远程 Trae npm 包安装”分开看：
+在当前主线路径里，推荐把“控制层启动”、“control-layer skill 安装”和“远程 runtime npm 包安装”分开看：
 
 - 控制平面机器：从 `scripts/run-codex-control-flow.js` 进入中控启动
 - 控制层会话：按需安装 `worker-review-orchestrator` skill
 - 控制层机器：按需安装 `@tingrudeng/worker-review-orchestrator-cli`
+- 远程 Codex 机器：按需安装 `@tingrudeng/codex-beta-runtime`
 - 远程 Trae 机器：按需安装 `@tingrudeng/trae-beta-runtime`
 
 ### 4.1 本地最小闭环
@@ -111,9 +112,28 @@
 
 1. 启动 `dispatcher server`
 2. 把 `.orchestrator` 发布到 dispatcher
-3. 在各机器上启动 `run-worker-daemon.js`
+3. 在各机器上启动 worker runtime（脚本或 npm 包）
 
 推荐由 `scripts/run-codex-control-flow.js --dispatcher-url ...` 串起 dispatch 与发布。
+
+远程 Codex 机器推荐 npm 入口：
+
+```bash
+npm install -g @tingrudeng/codex-beta-runtime
+forgeflow-codex-beta init
+forgeflow-codex-beta doctor
+forgeflow-codex-beta start worker
+```
+
+脚本方式仅用于在 ForgeFlow 仓库内做开发或调试：
+
+```bash
+node scripts/run-worker-daemon.js \
+  --dispatcher-url http://127.0.0.1:8787 \
+  --worker-id codex-mac-mini \
+  --pool codex \
+  --repo-dir /abs/path/to/business-repo
+```
 
 #### Dispatcher HTTP 认证（可选）
 

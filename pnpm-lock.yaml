@@ -6,78 +6,17 @@ settings:
 
 importers:
 
-  .:
-    dependencies:
-      ws:
-        specifier: ^8.18.3
-        version: 8.20.0
+  packages/codex-beta-runtime:
     devDependencies:
       '@types/node':
-        specifier: ^22.13.10
+        specifier: ^22.13.4
         version: 22.19.15
       typescript:
         specifier: ^5.8.2
         version: 5.9.3
       vitest:
-        specifier: ^3.0.7
+        specifier: ^3.0.8
         version: 3.2.4(@types/node@22.19.15)
-      zod:
-        specifier: ^3.24.2
-        version: 3.25.76
-
-  apps/dispatcher:
-    dependencies:
-      '@forgeflow/provider-registry':
-        specifier: workspace:*
-        version: link:../../packages/provider-registry
-      '@forgeflow/result-contracts':
-        specifier: workspace:*
-        version: link:../../packages/result-contracts
-      '@forgeflow/task-schema':
-        specifier: workspace:*
-        version: link:../../packages/task-schema
-      zod:
-        specifier: ^3.24.2
-        version: 3.25.76
-
-  packages/mcp-github: {}
-
-  packages/mcp-repo-policy: {}
-
-  packages/mcp-review-gate: {}
-
-  packages/mcp-scheduler: {}
-
-  packages/mcp-trae-worker: {}
-
-  packages/provider-registry: {}
-
-  packages/result-contracts:
-    dependencies:
-      zod:
-        specifier: ^3.24.2
-        version: 3.25.76
-
-  packages/task-decomposer:
-    dependencies:
-      '@forgeflow/task-schema':
-        specifier: workspace:*
-        version: link:../task-schema
-
-  packages/task-schema:
-    dependencies:
-      '@forgeflow/result-contracts':
-        specifier: workspace:*
-        version: link:../result-contracts
-      zod:
-        specifier: ^3.24.2
-        version: 3.25.76
-
-  packages/trae-beta-runtime: {}
-
-  packages/worker-review-orchestrator-cli: {}
-
-  services/worktree-manager: {}
 
 packages:
 
@@ -641,21 +580,6 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
-  ws@8.20.0:
-    resolution: {integrity: sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
 snapshots:
 
   '@esbuild/aix-ppc64@0.27.4':
@@ -1098,7 +1022,3 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
-
-  ws@8.20.0: {}
-
-  zod@3.25.76: {}

@@ -17,7 +17,10 @@ ForgeFlow 是多智能体协作开发的控制平面仓库。当前主线以 `di
 - Trae MCP worker 仍保留，但现在只应视为交互式、人工值守或兼容性 fallback，不是首选未来路径。
 - 远程 Trae 任务执行已经通过 dispatcher 驱动的主链路验证；当前限制主要在串行度、流式输出与多实例协调，而不是“能否接入 dispatcher”。
 - `blocked + rework -> continuation` 已通过远程 Trae 真机联调验证：dispatcher 能生成 continuation 任务，Trae worker 会消费 `continuationMode=continue`、`continueFromTaskId` 和注入后的 `Rework Notes`。
-- 一个最小的远程机器运行时包已在 `packages/trae-beta-runtime/` 下进入 beta 安装路径，用来提供 launch/gateway/worker/update 命令；当前 npm 包版本是 `@tingrudeng/trae-beta-runtime@0.1.0-beta.37`，`update` 会直接自更新已安装包，不是推荐式卸载重装流程。
+- 远程机器 npm 运行时已覆盖两条路径：
+  - Trae 路径：`packages/trae-beta-runtime/`（`@tingrudeng/trae-beta-runtime@0.1.0-beta.37`）
+  - Codex 路径：`packages/codex-beta-runtime/`（`@tingrudeng/codex-beta-runtime@0.1.0-beta.1`）
+  - 两者的 `update` 都是直接自更新已安装包，不是推荐式卸载重装流程。
 
 ## 文档入口
 
@@ -85,7 +88,18 @@ npm install -g @tingrudeng/worker-review-orchestrator-cli
 
 ### 3. 安装公开 npm 包
 
-当前公开发布的 npm 包是远程 Trae 运行时 `@tingrudeng/trae-beta-runtime`：
+当前公开 npm 运行时分两类：
+
+Codex worker runtime（远程机器）：
+
+```bash
+npm install -g @tingrudeng/codex-beta-runtime
+forgeflow-codex-beta init
+forgeflow-codex-beta doctor
+forgeflow-codex-beta start worker
+```
+
+Trae runtime（远程机器）：
 
 ```bash
 npm install -g @tingrudeng/trae-beta-runtime
@@ -106,9 +120,11 @@ forgeflow-trae-beta start worker
 
 ```bash
 # 预览发布（默认 dry-run，不会修改文件）
+node scripts/release-package.js --package codex-beta-runtime --bump prerelease
 node scripts/release-package.js --package trae-beta-runtime --bump prerelease
 
 # 实际发布
+node scripts/release-package.js --package codex-beta-runtime --bump prerelease --publish
 node scripts/release-package.js --package trae-beta-runtime --bump prerelease --publish
 ```
 
@@ -160,6 +176,15 @@ node scripts/run-worker-daemon.js \
   --worker-id codex-mac-mini \
   --pool codex \
   --repo-dir /abs/path/to/business-repo
+```
+
+远程机器推荐的 Codex npm 入口：
+
+```bash
+npm install -g @tingrudeng/codex-beta-runtime
+forgeflow-codex-beta init
+forgeflow-codex-beta doctor
+forgeflow-codex-beta start worker
 ```
 
 启动 Trae 无人值守链路（推荐：npm 运行时）：
