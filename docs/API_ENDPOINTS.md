@@ -2,6 +2,50 @@
 
 > Verified HTTP surface overview for the current live runtime. This is not a field-complete contract catalog. For exact payload semantics, keep using `docs/contracts/*` and the live code.
 
+## 目的
+
+概览 dispatcher server 与 Trae automation gateway 的当前 HTTP 接口面、响应形态差异和已验证边界。
+
+## 适合读者
+
+适合修改 HTTP 路由、CLI client、console 调用、worker runtime 回写或接口文档的维护者和 AI 代理。
+
+## 一分钟摘要
+
+- dispatcher 和 Trae automation gateway 是两套不同 HTTP 面，不共享统一响应 envelope。
+- dispatcher 鉴权、read-only、structured reads 和 shadow mode 都在 server/runtime 层体现。
+- generic worker claim 已是 `POST /api/workers/:workerId/claim-task`，`GET assigned-task` 只读。
+- 本文件是接口概览，不是完整字段字典；精确契约看 `docs/contracts/*` 和测试。
+- 当前 read-only 文档必须带实现边界：它依赖 `isMutationRequest` 的覆盖范围。
+
+```yaml
+ai_summary:
+  authority: "dispatcher 与 Trae automation gateway 的已验证 HTTP 接口概览"
+  scope: "路由职责、认证、response shape、worker/review/Trae/query/SLO/DR 接口边界"
+  read_when:
+    - "新增或修改 HTTP 路由"
+    - "修改 worker runtime、CLI 或 console 的 API 调用"
+    - "判断 dispatcher 与 automation gateway 是否可共用 envelope"
+  verify_with:
+    - "apps/dispatcher/src/modules/server/dispatcher-server.ts:handleDispatcherHttpRequest"
+    - "apps/dispatcher/src/modules/server/dispatcher-server.ts:startDispatcherServer"
+    - "apps/dispatcher/tests/modules/server/dispatcher-server.test.ts"
+    - "packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts"
+  stale_when:
+    - "HTTP 路由、鉴权、请求校验、响应 envelope 或 gateway 实现发生变化"
+```
+
+## 权威边界
+
+本文件只描述已验证接口概览；字段级契约以 `docs/contracts/*` 和真实代码为准。状态转换看 `STATE_MACHINE.md`，持久化字段看 `DATABASE_SCHEMA.md`。
+
+## 如何验证
+
+- 核对 `apps/dispatcher/src/modules/server/dispatcher-server.ts:handleDispatcherHttpRequest` 的路由分支。
+- 核对 `apps/dispatcher/tests/modules/server/dispatcher-server.test.ts` 的接口测试。
+- 核对 `scripts/lib/trae-automation-gateway.ts` 与 `packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts` 的 gateway 路由差异。
+- 运行 `pnpm docs:validate` 检查本文结构和链接。
+
 ## Scope
 
 This document covers the HTTP surfaces that were verified directly in code:
@@ -144,6 +188,7 @@ Current endpoint families:
   - Keeps query endpoints available while rejecting mutation routes with:
     - HTTP `503`
     - `{ "error": "dispatcher is in read-only mode", "code": "read_only_mode" }`
+  - Current caveat: mutation detection is implemented by `dispatcher-server.ts:isMutationRequest`; until that matcher covers every state-changing route, operators must not treat this as a hard write freeze.
 - `DISPATCHER_SHADOW_MODE=shadow-write`
 - `DISPATCHER_POSTGRES_URL=postgres://...`
 - `DISPATCHER_QUEUE_SHADOW_MODE=shadow-write`

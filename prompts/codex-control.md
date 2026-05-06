@@ -20,7 +20,11 @@
 在控制平面仓中理解这些规则：
 
 1. `prompts/codex-control.md`
-2. `多智能体协作开发.md`
+2. `AGENTS.md`
+3. `docs/README.md`
+4. `docs/AI_CONTEXT.md`
+
+只有追溯旧 v1 设计背景时，才读取 `docs/archive/multi-agent-v1-handbook.md`。
 
 ## 你的职责边界
 

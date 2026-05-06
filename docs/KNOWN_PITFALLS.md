@@ -2,6 +2,49 @@
 
 Only code-backed or implementation-backed pitfalls belong here.
 
+## 目的
+
+记录已经被代码、测试、运行日志或历史反复问题验证过的高风险误读点。
+
+## 适合读者
+
+适合修改 dispatcher、worker、Trae runtime、发布流程、文档和运维 runbook 的维护者、AI 代理和审查者。
+
+## 一分钟摘要
+
+- 这里不写泛化最佳实践，只写本仓库当前仍会误导开发或运维的事实。
+- `scripts/lib/*` bridge、Trae 双 gateway、worktree、review memory、release 和 Stage 3 边界都容易被误读。
+- 近期审查确认 read-only、非 assignment lease、shadow failure 和源码 DR 脚本仍有实现边界。
+- 新坑点必须附带代码、测试、配置或可复现命令证据。
+
+```yaml
+ai_summary:
+  authority: "当前已验证的仓库坑点、局部例外和高风险误读"
+  scope: "dispatcher runtime、Trae automation、worktree、review memory、release、Stage 3 边界"
+  read_when:
+    - "准备修改高风险运行时路径"
+    - "审查 worker、dispatcher、release 或 DR 变更"
+    - "文档与代码看起来冲突时"
+  verify_with:
+    - "apps/dispatcher/src/modules/server/dispatcher-server.ts"
+    - "apps/dispatcher/src/modules/server/runtime-state.ts"
+    - "apps/dispatcher/src/modules/server/runtime-state-sqlite.ts"
+    - "scripts/backup-runtime-state.mjs"
+  stale_when:
+    - "列出的坑点被代码修复、路径迁移或 runbook 变更消除"
+```
+
+## 权威边界
+
+本文件只记录已验证坑点，不替代 `TECH_DEBT.md` 的债务治理，也不替代 `ARCHITECTURE.md` 的系统说明。某个坑点修复后，应在同一变更中删除或改写对应条目。
+
+## 如何验证
+
+- 用 `rg` 定位每个坑点提到的函数、路由、脚本或配置项。
+- 对 dispatcher 事实优先核对 `apps/dispatcher/src/modules/server/*` 和对应测试。
+- 对脚本事实核对 `scripts/*.mjs`、`scripts/lib/*.ts` 和 package runtime 源码。
+- 运行 `pnpm docs:validate` 检查本文结构和链接。
+
 ## 1. Do not mistake `apps/dispatcher/src/db/schema.ts` for the live dispatcher truth source
 
 Current mainline runtime state is loaded through `scripts/lib/dispatcher-state.js`, which bootstraps the dispatcher-owned implementation in `apps/dispatcher/dist/modules/server/runtime-state.js`. SQLite remains the default backend (`.forgeflow-dispatcher/runtime-state.db`), and JSON is only an explicit fallback/import path.
@@ -155,3 +198,38 @@ When debugging suspected delivery problems, check both:
 
 - dispatcher `/api/metrics` and recent events
 - worker-side logs / failed artifacts under `.worktrees/failed/`
+
+## 14. Read-only mode is not yet a hard write freeze
+
+`DISPATCHER_READ_ONLY_MODE=1` is enforced by `apps/dispatcher/src/modules/server/dispatcher-server.ts:isMutationRequest`.
+
+Current matcher coverage is not the same thing as “every state-changing route”. In particular, route patterns such as worker claim/start/result and review decisions must be checked against the actual matcher before relying on read-only mode for DR freeze.
+
+Do not describe read-only mode as a complete write barrier until the matcher and tests cover every mutation path.
+
+## 15. Stage 3 lease type support is wider than enforced ownership
+
+`apps/dispatcher/src/modules/server/leases.ts` defines `assignment | session | repo | branch`.
+
+Current enforced acquisition / release in `apps/dispatcher/src/modules/server/runtime-state.ts` is assignment-focused through `acquireAssignmentLease()` and `releaseAssignmentLease()`.
+
+Do not assume repo, branch, or session ownership is already a hard concurrency guard just because the schema and metrics can store those resource types.
+
+## 16. Source DR scripts and packaged dispatcher CLI have different argument shapes
+
+The source scripts use positional arguments:
+
+- `node scripts/backup-runtime-state.mjs <stateDir> [backupDir]`
+- `node scripts/restore-runtime-state.mjs <backupDir> <stateDir>`
+
+The packaged runtime CLI exposes flags such as `forgeflow-dispatcher backup --backup-dir ...`.
+
+Do not copy package CLI examples into source-script runbooks without checking the actual script parser.
+
+## 17. Shadow write failure is currently best-effort and quiet
+
+`apps/dispatcher/src/modules/server/runtime-state-sqlite.ts:saveRuntimeState` calls `syncRuntimeStateShadow()` asynchronously and catches errors without surfacing them to the HTTP response.
+
+`readRuntimeStateShadowHealth()` exists in `runtime-state-shadow.ts`, but current `/api/dr/status` only reports read-only, structured reads, shadow mode, SQLite projection health, and backup manifests.
+
+Do not treat a green SQLite write as proof that Postgres / queue shadow stores are healthy.

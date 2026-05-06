@@ -4,6 +4,49 @@
 
 仓库规则仍以 `../AGENTS.md` 为准；这里不重复定义 branch / merge 权限边界。
 
+## 目的
+
+说明主线贡献时何时需要 ADR、如何处理兼容性、契约变更和 dispatcher / worker 变更的额外检查。
+
+## 适合读者
+
+适合准备提交主线变更的人类维护者、AI 代理、代码审查者和 release 维护者。
+
+## 一分钟摘要
+
+- 本文件补充贡献检查，不替代 `../AGENTS.md`。
+- 影响公共契约、状态机、持久化或 agent/worker 权限时需要更严格的设计记录和验证。
+- dispatcher / worker 变更必须核对运行时入口、状态落账、失败语义和文档同步。
+- 最小验证仍以 `pnpm test`、`pnpm typecheck`、`git diff --check` 为基线。
+
+```yaml
+ai_summary:
+  authority: "贡献流程补充、ADR 触发条件、兼容性和契约变更检查"
+  scope: "主线变更、dispatcher/worker 变更、协议变更和最小验证"
+  read_when:
+    - "准备提交影响主链的变更"
+    - "判断是否需要 ADR 或契约同步"
+    - "审查 dispatcher / worker 变更风险"
+  verify_with:
+    - "AGENTS.md"
+    - "docs/DOC_SYNC_CHECKLIST.md"
+    - "pnpm test"
+    - "pnpm typecheck"
+  stale_when:
+    - "贡献流程、ADR 规则、验证命令或兼容性边界变化"
+```
+
+## 权威边界
+
+本文件只补充贡献约束。执行权限、分支、提交、推送和合并规则以 `../AGENTS.md` 为准；具体文档同步门禁以 `DOC_SYNC_CHECKLIST.md` 为准。
+
+## 如何验证
+
+- 检查 `../AGENTS.md` 是否仍是唯一规则入口。
+- 检查 `DOC_SYNC_CHECKLIST.md` 是否仍覆盖受影响文档。
+- 运行本次变更涉及的测试、`pnpm typecheck` 和 `git diff --check`。
+- 运行 `pnpm docs:validate` 检查本文结构和链接。
+
 ## 1. 什么时候必须补 ADR
 
 出现以下任一情况时，改动里必须附 ADR 或等价决策记录：

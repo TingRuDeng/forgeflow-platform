@@ -2,6 +2,49 @@
 
 这份文档只负责说明如何把业务仓接入 forgeflow-platform。仓库规则看 `../AGENTS.md`，文档导航看 `README.md`，当前主线能力与 Trae 路径定位看 `../README.md`，协议细节看 `contracts/*`。
 
+## 目的
+
+说明业务仓如何接入 ForgeFlow 控制平面、准备项目契约、运行最小 smoke，并选择当前推荐 runtime 路径。
+
+## 适合读者
+
+适合业务仓维护者、控制层 agent、平台接入者、远程 worker 操作者和接入流程审查者。
+
+## 一分钟摘要
+
+- 业务仓至少需要 `.orchestrator/project.yaml`、仓库规则文件、workflow 模板和默认分支约定。
+- 当前推荐 Trae-first；`codex/gemini` worker daemon 仍可用但处于 deferred 扩展状态。
+- 控制面启动、control-layer skill/CLI 安装和远程 runtime 安装要分开看。
+- 接入后用 `forgeflow-review-orchestrator watch --summary` / `inspect --summary` 和 smoke checklist 验证。
+
+```yaml
+ai_summary:
+  authority: "业务仓接入步骤、模板使用、运行时接入模式和最小 smoke 路径"
+  scope: "项目契约、workflow 模板、控制面启动、远程 runtime、认证和接入验证"
+  read_when:
+    - "把新业务仓接入 forgeflow-platform"
+    - "调整模板、认证或 runtime 安装说明"
+    - "排查业务仓 smoke 流程"
+  verify_with:
+    - "templates/project.yaml"
+    - "templates/AGENTS.md"
+    - "templates/workflows/ai-dispatch.yml"
+    - "packages/trae-beta-runtime/README.md"
+  stale_when:
+    - "业务仓模板、runtime 安装方式、认证模式或 smoke 流程变化"
+```
+
+## 权威边界
+
+本文件只负责业务仓接入，不负责仓库整体架构、接口字段或 agent 执行规则。规则看 `../AGENTS.md`，架构看 `ARCHITECTURE.md`，接口看 `API_ENDPOINTS.md`。
+
+## 如何验证
+
+- 核对 `templates/` 下项目契约和 workflow 模板是否仍存在。
+- 核对 `packages/trae-beta-runtime/README.md`、`packages/codex-beta-runtime/README.md` 和 `packages/forgeflow-dispatcher/README.md` 的安装入口。
+- 按 `e2e-smoke-checklist.md` 执行最小接入验证。
+- 运行 `pnpm docs:validate` 检查本文结构和链接。
+
 ## 1. 接入目标
 
 当前 v1 的接入目标是：

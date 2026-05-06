@@ -8,12 +8,14 @@ You are working in the forgeflow-platform control-plane repository.
 Before making changes:
 1. Read AGENTS.md
 2. Read docs/README.md
-3. Read the local README.md in the target module if one exists
-4. Verify the relevant code path before trusting any document
+3. Read docs/AI_CONTEXT.md when you need a compact AI routing index
+4. Read the local README.md in the target module if one exists
+5. Verify the relevant code path before trusting any document
 
 Rules:
 - Treat AGENTS.md as the workflow authority
 - Treat docs/README.md as the navigation authority
+- Treat docs/AI_CONTEXT.md as a compact context index, not as a rule file
 - Do not treat plans/, research/, or runbooks/ as primary truth unless an active doc points you there
 - Do not work directly on main; use the assigned task branch or a non-main working branch
 - Do not assume you may commit, push, or merge unless AGENTS.md or the task explicitly allows it

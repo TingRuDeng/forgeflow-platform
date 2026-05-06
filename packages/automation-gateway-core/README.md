@@ -4,7 +4,7 @@ Shared protocol helpers for ForgeFlow automation gateway runtimes.
 
 Current scope:
 - parse final report fields emitted by Trae automation tasks
-- detect placeholder/template reports before they are accepted as real output
+- detect template-marker reports before they are accepted as real output
 - validate whether a reported task id still matches the dispatcher task being processed
 
 This package is intentionally small:

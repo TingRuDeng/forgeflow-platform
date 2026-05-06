@@ -51,6 +51,11 @@
   - `leaseReclaimCount`
   - `activeLeases`
 
+当前边界：
+
+- `session` / `repo` / `branch` 已进入类型、存储、投影和指标表达，但当前代码只确认 assignment lease 接入强约束 acquisition / release。
+- 不要把这些 resource type 解读成已经完整落地的 repo / branch / session 并发治理。
+
 ## 3. SQLite Structured Projection
 
 当前 SQLite 真相源仍是 append-only `snapshots`。
@@ -110,7 +115,7 @@
 当前语义：
 
 - 查询接口继续可用
-- mutation 请求统一拒绝
+- `dispatcher-server.ts:isMutationRequest` 覆盖的 mutation 请求会被拒绝
 - 当前返回：
   - HTTP `503`
   - JSON `{ "error": "dispatcher is in read-only mode", "code": "read_only_mode" }`
@@ -120,6 +125,11 @@
 - 故障隔离
 - 恢复前冻结写入
 - DR drill 验证
+
+当前边界：
+
+- read-only 不是独立路由注册系统，而是依赖手写 matcher；matcher 漏掉的 state-changing 路由不会自动获得保护。
+- 在 matcher 和测试补齐前，运行手册不得把该开关描述为完整写冻结。
 
 ## 6. Shadow Modes
 
@@ -153,6 +163,7 @@
 当前边界：
 
 - shadow 同步失败不会阻断 SQLite 主链写入
+- shadow 同步失败当前不会通过 `/api/dr/status` 暴露为一等健康状态
 - Postgres 当前是 shadow projection / queue shadow，不是 primary runtime store
 
 ## 7. Completion Signals

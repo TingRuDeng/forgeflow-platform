@@ -1,5 +1,47 @@
 # Dispatcher Module Guide
 
+## 目的
+
+说明 `apps/dispatcher/` 的模块职责、真实入口、修改扩散范围和本地约束。
+
+## 适合读者
+
+适合修改 dispatcher domain、runtime foundation、server state、review memory、task worktree 或 dispatcher 测试的维护者和 AI 代理。
+
+## 一分钟摘要
+
+- `apps/dispatcher/` owns dispatcher-side domain code and TypeScript runtime foundations.
+- live runtime entry 仍经过 `scripts/lib/*` adapter / bootstrap。
+- 修改状态、接口或持久化时必须同步检查 `scripts/lib/*`、CLI、docs 和测试。
+- `src/db/schema.ts` 不是 live SQLite snapshot backend。
+
+```yaml
+ai_summary:
+  authority: "apps/dispatcher 模块职责、入口、扩散范围和局部约束"
+  scope: "dispatcher domain、runtime foundation、server modules、tests 和 scripts/lib bridge"
+  read_when:
+    - "修改 apps/dispatcher 代码前"
+    - "判断 dispatcher live path 是否只在 apps/dispatcher 内"
+    - "更新状态、接口、持久化或 worktree 行为"
+  verify_with:
+    - "src/modules/server/runtime-state.ts"
+    - "src/modules/server/dispatcher-server.ts"
+    - "tests/modules/server/runtime-state.test.ts"
+    - "../../scripts/lib/README.md"
+  stale_when:
+    - "dispatcher live adapter、runtime module ownership 或测试入口变化"
+```
+
+## 权威边界
+
+本文件只说明 `apps/dispatcher/` 局部规则，不替代仓库规则、架构文档或接口文档。全仓规则看 `../../AGENTS.md`，架构看 `../../docs/ARCHITECTURE.md`。
+
+## 如何验证
+
+- 核对 `src/modules/server/*` 与 `tests/modules/server/*`。
+- 涉及 live adapter 时核对 `../../scripts/lib/*`。
+- 运行 `pnpm --filter @forgeflow/dispatcher test` 和 `pnpm docs:validate`。
+
 ## Owns
 
 `apps/dispatcher/` owns the reusable dispatcher-side domain code, TypeScript runtime foundations, and dispatcher-focused tests in this repository.

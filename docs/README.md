@@ -2,6 +2,48 @@
 
 这份文档是仓库唯一的文档导航入口。它负责说明哪些文件是权威来源，哪些只是补充、计划或研究材料。
 
+## 目的
+
+提供人类和 AI 代理进入仓库时的唯一文档导航，明确哪些文档权威、哪些只是历史或参考材料。
+
+## 适合读者
+
+适合首次进入仓库的维护者、AI 代理、控制层调度者、worker 执行者、审查者和运维操作者。
+
+## 一分钟摘要
+
+- 规则先读 `../AGENTS.md`，导航读本文件，AI 快速上下文读 `AI_CONTEXT.md`。
+- 稳定知识层由架构、状态机、接口、持久化、坑点和技术债文档组成。
+- `plans/`、`research/`、`archive/`、`external/` 默认不是当前实现权威。
+- 修改文档后运行 `pnpm docs:validate`，收尾仍要检查 `DOC_SYNC_CHECKLIST.md`。
+
+```yaml
+ai_summary:
+  authority: "仓库文档导航、权威级别、阅读路径和非权威材料边界"
+  scope: "docs 目录入口、稳定知识层、任务读取路径、支持材料和归档规则"
+  read_when:
+    - "需要判断某份文档是否权威"
+    - "进入仓库后选择最小阅读路径"
+    - "新增、归档或重命名文档前"
+  verify_with:
+    - "AGENTS.md"
+    - "docs/AI_CONTEXT.md"
+    - "docs/DOC_SYNC_CHECKLIST.md"
+    - "scripts/validate_docs.py"
+  stale_when:
+    - "新增权威文档、AI 索引、模块 README 或归档旧文档"
+```
+
+## 权威边界
+
+本文件只负责文档导航和阅读路径，不定义执行规则或接口字段。执行规则以 `../AGENTS.md` 为准；接口、状态、持久化事实以对应稳定文档和代码为准。
+
+## 如何验证
+
+- 运行 `pnpm docs:validate` 检查必备标题、`ai_summary`、AI_CONTEXT 顺序、本地链接和模板残留。
+- 对支持材料路径，使用 `test -f <path>` 或 `rg --files` 确认文件真实存在。
+- 文档事实变更时，对照 `../apps/dispatcher/src/`、`../scripts/` 和 `../packages/` 的真实入口。
+
 ## Authority Map
 
 - `../AGENTS.md`
@@ -10,6 +52,9 @@
 - `DOC_SYNC_CHECKLIST.md`
   - 文档同步完成门禁。
   - 每个代码任务都要更新受影响文档，或明确写出 `no doc impact`。
+- `AI_CONTEXT.md`
+  - 面向 AI 的短上下文索引。
+  - 只放权威地图、任务读取路径、证据入口和高风险误读点，不替代本文件的导航职责。
 - `../README.md`
   - 当前主线能力、当前推荐使用入口与 Trae 路径定位。
   - 不是规则文件。
@@ -63,10 +108,11 @@
 
 1. 先读 `../AGENTS.md`
 2. 再读本文件
-3. 再读 `../README.md`
-4. 如果目标模块有本地 `README.md`，先读本地入口
-5. 按任务类型进入下面的专用入口
-6. 最后回到代码验证，不直接相信任何文档
+3. 需要快速给 AI 会话喂上下文时读 `AI_CONTEXT.md`
+4. 再读 `../README.md`
+5. 如果目标模块有本地 `README.md`，先读本地入口
+6. 按任务类型进入下面的专用入口
+7. 最后回到代码验证，不直接相信任何文档
 
 当前项目使用入口：
 
@@ -178,7 +224,7 @@ Trae MCP fallback 维护：
 - dashboard snapshot 现在附带阶段二控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`、`retryRatePct`、`branchProtectionHitCount`、`repoConcurrencySaturation`、`failureCodes`、`reviewReasonCodes`。
 - dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，同时输出 `retryRatePct`、失败码聚合和 review reason 聚合。
 - dispatcher 任务状态机现在包含 `cancelled`，控制面和 console 都可以显式作废非终态任务。
-- 阶段三核心底座现在已进入主线：runtime state 增加显式 `leases[]`，SQLite 真相源同步维护 query-first 结构化投影，dispatcher 可选启用 structured reads、read-only 降级、Postgres / queue shadow write、SLO / burn-rate 与 DR 状态检查。
+- 阶段三核心底座现在已进入主线：runtime state 增加显式 `leases[]`，SQLite 真相源同步维护 query-first 结构化投影，dispatcher 可选启用 structured reads、read-only 降级、Postgres / queue shadow write、SLO / burn-rate 与 DR 状态检查；当前强约束 lease 只确认接入 assignment，read-only 也仍受 `isMutationRequest` 覆盖范围限制。
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - `codex` / `gemini` 多机执行主线是 `worker daemon`。
 - Codex 远程机器优先入口是 `@tingrudeng/codex-beta-runtime`。
@@ -299,6 +345,9 @@ Trae MCP fallback 维护：
   - 2026-04-05 的历史审查快照。
   - 可借鉴审查维度与部分工程观察，但不再代表当前阶段状态。
   - 当前阶段结论优先查看 `external/5、权威文档执行状态回写（2026-04-08）.md` 与 `superpowers/plans/2026-04-09-stage3-execution-status-backfill.md`。
+- `archive/multi-agent-v1-handbook.md`
+  - 根目录旧版 v1 操作手册的归档副本。
+  - 只保留历史设计背景，不再作为 control-layer 或 worker 分派入口。
 
 ## Repo Maintenance Baseline
 

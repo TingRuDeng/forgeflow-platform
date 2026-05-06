@@ -20,7 +20,9 @@
 推荐入口：
 
 ```bash
-node scripts/backup-runtime-state.mjs --state-dir .forgeflow-dispatcher
+node scripts/backup-runtime-state.mjs \
+  .forgeflow-dispatcher \
+  .forgeflow-dispatcher/backups/<timestamp>
 ```
 
 该脚本当前会：
@@ -45,8 +47,8 @@ cp .forgeflow-dispatcher/runtime-state.db \
 
 ```bash
 node scripts/restore-runtime-state.mjs \
-  --state-dir .forgeflow-dispatcher \
-  --backup-dir .forgeflow-dispatcher/backups/<timestamp>
+  .forgeflow-dispatcher/backups/<timestamp> \
+  .forgeflow-dispatcher
 ```
 
 手工最小恢复：
@@ -91,3 +93,9 @@ export FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1
 ```bash
 node scripts/verify-stage3-dr.mjs
 ```
+
+当前边界：
+
+- `scripts/backup-runtime-state.mjs` 和 `scripts/restore-runtime-state.mjs` 是源码仓脚本，当前使用位置参数。
+- `forgeflow-dispatcher backup --backup-dir ...` / `restore --backup-dir ...` 是打包 runtime CLI 的参数形态，不要混用。
+- `scripts/verify-stage3-dr.mjs` 当前验证备份/恢复文件复制路径，不等价于真实 SQLite + WAL 完整恢复演练。

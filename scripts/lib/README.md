@@ -1,5 +1,48 @@
 # Runtime Scripts Guide
 
+## 目的
+
+说明 `scripts/lib/` 作为 live adapter / runtime glue 层的职责、入口文件、扩散范围和局部陷阱。
+
+## 适合读者
+
+适合修改源码仓启动入口、dispatcher bridge、worker daemon、Trae automation gateway / worker 或脚本 glue 的维护者和 AI 代理。
+
+## 一分钟摘要
+
+- `scripts/lib/` 仍是源码仓 live entry-adapter，不是纯历史目录。
+- 多个 dispatcher 路径会 bridge 到 `apps/dispatcher/dist`，必须检查 dist freshness 风险。
+- Trae automation gateway 的脚本实现和 packaged runtime 实现不完全一致。
+- 修改这里通常会扩散到 README、稳定文档、`apps/dispatcher` 和 runtime package。
+
+```yaml
+ai_summary:
+  authority: "scripts/lib live adapter、runtime glue 和局部修改陷阱"
+  scope: "dispatcher bridge、worker daemon、Trae automation gateway/worker、review-memory/task-worktree wrappers"
+  read_when:
+    - "修改 scripts/lib 或顶层 scripts 入口"
+    - "排查源码仓运行路径与 apps/dispatcher 行为差异"
+    - "同步 Trae gateway 脚本实现和 packaged runtime 实现"
+  verify_with:
+    - "dispatcher-server.ts"
+    - "dispatcher-state.ts"
+    - "worker-daemon.ts"
+    - "trae-automation-worker.ts"
+  stale_when:
+    - "脚本 live entry、bridge 目标、Trae gateway 或 worker daemon 入口变化"
+```
+
+## 权威边界
+
+本文件只说明 `scripts/lib/` 局部职责。dispatcher 状态真相源仍看 `../../apps/dispatcher/README.md` 和 `../../docs/ARCHITECTURE.md`；HTTP 面看 `../../docs/API_ENDPOINTS.md`。
+
+## 如何验证
+
+- 核对本目录同名 `.ts` 和 `.js` 入口是否仍对应。
+- 涉及 dispatcher bridge 时核对 `../../apps/dispatcher/src/modules/server/*`。
+- 涉及 Trae runtime 时核对 `../../packages/trae-beta-runtime/src/runtime/*`。
+- 运行 `pnpm docs:validate` 检查本文结构和链接。
+
 ## Owns
 
 `scripts/lib/` is the live entry-adapter and runtime-glue layer for ForgeFlow's active execution path.

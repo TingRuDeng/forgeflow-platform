@@ -2,6 +2,50 @@
 
 > Verified persistence overview. Dispatcher runtime state now defaults to SQLite, but the repository still uses a hybrid persistence model rather than one fully normalized database for every subsystem.
 
+## 目的
+
+说明当前持久化来源、dispatcher runtime state 形态、SQLite snapshot / projection、review memory 和 Trae session store。
+
+## 适合读者
+
+适合修改状态字段、SQLite backend、结构化投影、shadow path、review memory、session store 或恢复流程的维护者和 AI 代理。
+
+## 一分钟摘要
+
+- `.forgeflow-dispatcher/runtime-state.db` 是 dispatcher 默认真相源，JSON 只是显式 fallback / import。
+- `snapshots` 仍是权威 runtime snapshot，结构化表是 query projection。
+- `leases[]` schema 支持 assignment/session/repo/branch，但当前强约束使用只确认 assignment。
+- Postgres / queue shadow path 是 best-effort，不是 primary store。
+- `apps/dispatcher/src/db/schema.ts` 不是当前 live runtime persistence path。
+
+```yaml
+ai_summary:
+  authority: "持久化来源、运行时状态集合、SQLite snapshot/projection 和 shadow 边界"
+  scope: "dispatcher runtime state、review memory、Trae session store、SQLite projection、Postgres/queue shadow"
+  read_when:
+    - "修改 runtime state 字段或 SQLite 存储"
+    - "修改 review memory、session store 或 DR 备份恢复"
+    - "判断 schema 常量是否代表 live persistence"
+  verify_with:
+    - "apps/dispatcher/src/modules/server/runtime-state.ts"
+    - "apps/dispatcher/src/modules/server/runtime-state-sqlite.ts"
+    - "apps/dispatcher/src/modules/server/runtime-state-shadow.ts"
+    - "scripts/lib/trae-automation-session-store.ts"
+  stale_when:
+    - "状态集合、SQLite 表、shadow 表、session 字段或 fallback 语义变化"
+```
+
+## 权威边界
+
+本文件是持久化概览，不是完整数据库迁移脚本或所有字段字典。接口语义看 `API_ENDPOINTS.md`，状态转换看 `STATE_MACHINE.md`，最终字段以 runtime 代码和测试为准。
+
+## 如何验证
+
+- 核对 `apps/dispatcher/src/modules/server/runtime-state.ts` 的 `RuntimeState` 相关类型与状态集合。
+- 核对 `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts` 的 `initDb`、`saveRuntimeState` 和 projection 表写入。
+- 核对 `apps/dispatcher/src/modules/server/runtime-state-shadow.ts` 的 shadow 表和健康读取 helper。
+- 运行 `pnpm docs:validate` 检查本文结构和链接。
+
 ## 1. Active Persistence Sources
 
 Current active persistence sources verified in code:
@@ -202,12 +246,18 @@ Verified core lease fields include:
 - `reclaimReason`
 - `metadata`
 
-Verified active resource types:
+Schema-level resource types:
 
 - `assignment`
 - `session`
 - `repo`
 - `branch`
+
+Current enforced ownership path verified in code:
+
+- `assignment`
+
+`session` / `repo` / `branch` are present in the shared lease type, SQLite projection and metrics aggregation, but current `runtime-state.ts` acquisition / release helpers only wire assignment lease into task execution paths.
 
 ## 3. Review Memory Store
 
@@ -317,7 +367,7 @@ Current shadow semantics:
 
 - SQLite remains the authority
 - Postgres / queue writes are best-effort shadow projection
-- drift should be detected through projection / shadow health checks, not assumed away
+- drift should be detected through projection health first; `readRuntimeStateShadowHealth()` exists in code, but current `/api/dr/status` does not expose shadow counts yet
 
 This is intentionally not a fully normalized operational schema. The current design optimizes for:
 
