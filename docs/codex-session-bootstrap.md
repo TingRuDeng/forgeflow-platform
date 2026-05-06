@@ -6,6 +6,7 @@
 
 1. `../AGENTS.md`
 2. `README.md`
+3. `AI_CONTEXT.md`
 
 如果要给新会话一个最小入口，优先使用 `AGENT_STARTER_PROMPT.md`。
 
@@ -17,9 +18,10 @@
 先做这些事：
 1. 读取 forgeflow-platform 仓库中的 AGENTS.md
 2. 读取 forgeflow-platform 仓库中的 docs/README.md
-3. 如果任务涉及业务仓，再读取业务仓中的 .orchestrator/project.yaml、AGENTS.md、GEMINI.md（如果存在）
-4. 如果目标模块有本地 README.md，先读模块入口
-5. 再检查相关代码，不直接相信文档
+3. 需要快速路由上下文时读取 docs/AI_CONTEXT.md
+4. 如果任务涉及业务仓，再读取业务仓中的 .orchestrator/project.yaml、AGENTS.md、GEMINI.md（如果存在）
+5. 如果目标模块有本地 README.md，先读模块入口
+6. 再检查相关代码，不直接相信文档
 
 工作要求：
 - 先做需求理解和任务拆分

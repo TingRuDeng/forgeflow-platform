@@ -110,20 +110,21 @@ export DISPATCHER_READ_ONLY_MODE=1
 此时：
 
 - 查询接口继续可用
-- 写接口统一返回 `503 read_only_mode`
+- `dispatcher-server.ts:isMutationRequest` 覆盖的写接口返回 `503 read_only_mode`
+- 当前不能把该开关当作完整写冻结；DR 前仍需核对目标写路由是否被 matcher 覆盖
 
 备份与恢复：
 
 ```bash
-node scripts/backup-runtime-state.mjs --state-dir .forgeflow-dispatcher
-node scripts/restore-runtime-state.mjs --state-dir .forgeflow-dispatcher --backup-dir .forgeflow-dispatcher/backups/<timestamp>
+node scripts/backup-runtime-state.mjs .forgeflow-dispatcher .forgeflow-dispatcher/backups/<timestamp>
+node scripts/restore-runtime-state.mjs .forgeflow-dispatcher/backups/<timestamp> .forgeflow-dispatcher
 node scripts/verify-stage3-dr.mjs
 ```
 
 建议：
 
 - 发布前至少做一次 backup
-- 每季度跑一次 `verify-stage3-dr`
+- 每季度跑一次 `verify-stage3-dr`，但把它视为文件复制路径 smoke，不视为完整 SQLite 恢复证明
 - 先切 read-only，再做 restore
 
 ## 6. SLO / Burn-rate
@@ -169,7 +170,7 @@ node scripts/verify-stage3-dr.mjs
 
 阶段三核心底座当前已完成：
 
-- lease / lock
+- assignment lease / lock；session、repo、branch lease 当前主要是 schema / projection / metrics 表达
 - query-first SQLite projection
 - Postgres / queue shadow path
 - SLO / burn-rate

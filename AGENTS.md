@@ -1,5 +1,46 @@
 # ForgeFlow AGENTS
 
+## 目的
+
+定义本仓库内人类维护者、交互式控制层 agent、执行型 worker 和审查者的协作规则。
+
+## 适合读者
+
+适合所有进入 forgeflow-platform 仓库的维护者、AI 代理、worker 执行者和代码审查者。
+
+## 一分钟摘要
+
+- `dispatcher` 是任务、分配、状态流转和审计记录的真相源。
+- 规则入口只有本文件，文档导航入口只有 `docs/README.md`。
+- 默认从最新 `origin/main` 创建 `codex/` 前缀分支，不直接在 `main` 上开发。
+- 产出代码的 agent 必须提供分支、commit、push 和验证命令证据。
+- 文档与代码冲突时信任代码，并在同一变更里修正文档。
+
+```yaml
+ai_summary:
+  authority: "仓库级 agent 协作、权限、分支、提交、合并和验证规则"
+  scope: "所有人类与 AI 代理在 forgeflow-platform 内的执行边界"
+  read_when:
+    - "开始任何仓库任务前"
+    - "判断能否提交、推送、合并或分派 worker 前"
+  verify_with:
+    - "docs/README.md"
+    - "docs/DOC_SYNC_CHECKLIST.md"
+    - "git status --short --branch"
+  stale_when:
+    - "agent 角色、分支策略、提交权限或文档入口发生变化"
+```
+
+## 权威边界
+
+本文件只定义执行规则和协作边界，不复述完整架构、接口或数据库事实。架构事实看 `docs/ARCHITECTURE.md`，接口事实看 `docs/API_ENDPOINTS.md`，持久化事实看 `docs/DATABASE_SCHEMA.md`。
+
+## 如何验证
+
+- 检查 `docs/README.md` 是否仍把本文件列为唯一规则入口。
+- 检查 `docs/DOC_SYNC_CHECKLIST.md` 是否仍要求收尾时同步文档或写明 `no doc impact`。
+- 执行任务前用 `git status --short --branch` 核对当前分支与工作区状态。
+
 ## 项目定位
 
 ForgeFlow 是一个面向多智能体协作开发的控制平面仓库。

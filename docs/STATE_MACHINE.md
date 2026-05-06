@@ -2,6 +2,50 @@
 
 This document is the current implementation-oriented summary of dispatcher task flow. For API shapes, see `API_ENDPOINTS.md`. For persisted fields, see `DATABASE_SCHEMA.md`.
 
+## 目的
+
+说明 dispatcher task、assignment、review、continuation、worker result 和 dashboard metrics 的当前状态语义。
+
+## 适合读者
+
+适合修改任务状态机、worker claim/start/result、review decision、redrive/continuation 或控制层摘要的维护者和 AI 代理。
+
+## 一分钟摘要
+
+- `planned -> ready -> assigned -> in_progress -> review -> merged` 是主线成功流。
+- `failed`、`blocked`、`cancelled` 有不同 redrive / follow-up 语义，不能混用。
+- generic worker claim 只能通过 `POST /api/workers/:workerId/claim-task` 产生副作用。
+- worker result 中 dispatcher-owned metadata 会被 canonicalize，worker 不能覆盖。
+- 本文件描述状态语义，字段持久化看 `DATABASE_SCHEMA.md`。
+
+```yaml
+ai_summary:
+  authority: "dispatcher 状态机、review decision、continuation 和 worker result canonicalization 摘要"
+  scope: "task/assignment/review 状态、redrive 条件、follow-up 语义和阶段二 metrics"
+  read_when:
+    - "修改任务状态流转或 review decision"
+    - "修复 redrive、continuation、claim 或 result 回写问题"
+    - "判断 failed、blocked、cancelled 是否可继续"
+  verify_with:
+    - "apps/dispatcher/src/modules/server/runtime-state.ts"
+    - "apps/dispatcher/tests/modules/server/runtime-state.test.ts"
+    - "apps/dispatcher/tests/modules/server/dispatcher-server.test.ts"
+    - "packages/worker-review-orchestrator-cli/src/redrive.ts"
+  stale_when:
+    - "新增任务状态、assignment 状态、review decision 或 redrive 规则"
+```
+
+## 权威边界
+
+本文件只描述状态语义，不替代 `API_ENDPOINTS.md` 的 HTTP 路由说明或 `DATABASE_SCHEMA.md` 的字段说明。最终状态转换以 `runtime-state.ts` 和测试为准。
+
+## 如何验证
+
+- 核对 `apps/dispatcher/src/modules/server/runtime-state.ts` 中的 claim、begin、record result、review decision 和 cancel 函数。
+- 核对 `packages/worker-review-orchestrator-cli/src/redrive.ts` 的 redrive 判断。
+- 运行 `pnpm --filter @forgeflow/dispatcher test tests/modules/server/runtime-state.test.ts tests/modules/server/dispatcher-server.test.ts`。
+- 运行 `pnpm docs:validate` 检查本文结构和链接。
+
 ## Task States
 
 `planned -> ready -> assigned -> in_progress -> review -> merged`

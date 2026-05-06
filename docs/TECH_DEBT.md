@@ -2,6 +2,49 @@
 
 Only confirmed, still-active debt belongs here.
 
+## 目的
+
+记录已经确认仍存在、不能被误当成主线完成能力的技术债和迁移边界。
+
+## 适合读者
+
+适合规划阶段修复、代码审查、发布风险评估、文档同步和多 agent 任务拆分时阅读。
+
+## 一分钟摘要
+
+- 本文件只写仍然存在的债务，不写愿望清单。
+- 当前债务集中在 runtime bridge、持久化多形态、shadow 可观测性、Trae gateway 重复实现和 Stage 3 边界。
+- 近期审查确认 read-only matcher、非 assignment lease、DR drill 深度和手动发布版本落账仍需后续修复。
+- 修复债务时必须同步 `README.md`、`docs/README.md` 和相关稳定文档。
+
+```yaml
+ai_summary:
+  authority: "已确认仍存在的技术债、影响范围和迁移边界"
+  scope: "runtime bridge、persistence、shadow path、Trae gateway、文档系统、Stage 3 deferred 能力"
+  read_when:
+    - "拆分技术债修复任务"
+    - "判断某项能力是否已经完整落地"
+    - "审查文档是否过度声明实现成熟度"
+  verify_with:
+    - "apps/dispatcher/src/modules/server/runtime-state-sqlite.ts"
+    - "apps/dispatcher/src/modules/server/runtime-state-shadow.ts"
+    - "apps/dispatcher/src/modules/server/dispatcher-server.ts"
+    - ".github/workflows/release.yml"
+  stale_when:
+    - "债务项被代码修复、删除、归档或升级为正式能力"
+```
+
+## 权威边界
+
+本文件负责债务和边界，不负责操作步骤或具体接口字段。操作看 `runbooks/*`，接口看 `API_ENDPOINTS.md`，持久化看 `DATABASE_SCHEMA.md`，最终以代码为准。
+
+## 如何验证
+
+- 对每个债务项执行 `rg` 或读取对应代码入口，确认仍存在。
+- 对 release 债务核对 `.github/workflows/release.yml`。
+- 对 shadow / DR 债务核对 `runtime-state-shadow.ts`、`runtime-state-sqlite.ts` 和 `scripts/verify-stage3-dr.mjs`。
+- 运行 `pnpm docs:validate` 检查本文结构和链接。
+
 ## 1. Dispatcher compatibility wrappers still depend on `apps/dispatcher/dist` freshness
 
 Current situation:
@@ -103,3 +146,88 @@ Impact:
 Desired direction:
 
 - keep Wave 5 explicitly out of “already supported” docs until governance and compatibility policy are finalized
+
+## 7. Read-only mode still depends on an incomplete route classifier
+
+Current situation:
+
+- `DISPATCHER_READ_ONLY_MODE=1` is enforced through `dispatcher-server.ts:isMutationRequest`
+- the classifier is a hand-maintained list of POST routes
+- some state-changing route shapes can drift unless tests cover every mutation endpoint
+
+Impact:
+
+- DR or repair docs can overclaim a hard write freeze
+- operators may trust read-only mode more than the current implementation justifies
+
+Desired direction:
+
+- move mutation classification closer to the route table or make all write routes explicitly registered
+- add regression tests that prove every state-changing route returns `503 read_only_mode`
+
+## 8. Stage 3 lease model has schema breadth ahead of enforcement breadth
+
+Current situation:
+
+- `leases.ts` supports assignment/session/repo/branch resource types
+- `runtime-state.ts` currently wires acquisition/release helpers into assignment execution paths
+- session/repo/branch are represented in schema/projection/metrics but not yet hard ownership guards
+
+Impact:
+
+- docs and operators can overread Stage 3 as fully solving repo/branch/session concurrency
+
+Desired direction:
+
+- either implement concrete session/repo/branch lease acquisition points
+- or keep active docs explicit that those resource types are reserved / projection-ready rather than enforced
+
+## 9. Shadow path failures are not yet first-class operational state
+
+Current situation:
+
+- `saveRuntimeState()` writes SQLite snapshot/projection first
+- Postgres / queue shadow sync runs asynchronously
+- shadow errors are caught without being persisted as runtime events or exposed by `/api/dr/status`
+
+Impact:
+
+- shadow-write rollout can drift while the SQLite main path still appears healthy
+
+Desired direction:
+
+- surface shadow sync failures through runtime events or DR status
+- add an operator-visible shadow health check before treating shadow write as rollout-ready
+
+## 10. Source DR drill is file-copy validation, not full SQLite recovery proof
+
+Current situation:
+
+- `scripts/verify-stage3-dr.mjs` creates a text file named `runtime-state.db`
+- it verifies backup / restore file copying and manifest behavior
+- it does not exercise a real SQLite database with WAL integrity semantics
+
+Impact:
+
+- `pnpm verify:stage3` can pass while real database recovery behavior is still under-validated
+
+Desired direction:
+
+- extend the drill to create a real SQLite DB and validate restored queryability
+- keep the current script documented as a minimal copy-path smoke until then
+
+## 11. Manual release can publish a version not represented in git history
+
+Current situation:
+
+- `.github/workflows/release.yml` manual path runs `npm version --no-git-tag-version`
+- the changed package version is published from the runner without a corresponding commit or tag
+
+Impact:
+
+- a published npm version may not map cleanly to a repository commit containing the same `package.json` version
+
+Desired direction:
+
+- require a tagged commit for manual release versions
+- or make manual release publish an already-committed version only

@@ -17,3 +17,4 @@ Currently archived due to stale or superseded positioning:
 - `release-v1.md`
 - `phase-2-openclaw.md`
 - `multi-repo-validation.md`
+- `multi-agent-v1-handbook.md`

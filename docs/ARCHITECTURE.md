@@ -2,6 +2,50 @@
 
 > Verified overview of the current main path. This is not a full code catalog. Facts below were checked against the live script entrypoints under `scripts/` and `scripts/lib/`, the dispatcher TypeScript foundations under `apps/dispatcher/src/`, and the packaged Trae runtime under `packages/trae-beta-runtime/src/`.
 
+## 目的
+
+说明当前主线系统形态、模块边界、运行时所有权、关键数据流和非目标范围。
+
+## 适合读者
+
+适合修改 dispatcher、worker runtime、Trae 自动化链路、持久化路径或部署方式的维护者和 AI 代理。
+
+## 一分钟摘要
+
+- `dispatcher` 是任务和状态真相源，`scripts/lib/*` 仍是 live adapter / bootstrap 层。
+- `apps/dispatcher/src/modules/server/*` 承载 dispatcher TypeScript runtime foundation。
+- Trae 首选 automation gateway + automation worker；Trae MCP worker 是 fallback。
+- SQLite snapshot 是当前真相源，结构化投影和 Postgres / queue shadow 不是 primary store。
+- 阶段三 lease 通用结构已存在，但强约束路径当前只确认接入 assignment。
+
+```yaml
+ai_summary:
+  authority: "系统形态、模块边界、运行时所有权和关键数据流"
+  scope: "dispatcher、worker daemon、Trae automation、MCP thin-wrapper、持久化和审查边界"
+  read_when:
+    - "修改主链运行时或服务边界"
+    - "判断某个目录是否是运行时权威实现"
+    - "更新阶段二或阶段三架构说明"
+  verify_with:
+    - "scripts/lib/dispatcher-server.js"
+    - "scripts/lib/dispatcher-state.js"
+    - "apps/dispatcher/src/modules/server/runtime-state.ts"
+    - "packages/trae-beta-runtime/src/runtime/worker.ts"
+  stale_when:
+    - "live adapter、dispatcher runtime、Trae runtime 或持久化真相源发生变化"
+```
+
+## 权威边界
+
+本文件是架构概览，不是接口字段字典、数据库 schema 完整目录或操作 runbook。接口看 `API_ENDPOINTS.md`，持久化看 `DATABASE_SCHEMA.md`，操作步骤看 `runbooks/*`，最终事实以代码为准。
+
+## 如何验证
+
+- 对运行入口核对 `scripts/start-control-plane.sh`、`scripts/run-dispatcher-server.js` 和 `scripts/lib/dispatcher-server.js`。
+- 对状态真相源核对 `apps/dispatcher/src/modules/server/runtime-state.ts` 与 `runtime-state-sqlite.ts`。
+- 对 Trae 路径核对 `scripts/lib/trae-automation-worker.ts` 和 `packages/trae-beta-runtime/src/runtime/worker.ts`。
+- 运行 `pnpm docs:validate` 检查本文结构和链接。
+
 ## 1. System Shape
 
 forgeflow-platform is a control-plane repository for multi-agent development, not a single monolithic application.
@@ -142,7 +186,7 @@ Current stage-3 ownership additions:
 - active resource types include `assignment`, `session`, `repo`, `branch`
 - reconcile may reclaim expired leases and emit audit events
 - read paths can prefer structured projection when `DISPATCHER_STRUCTURED_READS=1`
-- write paths can be frozen by `DISPATCHER_READ_ONLY_MODE=1`
+- write paths can be partially blocked by `DISPATCHER_READ_ONLY_MODE=1`; current coverage depends on `dispatcher-server.ts:isMutationRequest`, so it is not documented here as a complete write freeze
 - SQLite writes may best-effort shadow to Postgres / queue, but those external stores are not the primary authority yet
 
 The control layer should not rewrite state arbitrarily. It should go through the dispatcher review flow.
