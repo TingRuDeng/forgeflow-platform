@@ -407,11 +407,6 @@ function rewriteStructuredProjection(
         id, resource_type, resource_id, owner_id, owner_token, acquired_at, renewed_at, expires_at, released_at, reclaim_reason, metadata_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const insertSession = db.prepare(`
-      INSERT INTO sessions (
-        session_id, owner_id, acquired_at, renewed_at, expires_at, released_at, metadata_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
     for (const lease of state.leases ?? []) {
       insertLease.run(
         lease.id,
@@ -426,17 +421,6 @@ function rewriteStructuredProjection(
         lease.reclaimReason ?? null,
         asJson(lease.metadata ?? null),
       );
-      if (lease.resourceType === "session") {
-        insertSession.run(
-          lease.resourceId,
-          lease.ownerId,
-          lease.acquiredAt,
-          lease.renewedAt,
-          lease.expiresAt,
-          lease.releasedAt ?? null,
-          asJson(lease.metadata ?? null),
-        );
-      }
     }
 
     db.exec("COMMIT;");

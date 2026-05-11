@@ -688,9 +688,6 @@ function countEventsByType(events: Event[], type: string): number {
 function countActiveLeasesByResourceType(leases: RuntimeLease[], at: string): Record<LeaseResourceType, number> {
   const counts: Record<LeaseResourceType, number> = {
     assignment: 0,
-    session: 0,
-    repo: 0,
-    branch: 0,
   };
 
   for (const lease of listActiveLeases(leases, at)) {
@@ -1110,7 +1107,7 @@ export function reconcileRuntimeState(state: RuntimeState, options: ReconcileOpt
     };
     for (const reclaimed of reclaimedLeases.reclaimed) {
       nextState = appendEvent(nextState, {
-        taskId: reclaimed.lease.resourceType === "assignment" ? reclaimed.lease.resourceId : "system",
+        taskId: reclaimed.lease.resourceId,
         type: "lease_reclaimed",
         at,
         payload: {

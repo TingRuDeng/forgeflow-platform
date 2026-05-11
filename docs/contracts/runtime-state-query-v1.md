@@ -37,9 +37,6 @@
 当前支持的 `resourceType`：
 
 - `assignment`
-- `session`
-- `repo`
-- `branch`
 
 当前主线强约束：
 
@@ -53,8 +50,8 @@
 
 当前边界：
 
-- `session` / `repo` / `branch` 已进入类型、存储、投影和指标表达，但当前代码只确认 assignment lease 接入强约束 acquisition / release。
-- 不要把这些 resource type 解读成已经完整落地的 repo / branch / session 并发治理。
+- `session` / `repo` / `branch` 当前不是有效 lease resource type。
+- 不要把 `repoConcurrencySaturation`、Trae session store 或 worktree branch 检查看成 repo / branch / session lease 强约束。
 
 ## 3. SQLite Structured Projection
 
@@ -71,6 +68,8 @@
 - `runtime_events`
 - `leases`
 - `sessions`
+
+`sessions` 表目前保留给 Trae 会话投影，不再由 `session` lease 自动写入。
 
 当前语义：
 

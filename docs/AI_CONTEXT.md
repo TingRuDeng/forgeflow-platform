@@ -39,7 +39,7 @@
 ## 高风险误读点
 
 - `scripts/lib/*` 仍是 live adapter / bootstrap 层，不能只改 `apps/dispatcher/src` 就假定运行入口同步。
-- `leases[]` 的通用类型包含 assignment/session/repo/branch，但当前代码只把 assignment lease 接入强约束路径。
+- `leases[]` 当前代码层已收窄为 assignment-only；repo/branch/session 并发治理尚未实现。
 - `DISPATCHER_READ_ONLY_MODE=1` 目前按 `isMutationRequest` 拦截，不能当成完整写冻结。
 - Postgres / queue shadow path 是 best-effort；SQLite snapshot 仍是真相源。
 - 源码脚本 `backup-runtime-state.mjs` / `restore-runtime-state.mjs` 使用位置参数，不等同于打包后的 `forgeflow-dispatcher backup --backup-dir` CLI。

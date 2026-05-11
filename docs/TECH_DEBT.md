@@ -165,22 +165,22 @@ Desired direction:
 - move mutation classification closer to the route table or make all write routes explicitly registered
 - add regression tests that prove every state-changing route returns `503 read_only_mode`
 
-## 8. Stage 3 lease model has schema breadth ahead of enforcement breadth
+## 8. Repo / branch / session lease guards 仍是后续工作
 
-Current situation:
+当前情况：
 
-- `leases.ts` supports assignment/session/repo/branch resource types
-- `runtime-state.ts` currently wires acquisition/release helpers into assignment execution paths
-- session/repo/branch are represented in schema/projection/metrics but not yet hard ownership guards
+- `leases.ts` 当前只支持 assignment resource type
+- `runtime-state.ts` 将 acquisition/release helper 接入 assignment 执行路径
+- repo/branch/session 当前不是活跃 lease resource type
 
-Impact:
+影响：
 
-- docs and operators can overread Stage 3 as fully solving repo/branch/session concurrency
+- repo/branch/session 并发尚未由 dispatcher lease ownership 保护
 
-Desired direction:
+期望方向：
 
-- either implement concrete session/repo/branch lease acquisition points
-- or keep active docs explicit that those resource types are reserved / projection-ready rather than enforced
+- 如果 worktree branch 冲突需要 dispatcher 层预防，优先实现具体 branch lease 获取点
+- repo/session 语义需要单独定义清楚，再加回 lease type model
 
 ## 9. Shadow path failures are not yet first-class operational state
 
