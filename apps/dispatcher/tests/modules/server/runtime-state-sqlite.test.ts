@@ -12,10 +12,13 @@ import {
   saveRuntimeState,
   sqliteStore,
 } from "../../../src/modules/server/runtime-state-sqlite.js";
+import { readRuntimeStateShadowWriteStatus } from "../../../src/modules/server/runtime-state-shadow.js";
 
 const { DatabaseSync } = await import("node:sqlite");
 
 const tempRoots: string[] = [];
+const originalShadowMode = process.env.DISPATCHER_SHADOW_MODE;
+const originalPostgresUrl = process.env.DISPATCHER_POSTGRES_URL;
 
 function makeTempDir(): string {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-sqlite-state-"));
@@ -26,6 +29,16 @@ function makeTempDir(): string {
 afterEach(() => {
   for (const tempDir of tempRoots.splice(0)) {
     fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+  if (originalShadowMode === undefined) {
+    delete process.env.DISPATCHER_SHADOW_MODE;
+  } else {
+    process.env.DISPATCHER_SHADOW_MODE = originalShadowMode;
+  }
+  if (originalPostgresUrl === undefined) {
+    delete process.env.DISPATCHER_POSTGRES_URL;
+  } else {
+    process.env.DISPATCHER_POSTGRES_URL = originalPostgresUrl;
   }
 });
 
@@ -118,6 +131,10 @@ function createTestState(): RuntimeState {
   };
 }
 
+async function waitForAsyncShadowWrite(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 50));
+}
+
 function readSnapshotState(stateDir: string): {
   journalMode: string;
   count: number;
@@ -187,6 +204,20 @@ describe("runtime-state-sqlite", () => {
 
     const dbPath = path.join(stateDir, "runtime-state.db");
     expect(fs.existsSync(dbPath)).toBe(true);
+  });
+
+  it("records shadow write failures for DR visibility", async () => {
+    const stateDir = makeTempDir();
+    process.env.DISPATCHER_SHADOW_MODE = "shadow-write";
+    process.env.DISPATCHER_POSTGRES_URL = "postgres://127.0.0.1:1/forgeflow";
+
+    saveRuntimeState(stateDir, createTestState());
+    await waitForAsyncShadowWrite();
+
+    const status = readRuntimeStateShadowWriteStatus();
+    expect(status.status).toBe("failed");
+    expect(status.configured).toBe(true);
+    expect(status.lastError).toBeDefined();
   });
 
   it("reloads runtime state from sqlite file", () => {

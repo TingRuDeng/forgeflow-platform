@@ -10,7 +10,7 @@ import {
   loadStructuredRuntimeState,
   readStructuredProjectionHealth,
 } from "./runtime-state-query-store.js";
-import { getRuntimeStateShadowMode } from "./runtime-state-shadow.js";
+import { getRuntimeStateShadowMode, readRuntimeStateShadowWriteStatus } from "./runtime-state-shadow.js";
 import {
   beginTaskForWorker,
   buildDashboardSnapshot,
@@ -30,7 +30,7 @@ import {
   registerWorker,
   saveRuntimeState,
 } from "./runtime-state.js";
-import type { RuntimeState, Task } from "./runtime-state.js";
+import type { RegisterWorkerInput, RuntimeState, Task } from "./runtime-state.js";
 import { handleTraeRoute } from "./runtime-dispatcher-server.js";
 import {
   filterLessonsForInjection,
@@ -390,6 +390,46 @@ function validateReviewDecisionBody(body: unknown): Record<string, any> {
   };
 }
 
+function validateWorkerRegisterBody(body: unknown): RegisterWorkerInput {
+  if (!isPlainObject(body)) {
+    throw Object.assign(new Error("worker register body must be a JSON object"), { status: 400 });
+  }
+
+  const workerId = typeof body.workerId === "string" ? body.workerId.trim() : "";
+  if (!workerId) {
+    throw Object.assign(new Error("worker register workerId is required"), { status: 400 });
+  }
+
+  const pool = typeof body.pool === "string" ? body.pool.trim() : "";
+  if (!pool) {
+    throw Object.assign(new Error("worker register pool is required"), { status: 400 });
+  }
+
+  const hostname = typeof body.hostname === "string" ? body.hostname.trim() : "";
+  if (!hostname) {
+    throw Object.assign(new Error("worker register hostname is required"), { status: 400 });
+  }
+
+  if (body.labels !== undefined && (!Array.isArray(body.labels) || body.labels.some((item) => typeof item !== "string"))) {
+    throw Object.assign(new Error("worker register labels must be an array of strings"), { status: 400 });
+  }
+  if (body.repoDir !== undefined && typeof body.repoDir !== "string") {
+    throw Object.assign(new Error("worker register repoDir must be a string"), { status: 400 });
+  }
+  if (body.at !== undefined && typeof body.at !== "string") {
+    throw Object.assign(new Error("worker register at must be a string"), { status: 400 });
+  }
+
+  return {
+    workerId,
+    pool,
+    hostname,
+    labels: body.labels ?? [],
+    repoDir: body.repoDir,
+    at: body.at,
+  };
+}
+
 function validateWorkerResultBody(body: unknown): Record<string, any> {
   if (!isPlainObject(body)) {
     throw new Error("worker result body must be a JSON object");
@@ -461,6 +501,12 @@ function validateWorkerEventBody(body: unknown): { type: string; taskId: string 
     at: body.at,
     payload: body.payload,
   };
+}
+
+function rethrowStateLockTimeout(error: any): void {
+  if (error?.code === "state_lock_timeout") {
+    throw error;
+  }
 }
 
 function createHtmlResponse(status: number, html: string, extraHeaders: HeaderMap = {}): JsonResponse {
@@ -638,7 +684,7 @@ function withState<T>(stateDir: string, callback: (state: RuntimeState) => T): T
     const state = loadRuntimeState(stateDir);
     const result = callback(state);
     const nextState = (result as { state?: RuntimeState } | null | undefined)?.state;
-    if (nextState) {
+    if (nextState && !isReadOnlyModeEnabled()) {
       saveRuntimeState(stateDir, nextState);
     }
     return result;
@@ -660,13 +706,13 @@ function isMutationRequest(method: string, pathname: string): boolean {
   if (pathname === "/api/workers/register") {
     return true;
   }
-  if (/^\/api\/workers\/[^/]+\/(heartbeat|offline)$/.test(pathname)) {
+  if (/^\/api\/workers\/[^/]+\/(heartbeat|offline|claim-task|start-task|result)$/.test(pathname)) {
     return true;
   }
   if (pathname === "/api/dispatches") {
     return true;
   }
-  if (pathname === "/api/reviews/decision") {
+  if (/^\/api\/reviews\/[^/]+\/decision$/.test(pathname) || pathname === "/api/reviews/decision") {
     return true;
   }
   if (/^\/api\/tasks\/[^/]+\/cancel$/.test(pathname)) {
@@ -824,6 +870,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
         readOnly: isReadOnlyModeEnabled(),
         structuredReads: useStructuredReads(),
         shadowMode: getRuntimeStateShadowMode(),
+        shadowWrite: readRuntimeStateShadowWriteStatus(),
         projectionHealth: readStructuredProjectionHealth(stateDir),
         backups: listBackupManifests(stateDir),
       });
@@ -876,18 +923,26 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     }
 
     if (method === "POST" && pathname === "/api/workers/register") {
-      const result = withState(stateDir, (state) => {
-        const nextState = reconcileRuntimeState(registerWorker(state, body as any), {
-          now: body.at,
+      try {
+        const validatedBody = validateWorkerRegisterBody(body);
+        const result = withState(stateDir, (state) => {
+          const nextState = reconcileRuntimeState(registerWorker(state, validatedBody), {
+            now: validatedBody.at,
+          });
+          return {
+            state: nextState,
+          };
         });
-        return {
-          state: nextState,
-        };
-      });
-      return createJsonResponse(200, {
-        status: "registered",
-        workers: result.state.workers,
-      });
+        return createJsonResponse(200, {
+          status: "registered",
+          workers: result.state.workers,
+        });
+      } catch (error: any) {
+        rethrowStateLockTimeout(error);
+        return createJsonResponse(error?.status ?? 500, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     const heartbeatMatch = method === "POST"
@@ -989,6 +1044,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
           tasks: result.state.tasks,
         });
       } catch (error: any) {
+        rethrowStateLockTimeout(error);
         return createJsonResponse(classifyWorkerResultError(error), {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -1015,6 +1071,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
           events: result.state.events.slice(-5),
         });
       } catch (error: any) {
+        rethrowStateLockTimeout(error);
         return createJsonResponse(classifyWorkerEventError(error), {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -1074,6 +1131,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
           workers: result.state.workers,
         });
       } catch (error: any) {
+        rethrowStateLockTimeout(error);
         return createJsonResponse(classifyTaskCancellationError(error), {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -1145,6 +1203,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
           tasks: result.state.tasks,
         });
       } catch (error: any) {
+        rethrowStateLockTimeout(error);
         const status = typeof error?.status === "number" ? error.status : classifyReviewDecisionError(error);
         return createJsonResponse(status, {
           error: error instanceof Error ? error.message : String(error),
@@ -1168,6 +1227,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
         }));
         return result.handled;
       } catch (err: any) {
+        rethrowStateLockTimeout(err);
         console.error("[dispatcher-server] handleTraeRoute error:", err);
         const status = typeof err?.status === "number" ? err.status : 500;
         return createJsonResponse(status, { error: err instanceof Error ? err.message : String(err) });
@@ -1196,17 +1256,26 @@ export async function startDispatcherServer(input: { host?: string; port?: numbe
   const server = http.createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? `${host}:${port}`}`);
     const clientAddress = request.socket.remoteAddress;
+    const method = request.method ?? "GET";
+    const pathname = requestUrl.pathname;
+    const authHeader = request.headers.authorization;
 
     try {
-      const body = request.method === "POST" ? await readJsonBody(request) : undefined;
-      const authHeader = request.headers.authorization;
+      const authError = createAuthMiddleware({ method, pathname, authHeader, clientAddress });
+      if (authError) {
+        sendJson(response, authError.status, { error: authError.error });
+        return;
+      }
+
+      const body = method === "POST" ? await readJsonBody(request) : undefined;
       const handled = handleDispatcherHttpRequest({
         stateDir,
-        method: request.method ?? "GET",
-        pathname: requestUrl.pathname,
+        method,
+        pathname,
         body,
         authHeader,
         clientAddress,
+        internalCall: true,
       });
       if (handled.headers["content-type"]?.startsWith("text/html")) {
         sendHtml(response, handled.text, handled.headers);
