@@ -44,6 +44,9 @@ jobs:
       - name: Run lint
         run: pnpm lint
 
+      - name: Validate docs
+        run: pnpm docs:validate
+
       - name: Run typecheck
         run: pnpm typecheck
 

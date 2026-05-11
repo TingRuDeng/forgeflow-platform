@@ -1,12 +1,16 @@
-# 文档上下文迁移任务
+# 当前项目审查修复任务
 
-- [x] 审计现有规则入口、文档导航、稳定知识层和归档区。
-- [x] 对照代码验证 dispatcher、lease、read-only、shadow、DR 脚本和发布 workflow 事实。
-- [x] 补齐新版人机双友好文档结构和 `docs/AI_CONTEXT.md`。
-- [x] 补充文档校验脚本并接入根目录命令。
-- [x] 归档旧版重复文档并修正引用。
-- [x] 运行文档校验、相关测试和 diff 检查。
+- [x] 修复 dispatcher read-only 写冻结缺口，补齐真实写路由拦截，并避免只读 GET 在 read-only 下落盘。
+- [x] 将 dispatcher POST 鉴权前置到 body 解析之前，并补充 worker register 结构化输入校验。
+- [x] 让 shadow 写失败可观测，并把 shadow health 接入 DR 状态。
+- [x] 将 DR drill 升级为真实 SQLite/WAL 备份恢复验证。
+- [x] 将文档校验接入 CI，并修正手动发布版本不可追踪问题。
+- [x] 运行最小充分验证并补充 review 小结。
 
 ## Review 小结
 
-已完成增量迁移，没有从零重写旧文档。新增 `docs/AI_CONTEXT.md` 和 `scripts/validate_docs.py`，权威文档补齐目的、读者、摘要、`ai_summary`、边界和验证入口；根目录旧版 v1 手册已移入 `docs/archive/`。已运行 `pnpm docs:validate`、`python3 -m py_compile scripts/validate_docs.py`、`pnpm typecheck`、`pnpm test`、`git diff --check`。
+已修复 read-only 写冻结、POST 鉴权前置、worker register 输入校验、shadow 写失败可观测、真实 SQLite DR 演练、CI 文档门禁和手动发布版本落账问题。
+
+验证已通过：`pnpm docs:validate`、`git diff --check`、受影响 dispatcher 测试、`pnpm typecheck`、`pnpm lint`、`pnpm test`、`pnpm -r --if-present build`、`pnpm coverage:critical`。
+
+剩余风险：非 assignment lease 仍只是结构与指标层能力，repo/branch/session 强约束需要后续单独设计；手动发布现在先 commit/tag/push 再 publish，若 npm publish 失败，git 历史中会保留未发布版本，需要按发布 runbook 人工处置。
