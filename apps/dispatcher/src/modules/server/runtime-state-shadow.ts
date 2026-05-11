@@ -8,6 +8,28 @@ const SHADOW_MODE_ENV = "DISPATCHER_SHADOW_MODE";
 const SHADOW_POSTGRES_URL_ENV = "DISPATCHER_POSTGRES_URL";
 const SHADOW_QUEUE_MODE_ENV = "DISPATCHER_QUEUE_SHADOW_MODE";
 
+export type RuntimeStateShadowWriteStatus = {
+  status: "idle" | "skipped" | "running" | "ok" | "failed";
+  mode: ReturnType<typeof normalizeShadowMode>;
+  queueMode: ReturnType<typeof normalizeShadowMode>;
+  configured: boolean;
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastError: string | null;
+};
+
+let shadowWriteStatus: RuntimeStateShadowWriteStatus = {
+  status: "idle",
+  mode: "disabled",
+  queueMode: "disabled",
+  configured: false,
+  lastAttemptAt: null,
+  lastSuccessAt: null,
+  lastFailureAt: null,
+  lastError: null,
+};
+
 export function getRuntimeStateShadowMode() {
   return normalizeShadowMode(process.env[SHADOW_MODE_ENV]);
 }
@@ -19,6 +41,28 @@ function getQueueShadowMode() {
 function getPostgresUrl(): string | null {
   const url = process.env[SHADOW_POSTGRES_URL_ENV];
   return typeof url === "string" && url.trim().length > 0 ? url.trim() : null;
+}
+
+function formatShadowError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function updateShadowWriteStatus(next: Partial<RuntimeStateShadowWriteStatus>): void {
+  shadowWriteStatus = {
+    ...shadowWriteStatus,
+    ...next,
+  };
+}
+
+export function readRuntimeStateShadowWriteStatus(): RuntimeStateShadowWriteStatus {
+  const mode = getRuntimeStateShadowMode();
+  const queueMode = getQueueShadowMode();
+  return {
+    ...shadowWriteStatus,
+    mode,
+    queueMode,
+    configured: mode !== "disabled" && Boolean(getPostgresUrl()),
+  };
 }
 
 function buildProjectionSnapshot(state: RuntimeState) {
@@ -158,19 +202,56 @@ export async function syncRuntimeStateShadow(state: RuntimeState): Promise<void>
   const mode = getRuntimeStateShadowMode();
   const queueMode = getQueueShadowMode();
   const postgresUrl = getPostgresUrl();
+  const lastAttemptAt = new Date().toISOString();
   if (mode === "disabled" || !postgresUrl) {
+    updateShadowWriteStatus({
+      status: "skipped",
+      mode,
+      queueMode,
+      configured: false,
+      lastAttemptAt,
+      lastError: null,
+    });
     return;
   }
 
-  const client = await createPgClient(postgresUrl);
+  updateShadowWriteStatus({
+    status: "running",
+    mode,
+    queueMode,
+    configured: true,
+    lastAttemptAt,
+    lastError: null,
+  });
+
+  let client: Awaited<ReturnType<typeof createPgClient>> | null = null;
   try {
+    client = await createPgClient(postgresUrl);
     await ensureProjectionTables(client);
     await applyShadowProjection(client, buildProjectionSnapshot(state));
     if (queueMode !== "disabled") {
       await syncAssignmentQueueShadow(client, buildQueueSnapshot(state));
     }
+    updateShadowWriteStatus({
+      status: "ok",
+      mode,
+      queueMode,
+      configured: true,
+      lastSuccessAt: new Date().toISOString(),
+      lastError: null,
+    });
+  } catch (error) {
+    updateShadowWriteStatus({
+      status: "failed",
+      mode,
+      queueMode,
+      configured: true,
+      lastFailureAt: new Date().toISOString(),
+      lastError: formatShadowError(error),
+    });
+    throw error;
   } finally {
-    await client.end?.();
+    await client?.end?.();
   }
 }
 

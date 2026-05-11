@@ -13,6 +13,8 @@ const { DatabaseSync } = await import("node:sqlite");
 const STATE_FALLBACK_ENV = "FORGEFLOW_ALLOW_STATE_FALLBACK_JSON";
 const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 
+function ignoreObservedShadowFailure(): void {}
+
 function nowIso(): string {
   return formatLocalTimestamp();
 }
@@ -499,7 +501,7 @@ export function saveRuntimeState(stateDir: string, state: RuntimeState): void {
     `).run(content, checksum, createdAt);
 
     rewriteStructuredProjection(db, persistedState);
-    void syncRuntimeStateShadow(persistedState).catch(() => {});
+    void syncRuntimeStateShadow(persistedState).catch(ignoreObservedShadowFailure);
   } finally {
     db.close();
   }

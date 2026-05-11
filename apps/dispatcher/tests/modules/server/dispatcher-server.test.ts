@@ -452,6 +452,7 @@ describe("dispatcher server", () => {
     expect(drResponse.status).toBe(200);
     expect(drResponse.json.backups).toHaveLength(1);
     expect(drResponse.json).toHaveProperty("projectionHealth");
+    expect(drResponse.json).toHaveProperty("shadowWrite");
   });
 
   it("rejects mutation routes when read-only mode is enabled", async () => {
@@ -459,20 +460,30 @@ describe("dispatcher server", () => {
     process.env.DISPATCHER_READ_ONLY_MODE = "1";
     const mod = await import(serverModulePath);
 
-    const mutationResponse = await mod.handleDispatcherHttpRequest({
-      stateDir,
-      method: "POST",
-      pathname: "/api/dispatches",
-      body: {
-        repo: "test/readonly",
-        defaultBranch: "main",
-        requestedBy: "test",
-        tasks: [],
-        packages: [],
-      },
-    });
-    expect(mutationResponse.status).toBe(503);
-    expect(mutationResponse.json.code).toBe("read_only_mode");
+    const mutationRoutes = [
+      "/api/dispatches",
+      "/api/workers/codex-readonly/claim-task",
+      "/api/workers/codex-readonly/start-task",
+      "/api/workers/codex-readonly/result",
+      "/api/reviews/task-readonly/decision",
+    ];
+
+    for (const pathname of mutationRoutes) {
+      const mutationResponse = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "POST",
+        pathname,
+        body: {
+          repo: "test/readonly",
+          defaultBranch: "main",
+          requestedBy: "test",
+          tasks: [],
+          packages: [],
+        },
+      });
+      expect(mutationResponse.status).toBe(503);
+      expect(mutationResponse.json.code).toBe("read_only_mode");
+    }
 
     const healthResponse = await mod.handleDispatcherHttpRequest({
       stateDir,
@@ -481,6 +492,57 @@ describe("dispatcher server", () => {
     });
     expect(healthResponse.status).toBe(200);
     expect(healthResponse.json.readOnly).toBe(true);
+  });
+
+  it("does not persist reconcile changes from read-only GET routes", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    const stateMod = await import(path.join(repoRoot, "scripts/lib/dispatcher-state.js"));
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "stale-worker",
+        pool: "codex",
+        hostname: "stale-host",
+        labels: ["stale"],
+        repoDir: "/repo",
+        at: "2026-01-01T00:00:00.000Z",
+      },
+    });
+
+    process.env.DISPATCHER_READ_ONLY_MODE = "1";
+    const workersResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/workers",
+    });
+
+    expect(workersResponse.status).toBe(200);
+    expect(workersResponse.json[0].status).toBe("offline");
+
+    const persistedState = stateMod.loadRuntimeState(stateDir);
+    expect(persistedState.workers[0].status).toBe("idle");
+  });
+
+  it("rejects malformed worker register bodies", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        pool: "codex",
+        hostname: "host-without-worker-id",
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.json.error).toBe("worker register workerId is required");
   });
 
   it("accepts worker events and rolls them into dispatcher metrics", async () => {
@@ -2079,6 +2141,32 @@ describe("dispatcher server", () => {
       });
       expect(response.status).toBe(401);
       expect(response.json.error).toBe("unauthorized");
+    });
+
+    it("rejects unauthenticated POST requests before parsing the request body", async () => {
+      process.env.DISPATCHER_API_TOKEN = "test-secret-token";
+      delete process.env.DISPATCHER_AUTH_MODE;
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+      const instance = await mod.startDispatcherServer({
+        host: "127.0.0.1",
+        port: 0,
+        stateDir,
+      });
+
+      try {
+        const response = await fetch(`${instance.baseUrl}/api/dispatches`, {
+          method: "POST",
+          body: "{broken",
+        });
+
+        expect(response.status).toBe(401);
+        await expect(response.json()).resolves.toMatchObject({
+          error: "unauthorized",
+        });
+      } finally {
+        await instance.close();
+      }
     });
 
     it("returns 401 when token is required but incorrect (default token mode)", async () => {
