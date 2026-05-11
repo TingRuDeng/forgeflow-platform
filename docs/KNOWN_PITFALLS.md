@@ -207,13 +207,13 @@ Current matcher coverage is not the same thing as “every state-changing route�
 
 Do not describe read-only mode as a complete write barrier until the matcher and tests cover every mutation path.
 
-## 15. Stage 3 lease type support is wider than enforced ownership
+## 15. 尚未实现 repo / branch / session lease ownership
 
-`apps/dispatcher/src/modules/server/leases.ts` defines `assignment | session | repo | branch`.
+`apps/dispatcher/src/modules/server/leases.ts` 当前只定义 `assignment`。
 
-Current enforced acquisition / release in `apps/dispatcher/src/modules/server/runtime-state.ts` is assignment-focused through `acquireAssignmentLease()` and `releaseAssignmentLease()`.
+`apps/dispatcher/src/modules/server/runtime-state.ts` 当前通过 `acquireAssignmentLease()` 和 `releaseAssignmentLease()` 强约束 assignment 获取和释放。
 
-Do not assume repo, branch, or session ownership is already a hard concurrency guard just because the schema and metrics can store those resource types.
+不要因为其他位置存在 worktree 检查、Trae session 和 repo concurrency 指标，就假定 repo、branch 或 session ownership 已经是硬并发保护。
 
 ## 16. Source DR scripts and packaged dispatcher CLI have different argument shapes
 

@@ -2353,6 +2353,37 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(state.updatedAt).toBeDefined();
   });
 
+  it("buildDashboardSnapshot exposes assignment-only active lease metrics", () => {
+    const state = createEmptyRuntimeState();
+    state.leases.push({
+      id: "assignment:task-lease-metric",
+      resourceType: "assignment",
+      resourceId: "task-lease-metric",
+      ownerId: "codex-lease-metric",
+      ownerToken: "assignment:codex-lease-metric",
+      acquiredAt: "2026-04-01T10:00:00.000Z",
+      renewedAt: "2026-04-01T10:00:00.000Z",
+      expiresAt: "2026-04-01T10:10:00.000Z",
+      releasedAt: null,
+      reclaimReason: null,
+      metadata: {
+        taskId: "task-lease-metric",
+        workerId: "codex-lease-metric",
+      },
+    });
+
+    const snapshot = buildDashboardSnapshot(state, {
+      now: "2026-04-01T10:05:00.000Z",
+    });
+
+    expect(snapshot.metrics.activeLeases).toEqual({
+      total: 1,
+      byResourceType: {
+        assignment: 1,
+      },
+    });
+  });
+
   it("supports chatMode field in task and assignment", () => {
     const stateDir = makeTempDir();
 

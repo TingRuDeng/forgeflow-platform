@@ -14,7 +14,7 @@
 
 - `.forgeflow-dispatcher/runtime-state.db` 是 dispatcher 默认真相源，JSON 只是显式 fallback / import。
 - `snapshots` 仍是权威 runtime snapshot，结构化表是 query projection。
-- `leases[]` schema 支持 assignment/session/repo/branch，但当前强约束使用只确认 assignment。
+- `leases[]` 当前代码层只支持 assignment resource type；repo/branch/session 并发治理尚未实现。
 - Postgres / queue shadow path 是 best-effort，不是 primary store。
 - `apps/dispatcher/src/db/schema.ts` 不是当前 live runtime persistence path。
 
@@ -246,12 +246,9 @@ Verified core lease fields include:
 - `reclaimReason`
 - `metadata`
 
-Schema-level resource types:
+当前 schema-level resource types：
 
 - `assignment`
-- `session`
-- `repo`
-- `branch`
 
 Current enforced ownership path verified in code:
 

@@ -183,7 +183,7 @@ Current review states verified in code:
 Current stage-3 ownership additions:
 
 - runtime state now includes `leases[]`
-- active resource types include `assignment`, `session`, `repo`, `branch`
+- 当前活跃 lease resource type 只有 `assignment`
 - reconcile may reclaim expired leases and emit audit events
 - read paths can prefer structured projection when `DISPATCHER_STRUCTURED_READS=1`
 - write paths can be partially blocked by `DISPATCHER_READ_ONLY_MODE=1`; current coverage depends on `dispatcher-server.ts:isMutationRequest`, so it is not documented here as a complete write freeze
