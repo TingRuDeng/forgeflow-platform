@@ -14,6 +14,7 @@
 - `KNOWN_PITFALLS.md`：有代码证据支撑的高风险误读点。
 - `TECH_DEBT.md`：已确认仍存在的技术债和不能顺手掩盖的例外。
 - `DOC_SYNC_CHECKLIST.md`：收尾时的文档同步门禁。
+- `WORKER_PROTOCOL_V1.md` / `TASK_ATTEMPT_MODEL.md` / `ARTIFACT_BUNDLE_V1.md`：vNext 目标契约，不代表当前 runtime 已接入。
 
 ## 任务读取路径
 
@@ -21,6 +22,7 @@
 - 修改 HTTP 接口：读 `API_ENDPOINTS.md`，再查 `../apps/dispatcher/src/modules/server/dispatcher-server.ts` 和对应测试。
 - 修改持久化或 DR：读 `DATABASE_SCHEMA.md`、`runbooks/runtime-state-backup-restore-repair.md`，再查 `../apps/dispatcher/src/modules/server/runtime-state-sqlite.ts` 与 `../scripts/*runtime-state.mjs`。
 - 修改 Trae 无人值守链路：读 `ARCHITECTURE.md`、`API_ENDPOINTS.md`、`KNOWN_PITFALLS.md`，再查 `../scripts/lib/trae-automation-worker.ts` 与 `../packages/trae-beta-runtime/src/`。
+- 推进 vNext runtime reliability：读 `rfcs/0001-runtime-reliability-vnext.md`、`WORKER_PROTOCOL_V1.md`、`TASK_ATTEMPT_MODEL.md`、`ARTIFACT_BUNDLE_V1.md`，再查 `../packages/worker-protocol/src/index.ts`。
 - 修改文档：读本文件、`README.md` 和 `DOC_SYNC_CHECKLIST.md`，改完运行 `pnpm docs:validate`。
 
 ## 关键证据入口
@@ -35,6 +37,7 @@
 - `../scripts/restore-runtime-state.mjs:restoreRuntimeState`
 - `../packages/worker-review-orchestrator-cli/src/dispatch.ts`
 - `../packages/trae-beta-runtime/src/runtime/worker.ts`
+- `../packages/worker-protocol/src/index.ts`
 
 ## 高风险误读点
 
@@ -43,6 +46,7 @@
 - `DISPATCHER_READ_ONLY_MODE=1` 目前按 `isMutationRequest` 拦截，不能当成完整写冻结。
 - Postgres / queue shadow path 是 best-effort；SQLite snapshot 仍是真相源。
 - 源码脚本 `backup-runtime-state.mjs` / `restore-runtime-state.mjs` 使用位置参数，不等同于打包后的 `forgeflow-dispatcher backup --backup-dir` CLI。
+- vNext 文档和 `packages/worker-protocol` 是目标契约；当前 dispatcher mutation 仍未强制 TaskAttempt / LeaseToken envelope。
 - `plans/`、`research/`、`archive/`、`external/` 默认不是当前实现权威来源。
 
 ## Optional

@@ -78,6 +78,15 @@ ai_summary:
 - `CONTRIBUTING.md`
   - 主链贡献约束、ADR 触发条件、兼容性规则与契约变更 checklist。
   - 不替代仓库规则。
+- `WORKER_PROTOCOL_V1.md`
+  - vNext worker / dispatcher 目标协议。
+  - 当前是目标契约和类型包说明，不代表现有 dispatcher routes 已强制接入。
+- `TASK_ATTEMPT_MODEL.md`
+  - vNext TaskAttempt 目标模型。
+  - 用于后续拆分 task 目标和 worker 执行尝试。
+- `ARTIFACT_BUNDLE_V1.md`
+  - vNext ArtifactBundle 目标契约。
+  - 用于后续 result / review / replay 证据包标准化。
 - `AGENT_STARTER_PROMPT.md`
   - 新 agent 会话的短启动提示。
   - 只做入口 shim，不重复定义规则。
@@ -196,6 +205,15 @@ Trae MCP fallback 维护：
 3. `packages/mcp-trae-worker/src/server.ts`
 4. `scripts/run-trae-mcp-worker-server.js`
 
+vNext runtime reliability 推进：
+
+1. `rfcs/0001-runtime-reliability-vnext.md`
+2. `WORKER_PROTOCOL_V1.md`
+3. `TASK_ATTEMPT_MODEL.md`
+4. `ARTIFACT_BUNDLE_V1.md`
+5. `../packages/worker-protocol/src/index.ts`
+6. 当前实现仍要回到 `API_ENDPOINTS.md`、`STATE_MACHINE.md` 和代码验证
+
 ## Current Positioning
 
 - `dispatcher` 是任务与状态真相源。
@@ -223,6 +241,7 @@ Trae MCP fallback 维护：
 - dispatcher 现在会给每个任务生成稳定 `traceId`，并在 snapshot、Trae fetch-task、worker events、CLI summary 与 console drill-down 暴露该关联键。
 - dashboard snapshot 现在附带阶段二控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`、`retryRatePct`、`branchProtectionHitCount`、`repoConcurrencySaturation`、`failureCodes`、`reviewReasonCodes`。
 - dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，同时输出 `retryRatePct`、失败码聚合和 review reason 聚合。
+- vNext runtime reliability 的目标契约已开始落地到 `@forgeflow/worker-protocol`，但当前 dispatcher mutation 尚未强制 `TaskAttempt` / `LeaseToken` envelope。
 - dispatcher 任务状态机现在包含 `cancelled`，控制面和 console 都可以显式作废非终态任务。
 - 阶段三核心底座现在已进入主线：runtime state 增加显式 `leases[]`，SQLite 真相源同步维护 query-first 结构化投影，dispatcher 可选启用 structured reads、read-only 降级、Postgres / queue shadow write、SLO / burn-rate 与 DR 状态检查；当前强约束 lease 只确认接入 assignment，read-only 也仍受 `isMutationRequest` 覆盖范围限制。
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。

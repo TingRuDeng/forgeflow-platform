@@ -182,7 +182,25 @@ Desired direction:
 - 如果 worktree branch 冲突需要 dispatcher 层预防，优先实现具体 branch lease 获取点
 - repo/session 语义需要单独定义清楚，再加回 lease type model
 
-## 9. Shadow path failures are not yet first-class operational state
+## 9. vNext runtime reliability 目标契约尚未接入运行时
+
+当前情况：
+
+- `packages/worker-protocol` 提供 Worker Protocol v1、TaskAttempt、RuntimeEvent 和 ArtifactBundle 的目标 schema
+- dispatcher 当前 mutation 仍未强制 `protocolVersion`、`attemptId`、`leaseToken`、`traceId` 和 `idempotencyKey`
+- Trae runtime 当前仍走现有 v0 兼容路径
+
+影响：
+
+- 代码审查和文档阅读时容易把 vNext 目标契约误读为当前已执行的 runtime 保护
+- 后续 TaskAttempt / LeaseToken enforcement 需要跨 dispatcher、SQLite、Trae runtime、CLI 和 Console 分阶段推进
+
+期望方向：
+
+- 先实现 TaskAttempt memory model 和 v0 compatibility adapter
+- 再接入 SQLite attempts、LeaseToken enforcement、ArtifactBundle result 和 review workflow
+
+## 10. Shadow path failures are not yet first-class operational state
 
 Current situation:
 
@@ -199,7 +217,7 @@ Desired direction:
 - surface shadow sync failures through runtime events or DR status
 - add an operator-visible shadow health check before treating shadow write as rollout-ready
 
-## 10. Source DR drill is file-copy validation, not full SQLite recovery proof
+## 11. Source DR drill is file-copy validation, not full SQLite recovery proof
 
 Current situation:
 
@@ -216,7 +234,7 @@ Desired direction:
 - extend the drill to create a real SQLite DB and validate restored queryability
 - keep the current script documented as a minimal copy-path smoke until then
 
-## 11. Manual release can publish a version not represented in git history
+## 12. Manual release can publish a version not represented in git history
 
 Current situation:
 
