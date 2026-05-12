@@ -150,7 +150,14 @@ function createTestState(): RuntimeState {
 }
 
 async function waitForAsyncShadowWrite(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 2_000) {
+    const status = readRuntimeStateShadowWriteStatus();
+    if (status.status !== "running") {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }
 
 function readSnapshotState(stateDir: string): {

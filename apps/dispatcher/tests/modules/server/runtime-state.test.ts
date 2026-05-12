@@ -856,6 +856,37 @@ describe("dispatcher runtime state (TypeScript)", () => {
     ]));
   });
 
+  it("rejects a late result from an expired attempt after retry redrive", () => {
+    let state = createRunningAttemptState("task-stale-result", "codex-retry-worker");
+    const staleAttempt = state.taskAttempts[0]!;
+    state = reconcileRuntimeState(state, {
+      now: "2026-05-12T13:11:00.000Z",
+      heartbeatTimeoutMs: 60_000,
+    });
+
+    expect(() => recordWorkerResult(state, {
+      workerId: "codex-retry-worker",
+      attemptId: staleAttempt.attemptId,
+      leaseToken: staleAttempt.leaseToken,
+      result: {
+        taskId: state.tasks[0]!.id,
+        workerId: "codex-retry-worker",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-stale-result",
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "main",
+        mode: "run",
+        output: "late stale result",
+        generatedAt: "2026-05-12T13:11:30.000Z",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+      },
+    })).toThrow(/stale attempt result rejected/i);
+  });
+
   it("marks stale workers as offline in dashboard snapshots", () => {
     const stateDir = makeTempDir();
 

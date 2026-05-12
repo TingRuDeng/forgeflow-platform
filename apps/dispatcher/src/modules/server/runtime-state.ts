@@ -1068,31 +1068,46 @@ function buildArtifactBundle(input: {
   return bundle;
 }
 
-function assertActiveAttemptLease(
-  state: RuntimeState,
-  taskId: string,
-  workerId: string,
-  input: {
-    attemptId?: string;
-    leaseToken?: string;
-  },
-): void {
+function assertActiveAttemptLease(input: {
+  state: RuntimeState;
+  taskId: string;
+  workerId: string;
+  attemptId?: string;
+  leaseToken?: string;
+  operation?: string;
+}): void {
   if (!input.attemptId && !input.leaseToken) {
     return;
   }
 
-  const activeAttempt = findActiveTaskAttempt(state, taskId);
+  const operation = input.operation ?? "write";
+  const activeAttempt = findActiveTaskAttempt(input.state, input.taskId);
+  const historicalAttempt = input.attemptId
+    ? (input.state.taskAttempts ?? []).find((attempt) =>
+        attempt.taskId === input.taskId && attempt.attemptId === input.attemptId
+      )
+    : null;
   if (!activeAttempt) {
-    throw new Error(`active attempt not found for task: ${taskId}`);
+    if (historicalAttempt && isTerminalAttemptStatus(historicalAttempt.status)) {
+      throw new Error(`stale attempt ${operation} rejected: ${input.attemptId}`);
+    }
+    throw new Error(`active attempt not found for task: ${input.taskId}`);
   }
-  if (activeAttempt.workerId !== workerId) {
+  if (activeAttempt.workerId !== input.workerId) {
     throw new Error(`attempt owned by another worker: ${activeAttempt.workerId}`);
+  }
+  if (
+    historicalAttempt
+    && historicalAttempt.attemptId !== activeAttempt.attemptId
+    && isTerminalAttemptStatus(historicalAttempt.status)
+  ) {
+    throw new Error(`stale attempt ${operation} rejected: ${input.attemptId}`);
   }
   if (input.attemptId && input.attemptId !== activeAttempt.attemptId) {
     throw new Error(`attempt id mismatch: ${input.attemptId}`);
   }
   if (input.leaseToken && input.leaseToken !== activeAttempt.leaseToken) {
-    throw new Error(`lease token mismatch: ${taskId}`);
+    throw new Error(`lease token mismatch: ${input.taskId}`);
   }
 }
 
@@ -2166,7 +2181,13 @@ export function beginTaskForWorker(state: RuntimeState, input: BeginTaskInput): 
   }
 
   const at = input.at ?? nowIso();
-  assertActiveAttemptLease(state, input.taskId, input.workerId, input);
+  assertActiveAttemptLease({
+    state,
+    taskId: input.taskId,
+    workerId: input.workerId,
+    attemptId: input.attemptId,
+    leaseToken: input.leaseToken,
+  });
   const leaseResult = acquireAssignmentLease(state, input.taskId, input.workerId, at);
   if (!leaseResult.acquired) {
     throw new Error(`assignment lease not available: ${input.taskId}`);
@@ -2229,6 +2250,14 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   if (!worker) {
     throw new Error(`worker not found: ${input.workerId}`);
   }
+  assertActiveAttemptLease({
+    state,
+    taskId: task.id,
+    workerId: input.workerId,
+    attemptId: input.attemptId,
+    leaseToken: input.leaseToken,
+    operation: "result",
+  });
   if (task.assignedWorkerId !== input.workerId) {
     throw new Error(`task not assigned to worker: ${input.workerId}`);
   }
@@ -2240,7 +2269,6 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   if (!["assigned", "in_progress"].includes(task.status)) {
     throw new Error(`task not executable: ${task.id}`);
   }
-  assertActiveAttemptLease(state, task.id, input.workerId, input);
   const currentReview = state.reviews.find((candidate) => candidate.taskId === task.id);
   const canonicalResult = buildCanonicalWorkerResult(task, input.workerId, input.result);
   const canonicalPullRequest = canonicalizePullRequest(task, input.pullRequest);

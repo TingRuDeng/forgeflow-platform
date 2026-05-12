@@ -302,6 +302,7 @@ function classifyWorkerResultError(error: unknown): number {
     message.startsWith("task not assigned to worker:")
     || message.startsWith("task not executable:")
     || message.startsWith("active attempt not found for task:")
+    || message.startsWith("stale attempt ")
     || message.startsWith("attempt owned by another worker:")
     || message.startsWith("attempt id mismatch:")
     || message.startsWith("lease token mismatch:")

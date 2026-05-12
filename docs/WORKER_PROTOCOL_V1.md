@@ -106,6 +106,7 @@ POST /api/tasks/:taskId/attempts/:attemptId/result
 
 - `/api/workers/:workerId/start-task` 和 `/api/workers/:workerId/result` 接受可选 `attemptId` / `leaseToken`。
 - 当任一字段存在时，dispatcher 会对照当前 active attempt 校验 worker、attemptId 和 leaseToken。
+- 如果 worker 携带的 `attemptId` 已进入 `expired` / `failed` / `succeeded` / `cancelled` / `superseded` 等终态，dispatcher 会拒绝这次 stale 写入。
 - v0 worker 不传这两个字段时仍按既有路径执行，后续批次再收紧为强制 v1 envelope。
 
 ## 错误语义

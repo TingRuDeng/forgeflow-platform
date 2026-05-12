@@ -241,6 +241,7 @@ Current endpoint families:
     - `branchName`
     - `mode`
   - Dispatcher will reject mismatched worker metadata with `409`.
+  - Dispatcher will reject stale result writes with `409` when the payload carries a terminal historical `attemptId`.
   - Request-body validation now rejects malformed result payloads with `400`.
   - `result` may now include additive structured worker evidence for dispatcher persistence:
     - `failureType`

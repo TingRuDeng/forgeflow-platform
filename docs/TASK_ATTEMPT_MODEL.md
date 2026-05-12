@@ -50,6 +50,7 @@ ai_summary:
 - v0 result 会把 active attempt 标记为 `succeeded` 或 `failed`。
 - task cancel 会把 active attempt 标记为 `cancelled`。
 - reconcile 会把离线 worker 的过期 running attempt 标记为 `expired`，并按最小 retry policy redrive 或失败。
+- late result 携带历史终态 `attemptId` 时会被拒绝，不允许覆盖新 attempt 或 task 状态。
 - `taskAttempts[]` 会随 runtime snapshot 一起保存。
 - SQLite structured projection 会写入并读取 `task_attempts`。
 - worker start/result 写入如果携带 `attemptId` 或 `leaseToken`，dispatcher 会校验它们必须匹配当前 active attempt。
@@ -57,7 +58,6 @@ ai_summary:
 尚未实现：
 
 - worker mutation 对完整 v1 envelope 的强制校验。
-- stale result 拒绝。
 - 可配置 retry policy；当前只实现默认最多 2 次 attempt 的最小策略。
 
 ## Task 与 Attempt
