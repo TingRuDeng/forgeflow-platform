@@ -241,6 +241,7 @@ vNext runtime reliability 推进：
 - dispatcher 现在会 canonicalize worker result 的 `workerId/pool/repo/defaultBranch/branchName`，worker 不能再覆盖这些 dispatcher-owned 字段。
 - dispatcher 现在会给每个任务生成稳定 `traceId`，并在 snapshot、Trae fetch-task、worker events、CLI summary 与 console drill-down 暴露该关联键。
 - dashboard snapshot 现在附带阶段二控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`、`retryRatePct`、`branchProtectionHitCount`、`repoConcurrencySaturation`、`failureCodes`、`reviewReasonCodes`。
+- dashboard snapshot 现在暴露 `taskAttempts` 与 `artifactBundles`，Console 任务详情可直接查看 attempt timeline、runtime events 和 artifact summary。
 - dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，同时输出 `retryRatePct`、失败码聚合和 review reason 聚合。
 - vNext runtime reliability 的目标契约已开始落地到 `@forgeflow/worker-protocol`，但当前 dispatcher mutation 尚未强制 `TaskAttempt` / `LeaseToken` envelope。
 - dispatcher 任务状态机现在包含 `cancelled`，控制面和 console 都可以显式作废非终态任务。

@@ -445,6 +445,8 @@ export interface DashboardSnapshot {
   };
   workers: Worker[];
   tasks: Task[];
+  taskAttempts: TaskAttempt[];
+  artifactBundles: ArtifactBundle[];
   assignments: Assignment[];
   reviews: Review[];
   pullRequests: PullRequest[];
@@ -2519,6 +2521,8 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
     },
     workers,
     tasks: clone([...reconciledState.tasks].reverse()),
+    taskAttempts: clone(reconciledState.taskAttempts ?? []),
+    artifactBundles: clone(reconciledState.artifactBundles ?? []),
     assignments: clone(reconciledState.assignments),
     reviews: clone(reconciledState.reviews),
     pullRequests: clone(reconciledState.pullRequests),
