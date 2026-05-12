@@ -16,7 +16,7 @@
 - dispatcher 鉴权、read-only、structured reads 和 shadow mode 都在 server/runtime 层体现。
 - generic worker claim 已是 `POST /api/workers/:workerId/claim-task`，`GET assigned-task` 只读。
 - 本文件是接口概览，不是完整字段字典；精确契约看 `docs/contracts/*` 和测试。
-- 当前 read-only 文档必须带实现边界：它依赖 `isMutationRequest` 的覆盖范围。
+- read-only 模式会默认冻结 `/api` 下所有写方法，避免新增写路由遗漏手写 matcher。
 
 ```yaml
 ai_summary:
@@ -191,10 +191,10 @@ Current endpoint families:
     - `/api/metrics`
     - `/api/workers`
 - `DISPATCHER_READ_ONLY_MODE=1`
-  - Keeps query endpoints available while rejecting mutation routes with:
+  - Keeps query endpoints available while rejecting `/api` write methods with:
     - HTTP `503`
     - `{ "error": "dispatcher is in read-only mode", "code": "read_only_mode" }`
-  - Current caveat: mutation detection is implemented by `dispatcher-server.ts:isMutationRequest`; until that matcher covers every state-changing route, operators must not treat this as a hard write freeze.
+  - Write methods are `POST` / `PUT` / `PATCH` / `DELETE`; `GET` query routes remain available.
 - `DISPATCHER_SHADOW_MODE=shadow-write`
 - `DISPATCHER_POSTGRES_URL=postgres://...`
 - `DISPATCHER_QUEUE_SHADOW_MODE=shadow-write`

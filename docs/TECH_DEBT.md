@@ -14,7 +14,7 @@ Only confirmed, still-active debt belongs here.
 
 - 本文件只写仍然存在的债务，不写愿望清单。
 - 当前债务集中在 runtime bridge、持久化多形态、shadow 可观测性、Trae gateway 重复实现和 Stage 3 边界。
-- 近期审查确认 read-only matcher、非 assignment lease、DR drill 深度和手动发布版本落账仍需后续修复。
+- 近期审查确认非 assignment lease、DR drill 深度和手动发布版本落账仍需后续修复。
 - 修复债务时必须同步 `README.md`、`docs/README.md` 和相关稳定文档。
 
 ```yaml
@@ -147,25 +147,7 @@ Desired direction:
 
 - keep Wave 5 explicitly out of “already supported” docs until governance and compatibility policy are finalized
 
-## 7. Read-only mode still depends on an incomplete route classifier
-
-Current situation:
-
-- `DISPATCHER_READ_ONLY_MODE=1` is enforced through `dispatcher-server.ts:isMutationRequest`
-- the classifier is a hand-maintained list of POST routes
-- some state-changing route shapes can drift unless tests cover every mutation endpoint
-
-Impact:
-
-- DR or repair docs can overclaim a hard write freeze
-- operators may trust read-only mode more than the current implementation justifies
-
-Desired direction:
-
-- move mutation classification closer to the route table or make all write routes explicitly registered
-- add regression tests that prove every state-changing route returns `503 read_only_mode`
-
-## 8. Repo / branch / session lease guards 仍是后续工作
+## 7. Repo / branch / session lease guards 仍是后续工作
 
 当前情况：
 
@@ -182,7 +164,7 @@ Desired direction:
 - 如果 worktree branch 冲突需要 dispatcher 层预防，优先实现具体 branch lease 获取点
 - repo/session 语义需要单独定义清楚，再加回 lease type model
 
-## 9. vNext runtime reliability 目标契约尚未接入运行时
+## 8. vNext runtime reliability 目标契约尚未接入运行时
 
 当前情况：
 
@@ -205,7 +187,7 @@ Desired direction:
 
 - 继续接入 review workflow、artifact retention 和 Console artifact tabs
 
-## 10. Shadow path failures are not yet first-class operational state
+## 9. Shadow path failures are not yet first-class operational state
 
 Current situation:
 
@@ -222,7 +204,7 @@ Desired direction:
 - surface shadow sync failures through runtime events or DR status
 - add an operator-visible shadow health check before treating shadow write as rollout-ready
 
-## 11. Source DR drill is file-copy validation, not full SQLite recovery proof
+## 10. Source DR drill is file-copy validation, not full SQLite recovery proof
 
 Current situation:
 
@@ -239,7 +221,7 @@ Desired direction:
 - extend the drill to create a real SQLite DB and validate restored queryability
 - keep the current script documented as a minimal copy-path smoke until then
 
-## 12. Manual release can publish a version not represented in git history
+## 11. Manual release can publish a version not represented in git history
 
 Current situation:
 
