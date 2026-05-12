@@ -110,8 +110,8 @@ export DISPATCHER_READ_ONLY_MODE=1
 此时：
 
 - 查询接口继续可用
-- `dispatcher-server.ts:isMutationRequest` 覆盖的写接口返回 `503 read_only_mode`
-- 当前不能把该开关当作完整写冻结；DR 前仍需核对目标写路由是否被 matcher 覆盖
+- `/api` 下 `POST` / `PUT` / `PATCH` / `DELETE` 默认返回 `503 read_only_mode`
+- 该开关可作为 DR / repair 前的 dispatcher API 写冻结入口；直接文件操作和外部数据库操作仍需单独管控
 
 备份与恢复：
 

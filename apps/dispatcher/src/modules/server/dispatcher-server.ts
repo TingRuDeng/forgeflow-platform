@@ -50,6 +50,7 @@ const DEFAULT_STATE_LOCK_STALE_MS = 30000;
 const STRUCTURED_READS_ENV = "DISPATCHER_STRUCTURED_READS";
 const READ_ONLY_MODE_ENV = "DISPATCHER_READ_ONLY_MODE";
 const STATE_LOCK_SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
+const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 let stateLockTimeoutCount = 0;
 
 const AUTH_WHITELIST_PATHS = ["/health"];
@@ -774,34 +775,10 @@ function routeNotFound(response: http.ServerResponse): void {
 }
 
 function isMutationRequest(method: string, pathname: string): boolean {
-  if (method !== "POST") {
+  if (!MUTATION_METHODS.has(method.toUpperCase())) {
     return false;
   }
-  if (pathname === "/api/workers/register") {
-    return true;
-  }
-  if (/^\/api\/workers\/[^/]+\/(heartbeat|offline|claim-task|start-task|result)$/.test(pathname)) {
-    return true;
-  }
-  if (pathname === "/api/dispatches") {
-    return true;
-  }
-  if (/^\/api\/reviews\/[^/]+\/decision$/.test(pathname) || pathname === "/api/reviews/decision") {
-    return true;
-  }
-  if (/^\/api\/tasks\/[^/]+\/cancel$/.test(pathname)) {
-    return true;
-  }
-  if (/^\/api\/workers\/[^/]+\/disable$/.test(pathname) || /^\/api\/workers\/[^/]+\/enable$/.test(pathname)) {
-    return true;
-  }
-  if (/^\/api\/workers\/[^/]+\/events$/.test(pathname)) {
-    return true;
-  }
-  if (pathname.startsWith("/api/trae/")) {
-    return true;
-  }
-  return false;
+  return pathname.startsWith("/api/");
 }
 
 function listBackupManifests(stateDir: string): Array<{ name: string; path: string }> {

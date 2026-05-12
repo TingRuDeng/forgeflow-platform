@@ -466,6 +466,7 @@ describe("dispatcher server", () => {
       "/api/workers/codex-readonly/start-task",
       "/api/workers/codex-readonly/result",
       "/api/reviews/task-readonly/decision",
+      "/api/future-write",
     ];
 
     for (const pathname of mutationRoutes) {
