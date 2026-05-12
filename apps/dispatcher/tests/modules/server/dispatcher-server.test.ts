@@ -1090,6 +1090,113 @@ describe("dispatcher server", () => {
     expect(resultResponse.json.error).toBe("attempt id mismatch: stale-attempt");
   });
 
+  it("rejects late HTTP results from expired attempts after retry redrive", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    const stateMod = await import(path.join(repoRoot, "scripts/lib/dispatcher-state.js"));
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-stale-result-http",
+        pool: "codex",
+        hostname: "stale-result-host",
+        labels: [],
+        repoDir: "/repo",
+        at: "2026-05-12T13:00:00.000Z",
+      },
+    });
+
+    const dispatchResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/repo",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [
+          {
+            id: "task-stale-result-http",
+            title: "HTTP stale result",
+            pool: "codex",
+            dependsOn: [],
+            branchName: "ai/codex/task-stale-result-http",
+            verification: { mode: "run" },
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-stale-result-http",
+            assignment: {
+              taskId: "task-stale-result-http",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/task-stale-result-http",
+              repo: "test/repo",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+    const taskId = dispatchResponse.json.taskIds[0];
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-stale-result-http/claim-task",
+      body: { at: "2026-05-12T13:00:20.000Z" },
+    });
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-stale-result-http/start-task",
+      body: {
+        taskId,
+        at: "2026-05-12T13:00:30.000Z",
+      },
+    });
+
+    const runningState = stateMod.loadRuntimeState(stateDir);
+    const staleAttempt = runningState.taskAttempts[0];
+    stateMod.saveRuntimeState(stateDir, stateMod.reconcileRuntimeState(runningState, {
+      now: "2026-05-12T13:11:00.000Z",
+      heartbeatTimeoutMs: 60_000,
+    }));
+
+    const resultResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-stale-result-http/result",
+      body: {
+        attemptId: staleAttempt.attemptId,
+        leaseToken: staleAttempt.leaseToken,
+        result: {
+          taskId,
+          workerId: "codex-stale-result-http",
+          provider: "codex",
+          pool: "codex",
+          branchName: "ai/codex/task-stale-result-http",
+          repo: "test/repo",
+          defaultBranch: "main",
+          mode: "run",
+          output: "late stale result",
+          generatedAt: "2026-05-12T13:11:30.000Z",
+          verification: {
+            allPassed: true,
+            commands: [],
+          },
+        },
+      },
+    });
+    expect(resultResponse.status).toBe(409);
+    expect(resultResponse.json.error).toMatch(/stale attempt result rejected/i);
+  });
+
   it("rejects worker result metadata that does not match dispatcher truth", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);

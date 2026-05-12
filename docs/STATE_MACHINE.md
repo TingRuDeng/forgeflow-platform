@@ -71,6 +71,7 @@ Current rules:
   - dispatcher marks the current attempt as `expired` with `failureCode = attempt_lease_expired`
   - if attempts are still below the default max of 2, dispatcher records `attempt_expired` and `task_redriven`, releases worker / assignment ownership, and moves the task back to `ready`
   - if attempts are exhausted, dispatcher records `attempt_expired` and moves task / assignment to `failed`
+- A late worker result that still carries an expired / terminal `attemptId` is rejected before it can mutate task, assignment, review, artifact, or worker state.
 
 ## Assignment States
 
