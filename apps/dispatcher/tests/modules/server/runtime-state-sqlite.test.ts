@@ -95,6 +95,7 @@ function createTestState(): RuntimeState {
         idempotencyKey: "v0:dispatch-1:task-1:attempt-1",
       },
     ],
+    artifactBundles: [],
     events: [
       {
         taskId: "dispatch-1:task-1",
@@ -271,6 +272,44 @@ describe("runtime-state-sqlite", () => {
     const projection = sqliteStore.compareStructuredProjection(stateDir);
     expect(projection.expected.taskAttempts).toBe(1);
     expect(projection.actual.taskAttempts).toBe(1);
+    expect(projection.matches).toBe(true);
+  });
+
+  it("writes artifact bundles to the structured sqlite projection", () => {
+    const stateDir = makeTempDir();
+    const state = {
+      ...createTestState(),
+      artifactBundles: [
+        {
+          bundleId: "bundle-1",
+          taskId: "dispatch-1:task-1",
+          attemptId: "dispatch-1:task-1:attempt-1",
+          schemaVersion: "artifact-bundle/v1" as const,
+          summary: "done",
+          branch: "ai/codex/test-task",
+          commit: "abc123",
+          changedFiles: [{ path: "src/index.ts", changeType: "modified" as const }],
+          refs: { structuredReport: "artifact://attempt/result.json" },
+          riskNotes: [],
+          nextActions: [],
+          createdAt: "2026-04-01T10:02:00.000Z",
+        },
+      ],
+    };
+
+    saveRuntimeState(stateDir, state);
+
+    const structured = sqliteStore.readStructuredRuntimeState(stateDir);
+    expect(structured.artifactBundles).toHaveLength(1);
+    expect(structured.artifactBundles[0]).toMatchObject({
+      bundleId: "bundle-1",
+      taskId: "dispatch-1:task-1",
+      attemptId: "dispatch-1:task-1:attempt-1",
+    });
+
+    const projection = sqliteStore.compareStructuredProjection(stateDir);
+    expect(projection.expected.artifactBundles).toBe(1);
+    expect(projection.actual.artifactBundles).toBe(1);
     expect(projection.matches).toBe(true);
   });
 

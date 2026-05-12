@@ -13,19 +13,20 @@
 - ArtifactBundle 绑定 `taskId` 和 `attemptId`。
 - 最小 bundle 包含 `schemaVersion`、`changedFiles` 和 `refs`。
 - 大对象不直接塞进 runtime-state，优先存引用。
-- 当前只在 `packages/worker-protocol` 定义目标 schema，现有 worker result 尚未强制产出 bundle。
+- 当前 `packages/result-contracts` 已提供可执行 schema，dispatcher 会保存 result 产出的 bundle，并把 bundleId 绑定到 active attempt。
 
 ```yaml
 ai_summary:
   authority: "ArtifactBundle v1 目标 schema、证据边界、存储引用和 review 展示原则"
-  scope: "vNext artifact 契约，不替代当前 result-contracts 已实现字段"
+  scope: "vNext artifact 契约、当前 dispatcher 存储边界和 CLI 获取方式"
   read_when:
     - "扩展 worker result 或 result-contracts 前"
     - "实现 CLI artifact get 或 Console artifact tabs 前"
     - "设计 artifact retention 或 replay fixture 前"
   verify_with:
-    - "../packages/worker-protocol/src/index.ts"
-    - "../packages/worker-protocol/tests/index.test.ts"
+    - "../packages/result-contracts/src/index.ts"
+    - "../packages/result-contracts/tests/index.test.ts"
+    - "../apps/dispatcher/src/modules/server/runtime-state.ts"
     - "contracts/run-result-v1.md"
   stale_when:
     - "ArtifactBundle 字段、存储策略、refs 语义或 retention 策略变化"
@@ -33,13 +34,13 @@ ai_summary:
 
 ## 权威边界
 
-本文是 vNext 目标契约。当前已实现 run result 仍以 `contracts/run-result-v1.md` 和 `packages/result-contracts/src/index.ts` 为准。
+本文是 vNext artifact 契约和当前实现边界。字段 schema 以 `packages/result-contracts/src/index.ts` 为准；完整 worker protocol 目标仍看 `WORKER_PROTOCOL_V1.md`。
 
 ## 如何验证
 
-- 运行 `pnpm --filter @forgeflow/worker-protocol test`。
-- 对照 `../packages/worker-protocol/src/index.ts` 的 `ArtifactBundleSchema`。
-- 后续接入 worker result 时，补充 invalid bundle rejection 测试。
+- 运行 `pnpm --filter @forgeflow/result-contracts test`。
+- 运行 `pnpm --filter @forgeflow/dispatcher test -- tests/modules/server/runtime-state.test.ts tests/modules/server/runtime-state-sqlite.test.ts`。
+- 运行 `pnpm --filter @tingrudeng/worker-review-orchestrator-cli test -- tests/cli.test.ts`。
 
 ## 最小 Bundle
 
@@ -73,6 +74,15 @@ ai_summary:
 ## 存储策略
 
 runtime-state 只应保存 bundle 摘要和引用。diff、日志、截图、完整测试输出这类大对象应放在 artifact store 或本地 artifact 目录，并通过 `refs` 引用。
+
+当前实现：
+
+- `RuntimeState.artifactBundles[]` 保存 bundle 摘要和 refs。
+- SQLite structured projection 使用 `artifact_bundles` 表承载查询投影。
+- `TaskAttempt.artifactBundleId` 指向当前 attempt 的 bundle。
+- `/api/artifacts/:bundleId` 可按 bundleId 获取单个 bundle。
+- CLI 使用 `forgeflow-review-orchestrator artifact-get --bundle-id <id>` 获取 bundle。
+- Trae runtime 在拿到 `attempt_id` 后会随 submitResult 提交 minimal bundle。
 
 ## Review 展示
 

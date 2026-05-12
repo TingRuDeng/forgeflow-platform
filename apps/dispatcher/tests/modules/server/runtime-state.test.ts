@@ -611,6 +611,100 @@ describe("dispatcher runtime state (TypeScript)", () => {
     })).toThrow(/attempt id mismatch/i);
   });
 
+  it("stores artifact bundles from worker results and binds the active attempt", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-artifact-worker",
+      pool: "codex",
+      hostname: "mac-mini",
+      labels: ["codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-05-12T13:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "main",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-artifact-bundle",
+          title: "生成 artifact bundle",
+          pool: "codex",
+          branchName: "ai/codex/task-artifact-bundle",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-artifact-bundle",
+          assignment: {
+            taskId: "task-artifact-bundle",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "ai/codex/task-artifact-bundle",
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "main",
+          },
+        },
+      ],
+      createdAt: "2026-05-12T13:00:10.000Z",
+    });
+
+    const taskId = dispatch.taskIds[0]!;
+    const claimed = claimAssignedTaskForWorker(dispatch.state, {
+      workerId: "codex-artifact-worker",
+      at: "2026-05-12T13:00:20.000Z",
+    });
+    state = beginTaskForWorker(claimed.state, {
+      taskId,
+      workerId: "codex-artifact-worker",
+      at: "2026-05-12T13:00:30.000Z",
+    });
+    const attempt = state.taskAttempts[0]!;
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-artifact-worker",
+      result: {
+        taskId,
+        workerId: "codex-artifact-worker",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-artifact-bundle",
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "main",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-05-12T13:01:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+      },
+      changedFiles: ["src/index.ts"],
+      pullRequest: null,
+      artifactBundle: {
+        taskId,
+        attemptId: attempt.attemptId,
+        schemaVersion: "artifact-bundle/v1",
+        summary: "done",
+        changedFiles: [{ path: "src/index.ts", changeType: "modified" }],
+        refs: { structuredReport: "artifact://attempt/result.json" },
+        riskNotes: [],
+        nextActions: [],
+      },
+    });
+
+    expect(state.artifactBundles).toHaveLength(1);
+    expect(state.artifactBundles[0]).toMatchObject({
+      taskId,
+      attemptId: attempt.attemptId,
+      bundleId: `${attempt.attemptId}:artifact-bundle`,
+    });
+    expect(state.taskAttempts[0]?.artifactBundleId).toBe(`${attempt.attemptId}:artifact-bundle`);
+  });
+
   it("marks stale workers as offline in dashboard snapshots", () => {
     const stateDir = makeTempDir();
 

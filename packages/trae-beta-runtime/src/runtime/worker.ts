@@ -22,6 +22,30 @@ interface WorkerEvidence {
   artifacts?: Record<string, string>;
 }
 
+interface ArtifactBundle {
+  bundleId?: string;
+  taskId: string;
+  attemptId: string;
+  schemaVersion: "artifact-bundle/v1";
+  summary?: string;
+  branch?: string;
+  commit?: string;
+  pullRequestUrl?: string;
+  changedFiles: Array<{
+    path: string;
+    changeType: "added" | "modified" | "deleted" | "renamed";
+  }>;
+  refs: Record<string, unknown>;
+  testResults?: Array<{
+    name: string;
+    status: "passed" | "failed" | "skipped" | "unknown";
+    outputRef?: string;
+  }>;
+  riskNotes?: string[];
+  nextActions?: string[];
+  createdAt?: string;
+}
+
 type WorkerFailureKind = WorkerFailure["kind"];
 
 interface ClassifiedWorkerFailure {
@@ -88,6 +112,8 @@ export interface WorkerDiscoveryHints {
 
 export interface WorkerRuntimeTask {
   task_id: string;
+  attempt_id?: string;
+  lease_token?: string;
   traceId?: string;
   trace_id?: string;
   repo?: string;
@@ -512,6 +538,52 @@ function buildInvalidSuccessFailureEvidence(message: string): WorkerEvidence {
   };
 }
 
+function buildArtifactBundle(input: {
+  task: WorkerRuntimeTask;
+  status: "review_ready" | "failed";
+  summary: string;
+  filesChanged: string[];
+  testOutput?: string;
+  risks?: string[];
+  notes?: string;
+  github?: WorkerRuntimeReport["github"];
+  sessionId?: string | null;
+}): ArtifactBundle | undefined {
+  const attemptId = String(input.task.attempt_id || "").trim();
+  if (!attemptId) {
+    return undefined;
+  }
+
+  return {
+    bundleId: `${attemptId}:artifact-bundle`,
+    taskId: input.task.task_id,
+    attemptId,
+    schemaVersion: "artifact-bundle/v1",
+    summary: input.summary,
+    branch: input.github?.branchName || input.task.branch,
+    commit: input.github?.commitSha || undefined,
+    pullRequestUrl: input.github?.prUrl || undefined,
+    changedFiles: input.filesChanged.map((filePath) => ({
+      path: filePath,
+      changeType: "modified",
+    })),
+    refs: {
+      structuredReport: `artifact://${attemptId}/result.json`,
+      ...(input.sessionId ? { terminalTranscript: `artifact://${attemptId}/session-${input.sessionId}.log` } : {}),
+    },
+    testResults: input.testOutput
+      ? [{
+          name: "trae:test_output",
+          status: input.status === "review_ready" ? "passed" : "failed",
+          outputRef: `artifact://${attemptId}/tests.txt`,
+        }]
+      : undefined,
+    riskNotes: input.risks ?? [],
+    nextActions: input.notes ? [input.notes] : [],
+    createdAt: new Date().toISOString(),
+  };
+}
+
 function buildWorkerFailure(
   kind: WorkerFailureKind,
   code: string,
@@ -928,7 +1000,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     const traceId = extractTaskTraceId(task);
     const successRequested = parsed.result === "成功";
     const successAllowed = hasCodeChangeEvidence(parsed) || isEnvironmentOnlySuccess(parsed);
-    let status = successRequested && successAllowed ? "review_ready" : "failed";
+    let status: "review_ready" | "failed" = successRequested && successAllowed ? "review_ready" : "failed";
     let invalidSuccessMessage = successRequested && !successAllowed
       ? "success report missing code-change evidence or explicit environment_only proof"
       : null;
@@ -990,6 +1062,17 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     const summary = invalidSuccessMessage
       ? invalidSuccessMessage
       : parsed.notes || parsed.environmentEvidence || parsed.result;
+    const artifactBundle = buildArtifactBundle({
+      task,
+      status,
+      summary,
+      filesChanged: parsed.filesChanged,
+      testOutput: parsed.testOutput,
+      risks: parsed.risks,
+      notes: parsed.notes,
+      github: parsed.github,
+      sessionId,
+    });
 
     await emitPhaseEvent("submit_result_start", {
       status,
@@ -1016,6 +1099,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         filesChanged: parsed.filesChanged,
         github: parsed.github,
         ...(evidence ? { evidence } : {}),
+        ...(artifactBundle ? { artifactBundle } : {}),
       });
       await emitPhaseEvent("submit_result_done", { status, sessionId }, task.task_id);
       debugLog("dispatcher.submit_result.done", { taskId: task.task_id, status });
@@ -1049,6 +1133,15 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           }
         : {}),
     };
+    const artifactBundle = buildArtifactBundle({
+      task,
+      status: "failed",
+      summary: error.message,
+      filesChanged: [],
+      testOutput: rawOutput,
+      risks: [],
+      sessionId,
+    });
 
     await emitPhaseEvent("submit_result_start", {
       status: "failed",
@@ -1081,6 +1174,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           prUrl: null,
         },
         evidence,
+        ...(artifactBundle ? { artifactBundle } : {}),
       });
       await emitPhaseEvent("submit_result_done", {
         status: "failed",

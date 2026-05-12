@@ -9,6 +9,7 @@ import {
   WorkerEvidenceSchema,
   ReviewDecisionEvidenceSchema,
   RunResultSchema,
+  ArtifactBundleSchema,
 } from "../src/index.js";
 
 describe("RunCommandSchema", () => {
@@ -349,6 +350,40 @@ describe("RunResultSchema", () => {
         },
       })
     ).toThrow();
+  });
+});
+
+describe("ArtifactBundleSchema", () => {
+  it("parses a minimal v1 artifact bundle", () => {
+    const bundle = ArtifactBundleSchema.parse({
+      bundleId: "bundle-task-1-attempt-1",
+      taskId: "task-1",
+      attemptId: "attempt-1",
+      schemaVersion: "artifact-bundle/v1",
+      summary: "任务已完成",
+      changedFiles: [
+        {
+          path: "src/index.ts",
+          changeType: "modified",
+        },
+      ],
+      refs: {
+        structuredReport: "artifact://attempt-1/result.json",
+      },
+    });
+
+    expect(bundle.schemaVersion).toBe("artifact-bundle/v1");
+    expect(bundle.riskNotes).toEqual([]);
+    expect(bundle.nextActions).toEqual([]);
+  });
+
+  it("rejects artifact bundles without attempt ownership", () => {
+    expect(() => ArtifactBundleSchema.parse({
+      taskId: "task-1",
+      schemaVersion: "artifact-bundle/v1",
+      changedFiles: [],
+      refs: {},
+    })).toThrow();
   });
 });
 

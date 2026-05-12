@@ -9,6 +9,10 @@ import {
 import { sqliteStore } from "./runtime-state-sqlite.js";
 import type { RuntimeStateStore } from "./runtime-state-store.js";
 import type { LeaseResourceType, RuntimeLease } from "./leases.js";
+import {
+  ArtifactBundleSchema,
+  type ArtifactBundle,
+} from "@forgeflow/result-contracts";
 import type {
   ReviewDecisionEvidence,
   WorkerEvidence,
@@ -217,6 +221,7 @@ export interface RuntimeState {
   workers: Worker[];
   tasks: Task[];
   taskAttempts: TaskAttempt[];
+  artifactBundles: ArtifactBundle[];
   events: Event[];
   assignments: Assignment[];
   reviews: Review[];
@@ -342,6 +347,7 @@ export interface WorkerResult {
     commands: WorkerVerificationCommandResult[];
   };
   evidence?: WorkerEvidence;
+  artifactBundle?: ArtifactBundle;
 }
 
 export interface RecordWorkerResultInput {
@@ -350,6 +356,7 @@ export interface RecordWorkerResultInput {
   leaseToken?: string;
   result: WorkerResult;
   changedFiles?: string[];
+  artifactBundle?: ArtifactBundle;
   pullRequest?: {
     number: number;
     url: string;
@@ -1001,6 +1008,60 @@ function updateActiveTaskAttempt(
     ...state,
     taskAttempts: upsertTaskAttempt(state.taskAttempts ?? [], update(activeAttempt)),
   };
+}
+
+function upsertArtifactBundle(bundles: ArtifactBundle[] = [], bundle: ArtifactBundle): ArtifactBundle[] {
+  const existingIndex = bundles.findIndex((candidate) => candidate.bundleId === bundle.bundleId);
+  if (existingIndex < 0) {
+    return [...bundles, bundle];
+  }
+  const next = [...bundles];
+  next[existingIndex] = bundle;
+  return next;
+}
+
+function normalizeArtifactChangedFiles(changedFiles: string[] | undefined): ArtifactBundle["changedFiles"] {
+  return (changedFiles ?? []).map((filePath) => ({
+    path: filePath,
+    changeType: "modified" as const,
+  }));
+}
+
+function buildArtifactBundle(input: {
+  task: Task;
+  attempt: TaskAttempt;
+  result: WorkerResult;
+  artifactBundle?: ArtifactBundle;
+  changedFiles?: string[];
+  pullRequest: {
+    url: string;
+  } | null;
+}): ArtifactBundle {
+  const rawBundle = input.artifactBundle ?? input.result.artifactBundle;
+  const bundle = ArtifactBundleSchema.parse({
+    taskId: input.task.id,
+    attemptId: input.attempt.attemptId,
+    schemaVersion: "artifact-bundle/v1",
+    changedFiles: normalizeArtifactChangedFiles(input.changedFiles),
+    refs: {
+      structuredReport: `artifact://${input.attempt.attemptId}/result.json`,
+    },
+    ...rawBundle,
+    bundleId: rawBundle?.bundleId ?? `${input.attempt.attemptId}:artifact-bundle`,
+    summary: rawBundle?.summary ?? input.result.output,
+    branch: rawBundle?.branch ?? input.task.branchName,
+    commit: rawBundle?.commit,
+    pullRequestUrl: rawBundle?.pullRequestUrl ?? input.pullRequest?.url,
+    createdAt: rawBundle?.createdAt ?? input.result.generatedAt,
+  });
+
+  if (bundle.taskId !== input.task.id) {
+    throw new Error(`artifact bundle taskId mismatch for ${input.task.id}`);
+  }
+  if (bundle.attemptId !== input.attempt.attemptId) {
+    throw new Error(`artifact bundle attemptId mismatch for ${input.task.id}`);
+  }
+  return bundle;
 }
 
 function assertActiveAttemptLease(
@@ -2020,6 +2081,21 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   const currentReview = state.reviews.find((candidate) => candidate.taskId === task.id);
   const canonicalResult = buildCanonicalWorkerResult(task, input.workerId, input.result);
   const canonicalPullRequest = canonicalizePullRequest(task, input.pullRequest);
+  const activeAttempt = findActiveTaskAttempt(state, task.id);
+  const hasExplicitArtifactBundle = Boolean(input.artifactBundle ?? input.result.artifactBundle);
+  if (!activeAttempt && hasExplicitArtifactBundle) {
+    throw new Error(`active attempt not found for task: ${task.id}`);
+  }
+  const artifactBundle = activeAttempt
+    ? buildArtifactBundle({
+        task,
+        attempt: activeAttempt,
+        result: canonicalResult,
+        artifactBundle: input.artifactBundle ?? input.result.artifactBundle,
+        changedFiles: input.changedFiles,
+        pullRequest: canonicalPullRequest,
+      })
+    : null;
 
   const nextStatus = canonicalResult.verification.allPassed ? "review" : "failed";
   const reviewMaterial = canonicalResult.verification.allPassed
@@ -2105,6 +2181,21 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     };
   }
 
+  if (artifactBundle) {
+    nextState = appendEvent({
+      ...nextState,
+      artifactBundles: upsertArtifactBundle(nextState.artifactBundles ?? [], artifactBundle),
+    }, {
+      taskId: task.id,
+      type: "artifact_bundle_created",
+      at: artifactBundle.createdAt ?? canonicalResult.generatedAt,
+      payload: {
+        attemptId: artifactBundle.attemptId,
+        bundleId: artifactBundle.bundleId,
+      },
+    });
+  }
+
   nextState = updateActiveTaskAttempt(nextState, task.id, (attempt) => ({
     ...attempt,
     status: canonicalResult.verification.allPassed ? "succeeded" : "failed",
@@ -2112,6 +2203,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     endedAt: canonicalResult.generatedAt,
     failureCode: canonicalResult.verification.allPassed ? undefined : "verification_failed",
     failureMessage: canonicalResult.verification.allPassed ? undefined : canonicalResult.output,
+    artifactBundleId: artifactBundle?.bundleId ?? attempt.artifactBundleId,
   }));
 
   return releaseAssignmentLease(nextState, task.id, input.workerId, canonicalResult.generatedAt);

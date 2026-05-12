@@ -100,6 +100,7 @@ describe("runtime/worker", () => {
         status: "task",
         task: {
           task_id: "task-1",
+          attempt_id: "attempt-1",
           repo: "repo",
           branch: "feature/runtime",
           default_branch: "main",
@@ -236,6 +237,17 @@ describe("runtime/worker", () => {
           sessionId: "session-001",
         },
       },
+      artifactBundle: expect.objectContaining({
+        bundleId: "attempt-1:artifact-bundle",
+        taskId: "task-1",
+        attemptId: "attempt-1",
+        schemaVersion: "artifact-bundle/v1",
+        summary: "all good",
+        changedFiles: [
+          { path: "src/runtime/worker.ts", changeType: "modified" },
+          { path: "src/runtime/task-worktree.ts", changeType: "modified" },
+        ],
+      }),
     });
     expect(result).toEqual({
       status: "review_ready",

@@ -156,10 +156,15 @@ Current endpoint families:
   - Returns structured review projection rows from the SQLite query store.
 - `GET /api/query/leases`
   - Returns structured lease projection rows from the SQLite query store.
+- `GET /api/query/artifacts`
+  - Returns structured ArtifactBundle projection rows from the SQLite query store.
 - `GET /api/query/dashboard-snapshot`
   - Builds dashboard snapshot from the structured query store path.
 - `GET /api/query/projection-health`
   - Compares snapshot-derived counts with the SQLite structured projection tables.
+- `GET /api/artifacts/:bundleId`
+  - Returns one persisted ArtifactBundle by `bundleId`.
+  - Returns `404 artifact_not_found` when the bundle is unknown.
 - `GET /api/slo`
   - Returns stage-3 SLO targets, live indicators, and burn-rate reasons.
   - Current thresholds are controlled by:
@@ -241,6 +246,7 @@ Current endpoint families:
     - `blockers[]`
     - `findings[]`
     - `artifacts`
+  - `artifactBundle` may be provided as a top-level field; dispatcher validates ownership against the active attempt and stores the bundle summary / refs.
 - `POST /api/workers/:workerId/events`
   - Best-effort worker telemetry path for control-plane metrics and audit hints.
   - Current request body validates:

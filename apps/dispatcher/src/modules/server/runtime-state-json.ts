@@ -29,6 +29,7 @@ export function createEmptyRuntimeState(): RuntimeState {
     workers: [],
     tasks: [],
     taskAttempts: [],
+    artifactBundles: [],
     events: [],
     assignments: [],
     reviews: [],

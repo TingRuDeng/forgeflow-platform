@@ -62,6 +62,42 @@ export const ReviewDecisionEvidenceSchema = z.object({
   redriveStrategy: z.string().optional(),
 });
 
+export const ArtifactChangedFileSchema = z.object({
+  path: z.string().min(1),
+  changeType: z.enum(["added", "modified", "deleted", "renamed"]),
+  additions: z.number().int().nonnegative().optional(),
+  deletions: z.number().int().nonnegative().optional(),
+});
+
+export const ArtifactBundleSchema = z.object({
+  bundleId: z.string().min(1).optional(),
+  taskId: z.string().min(1),
+  attemptId: z.string().min(1),
+  schemaVersion: z.literal("artifact-bundle/v1"),
+  summary: z.string().optional(),
+  branch: z.string().optional(),
+  commit: z.string().optional(),
+  pullRequestUrl: z.string().url().optional(),
+  changedFiles: z.array(ArtifactChangedFileSchema),
+  refs: z.object({
+    diff: z.string().optional(),
+    logs: z.string().optional(),
+    testResults: z.string().optional(),
+    screenshots: z.array(z.string()).optional(),
+    terminalTranscript: z.string().optional(),
+    structuredReport: z.string().optional(),
+  }),
+  testResults: z.array(z.object({
+    name: z.string().min(1),
+    status: z.enum(["passed", "failed", "skipped", "unknown"]),
+    durationMs: z.number().nonnegative().optional(),
+    outputRef: z.string().optional(),
+  })).optional(),
+  riskNotes: z.array(z.string()).default([]),
+  nextActions: z.array(z.string()).default([]),
+  createdAt: z.string().optional(),
+});
+
 export const RunResultSchema = z.object({
   command: RunCommandSchema,
   task_id: z.string().min(1),
@@ -85,3 +121,5 @@ export type WorkerFailure = z.infer<typeof WorkerFailureSchema>;
 export type WorkerFailureType = z.infer<typeof WorkerFailureTypeSchema>;
 export type WorkerEvidence = z.infer<typeof WorkerEvidenceSchema>;
 export type ReviewDecisionEvidence = z.infer<typeof ReviewDecisionEvidenceSchema>;
+export type ArtifactChangedFile = z.infer<typeof ArtifactChangedFileSchema>;
+export type ArtifactBundle = z.infer<typeof ArtifactBundleSchema>;
