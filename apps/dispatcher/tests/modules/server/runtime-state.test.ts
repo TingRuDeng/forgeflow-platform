@@ -422,6 +422,107 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(snapshot.events.some((event) => event.payload && typeof event.payload === "object" && "to" in event.payload && event.payload.to === "merged")).toBe(true);
   });
 
+  it("creates and advances a synthetic task attempt for the v0 worker flow", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-attempt-worker",
+      pool: "codex",
+      hostname: "mac-mini",
+      labels: ["codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-05-12T10:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "main",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-attempt",
+          title: "绑定 attempt",
+          pool: "codex",
+          branchName: "ai/codex/task-attempt",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-attempt",
+          assignment: {
+            taskId: "task-attempt",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "ai/codex/task-attempt",
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "main",
+          },
+        },
+      ],
+      createdAt: "2026-05-12T10:00:10.000Z",
+    });
+
+    const taskId = dispatch.taskIds[0]!;
+    const claimed = claimAssignedTaskForWorker(dispatch.state, {
+      workerId: "codex-attempt-worker",
+      at: "2026-05-12T10:00:20.000Z",
+    });
+    state = claimed.state;
+
+    expect(state.taskAttempts).toHaveLength(1);
+    expect(state.taskAttempts[0]).toMatchObject({
+      taskId,
+      attemptNo: 1,
+      workerId: "codex-attempt-worker",
+      workerRuntime: "codex",
+      protocolVersion: "2026-05-v1",
+      leaseToken: "assignment:codex-attempt-worker",
+      status: "leased",
+      traceId: "trace-dispatch-1-task-attempt",
+      idempotencyKey: expect.stringContaining(taskId),
+    });
+
+    const attemptId = state.taskAttempts[0]!.attemptId;
+    state = beginTaskForWorker(state, {
+      taskId,
+      workerId: "codex-attempt-worker",
+      at: "2026-05-12T10:00:30.000Z",
+    });
+
+    expect(state.taskAttempts[0]).toMatchObject({
+      attemptId,
+      status: "running",
+      startedAt: "2026-05-12T10:00:30.000Z",
+    });
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-attempt-worker",
+      result: {
+        taskId,
+        workerId: "codex-attempt-worker",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-attempt",
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "main",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-05-12T10:01:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+      },
+    });
+
+    expect(state.taskAttempts[0]).toMatchObject({
+      attemptId,
+      status: "succeeded",
+      endedAt: "2026-05-12T10:01:00.000Z",
+    });
+  });
+
   it("marks stale workers as offline in dashboard snapshots", () => {
     const stateDir = makeTempDir();
 

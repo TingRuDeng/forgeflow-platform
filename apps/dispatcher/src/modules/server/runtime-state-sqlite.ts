@@ -209,6 +209,7 @@ function createEmptyRuntimeState(): RuntimeState {
     sequence: 0,
     workers: [],
     tasks: [],
+    taskAttempts: [],
     events: [],
     assignments: [],
     reviews: [],
@@ -224,6 +225,9 @@ function coerceRuntimeState(parsed: unknown): RuntimeState {
     ...(parsed as Partial<RuntimeState>),
     leases: Array.isArray((parsed as Partial<RuntimeState>)?.leases)
       ? (parsed as Partial<RuntimeState>).leases ?? []
+      : [],
+    taskAttempts: Array.isArray((parsed as Partial<RuntimeState>)?.taskAttempts)
+      ? (parsed as Partial<RuntimeState>).taskAttempts ?? []
       : [],
   };
 }
