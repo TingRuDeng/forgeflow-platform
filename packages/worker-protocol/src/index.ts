@@ -111,9 +111,13 @@ export const RuntimeEventTypeSchema = z.enum([
   "task_ready",
   "worker_registered",
   "worker_heartbeat",
+  "worker_disabled",
+  "worker_enabled",
+  "worker_offline",
   "lease_acquired",
   "lease_released",
   "lease_expired",
+  "lease_conflict",
   "lease_reclaimed",
   "attempt_created",
   "attempt_started",
@@ -131,6 +135,30 @@ export const RuntimeEventTypeSchema = z.enum([
   "policy_evaluated",
   "status_changed",
 ]);
+
+export type RuntimeEventType = z.infer<typeof RuntimeEventTypeSchema>;
+
+const LEGACY_RUNTIME_EVENT_TYPE_MAP: Readonly<Record<string, RuntimeEventType>> = {
+  created: "task_created",
+  assignment_claimed: "attempt_created",
+  progress_reported: "attempt_progress",
+  session_interrupted: "attempt_failed",
+  submit_result_retry_failed: "attempt_failed",
+  delivery_failed: "attempt_failed",
+  worktree_cleanup_failed: "attempt_failed",
+  worker_disabled: "worker_disabled",
+  worker_enabled: "worker_enabled",
+  worker_offline: "worker_offline",
+  lease_conflict: "lease_conflict",
+} as const;
+
+export function normalizeRuntimeEventType(value: string): RuntimeEventType | null {
+  const parsed = RuntimeEventTypeSchema.safeParse(value);
+  if (parsed.success) {
+    return parsed.data;
+  }
+  return LEGACY_RUNTIME_EVENT_TYPE_MAP[value] ?? null;
+}
 
 export const RuntimeEventSchema = z.object({
   eventId: NonEmptyStringSchema,
@@ -204,7 +232,6 @@ export type FailureCode = z.infer<typeof FailureCodeSchema>;
 export type TaskAttempt = z.infer<typeof TaskAttemptSchema>;
 export type RuntimeLeaseState = z.infer<typeof RuntimeLeaseStateSchema>;
 export type RuntimeLease = z.infer<typeof RuntimeLeaseSchema>;
-export type RuntimeEventType = z.infer<typeof RuntimeEventTypeSchema>;
 export type RuntimeEvent = z.infer<typeof RuntimeEventSchema>;
 export type ArtifactChangedFile = z.infer<typeof ArtifactChangedFileSchema>;
 export type ArtifactBundle = z.infer<typeof ArtifactBundleSchema>;
