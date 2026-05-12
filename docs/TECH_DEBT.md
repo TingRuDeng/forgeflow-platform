@@ -187,13 +187,14 @@ Desired direction:
 当前情况：
 
 - `packages/worker-protocol` 提供 Worker Protocol v1、TaskAttempt、RuntimeEvent 和 ArtifactBundle 的目标 schema
+- `packages/task-schema` 已接纳当前 dispatcher runtime 使用的 `trae` pool、Task/Worker 扩展字段和 AssignmentPayload 形态
 - dispatcher 当前 mutation 仍未强制 `protocolVersion`、`attemptId`、`leaseToken`、`traceId` 和 `idempotencyKey`
 - Trae runtime 当前仍走现有 v0 兼容路径
 
 影响：
 
 - 代码审查和文档阅读时容易把 vNext 目标契约误读为当前已执行的 runtime 保护
-- 后续 TaskAttempt / LeaseToken enforcement 需要跨 dispatcher、SQLite、Trae runtime、CLI 和 Console 分阶段推进
+- 后续 TaskAttempt / LeaseToken enforcement 仍需要跨 dispatcher、SQLite、Trae runtime、CLI 和 Console 分阶段推进
 
 期望方向：
 
