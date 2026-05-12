@@ -101,7 +101,7 @@ Current endpoint families:
   - HTML dashboard view.
   - Current GET response sets `Cache-Control: no-store`.
 - `GET /api/dashboard/snapshot`
-  - Returns a JSON snapshot of workers, tasks, assignments, reviews, PRs, recent events, and stats.
+  - 返回 workers、tasks、taskAttempts、artifactBundles、assignments、reviews、PRs、recent events 和 stats 的 JSON snapshot。
   - Current GET response sets `Cache-Control: no-store`.
   - Snapshot now also includes minimum control-plane metrics:
     - `metrics.queueDepth`
@@ -117,6 +117,7 @@ Current endpoint families:
   - Current task/event correlation additions:
     - tasks now carry stable `traceId`
     - recent events may include derived `summary`
+    - `taskAttempts` 和 `artifactBundles` 可被 Console 任务详情用于渲染 attempt timeline 与 artifact summary
 - `GET /api/metrics`
   - Returns a small control-plane metrics document for automation, dashboards, and alerts.
   - Current GET response sets `Cache-Control: no-store`.

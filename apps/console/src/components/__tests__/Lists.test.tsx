@@ -147,6 +147,35 @@ describe('Task drill-down', () => {
             at: '2026-04-08T10:01:00Z',
             payload: { message: 'running tests' },
           },
+          {
+            taskId: 'dispatch-1:task-1',
+            type: 'artifact_bundle_created',
+            at: '2026-04-08T10:02:00Z',
+            summary: 'artifact ready',
+          },
+        ]}
+        attempts={[
+          {
+            taskId: 'dispatch-1:task-1',
+            attemptId: 'att-001',
+            attemptNo: 1,
+            status: 'review',
+            workerId: 'trae-remote-forgeflow',
+            startedAt: '2026-04-08T10:00:30Z',
+            completedAt: '2026-04-08T10:02:30Z',
+            artifactBundleId: 'att-001:artifact-bundle',
+          },
+        ]}
+        artifactBundles={[
+          {
+            taskId: 'dispatch-1:task-1',
+            attemptId: 'att-001',
+            bundleId: 'att-001:artifact-bundle',
+            summary: '修改鉴权守卫并补充失败测试',
+            changedFiles: [{ path: 'src/auth.ts', changeType: 'modified' }],
+            riskNotes: ['需要人工复核权限边界'],
+            nextActions: ['合并后观察登录链路'],
+          },
         ]}
         onCancel={onCancel}
       />
@@ -157,6 +186,12 @@ describe('Task drill-down', () => {
     expect(screen.getByText(/verification_failed/i)).toBeInTheDocument();
     expect(screen.getByText(/test_gap/i)).toBeInTheDocument();
     expect(screen.getByText(/pnpm test failed/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/att-001/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/artifact ready/i)).toBeInTheDocument();
+    expect(screen.getByText(/修改鉴权守卫并补充失败测试/i)).toBeInTheDocument();
+    expect(screen.getByText(/src\/auth.ts/i)).toBeInTheDocument();
+    expect(screen.getByText(/需要人工复核权限边界/i)).toBeInTheDocument();
+    expect(screen.getByText(/合并后观察登录链路/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /作废任务|cancel task/i }));
 

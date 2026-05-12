@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useTranslation } from '@/lib/i18n';
 import { Badge } from './UI';
+import { ArtifactSummary, AttemptTimeline, RuntimeEventList, type ArtifactBundle, type TaskAttempt } from './TaskTimeline';
 
 interface Task {
   id: string;
@@ -108,15 +109,6 @@ function extractLatestProgress(events: EventRecord[]) {
   return [...events].find((event) => event.type === 'progress_reported') || null;
 }
 
-function extractEventSummary(event: EventRecord) {
-  return event.summary
-    || event.payload?.message
-    || event.payload?.data?.message
-    || event.payload?.failureCode
-    || event.payload?.data?.failureCode
-    || '--';
-}
-
 function canCancelTask(status?: string) {
   return !['merged', 'failed', 'cancelled'].includes(String(status || '').toLowerCase());
 }
@@ -216,9 +208,11 @@ export const TaskDetailsPanel: React.FC<{
   review?: Review | null;
   pullRequest?: PullRequest | null;
   events?: EventRecord[];
+  attempts?: TaskAttempt[];
+  artifactBundles?: ArtifactBundle[];
   cancellingTaskId?: string | null;
   onCancel?: (task: Task) => void;
-}> = ({ task, assignment, review, pullRequest, events = [], cancellingTaskId, onCancel }) => {
+}> = ({ task, assignment, review, pullRequest, events = [], attempts = [], artifactBundles = [], cancellingTaskId, onCancel }) => {
   const { t } = useTranslation();
 
   if (!task) {
@@ -318,20 +312,11 @@ export const TaskDetailsPanel: React.FC<{
         <div className="text-sm text-white/80">{t('url')}: {pullRequest?.url ? <a className="text-cyan-300 underline break-all" href={pullRequest.url} target="_blank" rel="noreferrer">{pullRequest.url}</a> : '--'}</div>
       </section>
 
-      <section className="glass-card rounded-xl p-4">
-        <div className="text-[11px] uppercase tracking-wide text-white/45 mb-3">{t('recentTaskEvents')}</div>
-        <div className="space-y-3">
-          {events.length > 0 ? events.slice(0, 5).map((event) => (
-            <div key={`${event.type}-${event.at || 'unknown'}`} className="border-l border-cyan-400/30 pl-3">
-              <div className="text-xs font-mono text-white/45">{formatTime(event.at)}</div>
-              <div className="text-sm text-white/85">{event.type}</div>
-              <div className="text-xs text-white/55 break-all">{extractEventSummary(event)}</div>
-            </div>
-          )) : (
-            <div className="text-sm text-white/45">{t('noRecentEvents')}</div>
-          )}
-        </div>
-      </section>
+      <AttemptTimeline attempts={attempts} />
+
+      <ArtifactSummary bundles={artifactBundles} />
+
+      <RuntimeEventList events={events} />
     </aside>
   );
 };

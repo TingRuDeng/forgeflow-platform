@@ -703,6 +703,20 @@ describe("dispatcher runtime state (TypeScript)", () => {
       bundleId: `${attempt.attemptId}:artifact-bundle`,
     });
     expect(state.taskAttempts[0]?.artifactBundleId).toBe(`${attempt.attemptId}:artifact-bundle`);
+
+    const snapshot = buildDashboardSnapshot(state);
+    expect(snapshot.taskAttempts).toHaveLength(1);
+    expect(snapshot.taskAttempts[0]).toMatchObject({
+      taskId,
+      attemptId: attempt.attemptId,
+      artifactBundleId: `${attempt.attemptId}:artifact-bundle`,
+    });
+    expect(snapshot.artifactBundles).toHaveLength(1);
+    expect(snapshot.artifactBundles[0]).toMatchObject({
+      taskId,
+      attemptId: attempt.attemptId,
+      summary: "done",
+    });
   });
 
   it("marks stale workers as offline in dashboard snapshots", () => {

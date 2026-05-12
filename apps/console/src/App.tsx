@@ -56,6 +56,20 @@ const App: React.FC = () => {
     return data.events.filter((event: { taskId: string }) => event.taskId === selectedTask.id);
   }, [data?.events, selectedTask?.id]);
 
+  const selectedAttempts = useMemo(() => {
+    if (!selectedTask?.id || !Array.isArray(data?.taskAttempts)) {
+      return [];
+    }
+    return data.taskAttempts.filter((attempt: { taskId: string }) => attempt.taskId === selectedTask.id);
+  }, [data?.taskAttempts, selectedTask?.id]);
+
+  const selectedArtifactBundles = useMemo(() => {
+    if (!selectedTask?.id || !Array.isArray(data?.artifactBundles)) {
+      return [];
+    }
+    return data.artifactBundles.filter((bundle: { taskId: string }) => bundle.taskId === selectedTask.id);
+  }, [data?.artifactBundles, selectedTask?.id]);
+
   useEffect(() => {
     const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
     if (tasks.length === 0) {
@@ -154,6 +168,8 @@ const App: React.FC = () => {
                     review={selectedReview}
                     pullRequest={selectedPullRequest}
                     events={selectedEvents}
+                    attempts={selectedAttempts}
+                    artifactBundles={selectedArtifactBundles}
                     cancellingTaskId={cancellingTaskId}
                     onCancel={handleTaskCancel}
                   />
