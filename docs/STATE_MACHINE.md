@@ -13,6 +13,7 @@ This document is the current implementation-oriented summary of dispatcher task 
 ## 一分钟摘要
 
 - `planned -> ready -> assigned -> in_progress -> review -> merged` 是主线成功流。
+- `in_progress` 的 active attempt lease 过期且 worker 离线时，reconcile 会按最小 retry policy 自动 redrive 或失败。
 - `failed`、`blocked`、`cancelled` 有不同 redrive / follow-up 语义，不能混用。
 - generic worker claim 只能通过 `POST /api/workers/:workerId/claim-task` 产生副作用。
 - worker result 中 dispatcher-owned metadata 会被 canonicalize，worker 不能覆盖。
@@ -55,6 +56,7 @@ Terminal or branch states:
 - `review -> blocked`
 - `assigned|in_progress -> failed`
 - `ready|assigned|in_progress|review|blocked -> cancelled`
+- `in_progress -> awaiting_retry -> ready` 目前只作为 runtime event 审计语义落账，不是持久化 `TaskStatus` 枚举值。
 
 Current rules:
 
@@ -65,6 +67,10 @@ Current rules:
 - Claim may either:
   - return an already assigned task for that worker
   - or atomically select a `ready` task for that worker pool and move it to `assigned`
+- Reconcile now scans active running attempts. If `leaseExpiresAt` has passed and the owning worker is offline:
+  - dispatcher marks the current attempt as `expired` with `failureCode = attempt_lease_expired`
+  - if attempts are still below the default max of 2, dispatcher records `attempt_expired` and `task_redriven`, releases worker / assignment ownership, and moves the task back to `ready`
+  - if attempts are exhausted, dispatcher records `attempt_expired` and moves task / assignment to `failed`
 
 ## Assignment States
 

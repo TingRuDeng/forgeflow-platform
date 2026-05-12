@@ -225,6 +225,7 @@ Current endpoint families:
   - May return an already assigned task for that worker, or atomically claim a `ready` task from the same pool.
   - Tasks whose `dependsOn` prerequisites are not yet merged stay in `planned` and are excluded until dispatcher unlocks them to `ready`.
   - Assignment claim is now also guarded by dispatcher lease ownership; conflicting claims are recorded as `lease_conflict` audit events.
+  - Reclaimed retry tasks create the next `TaskAttempt` when they are claimed again, preserving expired attempt history.
 - `POST /api/workers/:workerId/start-task`
   - Move task from `assigned` to `in_progress`.
 - `POST /api/workers/:workerId/result`
@@ -257,6 +258,8 @@ Current endpoint families:
     - `payload` optional object or primitive
   - Current mainline producers include:
     - `submit_result_retry_failed`
+    - `attempt_expired`
+    - `task_redriven`
     - `delivery_failed`
     - `worktree_cleanup_failed`
     - `session_interrupted`

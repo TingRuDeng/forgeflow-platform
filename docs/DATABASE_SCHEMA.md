@@ -93,6 +93,8 @@ Top-level collections currently include:
 `events` 当前除了 `created` / `status_changed` / `assignment_claimed` / `review_decided` / `progress_reported` 外，还会承载主链指标事件，例如：
 
 - `submit_result_retry_failed`
+- `attempt_expired`
+- `task_redriven`
 - `delivery_failed`
 - `worktree_cleanup_failed`
 - `session_interrupted`
