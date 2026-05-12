@@ -113,3 +113,14 @@ POST /api/tasks/:taskId/attempts/:attemptId/result
 | 409 | `IDEMPOTENCY_CONFLICT` | 同一 idempotencyKey 对应不同 payload |
 | 403 | `WORKER_NOT_AUTHORIZED` | worker 无权限处理该队列或 runtime class |
 | 422 | `RESULT_SCHEMA_INVALID` | result 或 artifact 不符合 schema |
+
+## Runtime Event Taxonomy
+
+`../packages/worker-protocol/src/index.ts` 暴露 `RuntimeEventTypeSchema` 和 `normalizeRuntimeEventType()`。
+
+当前批次的边界：
+
+- vNext 规范事件名继续使用 `task_created`、`attempt_started`、`attempt_failed`、`review_decided` 等稳定枚举。
+- 当前 dispatcher / worker 已存在的事件名通过 `normalizeRuntimeEventType()` 映射到规范枚举，例如 `created -> task_created`、`progress_reported -> attempt_progress`、`delivery_failed -> attempt_failed`。
+- helper 对未知事件返回 `null`，不做静默 fallback。
+- 本批次不改变 dispatcher 既有 `Event.type` 存储格式，也不新增 SQLite 事件列。

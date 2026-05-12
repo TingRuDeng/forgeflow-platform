@@ -6,6 +6,7 @@ import {
   ReviewDecisionSchema,
   RuntimeEventTypeSchema,
   WorkerProtocolEnvelopeSchema,
+  normalizeRuntimeEventType,
 } from "../src/index.js";
 
 describe("WorkerProtocolEnvelopeSchema", () => {
@@ -67,7 +68,24 @@ describe("RuntimeEventTypeSchema", () => {
   it("accepts fixed vNext runtime event taxonomy values", () => {
     expect(RuntimeEventTypeSchema.parse("attempt_created")).toBe("attempt_created");
     expect(RuntimeEventTypeSchema.parse("artifact_bundle_created")).toBe("artifact_bundle_created");
+    expect(RuntimeEventTypeSchema.parse("worker_disabled")).toBe("worker_disabled");
+    expect(RuntimeEventTypeSchema.parse("lease_conflict")).toBe("lease_conflict");
     expect(() => RuntimeEventTypeSchema.parse("attempt_started_again")).toThrow();
+  });
+
+  it("normalizes current dispatcher event names into the vNext taxonomy", () => {
+    expect(normalizeRuntimeEventType("created")).toBe("task_created");
+    expect(normalizeRuntimeEventType("assignment_claimed")).toBe("attempt_created");
+    expect(normalizeRuntimeEventType("progress_reported")).toBe("attempt_progress");
+    expect(normalizeRuntimeEventType("session_interrupted")).toBe("attempt_failed");
+    expect(normalizeRuntimeEventType("submit_result_retry_failed")).toBe("attempt_failed");
+    expect(normalizeRuntimeEventType("delivery_failed")).toBe("attempt_failed");
+    expect(normalizeRuntimeEventType("worktree_cleanup_failed")).toBe("attempt_failed");
+    expect(normalizeRuntimeEventType("worker_disabled")).toBe("worker_disabled");
+    expect(normalizeRuntimeEventType("worker_enabled")).toBe("worker_enabled");
+    expect(normalizeRuntimeEventType("worker_offline")).toBe("worker_offline");
+    expect(normalizeRuntimeEventType("lease_conflict")).toBe("lease_conflict");
+    expect(normalizeRuntimeEventType("unknown_runtime_event")).toBeNull();
   });
 });
 
