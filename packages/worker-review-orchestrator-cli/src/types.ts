@@ -88,6 +88,10 @@ export interface DecideOptions {
   at?: string;
   dispatcherUrl?: string;
   stateDir?: string;
+  reasonCode?: string;
+  mustFix?: string | string[];
+  canRedrive?: boolean;
+  redriveStrategy?: string;
 }
 
 export interface DecideResult {

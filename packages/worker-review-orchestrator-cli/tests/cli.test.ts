@@ -95,6 +95,17 @@ describe("worker-review-orchestrator-cli", () => {
         decision: "merge",
       },
     });
+    expect(parseCliArgs(["decide", "--dispatcher-url", "http://127.0.0.1:8787", "--task-id", "dispatch-1:task-1", "--decision", "block", "--reason-code", "test_failure", "--must-fix", "补测试,修类型", "--can-redrive"])).toMatchObject({
+      command: "decide",
+      options: {
+        dispatcherUrl: "http://127.0.0.1:8787",
+        taskId: "dispatch-1:task-1",
+        decision: "block",
+        reasonCode: "test_failure",
+        mustFix: "补测试,修类型",
+        canRedrive: true,
+      },
+    });
     expect(parseCliArgs(["inspect", "--dispatcher-url", "http://127.0.0.1:8787", "--task-id", "dispatch-1:task-1"])).toMatchObject({
       command: "inspect",
       options: {

@@ -237,6 +237,7 @@ vNext runtime reliability 推进：
   - `GET /api/workers/:workerId/assigned-task` 只读
   - `POST /api/workers/:workerId/claim-task` 才会真正 claim / assign
 - review decision 现在显式支持 `merge`、`block`、`rework`、`changes_requested`，其中后两者都会把任务落到 `blocked`，但保留原始 decision 供 redrive 和审计使用。
+- `forgeflow-review-orchestrator decide` 现在支持 `--reason-code`、`--must-fix`、`--can-redrive`、`--redrive-strategy`，并会把这些字段归一化写入 `review.evidence`。
 - dispatcher 现在会 canonicalize worker result 的 `workerId/pool/repo/defaultBranch/branchName`，worker 不能再覆盖这些 dispatcher-owned 字段。
 - dispatcher 现在会给每个任务生成稳定 `traceId`，并在 snapshot、Trae fetch-task、worker events、CLI summary 与 console drill-down 暴露该关联键。
 - dashboard snapshot 现在附带阶段二控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`、`retryRatePct`、`branchProtectionHitCount`、`repoConcurrencySaturation`、`failureCodes`、`reviewReasonCodes`。

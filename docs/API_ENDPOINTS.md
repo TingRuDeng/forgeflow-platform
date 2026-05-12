@@ -277,22 +277,23 @@ Current endpoint families:
     - `workerPromptMode`
     - `reportSchemaVersion`
 - `POST /api/reviews/:taskId/decision`
-  - Submit `merge`, `block`, `rework`, or `changes_requested`.
-  - `merge` moves task `review -> merged`.
-  - `block` / `rework` / `changes_requested` all move task `review -> blocked`, but dispatcher preserves the original review decision value for audit and redrive.
-  - Request body must be a JSON object and now validates:
-    - `actor` required, non-empty string
-    - `decision` required enum
-    - `notes` optional string
-    - `evidence` optional object
-  - Request body may include additive structured decision evidence:
+  - 提交 `merge`、`block`、`rework` 或 `changes_requested`。
+  - `merge` 会把任务从 `review` 推进到 `merged`。
+  - `block` / `rework` / `changes_requested` 都会把任务从 `review` 推进到 `blocked`，但 dispatcher 会保留原始 review decision 供审计和 redrive 使用。
+  - Request body 必须是 JSON object，并校验：
+    - `actor` 必填，非空字符串
+    - `decision` 必填 enum
+    - `notes` 可选字符串
+    - `evidence` 可选 object
+  - 结构化决策证据可放在 `evidence` 内，也可直接作为顶层便捷字段提交；顶层字段会归一化写入 `review.evidence`：
     - `reasonCode`
     - `mustFix[]`
     - `canRedrive`
     - `redriveStrategy`
-  - Blocked tasks with latest review decision `rework` or `changes_requested` are redriveable in the orchestrator CLI.
-  - Returns `404` when the task or assignment does not exist.
-  - Returns `409` when the task exists but is not currently in `review`.
+  - 标准 `reasonCode` 包括 `looks_good`、`tests_passed`、`minor_fix_needed`、`incomplete_implementation`、`test_failure`、`policy_violation`、`security_risk`、`unclear_diff`、`requires_pairing`、`needs_redrive`、`other`；旧版自定义字符串仍兼容。
+  - 最新 review decision 为 `rework` 或 `changes_requested` 的 blocked 任务可由 orchestrator CLI redrive。
+  - 任务或 assignment 不存在时返回 `404`。
+  - 任务存在但不在 `review` 状态时返回 `409`。
 - `POST /api/tasks/:taskId/cancel`
   - Explicitly move a non-terminal task to `cancelled`.
   - Current request body may include:

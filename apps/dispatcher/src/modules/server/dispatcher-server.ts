@@ -385,6 +385,47 @@ function validateWorkerStartBody(body: unknown): Record<string, any> {
   };
 }
 
+function readReviewEvidenceFields(source: Record<string, any>, prefix: string): Record<string, any> {
+  const evidence: Record<string, any> = {};
+  if (source.reasonCode !== undefined) {
+    if (typeof source.reasonCode !== "string") {
+      throw Object.assign(new Error(`${prefix}.reasonCode must be a string`), { status: 400 });
+    }
+    evidence.reasonCode = source.reasonCode;
+  }
+  if (source.mustFix !== undefined) {
+    if (!Array.isArray(source.mustFix) || source.mustFix.some((item) => typeof item !== "string")) {
+      throw Object.assign(new Error(`${prefix}.mustFix must be an array of strings`), { status: 400 });
+    }
+    evidence.mustFix = source.mustFix;
+  }
+  if (source.canRedrive !== undefined) {
+    if (typeof source.canRedrive !== "boolean") {
+      throw Object.assign(new Error(`${prefix}.canRedrive must be a boolean`), { status: 400 });
+    }
+    evidence.canRedrive = source.canRedrive;
+  }
+  if (source.redriveStrategy !== undefined) {
+    if (typeof source.redriveStrategy !== "string") {
+      throw Object.assign(new Error(`${prefix}.redriveStrategy must be a string`), { status: 400 });
+    }
+    evidence.redriveStrategy = source.redriveStrategy;
+  }
+  return evidence;
+}
+
+function normalizeReviewDecisionEvidence(body: Record<string, any>): Record<string, any> | undefined {
+  let evidence = body.evidence === undefined ? undefined : readReviewEvidenceFields(body.evidence, "review decision evidence");
+  const topLevel = readReviewEvidenceFields(body, "review decision");
+  if (Object.keys(topLevel).length > 0) {
+    evidence = {
+      ...(evidence ?? {}),
+      ...topLevel,
+    };
+  }
+  return evidence;
+}
+
 function validateReviewDecisionBody(body: unknown): Record<string, any> {
   if (!isPlainObject(body)) {
     throw Object.assign(new Error("review decision body must be a JSON object"), { status: 400 });
@@ -408,27 +449,14 @@ function validateReviewDecisionBody(body: unknown): Record<string, any> {
     if (!isPlainObject(body.evidence)) {
       throw Object.assign(new Error("review decision evidence must be an object when provided"), { status: 400 });
     }
-    if (body.evidence.reasonCode !== undefined && typeof body.evidence.reasonCode !== "string") {
-      throw Object.assign(new Error("review decision evidence.reasonCode must be a string"), { status: 400 });
-    }
-    if (
-      body.evidence.mustFix !== undefined
-      && (!Array.isArray(body.evidence.mustFix) || body.evidence.mustFix.some((item) => typeof item !== "string"))
-    ) {
-      throw Object.assign(new Error("review decision evidence.mustFix must be an array of strings"), { status: 400 });
-    }
-    if (body.evidence.canRedrive !== undefined && typeof body.evidence.canRedrive !== "boolean") {
-      throw Object.assign(new Error("review decision evidence.canRedrive must be a boolean"), { status: 400 });
-    }
-    if (body.evidence.redriveStrategy !== undefined && typeof body.evidence.redriveStrategy !== "string") {
-      throw Object.assign(new Error("review decision evidence.redriveStrategy must be a string"), { status: 400 });
-    }
   }
+  const evidence = normalizeReviewDecisionEvidence(body);
 
   return {
     ...body,
     actor,
     decision,
+    evidence,
   };
 }
 
