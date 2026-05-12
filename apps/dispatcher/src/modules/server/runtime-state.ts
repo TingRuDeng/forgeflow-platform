@@ -23,6 +23,8 @@ const defaultStore: RuntimeStateStore = sqliteStore;
 
 const RUNTIME_STATE_BACKEND_ENV = "RUNTIME_STATE_BACKEND";
 const RUNTIME_EVENTS_RETENTION_LIMIT = 500;
+const DEFAULT_MAX_TASK_ATTEMPTS = 2;
+const ATTEMPT_LEASE_EXPIRED_CODE = "attempt_lease_expired";
 
 function resolveStore(): RuntimeStateStore {
   if (process.env[RUNTIME_STATE_BACKEND_ENV] === "json") {
@@ -1305,6 +1307,161 @@ function isAssignmentTimedOut(assignment: Assignment | undefined, worker: Worker
   return !didWorkerHeartbeatAfterAssignment(worker, assignment);
 }
 
+function isAttemptLeaseExpired(attempt: TaskAttempt | null, at: string): boolean {
+  // attempt lease 是 worker 执行尝试的真实占用边界，过期后必须进入可审计恢复路径。
+  const leaseExpiresAt = Date.parse(attempt?.leaseExpiresAt ?? "");
+  const now = Date.parse(at);
+  return Number.isFinite(leaseExpiresAt) && Number.isFinite(now) && now > leaseExpiresAt;
+}
+
+function expireTaskAttempt(state: RuntimeState, attempt: TaskAttempt, at: string): RuntimeState {
+  // 保留历史 attempt，不覆盖或删除失败证据，避免 retry 抹掉原始执行记录。
+  return {
+    ...state,
+    taskAttempts: upsertTaskAttempt(state.taskAttempts ?? [], {
+      ...attempt,
+      status: "expired",
+      endedAt: at,
+      failureCode: ATTEMPT_LEASE_EXPIRED_CODE,
+      failureMessage: "attempt lease expired before worker result was submitted",
+    }),
+  };
+}
+
+function appendRetryRedriveEvents(
+  state: RuntimeState,
+  input: { task: Task; attempt: TaskAttempt; at: string },
+): RuntimeState {
+  let nextState = appendEvent(state, {
+    taskId: input.task.id,
+    type: "status_changed",
+    at: input.at,
+    payload: { from: "in_progress", to: "awaiting_retry" },
+  });
+  nextState = appendEvent(nextState, {
+    taskId: input.task.id,
+    type: "task_redriven",
+    at: input.at,
+    payload: {
+      reason: ATTEMPT_LEASE_EXPIRED_CODE,
+      fromAttemptId: input.attempt.attemptId,
+      nextAttemptNo: input.attempt.attemptNo + 1,
+    },
+  });
+  nextState = appendEvent(nextState, {
+    taskId: input.task.id,
+    type: "status_changed",
+    at: input.at,
+    payload: { from: "awaiting_retry", to: "ready" },
+  });
+  return nextState;
+}
+
+function markTaskReadyForRetry(
+  state: RuntimeState,
+  input: { task: Task; assignment: Assignment; worker: Worker; attempt: TaskAttempt; at: string },
+): RuntimeState {
+  // 当前最小策略用事件表达 awaiting_retry 中间语义，持久 task 状态仍回到 ready 供下一次 claim。
+  const nextState = appendRetryRedriveEvents(state, {
+    task: input.task,
+    attempt: input.attempt,
+    at: input.at,
+  });
+  return {
+    ...nextState,
+    updatedAt: input.at,
+    tasks: upsertTask(nextState.tasks, {
+      ...input.task,
+      status: "ready",
+      assignedWorkerId: null,
+      lastAssignedWorkerId: input.worker.id,
+    }),
+    assignments: upsertAssignment(nextState.assignments, {
+      ...input.assignment,
+      workerId: null,
+      status: "pending",
+      assignedAt: null,
+      claimedAt: null,
+      assignment: {
+        ...input.assignment.assignment,
+        workerId: null,
+        status: "pending",
+      },
+    }),
+    workers: upsertWorker(nextState.workers, {
+      ...input.worker,
+      status: "offline",
+      currentTaskId: undefined,
+    }),
+  };
+}
+
+function markTaskFailedAfterRetries(
+  state: RuntimeState,
+  input: { task: Task; assignment: Assignment; worker: Worker; at: string },
+): RuntimeState {
+  // retry 耗尽后显式失败，避免离线 worker 让任务长期停留在 in_progress。
+  const nextState = appendEvent(state, {
+    taskId: input.task.id,
+    type: "status_changed",
+    at: input.at,
+    payload: { from: "in_progress", to: "failed", failureCode: ATTEMPT_LEASE_EXPIRED_CODE },
+  });
+  return {
+    ...nextState,
+    updatedAt: input.at,
+    tasks: upsertTask(nextState.tasks, {
+      ...input.task,
+      status: "failed",
+    }),
+    assignments: upsertAssignment(nextState.assignments, {
+      ...input.assignment,
+      status: "failed",
+      assignment: {
+        ...input.assignment.assignment,
+        status: "failed",
+      },
+    }),
+    workers: upsertWorker(nextState.workers, {
+      ...input.worker,
+      status: "offline",
+      currentTaskId: undefined,
+    }),
+  };
+}
+
+function reconcileExpiredRunningAttempts(state: RuntimeState, options: ReconcileOptions, at: string): RuntimeState {
+  let nextState = state;
+  for (const task of state.tasks) {
+    if (task.status !== "in_progress" || !task.assignedWorkerId) {
+      continue;
+    }
+    const worker = nextState.workers.find((candidate) => candidate.id === task.assignedWorkerId);
+    const assignment = nextState.assignments.find((candidate) => candidate.taskId === task.id);
+    const attempt = findActiveTaskAttempt(nextState, task.id);
+    if (!worker || !assignment || !attempt || !isAttemptLeaseExpired(attempt, at)) {
+      continue;
+    }
+    if (resolveWorkerStatus(worker, options) !== "offline") {
+      continue;
+    }
+    nextState = appendEvent(expireTaskAttempt(nextState, attempt, at), {
+      taskId: task.id,
+      type: "attempt_expired",
+      at,
+      payload: {
+        attemptId: attempt.attemptId,
+        failureCode: ATTEMPT_LEASE_EXPIRED_CODE,
+      },
+    });
+    const attemptsForTask = (nextState.taskAttempts ?? []).filter((candidate) => candidate.taskId === task.id).length;
+    nextState = attemptsForTask < DEFAULT_MAX_TASK_ATTEMPTS
+      ? markTaskReadyForRetry(nextState, { task, assignment, worker, attempt, at })
+      : markTaskFailedAfterRetries(nextState, { task, assignment, worker, at });
+  }
+  return nextState;
+}
+
 export function reconcileRuntimeState(state: RuntimeState, options: ReconcileOptions = {}): RuntimeState {
   const at = options.now ?? nowIso();
   let nextState = backfillTraceMetadata(state, at);
@@ -1330,14 +1487,17 @@ export function reconcileRuntimeState(state: RuntimeState, options: ReconcileOpt
     }
   }
 
+  nextState = reconcileExpiredRunningAttempts(nextState, options, at);
+
   for (const worker of state.workers) {
-    const assignedTask = worker.currentTaskId
-      ? nextState.tasks.find((candidate) => candidate.id === worker.currentTaskId)
+    const currentWorker = nextState.workers.find((candidate) => candidate.id === worker.id) ?? worker;
+    const assignedTask = currentWorker.currentTaskId
+      ? nextState.tasks.find((candidate) => candidate.id === currentWorker.currentTaskId)
       : null;
-    const assignment = worker.currentTaskId
-      ? nextState.assignments.find((candidate) => candidate.taskId === worker.currentTaskId)
+    const assignment = currentWorker.currentTaskId
+      ? nextState.assignments.find((candidate) => candidate.taskId === currentWorker.currentTaskId)
       : null;
-    const workerResolvedStatus = resolveWorkerStatus(worker, options);
+    const workerResolvedStatus = resolveWorkerStatus(currentWorker, options);
     const shouldRequeueBecauseOffline =
       workerResolvedStatus === "offline" &&
       assignedTask &&
@@ -1401,11 +1561,11 @@ export function reconcileRuntimeState(state: RuntimeState, options: ReconcileOpt
     nextState = {
       ...nextState,
       workers: upsertWorker(nextState.workers, {
-        ...worker,
+        ...currentWorker,
         status: shouldRequeueBecauseTimeout || workerResolvedStatus === "offline" ? "offline" : "idle",
         currentTaskId: shouldRequeueBecauseOffline || shouldRequeueBecauseTimeout
           ? undefined
-          : worker.currentTaskId,
+          : currentWorker.currentTaskId,
       }),
     };
   }
@@ -1929,6 +2089,7 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
       assignment: null,
     };
   }
+  nextState = createOrReuseTaskAttempt(nextState, readyTask, worker.id, at);
 
   nextState = {
     ...nextState,

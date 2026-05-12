@@ -44,6 +44,53 @@ afterEach(() => {
   }
 });
 
+function createRunningAttemptState(taskSlug: string, workerId: string): RuntimeState {
+  let state = createEmptyRuntimeState();
+  state = registerWorker(state, {
+    workerId,
+    pool: "codex",
+    hostname: "retry-host",
+    labels: ["codex"],
+    repoDir: "/repos/openclaw",
+    at: "2026-05-12T13:00:00.000Z",
+  });
+  const dispatch = createDispatch(state, {
+    repo: "TingRuDeng/openclaw-multi-agent-mvp",
+    defaultBranch: "main",
+    requestedBy: "codex-control",
+    tasks: [{
+      id: taskSlug,
+      title: "验证 retry scheduler",
+      pool: "codex",
+      branchName: `ai/codex/${taskSlug}`,
+      verification: { mode: "run" },
+    }],
+    packages: [{
+      taskId: taskSlug,
+      assignment: {
+        taskId: taskSlug,
+        workerId: null,
+        pool: "codex",
+        status: "pending",
+        branchName: `ai/codex/${taskSlug}`,
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "main",
+      },
+    }],
+    createdAt: "2026-05-12T13:00:10.000Z",
+  });
+  const claimed = claimAssignedTaskForWorker(dispatch.state, {
+    workerId,
+    at: "2026-05-12T13:00:20.000Z",
+    heartbeatTimeoutMs: 60_000,
+  });
+  return beginTaskForWorker(claimed.state, {
+    taskId: claimed.assignment!.task.id,
+    workerId,
+    at: "2026-05-12T13:00:30.000Z",
+  });
+}
+
 describe("dispatcher runtime state (TypeScript)", () => {
   it("records new runtime timestamps with explicit local offsets instead of UTC z", () => {
     let state = createEmptyRuntimeState();
@@ -717,6 +764,96 @@ describe("dispatcher runtime state (TypeScript)", () => {
       attemptId: attempt.attemptId,
       summary: "done",
     });
+  });
+
+  it("requeues an expired running attempt when retry policy still allows another attempt", () => {
+    let state = createRunningAttemptState("task-retry-timeout", "codex-retry-worker");
+
+    state = reconcileRuntimeState(state, {
+      now: "2026-05-12T13:11:00.000Z",
+      heartbeatTimeoutMs: 60_000,
+    });
+
+    expect(state.tasks[0]).toMatchObject({
+      status: "ready",
+      assignedWorkerId: null,
+      lastAssignedWorkerId: "codex-retry-worker",
+    });
+    expect(state.assignments[0]).toMatchObject({
+      workerId: null,
+      status: "pending",
+      assignedAt: null,
+      claimedAt: null,
+    });
+    expect(state.taskAttempts[0]).toMatchObject({
+      status: "expired",
+      failureCode: "attempt_lease_expired",
+      endedAt: "2026-05-12T13:11:00.000Z",
+    });
+    expect(state.workers[0]).toMatchObject({
+      status: "offline",
+      currentTaskId: undefined,
+    });
+    expect(state.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "attempt_expired" }),
+      expect.objectContaining({ type: "task_redriven" }),
+      expect.objectContaining({
+        type: "status_changed",
+        payload: expect.objectContaining({ from: "in_progress", to: "awaiting_retry" }),
+      }),
+      expect.objectContaining({
+        type: "status_changed",
+        payload: expect.objectContaining({ from: "awaiting_retry", to: "ready" }),
+      }),
+    ]));
+  });
+
+  it("fails an expired running attempt when retry policy is exhausted", () => {
+    let state = createRunningAttemptState("task-retry-exhausted", "codex-retry-worker");
+    state = reconcileRuntimeState(state, {
+      now: "2026-05-12T13:11:00.000Z",
+      heartbeatTimeoutMs: 60_000,
+    });
+    state = heartbeatWorker(state, {
+      workerId: "codex-retry-worker",
+      at: "2026-05-12T13:12:00.000Z",
+    });
+    const claimed = claimAssignedTaskForWorker(state, {
+      workerId: "codex-retry-worker",
+      at: "2026-05-12T13:12:10.000Z",
+      heartbeatTimeoutMs: 60_000,
+    });
+    state = beginTaskForWorker(claimed.state, {
+      taskId: claimed.assignment!.task.id,
+      workerId: "codex-retry-worker",
+      at: "2026-05-12T13:12:20.000Z",
+    });
+
+    state = reconcileRuntimeState(state, {
+      now: "2026-05-12T13:23:00.000Z",
+      heartbeatTimeoutMs: 60_000,
+    });
+
+    expect(state.tasks[0]).toMatchObject({
+      status: "failed",
+      assignedWorkerId: "codex-retry-worker",
+    });
+    expect(state.assignments[0]).toMatchObject({
+      status: "failed",
+    });
+    expect(state.taskAttempts).toHaveLength(2);
+    expect(state.taskAttempts[1]).toMatchObject({
+      status: "expired",
+      failureCode: "attempt_lease_expired",
+      endedAt: "2026-05-12T13:23:00.000Z",
+    });
+    expect(state.events.filter((event) => event.type === "task_redriven")).toHaveLength(1);
+    expect(state.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "status_changed",
+        payload: expect.objectContaining({ from: "in_progress", to: "failed" }),
+      }),
+    ]));
   });
 
   it("marks stale workers as offline in dashboard snapshots", () => {
