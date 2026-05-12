@@ -78,6 +78,7 @@ function createTestState(): RuntimeState {
         verification: { mode: "run" },
       },
     ],
+    taskAttempts: [],
     events: [
       {
         taskId: "dispatch-1:task-1",

@@ -13,7 +13,7 @@
 - `Task` 是业务目标，`TaskAttempt` 是一次真实执行。
 - 一个 task 可以有多个 attempts，但短期内同一 task 最多一个 active attempt。
 - result、ArtifactBundle、Review、LeaseToken 都应该绑定 `attemptId`。
-- 当前文档是 vNext 目标模型，现有 runtime-state 尚未持久化 `taskAttempts[]`。
+- 当前 dispatcher runtime state 已有内存态 `taskAttempts[]`，SQLite attempts projection 仍未实现。
 
 ```yaml
 ai_summary:
@@ -40,6 +40,23 @@ ai_summary:
 - 运行 `pnpm --filter @forgeflow/worker-protocol test` 验证 `TaskAttemptSchema`。
 - 对照 `apps/dispatcher/src/modules/server/runtime-state.ts` 确认当前是否已经接入。
 - 后续接入时必须增加 stale result、retry、redrive 和 synthetic attempt migration 测试。
+
+## 当前实现状态
+
+已实现：
+
+- v0 worker claim 会为当前 task 创建 synthetic attempt。
+- v0 start 会把 active attempt 标记为 `running`。
+- v0 result 会把 active attempt 标记为 `succeeded` 或 `failed`。
+- task cancel 会把 active attempt 标记为 `cancelled`。
+- `taskAttempts[]` 会随 runtime snapshot 一起保存。
+
+尚未实现：
+
+- SQLite `task_attempts` projection 表。
+- worker mutation 对 `attemptId` 和 `leaseToken` 的强制校验。
+- stale result 拒绝。
+- redrive / retry 创建新 attempt 的完整策略。
 
 ## Task 与 Attempt
 
@@ -78,9 +95,9 @@ v1 状态集合：
 
 ## 兼容迁移
 
-vNext alpha 可允许 v0 worker 继续工作：
+vNext alpha 允许 v0 worker 继续工作：
 
-- dispatcher 为 v0 claim 自动生成 attemptId。
+- dispatcher 为 v0 claim 自动生成 attemptId 和 leaseToken。
 - v0 result 自动绑定当前 active attempt。
 - CLI doctor 给出 v0 warning。
 - vNext stable 之后再考虑移除 v0 mutation。

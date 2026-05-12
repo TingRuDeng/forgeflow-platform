@@ -28,6 +28,7 @@ export function createEmptyRuntimeState(): RuntimeState {
     sequence: 0,
     workers: [],
     tasks: [],
+    taskAttempts: [],
     events: [],
     assignments: [],
     reviews: [],

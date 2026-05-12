@@ -81,6 +81,7 @@ Top-level collections currently include:
 
 - `workers`
 - `tasks`
+- `taskAttempts`
 - `events`
 - `assignments`
 - `reviews`
@@ -343,6 +344,7 @@ Current role of those tables:
 
 - they are dispatcher-owned structured projections
 - they support `/api/query/*`, structured reads, and projection health checks
+- `taskAttempts` 目前只在 authoritative snapshot 中保存，尚未有独立 `task_attempts` projection 表
 - they do not replace `snapshots` as the runtime truth source
 
 Current stage-3 optional shadow path:

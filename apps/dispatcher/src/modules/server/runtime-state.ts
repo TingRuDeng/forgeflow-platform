@@ -48,6 +48,19 @@ export type AssignmentStatus = "pending" | "assigned" | "in_progress" | "review"
 export type ReviewDecision = "pending" | "merge" | "block" | "rework" | "changes_requested";
 
 export type PullRequestStatus = "opened" | "merged" | "changes_requested";
+export type WorkerRuntime = "codex" | "gemini" | "trae" | "custom";
+export type TaskAttemptStatus =
+  | "created"
+  | "leased"
+  | "starting"
+  | "running"
+  | "checkpointed"
+  | "result_submitted"
+  | "succeeded"
+  | "failed"
+  | "expired"
+  | "cancelled"
+  | "superseded";
 
 export interface Worker {
   id: string;
@@ -96,6 +109,26 @@ export interface Event {
   at: string;
   summary?: string | null;
   payload?: unknown;
+}
+
+export interface TaskAttempt {
+  attemptId: string;
+  taskId: string;
+  attemptNo: number;
+  workerId: string;
+  workerRuntime: WorkerRuntime;
+  protocolVersion: "2026-05-v1";
+  leaseToken: string;
+  status: TaskAttemptStatus;
+  traceId: string;
+  startedAt?: string;
+  heartbeatAt?: string;
+  leaseExpiresAt?: string;
+  endedAt?: string;
+  failureCode?: string;
+  failureMessage?: string;
+  artifactBundleId?: string;
+  idempotencyKey: string;
 }
 
 export interface AssignmentPayload {
@@ -183,6 +216,7 @@ export interface RuntimeState {
   sequence: number;
   workers: Worker[];
   tasks: Task[];
+  taskAttempts: TaskAttempt[];
   events: Event[];
   assignments: Assignment[];
   reviews: Review[];
@@ -884,6 +918,87 @@ function upsertAssignment(assignments: Assignment[], assignment: Assignment): As
   return next;
 }
 
+function isTerminalAttemptStatus(status: TaskAttemptStatus): boolean {
+  return ["succeeded", "failed", "expired", "cancelled", "superseded"].includes(status);
+}
+
+function resolveWorkerRuntime(pool: string): WorkerRuntime {
+  return pool === "codex" || pool === "gemini" || pool === "trae" ? pool : "custom";
+}
+
+function findActiveTaskAttempt(state: RuntimeState, taskId: string): TaskAttempt | null {
+  return (state.taskAttempts ?? []).find((attempt) =>
+    attempt.taskId === taskId && !isTerminalAttemptStatus(attempt.status)) ?? null;
+}
+
+function upsertTaskAttempt(attempts: TaskAttempt[], attempt: TaskAttempt): TaskAttempt[] {
+  const existingIndex = attempts.findIndex((candidate) => candidate.attemptId === attempt.attemptId);
+  if (existingIndex === -1) {
+    return [...attempts, attempt];
+  }
+
+  const next = [...attempts];
+  next[existingIndex] = attempt;
+  return next;
+}
+
+function createOrReuseTaskAttempt(
+  state: RuntimeState,
+  task: Task,
+  workerId: string,
+  at: string,
+): RuntimeState {
+  const activeAttempt = findActiveTaskAttempt(state, task.id);
+  if (activeAttempt) {
+    return {
+      ...state,
+      taskAttempts: upsertTaskAttempt(state.taskAttempts ?? [], {
+        ...activeAttempt,
+        workerId,
+        leaseToken: `assignment:${workerId}`,
+        status: activeAttempt.status === "created" ? "leased" : activeAttempt.status,
+        heartbeatAt: at,
+        leaseExpiresAt: new Date(Date.parse(at) + DEFAULT_LEASE_TTL_MS).toISOString(),
+      }),
+    };
+  }
+
+  const attemptNo = (state.taskAttempts ?? []).filter((attempt) => attempt.taskId === task.id).length + 1;
+  const attemptId = `${task.id}:attempt-${attemptNo}`;
+  return {
+    ...state,
+    taskAttempts: upsertTaskAttempt(state.taskAttempts ?? [], {
+      attemptId,
+      taskId: task.id,
+      attemptNo,
+      workerId,
+      workerRuntime: resolveWorkerRuntime(task.pool),
+      protocolVersion: "2026-05-v1",
+      leaseToken: `assignment:${workerId}`,
+      status: "leased",
+      traceId: resolveTaskTraceId(task) ?? buildTaskTraceId(task.id),
+      heartbeatAt: at,
+      leaseExpiresAt: new Date(Date.parse(at) + DEFAULT_LEASE_TTL_MS).toISOString(),
+      idempotencyKey: `v0:${task.id}:attempt-${attemptNo}`,
+    }),
+  };
+}
+
+function updateActiveTaskAttempt(
+  state: RuntimeState,
+  taskId: string,
+  update: (attempt: TaskAttempt) => TaskAttempt,
+): RuntimeState {
+  const activeAttempt = findActiveTaskAttempt(state, taskId);
+  if (!activeAttempt) {
+    return state;
+  }
+  return {
+    ...state,
+    taskAttempts: upsertTaskAttempt(state.taskAttempts ?? [], update(activeAttempt)),
+  };
+}
+
 function acquireAssignmentLease(
   state: RuntimeState,
   taskId: string,
@@ -1568,6 +1683,9 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
         assignment: null,
       };
     }
+    if (assignedTask) {
+      nextState = createOrReuseTaskAttempt(nextState, assignedTask, input.workerId, at);
+    }
     if (assignedTask?.status === "assigned" && assignmentRecord?.status === "assigned" && !assignmentRecord.claimedAt) {
       nextState = {
         ...appendEvent(nextState, {
@@ -1613,6 +1731,7 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
         assignment: null,
       };
     }
+    nextState = createOrReuseTaskAttempt(nextState, preAssignedTask, input.workerId, at);
     if (!assignmentRecord.claimedAt) {
       nextState = {
         ...appendEvent(nextState, {
@@ -1795,7 +1914,13 @@ export function beginTaskForWorker(state: RuntimeState, input: BeginTaskInput): 
   if (!leaseResult.acquired) {
     throw new Error(`assignment lease not available: ${input.taskId}`);
   }
-  let nextState = appendEvent(leaseResult.state, {
+  let nextState = updateActiveTaskAttempt(leaseResult.state, input.taskId, (attempt) => ({
+    ...attempt,
+    status: "running",
+    startedAt: attempt.startedAt ?? at,
+    heartbeatAt: at,
+  }));
+  nextState = appendEvent(nextState, {
     taskId: input.taskId,
     type: "status_changed",
     at,
@@ -1945,6 +2070,15 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
       }),
     };
   }
+
+  nextState = updateActiveTaskAttempt(nextState, task.id, (attempt) => ({
+    ...attempt,
+    status: canonicalResult.verification.allPassed ? "succeeded" : "failed",
+    heartbeatAt: canonicalResult.generatedAt,
+    endedAt: canonicalResult.generatedAt,
+    failureCode: canonicalResult.verification.allPassed ? undefined : "verification_failed",
+    failureMessage: canonicalResult.verification.allPassed ? undefined : canonicalResult.output,
+  }));
 
   return releaseAssignmentLease(nextState, task.id, input.workerId, canonicalResult.generatedAt);
 }
@@ -2102,8 +2236,15 @@ export function cancelTask(state: RuntimeState, input: CancelTaskInput): Runtime
     ? releaseAssignmentLease(nextState, task.id, task.assignedWorkerId, at, "cancelled")
     : nextState;
 
+  const attemptedState = updateActiveTaskAttempt(releasedState, task.id, (attempt) => ({
+    ...attempt,
+    status: "cancelled",
+    heartbeatAt: at,
+    endedAt: at,
+  }));
+
   return {
-    ...releasedState,
+    ...attemptedState,
     workers: affectedWorkers,
   };
 }
