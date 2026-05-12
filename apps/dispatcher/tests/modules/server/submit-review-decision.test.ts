@@ -11,6 +11,7 @@ const repoRoot = path.resolve(
 );
 const stateModulePath = path.join(repoRoot, "scripts/lib/dispatcher-state.js");
 const reviewModulePath = path.join(repoRoot, "scripts/lib/review-decision.js");
+const serverModulePath = path.join(repoRoot, "scripts/lib/dispatcher-server.js");
 const reviewScriptPath = path.join(repoRoot, "scripts/submit-review-decision.js");
 const tempRoots: string[] = [];
 
@@ -162,6 +163,40 @@ describe("submit review decision", () => {
       evidence: {
         reasonCode: "test_gap",
         mustFix: ["补充失败分支覆盖"],
+        canRedrive: true,
+        redriveStrategy: "same_worker_continue",
+      },
+    });
+  }, 15_000);
+
+  it("normalizes top-level review reason fields into evidence through the HTTP API", async () => {
+    const stateDir = makeTempDir();
+    const { stateMod, taskId } = await createReviewReadyState(stateDir);
+    const serverMod = await import(serverModulePath);
+
+    const response = await serverMod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: `/api/reviews/${encodeURIComponent(taskId)}/decision`,
+      internalCall: true,
+      body: {
+        actor: "codex-control",
+        decision: "rework",
+        notes: "需要返工",
+        reasonCode: "test_failure",
+        mustFix: ["补齐失败测试"],
+        canRedrive: true,
+        redriveStrategy: "same_worker_continue",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const snapshot = stateMod.buildDashboardSnapshot(stateMod.loadRuntimeState(stateDir));
+    expect(snapshot.reviews[0]).toMatchObject({
+      decision: "rework",
+      evidence: {
+        reasonCode: "test_failure",
+        mustFix: ["补齐失败测试"],
         canRedrive: true,
         redriveStrategy: "same_worker_continue",
       },

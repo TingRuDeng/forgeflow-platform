@@ -20,6 +20,8 @@ describe("decide", () => {
       taskId: "dispatch-1:task-1",
       decision: "merge",
       actor: "codex-control",
+      reasonCode: "looks_good",
+      canRedrive: false,
       fetchImpl: fetchImpl as typeof globalThis.fetch,
     });
 
@@ -31,10 +33,20 @@ describe("decide", () => {
     });
     expect(fetchImpl).toHaveBeenCalledWith(
       "http://127.0.0.1:8787/api/reviews/dispatch-1%3Atask-1/decision",
-      expect.objectContaining({
-        method: "POST",
-      }),
+      expect.objectContaining({ method: "POST" }),
     );
+    const requestBody = JSON.parse((fetchImpl.mock.calls[0] as unknown as [string, { body: string }])[1].body);
+    expect(requestBody).toMatchObject({
+      actor: "codex-control",
+      decision: "merge",
+      notes: "",
+      at: expect.any(String),
+      evidence: {
+        reasonCode: "looks_good",
+        mustFix: [],
+        canRedrive: false,
+      },
+    });
   });
 
   it("updates local runtime state when only state-dir is available", async () => {
@@ -52,6 +64,10 @@ describe("decide", () => {
       decision: "block",
       actor: "codex-control",
       notes: "needs more work",
+      reasonCode: "test_failure",
+      mustFix: ["补齐失败测试"],
+      canRedrive: true,
+      redriveStrategy: "same_worker_continue",
     });
 
     expect(result).toMatchObject({
@@ -65,7 +81,7 @@ describe("decide", () => {
       updatedAt: string;
       tasks: Array<{ status: string }>;
       assignments: Array<{ status: string; assignment: { status: string } }>;
-      reviews: Array<{ decision: string; decidedAt: string }>;
+      reviews: Array<{ decision: string; decidedAt: string; evidence?: Record<string, unknown> }>;
       pullRequests: Array<{ status: string; updatedAt: string }>;
     };
 
@@ -75,6 +91,12 @@ describe("decide", () => {
     expect(nextState.assignments[0]?.status).toBe("blocked");
     expect(nextState.assignments[0]?.assignment.status).toBe("blocked");
     expect(nextState.reviews[0]?.decision).toBe("block");
+    expect(nextState.reviews[0]?.evidence).toMatchObject({
+      reasonCode: "test_failure",
+      mustFix: ["补齐失败测试"],
+      canRedrive: true,
+      redriveStrategy: "same_worker_continue",
+    });
     expect(nextState.reviews[0]?.decidedAt).toMatch(/[+-]\d{2}:\d{2}$/);
     expect(nextState.reviews[0]?.decidedAt.endsWith("Z")).toBe(false);
     expect(nextState.pullRequests[0]?.status).toBe("changes_requested");

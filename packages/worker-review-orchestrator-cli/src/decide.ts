@@ -5,6 +5,13 @@ import type { DecideOptions, DecideResult, LocalRuntimeState } from "./types.js"
 import { createJsonHttpClient, createEmptyRuntimeState, loadRuntimeState, saveRuntimeState } from "./http.js";
 import { formatLocalTimestamp } from "./time.js";
 
+type DecisionEvidence = {
+  reasonCode?: string;
+  mustFix: string[];
+  canRedrive?: boolean;
+  redriveStrategy?: string;
+};
+
 function normalizeDecision(decision: DecideOptions["decision"]) {
   if (decision === "merge") {
     return "merge" as const;
@@ -20,6 +27,51 @@ function normalizeDecision(decision: DecideOptions["decision"]) {
 
 function readNowIso() {
   return formatLocalTimestamp();
+}
+
+function normalizeText(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const text = value.trim();
+  return text ? text : undefined;
+}
+
+function normalizeMustFix(value: DecideOptions["mustFix"]): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  const text = normalizeText(value);
+  if (!text) {
+    return [];
+  }
+  return text
+    .split(/[,，;；\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildDecisionEvidence(options: DecideOptions): DecisionEvidence | undefined {
+  const reasonCode = normalizeText(options.reasonCode);
+  const mustFix = normalizeMustFix(options.mustFix);
+  const redriveStrategy = normalizeText(options.redriveStrategy);
+  const hasBooleanFlag = typeof options.canRedrive === "boolean";
+  if (!reasonCode && mustFix.length === 0 && !hasBooleanFlag && !redriveStrategy) {
+    return undefined;
+  }
+  const evidence: DecisionEvidence = { mustFix };
+  if (reasonCode) {
+    evidence.reasonCode = reasonCode;
+  }
+  if (hasBooleanFlag) {
+    evidence.canRedrive = options.canRedrive;
+  }
+  if (redriveStrategy) {
+    evidence.redriveStrategy = redriveStrategy;
+  }
+  return evidence;
 }
 
 function upsertByTaskId(items: Array<Record<string, unknown>>, payload: Record<string, unknown>) {
@@ -56,6 +108,7 @@ function buildLocalDecisionState(
 
   const nextStatus = input.decision === "merge" ? "merged" : "blocked";
   const at = input.at || readNowIso();
+  const evidence = buildDecisionEvidence(input);
 
   const nextEvents = [
     ...state.events,
@@ -92,13 +145,18 @@ function buildLocalDecisionState(
       : candidate,
   );
 
-  const nextReviews = upsertByTaskId(state.reviews, {
+  const reviewPayload: Record<string, unknown> = {
     taskId: input.taskId,
     decision: input.decision,
     actor: input.actor ?? "codex-control",
     notes: input.notes ?? "",
     decidedAt: at,
-  });
+  };
+  if (evidence) {
+    reviewPayload.evidence = evidence;
+  }
+
+  const nextReviews = upsertByTaskId(state.reviews, reviewPayload);
 
   const nextPullRequests = state.pullRequests.map((pullRequest) =>
     pullRequest.taskId === input.taskId
@@ -139,11 +197,13 @@ export async function runDecide(options: DecideOptions & {
   fetchImpl?: typeof globalThis.fetch;
 }): Promise<DecideResult> {
   const decision = normalizeDecision(options.decision);
+  const evidence = buildDecisionEvidence(options);
   const payload = {
     actor: options.actor ?? "codex-control",
     decision,
     notes: options.notes ?? "",
     at: options.at ?? readNowIso(),
+    ...(evidence ? { evidence } : {}),
   };
 
   if (options.dispatcherUrl) {

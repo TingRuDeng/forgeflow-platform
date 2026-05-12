@@ -8,6 +8,7 @@ import {
   WorkerFailureSchema,
   WorkerEvidenceSchema,
   ReviewDecisionEvidenceSchema,
+  ReviewReasonCodeSchema,
   RunResultSchema,
   ArtifactBundleSchema,
 } from "../src/index.js";
@@ -249,6 +250,11 @@ describe("WorkerEvidenceSchema", () => {
 });
 
 describe("ReviewDecisionEvidenceSchema", () => {
+  it("accepts the standard review reason code taxonomy", () => {
+    const result = ReviewReasonCodeSchema.parse("test_failure");
+    expect(result).toBe("test_failure");
+  });
+
   it("parses valid review decision evidence", () => {
     const evidence = {
       reasonCode: "SECURITY",
@@ -260,6 +266,11 @@ describe("ReviewDecisionEvidenceSchema", () => {
     expect(result.reasonCode).toBe("SECURITY");
     expect(result.mustFix).toHaveLength(2);
     expect(result.canRedrive).toBe(true);
+  });
+
+  it("keeps legacy custom reason code strings compatible", () => {
+    const result = ReviewDecisionEvidenceSchema.parse({ reasonCode: "test_gap" });
+    expect(result.reasonCode).toBe("test_gap");
   });
 
   it("applies default mustFix", () => {

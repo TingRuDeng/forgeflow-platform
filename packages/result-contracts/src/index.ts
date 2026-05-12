@@ -17,6 +17,20 @@ export const WorkerFailureTypeSchema = z.enum([
   "unknown",
 ]);
 
+export const ReviewReasonCodeSchema = z.enum([
+  "looks_good",
+  "tests_passed",
+  "minor_fix_needed",
+  "incomplete_implementation",
+  "test_failure",
+  "policy_violation",
+  "security_risk",
+  "unclear_diff",
+  "requires_pairing",
+  "needs_redrive",
+  "other",
+]);
+
 export const ReviewFindingSchema = z.object({
   finding_id: z.string().min(1).default("finding"),
   severity: z.enum(["critical", "high", "medium", "low"]),
@@ -56,7 +70,7 @@ export const WorkerEvidenceSchema = z.object({
 });
 
 export const ReviewDecisionEvidenceSchema = z.object({
-  reasonCode: z.string().optional(),
+  reasonCode: z.union([ReviewReasonCodeSchema, z.string().min(1)]).optional(),
   mustFix: z.array(z.string()).default([]),
   canRedrive: z.boolean().optional(),
   redriveStrategy: z.string().optional(),
@@ -119,6 +133,7 @@ export type RunResult = z.infer<typeof RunResultSchema>;
 export type ReviewFinding = z.infer<typeof ReviewFindingSchema>;
 export type WorkerFailure = z.infer<typeof WorkerFailureSchema>;
 export type WorkerFailureType = z.infer<typeof WorkerFailureTypeSchema>;
+export type ReviewReasonCode = z.infer<typeof ReviewReasonCodeSchema>;
 export type WorkerEvidence = z.infer<typeof WorkerEvidenceSchema>;
 export type ReviewDecisionEvidence = z.infer<typeof ReviewDecisionEvidenceSchema>;
 export type ArtifactChangedFile = z.infer<typeof ArtifactChangedFileSchema>;
