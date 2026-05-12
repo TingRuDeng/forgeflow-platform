@@ -298,6 +298,7 @@ function rewriteStructuredProjection(
       DELETE FROM workers;
       DELETE FROM tasks;
       DELETE FROM task_attempts;
+      DELETE FROM artifact_bundles;
       DELETE FROM assignments;
       DELETE FROM reviews;
       DELETE FROM pull_requests;

@@ -66,6 +66,13 @@ function isSessionInterrupted(input: {
   return text.includes("interrupted") || text.includes("session interrupted");
 }
 
+function classifyTraeMutationError(error?: string): number {
+  if (error === "task_not_found" || error === "worker_not_found") {
+    return 404;
+  }
+  return 409;
+}
+
 function upsertWorkerRepoDir(
   state: RuntimeState,
   workerId: string,
@@ -94,6 +101,8 @@ function overwriteRuntimeState(target: RuntimeState, source: RuntimeState): void
   target.sequence = source.sequence;
   target.workers = source.workers;
   target.tasks = source.tasks;
+  target.taskAttempts = source.taskAttempts;
+  target.artifactBundles = source.artifactBundles;
   target.events = source.events;
   target.assignments = source.assignments;
   target.reviews = source.reviews;
@@ -278,6 +287,8 @@ export function applyTraeSubmitResult(
   state: RuntimeState,
   input: {
     taskId: string;
+    attemptId?: string;
+    leaseToken?: string;
     status: "review_ready" | "failed";
     summary?: string;
     testOutput?: string;
@@ -310,6 +321,8 @@ export function applyTraeSubmitResult(
   try {
     const nextState = recordWorkerResultFn(state, {
       workerId,
+      attemptId: input.attemptId,
+      leaseToken: input.leaseToken,
       result: {
         taskId: input.taskId,
         workerId,
@@ -413,7 +426,8 @@ export function applyTraeReportProgress(
 export function applyTraeStartTask(
   state: RuntimeState,
   workerId: string,
-  taskId: string
+  taskId: string,
+  attemptLease: { attemptId?: string; leaseToken?: string } = {},
 ): { state: RuntimeState; worker: Worker | null; ok: boolean; error?: string } {
   const worker = state.workers.find((candidate) => candidate.id === workerId);
   if (!worker) {
@@ -452,6 +466,8 @@ export function applyTraeStartTask(
     const nextState = beginTaskForWorker(state, {
       workerId,
       taskId,
+      attemptId: attemptLease.attemptId,
+      leaseToken: attemptLease.leaseToken,
       at: nowIso(),
     });
     overwriteRuntimeState(state, nextState);
@@ -614,7 +630,12 @@ function handleTraeRouteImpl(
 
   if (method === "POST" && pathname === "/api/trae/start-task") {
     const reqBody = body as unknown as TraeStartTaskRequest;
-    const { worker_id: workerId, task_id: taskId } = reqBody;
+    const {
+      worker_id: workerId,
+      task_id: taskId,
+      attempt_id: attemptId,
+      lease_token: leaseToken,
+    } = reqBody;
     if (!workerId || !taskId) {
       return {
         status: 400,
@@ -624,7 +645,10 @@ function handleTraeRouteImpl(
       };
     }
 
-    const result = applyTraeStartTask(state, workerId, taskId);
+    const result = applyTraeStartTask(state, workerId, taskId, {
+      attemptId,
+      leaseToken,
+    });
     if (!result.ok) {
       const status = result.error === "worker_not_found" || result.error === "task_not_found" ? 404 : 409;
       return {
@@ -689,6 +713,8 @@ function handleTraeRouteImpl(
       pr_url: prUrl,
       evidence,
       artifact_bundle: artifactBundle,
+      attempt_id: attemptId,
+      lease_token: leaseToken,
     } = body as unknown as TraeSubmitResultRequest;
 
     if (!taskId || !status) {
@@ -711,6 +737,8 @@ function handleTraeRouteImpl(
 
     const result = applyTraeSubmitResult(state, {
       taskId,
+      attemptId,
+      leaseToken,
       status,
       summary,
       testOutput,
@@ -728,7 +756,7 @@ function handleTraeRouteImpl(
 
     if (!result.ok) {
       return {
-        status: 404,
+        status: classifyTraeMutationError(result.error),
         headers: { "content-type": "application/json" },
         json: { ok: false, error: result.error },
         text: JSON.stringify({ ok: false, error: result.error }),

@@ -279,6 +279,15 @@ function extractTaskTraceId(task: Pick<WorkerRuntimeTask, "traceId" | "trace_id"
   return traceId || null;
 }
 
+function buildAttemptLeaseInput(task: Pick<WorkerRuntimeTask, "attempt_id" | "lease_token">) {
+  const attemptId = typeof task.attempt_id === "string" ? task.attempt_id.trim() : "";
+  const leaseToken = typeof task.lease_token === "string" ? task.lease_token.trim() : "";
+  return {
+    ...(attemptId ? { attemptId } : {}),
+    ...(leaseToken ? { leaseToken } : {}),
+  };
+}
+
 export function buildAutomationPrompt(task: WorkerRuntimeTask) {
   const scope = Array.isArray(task.scope) && task.scope.length > 0 ? task.scope.join(", ") : "all";
   const constraints = Array.isArray(task.constraints) && task.constraints.length > 0
@@ -1092,6 +1101,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     try {
       await dispatcherClient.submitResult({
         taskId: task.task_id,
+        ...buildAttemptLeaseInput(task),
         status,
         summary,
         testOutput: parsed.testOutput || "",
@@ -1160,6 +1170,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     try {
       await dispatcherClient.submitResult({
         taskId: task.task_id,
+        ...buildAttemptLeaseInput(task),
         status: "failed",
         summary: error.message,
         testOutput: rawOutput,
@@ -1403,7 +1414,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         task.execution_dir = repoDir;
         await emitPhaseEvent("start_task_start", {}, task.task_id);
         try {
-          await dispatcherClient.startTask(workerId, task.task_id);
+          await dispatcherClient.startTask(workerId, task.task_id, buildAttemptLeaseInput(task));
           await emitPhaseEvent("start_task_done", {}, task.task_id);
         } catch (error) {
           startTaskFailed = true;

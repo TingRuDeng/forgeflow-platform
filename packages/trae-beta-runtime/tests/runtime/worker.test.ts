@@ -101,6 +101,7 @@ describe("runtime/worker", () => {
         task: {
           task_id: "task-1",
           attempt_id: "attempt-1",
+          lease_token: "lease-token-1",
           repo: "repo",
           branch: "feature/runtime",
           default_branch: "main",
@@ -179,7 +180,10 @@ describe("runtime/worker", () => {
     }, {
       allowReuse: true,
     });
-    expect(dispatcherClient.startTask).toHaveBeenCalledWith("trae-remote", "task-1");
+    expect(dispatcherClient.startTask).toHaveBeenCalledWith("trae-remote", "task-1", {
+      attemptId: "attempt-1",
+      leaseToken: "lease-token-1",
+    });
     expect(dispatcherClient.reportProgress).toHaveBeenCalledWith("task-1", "Trae automation worker started task", "trae-remote");
     expect(automationClient.ready).toHaveBeenNthCalledWith(2, {
       discovery: expect.objectContaining({
@@ -209,6 +213,8 @@ describe("runtime/worker", () => {
     expect(promptContent).toContain("先完成执行上下文预检证明");
     expect(dispatcherClient.submitResult).toHaveBeenCalledWith({
       taskId: "task-1",
+      attemptId: "attempt-1",
+      leaseToken: "lease-token-1",
       status: "review_ready",
       summary: "all good",
       testOutput: "pnpm test",

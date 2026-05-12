@@ -62,3 +62,21 @@
 验证已通过：`pnpm docs:validate`、`git diff --check`。
 
 剩余风险：本批只同步文档事实，不实现持久化 shadow failure event、live DR 压力演练或 release 失败自动恢复。
+
+# 成熟产品验收：Trae attempt lease envelope
+
+- [x] 补充 RED 测试，证明 Trae runtime start/result 会携带 dispatcher 返回的 `attempt_id` / `lease_token`。
+- [x] 补充 RED 测试，证明 Trae dispatcher 路由会把 `attempt_id` / `lease_token` 传入状态机校验。
+- [x] 修改 Trae runtime client 与 worker，传递 `attemptId` / `leaseToken`。
+- [x] 修改 dispatcher Trae start/result 路由，透传 attempt lease 字段。
+- [x] 同步 Worker Protocol / TaskAttempt / 技术债文档。
+- [x] 运行受影响测试、类型检查、文档校验和 diff 检查。
+- [x] 补充 review 小结。
+
+## Review 小结
+
+已把 Trae 主链从“fetch 返回 attempt lease 但 runtime 不使用”推进到 start/result 回写携带并校验 `attempt_id` / `lease_token`。同时修复 `runtime-dispatcher-server.ts:overwriteRuntimeState` 漏复制 `taskAttempts` / `artifactBundles` 的状态覆盖缺口，以及 SQLite projection 重写时未清空 `artifact_bundles` 导致重复插入的缺口。
+
+验证已通过：Trae runtime RED 测试先失败，dispatcher RED 测试先暴露 attempt 缺失与 stale lease 未校验；修复后 `pnpm --filter @tingrudeng/trae-beta-runtime test -- tests/runtime/worker.test.ts tests/runtime/clients.test.ts`、`pnpm --filter @forgeflow/dispatcher test -- tests/modules/server/dispatcher-server.test.ts`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:validate`、`git diff --check` 全部通过。
+
+剩余风险：Trae 仍使用 v0 兼容路由，尚未强制完整 v1 envelope 的 `protocolVersion`、`traceId` 和 `idempotencyKey`。

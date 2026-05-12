@@ -221,10 +221,15 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
         timeoutMs: requestTimeoutMs,
       });
     },
-    async startTask(workerId: string, taskId: string) {
+    async startTask(workerId: string, taskId: string, attemptLease: { attemptId?: string; leaseToken?: string } = {}) {
       return http.request("/api/trae/start-task", {
         method: "POST",
-        body: { worker_id: workerId, task_id: taskId },
+        body: {
+          worker_id: workerId,
+          task_id: taskId,
+          attempt_id: attemptLease.attemptId,
+          lease_token: attemptLease.leaseToken,
+        },
         timeoutMs: requestTimeoutMs,
       });
     },
@@ -254,6 +259,8 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
     },
     async submitResult(input: {
       taskId: string;
+      attemptId?: string;
+      leaseToken?: string;
       status: string;
       summary: string;
       testOutput: string;
@@ -274,6 +281,8 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
         method: "POST",
         body: {
           task_id: input.taskId,
+          attempt_id: input.attemptId,
+          lease_token: input.leaseToken,
           status: input.status,
           summary: input.summary,
           test_output: input.testOutput,
