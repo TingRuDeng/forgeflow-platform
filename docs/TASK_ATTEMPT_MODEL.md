@@ -13,7 +13,7 @@
 - `Task` 是业务目标，`TaskAttempt` 是一次真实执行。
 - 一个 task 可以有多个 attempts，但短期内同一 task 最多一个 active attempt。
 - result、ArtifactBundle、Review、LeaseToken 都应该绑定 `attemptId`。
-- 当前 dispatcher runtime state 已有内存态 `taskAttempts[]`，SQLite attempts projection 仍未实现。
+- 当前 dispatcher runtime state 已有 `taskAttempts[]`，SQLite 也已有 `task_attempts` projection。
 
 ```yaml
 ai_summary:
@@ -50,10 +50,10 @@ ai_summary:
 - v0 result 会把 active attempt 标记为 `succeeded` 或 `failed`。
 - task cancel 会把 active attempt 标记为 `cancelled`。
 - `taskAttempts[]` 会随 runtime snapshot 一起保存。
+- SQLite structured projection 会写入并读取 `task_attempts`。
 
 尚未实现：
 
-- SQLite `task_attempts` projection 表。
 - worker mutation 对 `attemptId` 和 `leaseToken` 的强制校验。
 - stale result 拒绝。
 - redrive / retry 创建新 attempt 的完整策略。
