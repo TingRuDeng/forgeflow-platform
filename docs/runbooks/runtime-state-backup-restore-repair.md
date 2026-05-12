@@ -98,4 +98,5 @@ node scripts/verify-stage3-dr.mjs
 
 - `scripts/backup-runtime-state.mjs` 和 `scripts/restore-runtime-state.mjs` 是源码仓脚本，当前使用位置参数。
 - `forgeflow-dispatcher backup --backup-dir ...` / `restore --backup-dir ...` 是打包 runtime CLI 的参数形态，不要混用。
-- `scripts/verify-stage3-dr.mjs` 当前验证备份/恢复文件复制路径，不等价于真实 SQLite + WAL 完整恢复演练。
+- `scripts/verify-stage3-dr.mjs` 会创建真实 SQLite `runtime-state.db`，恢复后执行 `PRAGMA integrity_check` 和 snapshot checksum 校验。
+- 该脚本仍是源码级快速 DR gate，不等价于 live dispatcher 在持续写入、WAL 压力和进程崩溃下的完整恢复演练。
