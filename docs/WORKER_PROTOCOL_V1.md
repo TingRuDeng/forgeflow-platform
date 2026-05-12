@@ -12,7 +12,7 @@
 
 - 协议版本固定为 `2026-05-v1`。
 - 每个写入 envelope 都必须包含 `taskId`、`attemptId`、`workerId`、`leaseToken`、`traceId` 和 `idempotencyKey`。
-- 当前仓库只新增协议类型包，不表示现有 dispatcher routes 已强制要求 v1。
+- 当前 dispatcher v0 start/result routes 已支持可选 `attemptId` / `leaseToken`，传入后会校验 active attempt；但还未强制所有 worker 使用完整 v1 envelope。
 - 具体 schema 以 `../packages/worker-protocol/src/index.ts` 为可执行契约。
 
 ```yaml
@@ -101,6 +101,12 @@ POST /api/tasks/:taskId/attempts/:attemptId/result
 ```
 
 这些写入必须校验 envelope。`result` 必须绑定 `ArtifactBundle`，否则后续 review 不能稳定引用执行证据。
+
+当前兼容路径：
+
+- `/api/workers/:workerId/start-task` 和 `/api/workers/:workerId/result` 接受可选 `attemptId` / `leaseToken`。
+- 当任一字段存在时，dispatcher 会对照当前 active attempt 校验 worker、attemptId 和 leaseToken。
+- v0 worker 不传这两个字段时仍按既有路径执行，后续批次再收紧为强制 v1 envelope。
 
 ## 错误语义
 

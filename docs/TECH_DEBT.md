@@ -190,17 +190,18 @@ Desired direction:
 - `packages/task-schema` 已接纳当前 dispatcher runtime 使用的 `trae` pool、Task/Worker 扩展字段和 AssignmentPayload 形态
 - `packages/worker-protocol` 已提供当前 runtime 事件名到 vNext RuntimeEvent taxonomy 的 normalize helper
 - dispatcher runtime state 已有 `taskAttempts[]`，SQLite `task_attempts` projection 会保存 synthetic attempt
-- dispatcher 当前 mutation 仍未强制 `protocolVersion`、`attemptId`、`leaseToken`、`traceId` 和 `idempotencyKey`
+- dispatcher v0 start/result mutation 已支持可选 `attemptId` / `leaseToken` 校验，但仍未强制完整 v1 envelope
+- dispatcher 当前 mutation 仍未强制 `protocolVersion`、`traceId` 和 `idempotencyKey`
 - Trae runtime 当前仍走现有 v0 兼容路径
 
 影响：
 
 - 代码审查和文档阅读时容易把 vNext 目标契约误读为当前已执行的 runtime 保护
-- 后续 LeaseToken enforcement 仍需要跨 dispatcher、Trae runtime、CLI 和 Console 分阶段推进
+- 后续 LeaseToken enforcement 仍需要跨 Trae runtime、CLI 和 Console 分阶段推进，并把 v0 兼容路径收紧为完整 v1 envelope
 
 期望方向：
 
-- 继续接入 LeaseToken enforcement、ArtifactBundle result 和 review workflow
+- 继续接入 ArtifactBundle result 和 review workflow
 
 ## 10. Shadow path failures are not yet first-class operational state
 

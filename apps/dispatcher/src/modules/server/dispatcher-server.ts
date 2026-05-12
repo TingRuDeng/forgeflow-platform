@@ -301,12 +301,21 @@ function classifyWorkerResultError(error: unknown): number {
   if (
     message.startsWith("task not assigned to worker:")
     || message.startsWith("task not executable:")
+    || message.startsWith("active attempt not found for task:")
+    || message.startsWith("attempt owned by another worker:")
+    || message.startsWith("attempt id mismatch:")
+    || message.startsWith("lease token mismatch:")
     || message.includes("mismatch for ")
   ) {
     return 409;
   }
   if (
-    message === "worker result body must be a JSON object"
+    message === "worker start body must be a JSON object"
+    || message === "worker start taskId is required"
+    || message === "worker start at must be a string when provided"
+    || message === "worker attemptId must be a string when provided"
+    || message === "worker leaseToken must be a string when provided"
+    || message === "worker result body must be a JSON object"
     || message === "worker result.result must be a JSON object"
     || message === "worker result taskId is required"
     || message === "worker result verification.allPassed must be a boolean"
@@ -341,6 +350,39 @@ function classifyWorkerEventError(error: unknown): number {
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readWorkerLeaseFields(body: Record<string, any>): { attemptId?: string; leaseToken?: string } {
+  if (body.attemptId !== undefined && typeof body.attemptId !== "string") {
+    throw new Error("worker attemptId must be a string when provided");
+  }
+  if (body.leaseToken !== undefined && typeof body.leaseToken !== "string") {
+    throw new Error("worker leaseToken must be a string when provided");
+  }
+  return {
+    attemptId: body.attemptId,
+    leaseToken: body.leaseToken,
+  };
+}
+
+function validateWorkerStartBody(body: unknown): Record<string, any> {
+  if (!isPlainObject(body)) {
+    throw new Error("worker start body must be a JSON object");
+  }
+
+  const taskId = typeof body.taskId === "string" ? body.taskId.trim() : "";
+  if (!taskId) {
+    throw new Error("worker start taskId is required");
+  }
+  if (body.at !== undefined && typeof body.at !== "string") {
+    throw new Error("worker start at must be a string when provided");
+  }
+
+  return {
+    taskId,
+    at: body.at,
+    ...readWorkerLeaseFields(body),
+  };
 }
 
 function validateReviewDecisionBody(body: unknown): Record<string, any> {
@@ -478,7 +520,10 @@ function validateWorkerResultBody(body: unknown): Record<string, any> {
     }
   }
 
-  return body;
+  return {
+    ...body,
+    ...readWorkerLeaseFields(body),
+  };
 }
 
 function validateWorkerEventBody(body: unknown): { type: string; taskId: string | null; at: string | undefined; payload: unknown } {
@@ -1012,17 +1057,27 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
       ? pathname.match(/^\/api\/workers\/([^/]+)\/start-task$/)
       : null;
     if (startMatch) {
-      const result = withState(stateDir, (state) => ({
-        state: beginTaskForWorker(state, {
-          workerId: decodeURIComponent(startMatch[1]),
-          taskId: body.taskId,
-          at: body.at,
-        }),
-      }));
-      return createJsonResponse(200, {
-        status: "started",
-        tasks: result.state.tasks,
-      });
+      try {
+        const validatedBody = validateWorkerStartBody(body);
+        const result = withState(stateDir, (state) => ({
+          state: beginTaskForWorker(state, {
+            workerId: decodeURIComponent(startMatch[1]),
+            taskId: validatedBody.taskId,
+            attemptId: validatedBody.attemptId,
+            leaseToken: validatedBody.leaseToken,
+            at: validatedBody.at,
+          }),
+        }));
+        return createJsonResponse(200, {
+          status: "started",
+          tasks: result.state.tasks,
+        });
+      } catch (error: any) {
+        rethrowStateLockTimeout(error);
+        return createJsonResponse(classifyWorkerResultError(error), {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     const resultMatch = method === "POST"
@@ -1034,6 +1089,8 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
         const result = withState(stateDir, (state) => ({
           state: recordWorkerResult(state, {
             workerId: decodeURIComponent(resultMatch[1]),
+            attemptId: validatedBody.attemptId,
+            leaseToken: validatedBody.leaseToken,
             result: validatedBody.result,
             changedFiles: validatedBody.changedFiles,
             pullRequest: validatedBody.pullRequest,

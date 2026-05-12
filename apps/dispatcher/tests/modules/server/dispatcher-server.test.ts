@@ -975,6 +975,121 @@ describe("dispatcher server", () => {
     expect(assignedTask.status).toBe("assigned");
   });
 
+  it("rejects worker HTTP writes with stale attempt lease data", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    const stateMod = await import(path.join(repoRoot, "scripts/lib/dispatcher-state.js"));
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-lease-http",
+        pool: "codex",
+        hostname: "lease-http-host",
+        labels: [],
+        repoDir: "/repo",
+      },
+    });
+
+    const dispatchResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/repo",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [
+          {
+            id: "task-http-lease",
+            title: "HTTP lease",
+            pool: "codex",
+            dependsOn: [],
+            branchName: "ai/codex/task-http-lease",
+            verification: { mode: "run" },
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-http-lease",
+            assignment: {
+              taskId: "task-http-lease",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/task-http-lease",
+              repo: "test/repo",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+    const taskId = dispatchResponse.json.taskIds[0];
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-lease-http/claim-task",
+      body: {},
+    });
+    const attempt = stateMod.loadRuntimeState(stateDir).taskAttempts[0];
+
+    const startResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-lease-http/start-task",
+      body: {
+        taskId,
+        attemptId: attempt.attemptId,
+        leaseToken: "stale-token",
+      },
+    });
+    expect(startResponse.status).toBe(409);
+    expect(startResponse.json.error).toBe(`lease token mismatch: ${taskId}`);
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-lease-http/start-task",
+      body: {
+        taskId,
+        attemptId: attempt.attemptId,
+        leaseToken: attempt.leaseToken,
+      },
+    });
+
+    const resultResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-lease-http/result",
+      body: {
+        attemptId: "stale-attempt",
+        leaseToken: attempt.leaseToken,
+        result: {
+          taskId,
+          workerId: "codex-lease-http",
+          provider: "codex",
+          pool: "codex",
+          branchName: "ai/codex/task-http-lease",
+          repo: "test/repo",
+          defaultBranch: "main",
+          mode: "run",
+          output: "done",
+          generatedAt: "2026-05-12T12:00:00.000Z",
+          verification: {
+            allPassed: true,
+            commands: [],
+          },
+        },
+      },
+    });
+    expect(resultResponse.status).toBe(409);
+    expect(resultResponse.json.error).toBe("attempt id mismatch: stale-attempt");
+  });
+
   it("rejects worker result metadata that does not match dispatcher truth", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);
