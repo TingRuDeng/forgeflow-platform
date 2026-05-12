@@ -1427,12 +1427,33 @@ describe("dispatcher server", () => {
       body: { worker_id: "trae-retry", repo_dir: repoDir },
     });
     const taskId = firstFetch.json.task.task_id;
+    expect(firstFetch.json.task.attempt_id).toBeTruthy();
+    expect(firstFetch.json.task.lease_token).toBeTruthy();
+
+    const staleStart = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/start-task",
+      body: {
+        worker_id: "trae-retry",
+        task_id: taskId,
+        attempt_id: firstFetch.json.task.attempt_id,
+        lease_token: "stale-token",
+      },
+    });
+    expect(staleStart.status).toBe(409);
+    expect(staleStart.json.error).toMatch(/lease token mismatch/i);
 
     await mod.handleDispatcherHttpRequest({
       stateDir,
       method: "POST",
       pathname: "/api/trae/start-task",
-      body: { worker_id: "trae-retry", task_id: taskId },
+      body: {
+        worker_id: "trae-retry",
+        task_id: taskId,
+        attempt_id: firstFetch.json.task.attempt_id,
+        lease_token: firstFetch.json.task.lease_token,
+      },
     });
 
     const retryFetch = await mod.handleDispatcherHttpRequest({
@@ -1869,6 +1890,31 @@ describe("dispatcher server", () => {
       body: { worker_id: "trae-01" },
     });
     const taskId = fetchResponse.json.task.task_id;
+    expect(fetchResponse.json.task.attempt_id).toBeTruthy();
+    expect(fetchResponse.json.task.lease_token).toBeTruthy();
+
+    const staleResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/submit-result",
+      body: {
+        task_id: taskId,
+        attempt_id: fetchResponse.json.task.attempt_id,
+        lease_token: "stale-token",
+        status: "review_ready",
+        summary: "Done!",
+        test_output: "PASS",
+        risks: ["Low risk"],
+        files_changed: ["docs/test.md"],
+        branch_name: "ai/trae/task-2",
+        commit_sha: "abc123def456",
+        push_status: "success",
+        pr_number: 42,
+        pr_url: "https://github.com/test/repo/pull/42",
+      },
+    });
+    expect(staleResponse.status).toBe(409);
+    expect(staleResponse.json.error).toMatch(/lease token mismatch/i);
 
     const response = await mod.handleDispatcherHttpRequest({
       stateDir,
@@ -1876,6 +1922,8 @@ describe("dispatcher server", () => {
       pathname: "/api/trae/submit-result",
       body: {
         task_id: taskId,
+        attempt_id: fetchResponse.json.task.attempt_id,
+        lease_token: fetchResponse.json.task.lease_token,
         status: "review_ready",
         summary: "Done!",
         test_output: "PASS",

@@ -12,7 +12,7 @@
 
 - 协议版本固定为 `2026-05-v1`。
 - 每个写入 envelope 都必须包含 `taskId`、`attemptId`、`workerId`、`leaseToken`、`traceId` 和 `idempotencyKey`。
-- 当前 dispatcher v0 start/result routes 已支持可选 `attemptId` / `leaseToken`，传入后会校验 active attempt；但还未强制所有 worker 使用完整 v1 envelope。
+- 当前 dispatcher v0 start/result routes 与 Trae 兼容路由已支持可选 attempt lease 校验；但还未强制所有 worker 使用完整 v1 envelope。
 - 具体 schema 以 `../packages/worker-protocol/src/index.ts` 为可执行契约。
 
 ```yaml
@@ -105,6 +105,7 @@ POST /api/tasks/:taskId/attempts/:attemptId/result
 当前兼容路径：
 
 - `/api/workers/:workerId/start-task` 和 `/api/workers/:workerId/result` 接受可选 `attemptId` / `leaseToken`。
+- `/api/trae/fetch-task` 会返回 `attempt_id` / `lease_token`，Trae runtime 会在 `/api/trae/start-task` 和 `/api/trae/submit-result` 回写时携带它们。
 - 当任一字段存在时，dispatcher 会对照当前 active attempt 校验 worker、attemptId 和 leaseToken。
 - 如果 worker 携带的 `attemptId` 已进入 `expired` / `failed` / `succeeded` / `cancelled` / `superseded` 等终态，dispatcher 会拒绝这次 stale 写入。
 - v0 worker 不传这两个字段时仍按既有路径执行，后续批次再收紧为强制 v1 envelope。

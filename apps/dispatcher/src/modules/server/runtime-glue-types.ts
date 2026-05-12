@@ -149,6 +149,8 @@ export interface TraeFetchTaskResponse {
 
 export interface TraeSubmitResultRequest {
   task_id: string;
+  attempt_id?: string;
+  lease_token?: string;
   status: "review_ready" | "failed";
   summary?: string;
   test_output?: string;
@@ -185,4 +187,6 @@ export interface TraeRegisterRequest {
 export interface TraeStartTaskRequest {
   worker_id: string;
   task_id: string;
+  attempt_id?: string;
+  lease_token?: string;
 }

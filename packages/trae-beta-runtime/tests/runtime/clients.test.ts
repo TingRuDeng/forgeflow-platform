@@ -210,6 +210,8 @@ describe("runtime/clients", () => {
 
     await dispatcher.submitResult({
       taskId: "task-1",
+      attemptId: "attempt-1",
+      leaseToken: "lease-token-1",
       status: "failed",
       summary: "pnpm test failed",
       testOutput: "FAIL",
@@ -244,6 +246,8 @@ describe("runtime/clients", () => {
     const body = JSON.parse((fetchImpl.mock.calls[0] as unknown as [string, { body: string }])[1].body);
     expect(body).toMatchObject({
       task_id: "task-1",
+      attempt_id: "attempt-1",
+      lease_token: "lease-token-1",
       status: "failed",
       summary: "pnpm test failed",
       evidence: {
@@ -257,6 +261,30 @@ describe("runtime/clients", () => {
         taskId: "task-1",
         attemptId: "attempt-1",
       },
+    });
+  });
+
+  it("sends attempt lease data in startTask request", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await dispatcher.startTask("trae-1", "task-1", {
+      attemptId: "attempt-1",
+      leaseToken: "lease-token-1",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((fetchImpl.mock.calls[0] as unknown as [string, { body: string }])[1].body);
+    expect(body).toMatchObject({
+      worker_id: "trae-1",
+      task_id: "task-1",
+      attempt_id: "attempt-1",
+      lease_token: "lease-token-1",
     });
   });
 
