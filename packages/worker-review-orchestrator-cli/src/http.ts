@@ -131,6 +131,7 @@ export function createEmptyRuntimeState(): LocalRuntimeState {
     reviews: [],
     pullRequests: [],
     dispatches: [],
+    artifactBundles: [],
   };
 }
 

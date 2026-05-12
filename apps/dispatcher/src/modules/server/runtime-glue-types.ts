@@ -1,11 +1,12 @@
 export type ReviewDecisionKind = "merge" | "block" | "rework" | "changes_requested";
 
 import type {
+  ArtifactBundle,
   ReviewDecisionEvidence,
   WorkerEvidence,
 } from "@forgeflow/result-contracts";
 
-export { ReviewDecisionEvidence, WorkerEvidence };
+export { ArtifactBundle, ReviewDecisionEvidence, WorkerEvidence };
 
 export interface ReviewDecisionPayload {
   actor?: string;
@@ -120,6 +121,8 @@ export type WorkerStatus = "idle" | "busy" | "offline";
 
 export interface TraeTaskInfo {
   task_id: string;
+  attempt_id?: string;
+  lease_token?: string;
   trace_id?: string;
   repo: string;
   branch: string;
@@ -158,6 +161,7 @@ export interface TraeSubmitResultRequest {
   pr_number?: number;
   pr_url?: string;
   evidence?: WorkerEvidence;
+  artifact_bundle?: ArtifactBundle;
 }
 
 export interface TraeHeartbeatRequest {

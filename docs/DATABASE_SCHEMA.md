@@ -82,6 +82,7 @@ Top-level collections currently include:
 - `workers`
 - `tasks`
 - `taskAttempts`
+- `artifactBundles`
 - `events`
 - `assignments`
 - `reviews`
@@ -334,6 +335,7 @@ Stage-3 query-first projection tables now also live in the same SQLite file:
 - `tasks`
 - `assignments`
 - `task_attempts`
+- `artifact_bundles`
 - `reviews`
 - `pull_requests`
 - `dispatches`
@@ -346,6 +348,7 @@ Current role of those tables:
 - they are dispatcher-owned structured projections
 - they support `/api/query/*`, structured reads, and projection health checks
 - `task_attempts` 保存 vNext synthetic attempt projection，authoritative truth 仍以 snapshot 的 `taskAttempts[]` 为准
+- `artifact_bundles` 保存 vNext ArtifactBundle 摘要和 refs projection，不保存 diff / log 正文
 - they do not replace `snapshots` as the runtime truth source
 
 Current stage-3 optional shadow path:

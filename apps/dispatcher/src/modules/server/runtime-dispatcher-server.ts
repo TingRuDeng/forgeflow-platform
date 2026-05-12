@@ -23,6 +23,7 @@ import type {
   TraeReportProgressRequest,
   TraeRegisterRequest,
   TraeStartTaskRequest,
+  ArtifactBundle,
   WorkerEvidence,
 } from "./runtime-glue-types.js";
 import { formatLocalTimestamp } from "../time.js";
@@ -32,6 +33,13 @@ function nowIso(): string {
 }
 
 const RUNTIME_EVENTS_RETENTION_LIMIT = 500;
+const TERMINAL_ATTEMPT_STATUSES = new Set(["succeeded", "failed", "expired", "cancelled", "superseded"]);
+
+function findActiveTaskAttempt(state: RuntimeState, taskId: string) {
+  return (state.taskAttempts ?? []).find((attempt) =>
+    attempt.taskId === taskId && !TERMINAL_ATTEMPT_STATUSES.has(attempt.status)
+  ) ?? null;
+}
 
 function appendRuntimeEvent(state: RuntimeState, event: Event): void {
   state.events.push(event);
@@ -282,6 +290,7 @@ export function applyTraeSubmitResult(
     prNumber?: number;
     prUrl?: string;
     evidence?: WorkerEvidence;
+    artifactBundle?: ArtifactBundle;
   }
 ): { state: RuntimeState; ok: boolean; error?: string } {
   const task = state.tasks.find((t) => t.id === input.taskId);
@@ -326,6 +335,7 @@ export function applyTraeSubmitResult(
         },
         evidence: input.evidence,
       },
+      artifactBundle: input.artifactBundle,
       changedFiles: input.filesChanged,
       pullRequest: input.prNumber && input.prUrl
         ? {
@@ -546,6 +556,7 @@ function handleTraeRouteImpl(
         text: JSON.stringify({ status: "no_task" }),
       };
     }
+    const attempt = findActiveTaskAttempt(state, result.task.id);
 
     return {
       status: 200,
@@ -554,6 +565,8 @@ function handleTraeRouteImpl(
         status: "ok",
         task: {
           task_id: result.task.id,
+          attempt_id: attempt?.attemptId,
+          lease_token: attempt?.leaseToken,
           trace_id: result.task.traceId ?? undefined,
           repo: result.task.repo,
           branch: result.task.branchName,
@@ -576,6 +589,8 @@ function handleTraeRouteImpl(
         status: "ok",
         task: {
           task_id: result.task.id,
+          attempt_id: attempt?.attemptId,
+          lease_token: attempt?.leaseToken,
           trace_id: result.task.traceId ?? undefined,
           repo: result.task.repo,
           branch: result.task.branchName,
@@ -673,6 +688,7 @@ function handleTraeRouteImpl(
       pr_number: prNumber,
       pr_url: prUrl,
       evidence,
+      artifact_bundle: artifactBundle,
     } = body as unknown as TraeSubmitResultRequest;
 
     if (!taskId || !status) {
@@ -707,6 +723,7 @@ function handleTraeRouteImpl(
       prNumber,
       prUrl,
       evidence,
+      artifactBundle,
     });
 
     if (!result.ok) {

@@ -120,6 +120,14 @@ export interface LocalRuntimeState {
   reviews: Array<Record<string, unknown>>;
   pullRequests: Array<Record<string, unknown>>;
   dispatches: Array<Record<string, unknown>>;
+  artifactBundles: Array<Record<string, unknown>>;
+}
+
+export interface ArtifactGetOptions {
+  dispatcherUrl?: string;
+  stateDir?: string;
+  bundleId: string;
+  fetchImpl?: typeof globalThis.fetch;
 }
 
 export interface InspectOptions {

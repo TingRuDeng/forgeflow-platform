@@ -959,8 +959,24 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
       return createNoStoreJsonResponse(200, loadStructuredRuntimeState(stateDir).leases ?? []);
     }
 
+    if (method === "GET" && pathname === "/api/query/artifacts") {
+      return createNoStoreJsonResponse(200, loadStructuredRuntimeState(stateDir).artifactBundles ?? []);
+    }
+
     if (method === "GET" && pathname === "/api/query/dashboard-snapshot") {
       return createNoStoreJsonResponse(200, buildStructuredDashboardSnapshot(stateDir));
+    }
+
+    const artifactMatch = method === "GET"
+      ? pathname.match(/^\/api\/artifacts\/([^/]+)$/)
+      : null;
+    if (artifactMatch) {
+      const bundleId = decodeURIComponent(artifactMatch[1]);
+      const state = loadRuntimeState(stateDir);
+      const artifact = (state.artifactBundles ?? []).find((candidate) => candidate.bundleId === bundleId);
+      return artifact
+        ? createNoStoreJsonResponse(200, artifact)
+        : createNoStoreJsonResponse(404, { error: "artifact_not_found" });
     }
 
     if (method === "GET" && pathname === "/api/query/projection-health") {
@@ -1093,6 +1109,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
             leaseToken: validatedBody.leaseToken,
             result: validatedBody.result,
             changedFiles: validatedBody.changedFiles,
+            artifactBundle: validatedBody.artifactBundle,
             pullRequest: validatedBody.pullRequest,
           }),
         }));

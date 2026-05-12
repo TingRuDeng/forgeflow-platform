@@ -18,6 +18,30 @@ interface WorkerEvidence {
   artifacts?: Record<string, string>;
 }
 
+interface ArtifactBundle {
+  bundleId?: string;
+  taskId: string;
+  attemptId: string;
+  schemaVersion: "artifact-bundle/v1";
+  summary?: string;
+  branch?: string;
+  commit?: string;
+  pullRequestUrl?: string;
+  changedFiles: Array<{
+    path: string;
+    changeType: "added" | "modified" | "deleted" | "renamed";
+  }>;
+  refs: Record<string, unknown>;
+  testResults?: Array<{
+    name: string;
+    status: "passed" | "failed" | "skipped" | "unknown";
+    outputRef?: string;
+  }>;
+  riskNotes?: string[];
+  nextActions?: string[];
+  createdAt?: string;
+}
+
 const DEFAULT_DISPATCHER_URL = "http://127.0.0.1:8787";
 const DEFAULT_AUTOMATION_URL = "http://127.0.0.1:8790";
 const DEFAULT_DISPATCHER_REQUEST_TIMEOUT_MS = Number(process.env.TRAE_AUTOMATION_DISPATCHER_TIMEOUT_MS || 30000);
@@ -244,6 +268,7 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
         prUrl?: string | null;
       };
       evidence?: WorkerEvidence;
+      artifactBundle?: ArtifactBundle;
     }) {
       return http.request("/api/trae/submit-result", {
         method: "POST",
@@ -261,6 +286,7 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
           pr_number: input.github?.prNumber,
           pr_url: input.github?.prUrl,
           evidence: input.evidence,
+          artifact_bundle: input.artifactBundle,
         },
         timeoutMs: requestTimeoutMs,
       });

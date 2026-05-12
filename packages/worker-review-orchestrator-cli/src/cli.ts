@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { runArtifactGet } from "./artifact.js";
 import { buildSingleTaskDispatchInput, runDispatch } from "./dispatch.js";
 import { runDecide } from "./decide.js";
 import { runInspect } from "./inspect.js";
@@ -27,11 +28,12 @@ export interface CliDeps {
   runInspect: typeof runInspect;
   runRedrive: typeof runRedrive;
   runUpdate: typeof runUpdate;
+  runArtifactGet: typeof runArtifactGet;
   log: (message: string) => void;
 }
 
 export interface ParsedCliArgs {
-  command: "dispatch" | "dispatch-task" | "continue-task" | "watch" | "decide" | "inspect" | "redrive" | "update" | "version" | "init";
+  command: "dispatch" | "dispatch-task" | "continue-task" | "watch" | "decide" | "inspect" | "redrive" | "artifact-get" | "update" | "version" | "init";
   options: Record<string, string | number | boolean>;
 }
 
@@ -53,7 +55,7 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
   if (!command) {
     throw new Error("command is required");
   }
-  if (!["dispatch", "dispatch-task", "continue-task", "watch", "decide", "inspect", "redrive", "update", "version", "init"].includes(command)) {
+  if (!["dispatch", "dispatch-task", "continue-task", "watch", "decide", "inspect", "redrive", "artifact-get", "update", "version", "init"].includes(command)) {
     throw new Error(`unknown command: ${command}`);
   }
 
@@ -101,6 +103,8 @@ Usage:
   forgeflow-review-orchestrator inspect --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1 --summary
   forgeflow-review-orchestrator inspect --state-dir /path/to/.forgeflow-dispatcher --task-id dispatch-1:task-1
   forgeflow-review-orchestrator inspect --state-dir /path/to/.forgeflow-dispatcher --task-id dispatch-1:task-1 --summary
+  forgeflow-review-orchestrator artifact-get --dispatcher-url http://127.0.0.1:8787 --bundle-id bundle-1
+  forgeflow-review-orchestrator artifact-get --state-dir /path/to/.forgeflow-dispatcher --bundle-id bundle-1
   forgeflow-review-orchestrator redrive --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1
   forgeflow-review-orchestrator update
   forgeflow-review-orchestrator update --help
@@ -117,6 +121,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
     runInspect,
     runRedrive,
     runUpdate,
+    runArtifactGet,
     log: (message) => console.log(message),
     ...partialDeps,
   };
@@ -376,6 +381,25 @@ Examples:
       taskId,
       summary: options.summary === true,
       stateDir,
+    });
+    deps.log(JSON.stringify(result, null, 2));
+    return result;
+  }
+
+  if (parsed.command === "artifact-get") {
+    const stateDir = typeof options.stateDir === "string" ? options.stateDir : undefined;
+    const dispatcherUrl = stateDir ? undefined : getDispatcherUrl(options);
+    const bundleId = typeof options.bundleId === "string" ? options.bundleId : undefined;
+    if (!dispatcherUrl && !stateDir) {
+      throw new Error("--dispatcher-url or --state-dir is required");
+    }
+    if (!bundleId) {
+      throw new Error("--bundle-id is required");
+    }
+    const result = await deps.runArtifactGet({
+      dispatcherUrl,
+      stateDir,
+      bundleId,
     });
     deps.log(JSON.stringify(result, null, 2));
     return result;

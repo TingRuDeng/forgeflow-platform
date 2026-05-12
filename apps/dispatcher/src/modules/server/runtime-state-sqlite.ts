@@ -141,6 +141,23 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
       idempotency_key TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS artifact_bundles (
+      bundle_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      attempt_id TEXT NOT NULL,
+      schema_version TEXT NOT NULL,
+      summary TEXT,
+      branch TEXT,
+      commit_sha TEXT,
+      pull_request_url TEXT,
+      changed_files_json TEXT NOT NULL,
+      refs_json TEXT NOT NULL,
+      test_results_json TEXT,
+      risk_notes_json TEXT NOT NULL,
+      next_actions_json TEXT NOT NULL,
+      created_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS assignments (
       task_id TEXT PRIMARY KEY,
       worker_id TEXT,
@@ -230,6 +247,7 @@ function createEmptyRuntimeState(): RuntimeState {
     workers: [],
     tasks: [],
     taskAttempts: [],
+    artifactBundles: [],
     events: [],
     assignments: [],
     reviews: [],
@@ -248,6 +266,9 @@ function coerceRuntimeState(parsed: unknown): RuntimeState {
       : [],
     taskAttempts: Array.isArray((parsed as Partial<RuntimeState>)?.taskAttempts)
       ? (parsed as Partial<RuntimeState>).taskAttempts ?? []
+      : [],
+    artifactBundles: Array.isArray((parsed as Partial<RuntimeState>)?.artifactBundles)
+      ? (parsed as Partial<RuntimeState>).artifactBundles ?? []
       : [],
   };
 }
@@ -366,6 +387,31 @@ function rewriteStructuredProjection(
         attempt.failureMessage ?? null,
         attempt.artifactBundleId ?? null,
         attempt.idempotencyKey,
+      );
+    }
+
+    const insertArtifactBundle = db.prepare(`
+      INSERT INTO artifact_bundles (
+        bundle_id, task_id, attempt_id, schema_version, summary, branch, commit_sha, pull_request_url,
+        changed_files_json, refs_json, test_results_json, risk_notes_json, next_actions_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const bundle of state.artifactBundles ?? []) {
+      insertArtifactBundle.run(
+        bundle.bundleId ?? `${bundle.attemptId}:artifact-bundle`,
+        bundle.taskId,
+        bundle.attemptId,
+        bundle.schemaVersion,
+        bundle.summary ?? null,
+        bundle.branch ?? null,
+        bundle.commit ?? null,
+        bundle.pullRequestUrl ?? null,
+        asJson(bundle.changedFiles),
+        asJson(bundle.refs),
+        asJson(bundle.testResults ?? null),
+        asJson(bundle.riskNotes ?? []),
+        asJson(bundle.nextActions ?? []),
+        bundle.createdAt ?? null,
       );
     }
 
@@ -657,6 +703,27 @@ export function readStructuredRuntimeState(stateDir: string): RuntimeState {
       idempotencyKey: row.idempotency_key,
     }));
 
+    base.artifactBundles = db.prepare(`
+      SELECT *
+      FROM artifact_bundles
+      ORDER BY task_id, attempt_id, bundle_id
+    `).all().map((row: any) => ({
+      bundleId: row.bundle_id,
+      taskId: row.task_id,
+      attemptId: row.attempt_id,
+      schemaVersion: row.schema_version,
+      summary: row.summary ?? undefined,
+      branch: row.branch ?? undefined,
+      commit: row.commit_sha ?? undefined,
+      pullRequestUrl: row.pull_request_url ?? undefined,
+      changedFiles: fromJson(row.changed_files_json, []),
+      refs: fromJson(row.refs_json, {}),
+      testResults: fromJson(row.test_results_json, undefined),
+      riskNotes: fromJson(row.risk_notes_json, []),
+      nextActions: fromJson(row.next_actions_json, []),
+      createdAt: row.created_at ?? undefined,
+    }));
+
     base.assignments = db.prepare(`
       SELECT *
       FROM assignments
@@ -789,6 +856,7 @@ export function compareStructuredProjection(stateDir: string): {
     workers: snapshot.workers.length,
     tasks: snapshot.tasks.length,
     taskAttempts: (snapshot.taskAttempts ?? []).length,
+    artifactBundles: (snapshot.artifactBundles ?? []).length,
     assignments: snapshot.assignments.length,
     reviews: snapshot.reviews.length,
     pullRequests: snapshot.pullRequests.length,
@@ -800,6 +868,7 @@ export function compareStructuredProjection(stateDir: string): {
     workers: structured.workers.length,
     tasks: structured.tasks.length,
     taskAttempts: (structured.taskAttempts ?? []).length,
+    artifactBundles: (structured.artifactBundles ?? []).length,
     assignments: structured.assignments.length,
     reviews: structured.reviews.length,
     pullRequests: structured.pullRequests.length,

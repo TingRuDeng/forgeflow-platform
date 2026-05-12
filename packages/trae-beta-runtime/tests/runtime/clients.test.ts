@@ -229,6 +229,15 @@ describe("runtime/clients", () => {
         blockers: [],
         findings: [],
       },
+      artifactBundle: {
+        bundleId: "attempt-1:artifact-bundle",
+        taskId: "task-1",
+        attemptId: "attempt-1",
+        schemaVersion: "artifact-bundle/v1",
+        summary: "pnpm test failed",
+        changedFiles: [],
+        refs: { structuredReport: "artifact://attempt-1/result.json" },
+      },
     });
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -242,6 +251,11 @@ describe("runtime/clients", () => {
         failureSummary: "pnpm test failed",
         blockers: [],
         findings: [],
+      },
+      artifact_bundle: {
+        bundleId: "attempt-1:artifact-bundle",
+        taskId: "task-1",
+        attemptId: "attempt-1",
       },
     });
   });

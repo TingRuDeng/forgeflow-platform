@@ -85,8 +85,8 @@ ai_summary:
   - vNext TaskAttempt 目标模型。
   - 用于后续拆分 task 目标和 worker 执行尝试。
 - `ARTIFACT_BUNDLE_V1.md`
-  - vNext ArtifactBundle 目标契约。
-  - 用于后续 result / review / replay 证据包标准化。
+  - vNext ArtifactBundle 契约与当前 result 存储边界。
+  - 覆盖 dispatcher bundle 存储、CLI 获取和 review / replay 证据包标准化方向。
 - `AGENT_STARTER_PROMPT.md`
   - 新 agent 会话的短启动提示。
   - 只做入口 shim，不重复定义规则。
