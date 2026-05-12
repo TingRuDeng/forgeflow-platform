@@ -124,7 +124,7 @@ node scripts/verify-stage3-dr.mjs
 建议：
 
 - 发布前至少做一次 backup
-- 每季度跑一次 `verify-stage3-dr`，但把它视为文件复制路径 smoke，不视为完整 SQLite 恢复证明
+- 每季度跑一次 `verify-stage3-dr`，它能证明源码级 SQLite 备份恢复与 checksum 校验，但不替代 live dispatcher DR 演练
 - 先切 read-only，再做 restore
 
 ## 6. SLO / Burn-rate

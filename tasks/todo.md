@@ -46,3 +46,19 @@
 验证已通过：RED 测试先返回 `404` 后修复为 `503 read_only_mode`；`pnpm --filter @forgeflow/dispatcher test -- tests/modules/server/dispatcher-server.test.ts`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:validate`、`git diff --check` 全部通过。
 
 剩余风险：read-only 只冻结 dispatcher HTTP API 写方法；直接修改运行时文件、外部数据库或操作系统层面的写入仍需由运维流程单独管控。
+
+# 成熟产品验收：技术债事实同步
+
+- [x] 对照真实代码核对 shadow status、Stage 3 DR drill 和 release workflow 的技术债描述。
+- [x] 修正 `docs/TECH_DEBT.md` 中已过期或过度表述的债务项。
+- [x] 修正 DR runbook 中对 `verify-stage3-dr` 的过期边界说明。
+- [x] 运行文档校验和 diff 检查。
+- [x] 补充 review 小结。
+
+## Review 小结
+
+已按真实代码修正技术债事实：shadow 写失败已经通过 `/api/dr/status` 暴露 in-memory 状态，但尚未持久化为运行时事件；`verify-stage3-dr` 已经创建真实 SQLite 并校验 integrity/checksum，但仍不是 live dispatcher WAL 压力演练；手动 release 已先 commit/tag/push 再 publish，剩余风险是 publish 失败后 git 版本领先 npm。
+
+验证已通过：`pnpm docs:validate`、`git diff --check`。
+
+剩余风险：本批只同步文档事实，不实现持久化 shadow failure event、live DR 压力演练或 release 失败自动恢复。

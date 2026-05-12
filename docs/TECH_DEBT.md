@@ -187,52 +187,56 @@ Desired direction:
 
 - 继续接入 review workflow、artifact retention 和 Console artifact tabs
 
-## 9. Shadow path failures are not yet first-class operational state
+## 9. Shadow path failures are not yet persisted as first-class runtime events
 
 Current situation:
 
 - `saveRuntimeState()` writes SQLite snapshot/projection first
 - Postgres / queue shadow sync runs asynchronously
-- shadow errors are caught without being persisted as runtime events or exposed by `/api/dr/status`
+- `runtime-state-shadow.ts:readRuntimeStateShadowWriteStatus` exposes last shadow attempt status through `/api/dr/status`
+- shadow errors are still in-memory process status only; they are not persisted as runtime events or durable audit records
 
 Impact:
 
-- shadow-write rollout can drift while the SQLite main path still appears healthy
+- process restart can lose the last shadow failure details
+- shadow-write rollout still needs external alerting before any primary-store cutover
 
 Desired direction:
 
-- surface shadow sync failures through runtime events or DR status
-- add an operator-visible shadow health check before treating shadow write as rollout-ready
+- persist shadow sync failures as runtime events or durable health records
+- add an operator-visible shadow drift check before treating shadow write as rollout-ready
 
-## 10. Source DR drill is file-copy validation, not full SQLite recovery proof
+## 10. Source DR drill is still a minimal SQLite recovery proof
 
 Current situation:
 
-- `scripts/verify-stage3-dr.mjs` creates a text file named `runtime-state.db`
-- it verifies backup / restore file copying and manifest behavior
-- it does not exercise a real SQLite database with WAL integrity semantics
+- `scripts/verify-stage3-dr.mjs` creates a real SQLite `runtime-state.db`
+- it writes a `snapshots` row, backs up and restores the DB, then validates `PRAGMA integrity_check` and snapshot checksum
+- it does not simulate a long-running dispatcher with concurrent writes, large WAL growth, or mid-write crash recovery
 
 Impact:
 
-- `pnpm verify:stage3` can pass while real database recovery behavior is still under-validated
+- `pnpm verify:stage3` proves the source DR script path and restored SQLite queryability
+- it is not yet a full production DR exercise for live WAL pressure, lock contention, or crash consistency
 
 Desired direction:
 
-- extend the drill to create a real SQLite DB and validate restored queryability
-- keep the current script documented as a minimal copy-path smoke until then
+- add a heavier live-dispatcher DR drill that runs writes during backup and validates restore under WAL pressure
+- keep the current script as the fast source-level DR gate
 
-## 11. Manual release can publish a version not represented in git history
+## 11. Manual release can leave git ahead of npm when publish fails
 
 Current situation:
 
-- `.github/workflows/release.yml` manual path runs `npm version --no-git-tag-version`
-- the changed package version is published from the runner without a corresponding commit or tag
+- `.github/workflows/release.yml` manual path bumps package version, commits it, creates a release tag, and pushes before `npm publish`
+- if `npm publish` fails after the push, git history can contain a package version that was not published to npm
 
 Impact:
 
-- a published npm version may not map cleanly to a repository commit containing the same `package.json` version
+- operators may need to reconcile an already-pushed release commit/tag with a failed npm publish
+- retry or rollback must be explicit to avoid confusing package consumers
 
 Desired direction:
 
-- require a tagged commit for manual release versions
-- or make manual release publish an already-committed version only
+- document the failed-publish recovery path in release runbooks
+- consider a two-phase release marker or automatic GitHub issue when publish fails
