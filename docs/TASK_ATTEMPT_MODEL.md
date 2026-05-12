@@ -51,10 +51,11 @@ ai_summary:
 - task cancel 会把 active attempt 标记为 `cancelled`。
 - `taskAttempts[]` 会随 runtime snapshot 一起保存。
 - SQLite structured projection 会写入并读取 `task_attempts`。
+- worker start/result 写入如果携带 `attemptId` 或 `leaseToken`，dispatcher 会校验它们必须匹配当前 active attempt。
 
 尚未实现：
 
-- worker mutation 对 `attemptId` 和 `leaseToken` 的强制校验。
+- worker mutation 对完整 v1 envelope 的强制校验。
 - stale result 拒绝。
 - redrive / retry 创建新 attempt 的完整策略。
 

@@ -523,6 +523,94 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
   });
 
+  it("rejects vNext start and result writes with stale attempt lease data", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-lease-worker",
+      pool: "codex",
+      hostname: "mac-mini",
+      labels: ["codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-05-12T11:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "main",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-lease-token",
+          title: "校验 lease token",
+          pool: "codex",
+          branchName: "ai/codex/task-lease-token",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-lease-token",
+          assignment: {
+            taskId: "task-lease-token",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "ai/codex/task-lease-token",
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "main",
+          },
+        },
+      ],
+      createdAt: "2026-05-12T11:00:10.000Z",
+    });
+
+    const taskId = dispatch.taskIds[0]!;
+    const claimed = claimAssignedTaskForWorker(dispatch.state, {
+      workerId: "codex-lease-worker",
+      at: "2026-05-12T11:00:20.000Z",
+    });
+    state = claimed.state;
+
+    const attempt = state.taskAttempts[0]!;
+    expect(() => beginTaskForWorker(state, {
+      taskId,
+      workerId: "codex-lease-worker",
+      attemptId: attempt.attemptId,
+      leaseToken: "stale-token",
+      at: "2026-05-12T11:00:30.000Z",
+    })).toThrow(/lease token mismatch/i);
+
+    state = beginTaskForWorker(state, {
+      taskId,
+      workerId: "codex-lease-worker",
+      attemptId: attempt.attemptId,
+      leaseToken: attempt.leaseToken,
+      at: "2026-05-12T11:00:30.000Z",
+    });
+
+    expect(() => recordWorkerResult(state, {
+      workerId: "codex-lease-worker",
+      attemptId: "stale-attempt",
+      leaseToken: attempt.leaseToken,
+      result: {
+        taskId,
+        workerId: "codex-lease-worker",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-lease-token",
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "main",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-05-12T11:01:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+      },
+    })).toThrow(/attempt id mismatch/i);
+  });
+
   it("marks stale workers as offline in dashboard snapshots", () => {
     const stateDir = makeTempDir();
 
