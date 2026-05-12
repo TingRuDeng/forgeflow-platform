@@ -121,6 +121,26 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS task_attempts (
+      attempt_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      attempt_no INTEGER NOT NULL,
+      worker_id TEXT NOT NULL,
+      worker_runtime TEXT NOT NULL,
+      protocol_version TEXT NOT NULL,
+      lease_token TEXT NOT NULL,
+      status TEXT NOT NULL,
+      trace_id TEXT NOT NULL,
+      started_at TEXT,
+      heartbeat_at TEXT,
+      lease_expires_at TEXT,
+      ended_at TEXT,
+      failure_code TEXT,
+      failure_message TEXT,
+      artifact_bundle_id TEXT,
+      idempotency_key TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS assignments (
       task_id TEXT PRIMARY KEY,
       worker_id TEXT,
@@ -256,6 +276,7 @@ function rewriteStructuredProjection(
     db.exec(`
       DELETE FROM workers;
       DELETE FROM tasks;
+      DELETE FROM task_attempts;
       DELETE FROM assignments;
       DELETE FROM reviews;
       DELETE FROM pull_requests;
@@ -317,6 +338,34 @@ function rewriteStructuredProjection(
         task.lastAssignedWorkerId ?? null,
         task.requestedBy,
         task.createdAt,
+      );
+    }
+
+    const insertTaskAttempt = db.prepare(`
+      INSERT INTO task_attempts (
+        attempt_id, task_id, attempt_no, worker_id, worker_runtime, protocol_version, lease_token, status, trace_id,
+        started_at, heartbeat_at, lease_expires_at, ended_at, failure_code, failure_message, artifact_bundle_id, idempotency_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const attempt of state.taskAttempts ?? []) {
+      insertTaskAttempt.run(
+        attempt.attemptId,
+        attempt.taskId,
+        attempt.attemptNo,
+        attempt.workerId,
+        attempt.workerRuntime,
+        attempt.protocolVersion,
+        attempt.leaseToken,
+        attempt.status,
+        attempt.traceId,
+        attempt.startedAt ?? null,
+        attempt.heartbeatAt ?? null,
+        attempt.leaseExpiresAt ?? null,
+        attempt.endedAt ?? null,
+        attempt.failureCode ?? null,
+        attempt.failureMessage ?? null,
+        attempt.artifactBundleId ?? null,
+        attempt.idempotencyKey,
       );
     }
 
@@ -584,6 +633,30 @@ export function readStructuredRuntimeState(stateDir: string): RuntimeState {
       createdAt: row.created_at,
     }));
 
+    base.taskAttempts = db.prepare(`
+      SELECT *
+      FROM task_attempts
+      ORDER BY task_id, attempt_no
+    `).all().map((row: any) => ({
+      attemptId: row.attempt_id,
+      taskId: row.task_id,
+      attemptNo: row.attempt_no,
+      workerId: row.worker_id,
+      workerRuntime: row.worker_runtime,
+      protocolVersion: row.protocol_version,
+      leaseToken: row.lease_token,
+      status: row.status,
+      traceId: row.trace_id,
+      startedAt: row.started_at ?? undefined,
+      heartbeatAt: row.heartbeat_at ?? undefined,
+      leaseExpiresAt: row.lease_expires_at ?? undefined,
+      endedAt: row.ended_at ?? undefined,
+      failureCode: row.failure_code ?? undefined,
+      failureMessage: row.failure_message ?? undefined,
+      artifactBundleId: row.artifact_bundle_id ?? undefined,
+      idempotencyKey: row.idempotency_key,
+    }));
+
     base.assignments = db.prepare(`
       SELECT *
       FROM assignments
@@ -715,6 +788,7 @@ export function compareStructuredProjection(stateDir: string): {
   const expected = {
     workers: snapshot.workers.length,
     tasks: snapshot.tasks.length,
+    taskAttempts: (snapshot.taskAttempts ?? []).length,
     assignments: snapshot.assignments.length,
     reviews: snapshot.reviews.length,
     pullRequests: snapshot.pullRequests.length,
@@ -725,6 +799,7 @@ export function compareStructuredProjection(stateDir: string): {
   const actual = {
     workers: structured.workers.length,
     tasks: structured.tasks.length,
+    taskAttempts: (structured.taskAttempts ?? []).length,
     assignments: structured.assignments.length,
     reviews: structured.reviews.length,
     pullRequests: structured.pullRequests.length,

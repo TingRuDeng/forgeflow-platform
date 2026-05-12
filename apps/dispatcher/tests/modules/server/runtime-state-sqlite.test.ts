@@ -78,7 +78,23 @@ function createTestState(): RuntimeState {
         verification: { mode: "run" },
       },
     ],
-    taskAttempts: [],
+    taskAttempts: [
+      {
+        attemptId: "dispatch-1:task-1:attempt-1",
+        taskId: "dispatch-1:task-1",
+        attemptNo: 1,
+        workerId: "test-worker-1",
+        workerRuntime: "codex",
+        protocolVersion: "2026-05-v1",
+        leaseToken: "assignment:test-worker-1",
+        status: "running",
+        traceId: "trace-dispatch-1-task-1",
+        startedAt: "2026-04-01T10:01:00.000Z",
+        heartbeatAt: "2026-04-01T10:01:00.000Z",
+        leaseExpiresAt: "2026-04-01T10:06:00.000Z",
+        idempotencyKey: "v0:dispatch-1:task-1:attempt-1",
+      },
+    ],
     events: [
       {
         taskId: "dispatch-1:task-1",
@@ -235,6 +251,27 @@ describe("runtime-state-sqlite", () => {
     expect(reloaded.tasks[0].id).toBe("dispatch-1:task-1");
     expect(reloaded.dispatches).toHaveLength(1);
     expect(reloaded.dispatches[0].id).toBe("dispatch-1");
+  });
+
+  it("writes task attempts to the structured sqlite projection", () => {
+    const stateDir = makeTempDir();
+    const state = createTestState();
+
+    saveRuntimeState(stateDir, state);
+
+    const structured = sqliteStore.readStructuredRuntimeState(stateDir);
+    expect(structured.taskAttempts).toHaveLength(1);
+    expect(structured.taskAttempts[0]).toMatchObject({
+      attemptId: "dispatch-1:task-1:attempt-1",
+      taskId: "dispatch-1:task-1",
+      status: "running",
+      leaseToken: "assignment:test-worker-1",
+    });
+
+    const projection = sqliteStore.compareStructuredProjection(stateDir);
+    expect(projection.expected.taskAttempts).toBe(1);
+    expect(projection.actual.taskAttempts).toBe(1);
+    expect(projection.matches).toBe(true);
   });
 
   it("imports from existing JSON snapshot", () => {
