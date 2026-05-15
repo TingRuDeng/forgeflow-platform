@@ -947,7 +947,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
         readOnly: isReadOnlyModeEnabled(),
         structuredReads: useStructuredReads(),
         shadowMode: getRuntimeStateShadowMode(),
-        shadowWrite: readRuntimeStateShadowWriteStatus(),
+        shadowWrite: readRuntimeStateShadowWriteStatus(stateDir),
         projectionHealth: readStructuredProjectionHealth(stateDir),
         backups: listBackupManifests(stateDir),
       });

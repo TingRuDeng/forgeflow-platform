@@ -6,6 +6,7 @@ const FILES = [
   "runtime-state.db-wal",
   "runtime-state.db-shm",
   "runtime-state.json",
+  "runtime-state-shadow-status.json",
 ];
 
 export function restoreRuntimeState({ backupDir, stateDir }) {

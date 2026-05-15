@@ -97,3 +97,20 @@
 验证已通过：RED 测试先失败于缺失完整 envelope 字段；修复后 `pnpm --filter @tingrudeng/trae-beta-runtime test -- tests/runtime/worker.test.ts tests/runtime/clients.test.ts`、`pnpm --filter @forgeflow/dispatcher test -- tests/modules/server/dispatcher-server.test.ts`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:validate`、`git diff --check` 通过。
 
 剩余风险：通用 v0 worker routes 仍保留空 envelope 兼容；跨请求 idempotency payload 冲突检测尚未实现。
+
+# 成熟产品验收：shadow 写失败 durable health record
+
+- [x] 补充 RED 测试，证明 shadow 写失败会落 `runtime-state-shadow-status.json`。
+- [x] 实现 shadow 写状态文件持久化，并让 `/api/dr/status` 读取 stateDir 下的 durable record。
+- [x] 保持 shadow 写失败不影响 SQLite 主链写入结果。
+- [x] 同步 Stage 3 / DR runbook 和技术债文档。
+- [x] 运行受影响测试、类型检查、文档校验和 diff 检查。
+- [x] 补充 review 小结。
+
+## Review 小结
+
+已完成 shadow 写状态 durable health record：shadow sync 成功、跳过或失败后写入 `runtime-state-shadow-status.json`，`/api/dr/status.shadowWrite` 合并读取 stateDir 下的记录，源码脚本与打包 dispatcher runtime 的 backup/restore 都会复制该文件。
+
+验证已通过：RED 测试先失败于未生成 health record、DR status 未读取持久化记录，以及缺少 shadow health 选择逻辑；修复后 `pnpm --filter @forgeflow/dispatcher test -- tests/modules/server/runtime-state-sqlite.test.ts tests/modules/server/runtime-state-shadow-health.test.ts tests/modules/server/dispatcher-server.test.ts`、`pnpm --filter @tingrudeng/forgeflow-dispatcher test -- tests/backup.test.ts`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:validate`、`git diff --check`、`pnpm verify:stage3` 通过。
+
+剩余风险：shadow failure 仍不是 `RuntimeState.events[]` 中的一等审计事件；shadow drift 自动对账和 primary cutover 仍需单独设计。

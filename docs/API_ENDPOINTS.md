@@ -180,8 +180,10 @@ Current endpoint families:
     - `readOnly`
     - `structuredReads`
     - `shadowMode`
+    - `shadowWrite`
     - `projectionHealth`
     - `backups`
+  - `shadowWrite` 会合并 stateDir 下的 `runtime-state-shadow-status.json`，因此 dispatcher 重启后仍能显示最后一次 shadow 写入结果。
 
 ### Structured reads, read-only, and shadow modes
 

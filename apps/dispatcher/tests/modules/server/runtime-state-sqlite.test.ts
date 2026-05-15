@@ -243,6 +243,15 @@ describe("runtime-state-sqlite", () => {
     expect(status.status).toBe("failed");
     expect(status.configured).toBe(true);
     expect(status.lastError).toBeDefined();
+
+    const statusPath = path.join(stateDir, "runtime-state-shadow-status.json");
+    expect(fs.existsSync(statusPath)).toBe(true);
+    const durableStatus = JSON.parse(fs.readFileSync(statusPath, "utf8"));
+    expect(durableStatus).toMatchObject({
+      status: "failed",
+      configured: true,
+      lastError: status.lastError,
+    });
   });
 
   it("reloads runtime state from sqlite file", () => {
