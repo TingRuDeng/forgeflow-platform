@@ -1103,6 +1103,131 @@ describe("dispatcher server", () => {
     expect(resultResponse.json.error).toBe("attempt id mismatch: stale-attempt");
   });
 
+  it("rejects generic worker HTTP v1 envelope mismatches", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    const stateMod = await import(path.join(repoRoot, "scripts/lib/dispatcher-state.js"));
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-v1-envelope-http",
+        pool: "codex",
+        hostname: "v1-envelope-host",
+        labels: [],
+        repoDir: "/repo",
+      },
+    });
+
+    const dispatchResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/repo",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [
+          {
+            id: "task-http-v1-envelope",
+            title: "HTTP v1 envelope",
+            pool: "codex",
+            dependsOn: [],
+            branchName: "ai/codex/task-http-v1-envelope",
+            verification: { mode: "run" },
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-http-v1-envelope",
+            assignment: {
+              taskId: "task-http-v1-envelope",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/task-http-v1-envelope",
+              repo: "test/repo",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+    const taskId = dispatchResponse.json.taskIds[0];
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-v1-envelope-http/claim-task",
+      body: {},
+    });
+    const attempt = stateMod.loadRuntimeState(stateDir).taskAttempts[0];
+
+    const staleStart = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-v1-envelope-http/start-task",
+      body: {
+        taskId,
+        attemptId: attempt.attemptId,
+        leaseToken: attempt.leaseToken,
+        protocolVersion: attempt.protocolVersion,
+        traceId: "stale-trace-id",
+        idempotencyKey: attempt.idempotencyKey,
+      },
+    });
+    expect(staleStart.status).toBe(409);
+    expect(staleStart.json.error).toBe(`trace id mismatch: ${taskId}`);
+
+    const startResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-v1-envelope-http/start-task",
+      body: {
+        taskId,
+        attemptId: attempt.attemptId,
+        leaseToken: attempt.leaseToken,
+        protocolVersion: attempt.protocolVersion,
+        traceId: attempt.traceId,
+        idempotencyKey: attempt.idempotencyKey,
+      },
+    });
+    expect(startResponse.status).toBe(200);
+
+    const staleResult = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-v1-envelope-http/result",
+      body: {
+        attemptId: attempt.attemptId,
+        leaseToken: attempt.leaseToken,
+        protocolVersion: attempt.protocolVersion,
+        traceId: attempt.traceId,
+        idempotencyKey: "stale-idempotency-key",
+        result: {
+          taskId,
+          workerId: "codex-v1-envelope-http",
+          provider: "codex",
+          pool: "codex",
+          branchName: "ai/codex/task-http-v1-envelope",
+          repo: "test/repo",
+          defaultBranch: "main",
+          mode: "run",
+          output: "done",
+          generatedAt: "2026-05-12T12:00:00.000Z",
+          verification: {
+            allPassed: true,
+            commands: [],
+          },
+        },
+      },
+    });
+    expect(staleResult.status).toBe(409);
+    expect(staleResult.json.error).toBe(`idempotency key mismatch: ${taskId}`);
+  });
+
   it("rejects late HTTP results from expired attempts after retry redrive", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);

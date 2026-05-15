@@ -230,8 +230,11 @@ Current endpoint families:
   - Reclaimed retry tasks create the next `TaskAttempt` when they are claimed again, preserving expired attempt history.
 - `POST /api/workers/:workerId/start-task`
   - Move task from `assigned` to `in_progress`.
+  - Optional v1 envelope fields are `attemptId`, `leaseToken`, `protocolVersion`, `traceId`, and `idempotencyKey`.
+  - If any of `protocolVersion` / `traceId` / `idempotencyKey` is provided, dispatcher requires the complete v1 envelope and validates it against the active attempt.
 - `POST /api/workers/:workerId/result`
   - Submit execution result, changed files, and optional PR metadata.
+  - Optional v1 envelope fields follow the same validation rule as `start-task`.
   - Caller should only treat the task as durably delivered after this endpoint returns success; `worker-daemon` no longer treats exhausted submission retries as a completed task.
   - Worker execution now uses a child-process env allowlist; do not assume parent-side secrets such as `GITHUB_TOKEN` or `DISPATCHER_API_TOKEN` are visible inside the assignment process.
   - Dispatcher now canonicalizes dispatcher-owned fields:
