@@ -25,6 +25,7 @@ const RUNTIME_STATE_BACKEND_ENV = "RUNTIME_STATE_BACKEND";
 const RUNTIME_EVENTS_RETENTION_LIMIT = 500;
 const DEFAULT_MAX_TASK_ATTEMPTS = 2;
 const ATTEMPT_LEASE_EXPIRED_CODE = "attempt_lease_expired";
+const WORKER_PROTOCOL_VERSION = "2026-05-v1";
 
 function resolveStore(): RuntimeStateStore {
   if (process.env[RUNTIME_STATE_BACKEND_ENV] === "json") {
@@ -324,6 +325,9 @@ export interface BeginTaskInput {
   taskId: string;
   attemptId?: string;
   leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
   at?: string;
 }
 
@@ -356,6 +360,9 @@ export interface RecordWorkerResultInput {
   workerId: string;
   attemptId?: string;
   leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
   result: WorkerResult;
   changedFiles?: string[];
   artifactBundle?: ArtifactBundle;
@@ -1074,10 +1081,17 @@ function assertActiveAttemptLease(input: {
   workerId: string;
   attemptId?: string;
   leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
   operation?: string;
 }): void {
-  if (!input.attemptId && !input.leaseToken) {
+  const declaresV1Envelope = Boolean(input.protocolVersion || input.traceId || input.idempotencyKey);
+  if (!input.attemptId && !input.leaseToken && !declaresV1Envelope) {
     return;
+  }
+  if (declaresV1Envelope) {
+    assertCompleteWorkerProtocolEnvelope(input);
   }
 
   const operation = input.operation ?? "write";
@@ -1108,6 +1122,36 @@ function assertActiveAttemptLease(input: {
   }
   if (input.leaseToken && input.leaseToken !== activeAttempt.leaseToken) {
     throw new Error(`lease token mismatch: ${input.taskId}`);
+  }
+  if (input.protocolVersion && input.protocolVersion !== activeAttempt.protocolVersion) {
+    throw new Error(`protocol version mismatch: ${input.protocolVersion}`);
+  }
+  if (input.traceId && input.traceId !== activeAttempt.traceId) {
+    throw new Error(`trace id mismatch: ${input.taskId}`);
+  }
+  if (input.idempotencyKey && input.idempotencyKey !== activeAttempt.idempotencyKey) {
+    throw new Error(`idempotency key mismatch: ${input.taskId}`);
+  }
+}
+
+function assertCompleteWorkerProtocolEnvelope(input: {
+  attemptId?: string;
+  leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
+}): void {
+  if (input.protocolVersion !== WORKER_PROTOCOL_VERSION) {
+    throw new Error(`unsupported worker protocol version: ${input.protocolVersion || "<empty>"}`);
+  }
+  const missingField = [
+    ["attemptId", input.attemptId],
+    ["leaseToken", input.leaseToken],
+    ["traceId", input.traceId],
+    ["idempotencyKey", input.idempotencyKey],
+  ].find(([, value]) => !value);
+  if (missingField) {
+    throw new Error(`worker protocol v1 envelope incomplete: ${missingField[0]} required`);
   }
 }
 
@@ -2172,14 +2216,6 @@ export function beginTaskForWorker(state: RuntimeState, input: BeginTaskInput): 
     throw new Error(`task not assigned to worker: ${input.workerId}`);
   }
 
-  if (task.status === "in_progress") {
-    return state;
-  }
-
-  if (task.status !== "assigned" || assignment.status !== "assigned") {
-    throw new Error(`task not ready to start: ${input.taskId}`);
-  }
-
   const at = input.at ?? nowIso();
   assertActiveAttemptLease({
     state,
@@ -2187,7 +2223,18 @@ export function beginTaskForWorker(state: RuntimeState, input: BeginTaskInput): 
     workerId: input.workerId,
     attemptId: input.attemptId,
     leaseToken: input.leaseToken,
+    protocolVersion: input.protocolVersion,
+    traceId: input.traceId,
+    idempotencyKey: input.idempotencyKey,
   });
+
+  if (task.status === "in_progress") {
+    return state;
+  }
+
+  if (task.status !== "assigned" || assignment.status !== "assigned") {
+    throw new Error(`task not ready to start: ${input.taskId}`);
+  }
   const leaseResult = acquireAssignmentLease(state, input.taskId, input.workerId, at);
   if (!leaseResult.acquired) {
     throw new Error(`assignment lease not available: ${input.taskId}`);
@@ -2256,6 +2303,9 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     workerId: input.workerId,
     attemptId: input.attemptId,
     leaseToken: input.leaseToken,
+    protocolVersion: input.protocolVersion,
+    traceId: input.traceId,
+    idempotencyKey: input.idempotencyKey,
     operation: "result",
   });
   if (task.assignedWorkerId !== input.workerId) {

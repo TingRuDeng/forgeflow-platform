@@ -1429,6 +1429,9 @@ describe("dispatcher server", () => {
     const taskId = firstFetch.json.task.task_id;
     expect(firstFetch.json.task.attempt_id).toBeTruthy();
     expect(firstFetch.json.task.lease_token).toBeTruthy();
+    expect(firstFetch.json.task.protocol_version).toBe("2026-05-v1");
+    expect(firstFetch.json.task.trace_id).toBeTruthy();
+    expect(firstFetch.json.task.idempotency_key).toBeTruthy();
 
     const staleStart = await mod.handleDispatcherHttpRequest({
       stateDir,
@@ -1444,6 +1447,23 @@ describe("dispatcher server", () => {
     expect(staleStart.status).toBe(409);
     expect(staleStart.json.error).toMatch(/lease token mismatch/i);
 
+    const traceMismatchStart = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/start-task",
+      body: {
+        worker_id: "trae-retry",
+        task_id: taskId,
+        attempt_id: firstFetch.json.task.attempt_id,
+        lease_token: firstFetch.json.task.lease_token,
+        protocol_version: firstFetch.json.task.protocol_version,
+        trace_id: "stale-trace",
+        idempotency_key: firstFetch.json.task.idempotency_key,
+      },
+    });
+    expect(traceMismatchStart.status).toBe(409);
+    expect(traceMismatchStart.json.error).toMatch(/trace id mismatch/i);
+
     await mod.handleDispatcherHttpRequest({
       stateDir,
       method: "POST",
@@ -1453,6 +1473,9 @@ describe("dispatcher server", () => {
         task_id: taskId,
         attempt_id: firstFetch.json.task.attempt_id,
         lease_token: firstFetch.json.task.lease_token,
+        protocol_version: firstFetch.json.task.protocol_version,
+        trace_id: firstFetch.json.task.trace_id,
+        idempotency_key: firstFetch.json.task.idempotency_key,
       },
     });
 
@@ -1892,6 +1915,9 @@ describe("dispatcher server", () => {
     const taskId = fetchResponse.json.task.task_id;
     expect(fetchResponse.json.task.attempt_id).toBeTruthy();
     expect(fetchResponse.json.task.lease_token).toBeTruthy();
+    expect(fetchResponse.json.task.protocol_version).toBe("2026-05-v1");
+    expect(fetchResponse.json.task.trace_id).toBeTruthy();
+    expect(fetchResponse.json.task.idempotency_key).toBeTruthy();
 
     const staleResponse = await mod.handleDispatcherHttpRequest({
       stateDir,
@@ -1916,6 +1942,32 @@ describe("dispatcher server", () => {
     expect(staleResponse.status).toBe(409);
     expect(staleResponse.json.error).toMatch(/lease token mismatch/i);
 
+    const idempotencyMismatchResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/submit-result",
+      body: {
+        task_id: taskId,
+        attempt_id: fetchResponse.json.task.attempt_id,
+        lease_token: fetchResponse.json.task.lease_token,
+        protocol_version: fetchResponse.json.task.protocol_version,
+        trace_id: fetchResponse.json.task.trace_id,
+        idempotency_key: "stale-idempotency-key",
+        status: "review_ready",
+        summary: "Done!",
+        test_output: "PASS",
+        risks: ["Low risk"],
+        files_changed: ["docs/test.md"],
+        branch_name: "ai/trae/task-2",
+        commit_sha: "abc123def456",
+        push_status: "success",
+        pr_number: 42,
+        pr_url: "https://github.com/test/repo/pull/42",
+      },
+    });
+    expect(idempotencyMismatchResponse.status).toBe(409);
+    expect(idempotencyMismatchResponse.json.error).toMatch(/idempotency key mismatch/i);
+
     const response = await mod.handleDispatcherHttpRequest({
       stateDir,
       method: "POST",
@@ -1924,6 +1976,9 @@ describe("dispatcher server", () => {
         task_id: taskId,
         attempt_id: fetchResponse.json.task.attempt_id,
         lease_token: fetchResponse.json.task.lease_token,
+        protocol_version: fetchResponse.json.task.protocol_version,
+        trace_id: fetchResponse.json.task.trace_id,
+        idempotency_key: fetchResponse.json.task.idempotency_key,
         status: "review_ready",
         summary: "Done!",
         test_output: "PASS",

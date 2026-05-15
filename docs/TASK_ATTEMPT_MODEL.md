@@ -54,11 +54,12 @@ ai_summary:
 - `taskAttempts[]` 会随 runtime snapshot 一起保存。
 - SQLite structured projection 会写入并读取 `task_attempts`。
 - worker start/result 写入如果携带 `attemptId` 或 `leaseToken`，dispatcher 会校验它们必须匹配当前 active attempt。
-- Trae `fetch-task` 会创建或复用 active attempt，并把 `attempt_id` / `lease_token` 返回给 runtime；Trae runtime 在 start/result 回写时会继续携带这些字段。
+- Trae `fetch-task` 会创建或复用 active attempt，并把 `attempt_id` / `lease_token` / `protocol_version` / `trace_id` / `idempotency_key` 返回给 runtime；Trae runtime 在 start/result 回写时会继续携带这些字段。
+- Trae start/result 写入声明 v1 envelope 时，dispatcher 会拒绝 traceId 或 idempotencyKey 与当前 active attempt 不一致的请求。
 
 尚未实现：
 
-- worker mutation 对完整 v1 envelope 的强制校验；当前只收紧了 attempt lease 字段。
+- 通用 worker mutation 对完整 v1 envelope 的强制校验；当前 Trae 主链已收紧，其他 v0 worker route 仍保留兼容。
 - 可配置 retry policy；当前只实现默认最多 2 次 attempt 的最小策略。
 
 ## Task 与 Attempt

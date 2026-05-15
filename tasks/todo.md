@@ -80,3 +80,20 @@
 验证已通过：Trae runtime RED 测试先失败，dispatcher RED 测试先暴露 attempt 缺失与 stale lease 未校验；修复后 `pnpm --filter @tingrudeng/trae-beta-runtime test -- tests/runtime/worker.test.ts tests/runtime/clients.test.ts`、`pnpm --filter @forgeflow/dispatcher test -- tests/modules/server/dispatcher-server.test.ts`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:validate`、`git diff --check` 全部通过。
 
 剩余风险：Trae 仍使用 v0 兼容路由，尚未强制完整 v1 envelope 的 `protocolVersion`、`traceId` 和 `idempotencyKey`。
+
+# 成熟产品验收：v1 worker envelope 最小闭环
+
+- [x] 补充 RED 测试，证明 Trae runtime start/result 会携带 `protocol_version`、`trace_id` 和 `idempotency_key`。
+- [x] 补充 RED 测试，证明 dispatcher Trae fetch-task 会返回完整 envelope，并拒绝 v1 envelope mismatch。
+- [x] 实现 Trae runtime 与 dispatcher 之间的完整 envelope 透传和 active attempt 校验。
+- [x] 同步 Worker Protocol / TaskAttempt / 技术债文档。
+- [x] 运行受影响测试、类型检查、文档校验和 diff 检查。
+- [x] 补充 review 小结。
+
+## Review 小结
+
+已完成 Trae 主链 v1 envelope 最小闭环：`fetch-task` 返回 `protocol_version`、`trace_id`、`idempotency_key`，Trae runtime 在 start/result 回写时携带这些字段，dispatcher 对声明 v1 envelope 的 start/result 写入校验 active attempt 的协议版本、traceId 和 idempotencyKey。
+
+验证已通过：RED 测试先失败于缺失完整 envelope 字段；修复后 `pnpm --filter @tingrudeng/trae-beta-runtime test -- tests/runtime/worker.test.ts tests/runtime/clients.test.ts`、`pnpm --filter @forgeflow/dispatcher test -- tests/modules/server/dispatcher-server.test.ts`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:validate`、`git diff --check` 通过。
+
+剩余风险：通用 v0 worker routes 仍保留空 envelope 兼容；跨请求 idempotency payload 冲突检测尚未实现。

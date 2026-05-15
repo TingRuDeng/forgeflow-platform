@@ -307,12 +307,20 @@ function classifyWorkerResultError(error: unknown): number {
     || message.startsWith("attempt owned by another worker:")
     || message.startsWith("attempt id mismatch:")
     || message.startsWith("lease token mismatch:")
+    || message.startsWith("protocol version mismatch:")
+    || message.startsWith("trace id mismatch:")
+    || message.startsWith("idempotency key mismatch:")
     || message.includes("mismatch for ")
   ) {
     return 409;
   }
   if (
-    message === "worker start body must be a JSON object"
+    message.startsWith("unsupported worker protocol version:")
+    || message.startsWith("worker protocol v1 envelope incomplete:")
+    || message === "worker protocolVersion must be a string when provided"
+    || message === "worker traceId must be a string when provided"
+    || message === "worker idempotencyKey must be a string when provided"
+    || message === "worker start body must be a JSON object"
     || message === "worker start taskId is required"
     || message === "worker start at must be a string when provided"
     || message === "worker attemptId must be a string when provided"
@@ -354,16 +362,34 @@ function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function readWorkerLeaseFields(body: Record<string, any>): { attemptId?: string; leaseToken?: string } {
+function readWorkerLeaseFields(body: Record<string, any>): {
+  attemptId?: string;
+  leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
+} {
   if (body.attemptId !== undefined && typeof body.attemptId !== "string") {
     throw new Error("worker attemptId must be a string when provided");
   }
   if (body.leaseToken !== undefined && typeof body.leaseToken !== "string") {
     throw new Error("worker leaseToken must be a string when provided");
   }
+  if (body.protocolVersion !== undefined && typeof body.protocolVersion !== "string") {
+    throw new Error("worker protocolVersion must be a string when provided");
+  }
+  if (body.traceId !== undefined && typeof body.traceId !== "string") {
+    throw new Error("worker traceId must be a string when provided");
+  }
+  if (body.idempotencyKey !== undefined && typeof body.idempotencyKey !== "string") {
+    throw new Error("worker idempotencyKey must be a string when provided");
+  }
   return {
     attemptId: body.attemptId,
     leaseToken: body.leaseToken,
+    protocolVersion: body.protocolVersion,
+    traceId: body.traceId,
+    idempotencyKey: body.idempotencyKey,
   };
 }
 

@@ -123,7 +123,9 @@ export interface TraeTaskInfo {
   task_id: string;
   attempt_id?: string;
   lease_token?: string;
+  protocol_version?: string;
   trace_id?: string;
+  idempotency_key?: string;
   repo: string;
   branch: string;
   default_branch: string;
@@ -151,6 +153,9 @@ export interface TraeSubmitResultRequest {
   task_id: string;
   attempt_id?: string;
   lease_token?: string;
+  protocol_version?: string;
+  trace_id?: string;
+  idempotency_key?: string;
   status: "review_ready" | "failed";
   summary?: string;
   test_output?: string;
@@ -189,4 +194,7 @@ export interface TraeStartTaskRequest {
   task_id: string;
   attempt_id?: string;
   lease_token?: string;
+  protocol_version?: string;
+  trace_id?: string;
+  idempotency_key?: string;
 }

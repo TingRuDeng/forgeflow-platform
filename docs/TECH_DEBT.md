@@ -172,15 +172,16 @@ Desired direction:
 - `packages/task-schema` 已接纳当前 dispatcher runtime 使用的 `trae` pool、Task/Worker 扩展字段和 AssignmentPayload 形态
 - `packages/worker-protocol` 已提供当前 runtime 事件名到 vNext RuntimeEvent taxonomy 的 normalize helper
 - dispatcher runtime state 已有 `taskAttempts[]`，SQLite `task_attempts` projection 会保存 synthetic attempt
-- dispatcher v0 start/result mutation 与 Trae 兼容 start/result 路由已支持可选 `attemptId` / `leaseToken` 校验，并会拒绝携带历史终态 `attemptId` 的 stale result；但仍未强制完整 v1 envelope
+- dispatcher v0 start/result mutation 已支持可选 `attemptId` / `leaseToken` 校验，并会拒绝携带历史终态 `attemptId` 的 stale result
+- Trae 兼容主链的 `fetch-task` / `start-task` / `submit-result` 已回显并校验 `protocolVersion`、`traceId`、`idempotencyKey`、`attemptId` 和 `leaseToken`
 - dispatcher runtime state 已有 `artifactBundles[]`，SQLite `artifact_bundles` projection 会保存 ArtifactBundle 摘要和 refs
-- dispatcher 当前 mutation 仍未强制 `protocolVersion`、`traceId` 和 `idempotencyKey`
-- Trae runtime 当前仍走现有 v0 兼容路径，但已在 `fetch-task` / `start-task` / `submit-result` 主链携带 attempt lease 字段
+- 通用 dispatcher worker mutation 仍未强制 `protocolVersion`、`traceId` 和 `idempotencyKey`
+- Trae runtime 当前仍走现有兼容路径，但已在 `fetch-task` / `start-task` / `submit-result` 主链携带完整 v1 envelope 字段
 
 影响：
 
 - 代码审查和文档阅读时容易把 vNext 目标契约误读为当前已执行的 runtime 保护
-- 后续 LeaseToken enforcement 仍需要把 v0 兼容路径收紧为完整 v1 envelope，并覆盖 CLI / Console 的剩余入口
+- 后续 LeaseToken enforcement 仍需要把通用 v0 worker route、CLI / Console 剩余入口收紧为完整 v1 envelope
 - ArtifactBundle 当前不保存 diff / log 正文，只保存 refs；artifact retention 仍未实现
 
 期望方向：
