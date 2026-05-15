@@ -20,7 +20,9 @@ describe("stage3 DR verification", () => {
     const payload = JSON.parse(result.stdout);
     expect(payload.ok).toBe(true);
     expect(payload.integrityCheck).toBe("ok");
-    expect(payload.snapshotCount).toBe(1);
+    expect(payload.walIncluded).toBe(true);
+    expect(payload.snapshotCount).toBeGreaterThan(1);
     expect(payload.restoredState.version).toBe(1);
+    expect(payload.restoredState.sequence).toBe(payload.snapshotCount);
   });
 });
