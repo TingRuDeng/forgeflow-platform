@@ -209,22 +209,23 @@ Desired direction:
 - decide whether shadow sync failures should also become first-class runtime events
 - add an operator-visible shadow drift check before treating shadow write as rollout-ready
 
-## 10. Source DR drill is still a minimal SQLite recovery proof
+## 10. Source DR drill covers WAL restore, but not live dispatcher DR
 
 Current situation:
 
 - `scripts/verify-stage3-dr.mjs` creates a real SQLite `runtime-state.db`
-- it writes a `snapshots` row, backs up and restores the DB, then validates `PRAGMA integrity_check` and snapshot checksum
-- it does not simulate a long-running dispatcher with concurrent writes, large WAL growth, or mid-write crash recovery
+- it writes multiple `snapshots` rows while the SQLite connection remains open in WAL mode
+- it verifies that backup / restore includes `runtime-state.db-wal`, then validates `PRAGMA integrity_check`, snapshot count, latest sequence, and checksum
+- it does not simulate a long-running dispatcher with concurrent writes, lock contention, or mid-write crash recovery
 
 Impact:
 
-- `pnpm verify:stage3` proves the source DR script path and restored SQLite queryability
-- it is not yet a full production DR exercise for live WAL pressure, lock contention, or crash consistency
+- `pnpm verify:stage3` proves the source DR script path, WAL-backed restore, and restored SQLite queryability
+- it is not yet a full production DR exercise for live dispatcher write pressure, lock contention, or crash consistency
 
 Desired direction:
 
-- add a heavier live-dispatcher DR drill that runs writes during backup and validates restore under WAL pressure
+- add a heavier live-dispatcher DR drill that runs real dispatcher writes during backup and validates restore under lock / WAL pressure
 - keep the current script as the fast source-level DR gate
 
 ## 11. Manual release can leave git ahead of npm when publish fails
