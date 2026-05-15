@@ -114,3 +114,19 @@
 验证已通过：RED 测试先失败于未生成 health record、DR status 未读取持久化记录，以及缺少 shadow health 选择逻辑；修复后 `pnpm --filter @forgeflow/dispatcher test -- tests/modules/server/runtime-state-sqlite.test.ts tests/modules/server/runtime-state-shadow-health.test.ts tests/modules/server/dispatcher-server.test.ts`、`pnpm --filter @tingrudeng/forgeflow-dispatcher test -- tests/backup.test.ts`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:validate`、`git diff --check`、`pnpm verify:stage3` 通过。
 
 剩余风险：shadow failure 仍不是 `RuntimeState.events[]` 中的一等审计事件；shadow drift 自动对账和 primary cutover 仍需单独设计。
+
+# 成熟产品验收：通用 worker v1 envelope 校验
+
+- [x] 补 RED 测试，证明通用 worker start/result 声明 v1 envelope 时会校验 trace/idempotency mismatch。
+- [x] 将通用 worker start/result 路由补齐 `protocolVersion`、`traceId`、`idempotencyKey` 传参。
+- [x] 同步技术债和任务记录中该缺口状态。
+- [x] 运行受影响测试、类型检查、文档校验和 diff 检查。
+- [x] 补充 review 小结。
+
+## Review 小结
+
+已完成通用 worker v1 envelope 校验补齐：`/api/workers/:workerId/start-task` 和 `/api/workers/:workerId/result` 会把 `protocolVersion`、`traceId`、`idempotencyKey` 传入状态机，声明 v1 envelope 时必须与 active attempt 一致。空 envelope 的 v0 worker 兼容路径保持不变。
+
+验证已通过：RED 测试先失败于错误 `traceId` 仍返回 200；修复后 `pnpm --filter @forgeflow/dispatcher test -- tests/modules/server/dispatcher-server.test.ts`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:validate`、`git diff --check` 通过。
+
+剩余风险：跨请求 idempotency payload 指纹冲突检测尚未实现；空 envelope v0 worker 兼容路径仍保留，后续是否强制升级需要单独评估。
