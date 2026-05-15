@@ -212,6 +212,9 @@ describe("runtime/clients", () => {
       taskId: "task-1",
       attemptId: "attempt-1",
       leaseToken: "lease-token-1",
+      protocolVersion: "2026-05-v1",
+      traceId: "trace-1",
+      idempotencyKey: "v0:task-1:attempt-1",
       status: "failed",
       summary: "pnpm test failed",
       testOutput: "FAIL",
@@ -248,6 +251,9 @@ describe("runtime/clients", () => {
       task_id: "task-1",
       attempt_id: "attempt-1",
       lease_token: "lease-token-1",
+      protocol_version: "2026-05-v1",
+      trace_id: "trace-1",
+      idempotency_key: "v0:task-1:attempt-1",
       status: "failed",
       summary: "pnpm test failed",
       evidence: {
@@ -276,6 +282,9 @@ describe("runtime/clients", () => {
     await dispatcher.startTask("trae-1", "task-1", {
       attemptId: "attempt-1",
       leaseToken: "lease-token-1",
+      protocolVersion: "2026-05-v1",
+      traceId: "trace-1",
+      idempotencyKey: "v0:task-1:attempt-1",
     });
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -285,6 +294,9 @@ describe("runtime/clients", () => {
       task_id: "task-1",
       attempt_id: "attempt-1",
       lease_token: "lease-token-1",
+      protocol_version: "2026-05-v1",
+      trace_id: "trace-1",
+      idempotency_key: "v0:task-1:attempt-1",
     });
   });
 

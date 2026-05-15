@@ -102,6 +102,9 @@ describe("runtime/worker", () => {
           task_id: "task-1",
           attempt_id: "attempt-1",
           lease_token: "lease-token-1",
+          protocol_version: "2026-05-v1",
+          trace_id: "trace-1",
+          idempotency_key: "v0:task-1:attempt-1",
           repo: "repo",
           branch: "feature/runtime",
           default_branch: "main",
@@ -183,6 +186,9 @@ describe("runtime/worker", () => {
     expect(dispatcherClient.startTask).toHaveBeenCalledWith("trae-remote", "task-1", {
       attemptId: "attempt-1",
       leaseToken: "lease-token-1",
+      protocolVersion: "2026-05-v1",
+      traceId: "trace-1",
+      idempotencyKey: "v0:task-1:attempt-1",
     });
     expect(dispatcherClient.reportProgress).toHaveBeenCalledWith("task-1", "Trae automation worker started task", "trae-remote");
     expect(automationClient.ready).toHaveBeenNthCalledWith(2, {
@@ -215,6 +221,9 @@ describe("runtime/worker", () => {
       taskId: "task-1",
       attemptId: "attempt-1",
       leaseToken: "lease-token-1",
+      protocolVersion: "2026-05-v1",
+      traceId: "trace-1",
+      idempotencyKey: "v0:task-1:attempt-1",
       status: "review_ready",
       summary: "all good",
       testOutput: "pnpm test",
@@ -241,6 +250,7 @@ describe("runtime/worker", () => {
           remoteVerified: "true",
           remoteHeadSha: "abc123",
           sessionId: "session-001",
+          traceId: "trace-1",
         },
       },
       artifactBundle: expect.objectContaining({

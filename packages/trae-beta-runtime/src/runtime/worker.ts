@@ -114,6 +114,8 @@ export interface WorkerRuntimeTask {
   task_id: string;
   attempt_id?: string;
   lease_token?: string;
+  protocol_version?: string;
+  idempotency_key?: string;
   traceId?: string;
   trace_id?: string;
   repo?: string;
@@ -279,12 +281,21 @@ function extractTaskTraceId(task: Pick<WorkerRuntimeTask, "traceId" | "trace_id"
   return traceId || null;
 }
 
-function buildAttemptLeaseInput(task: Pick<WorkerRuntimeTask, "attempt_id" | "lease_token">) {
+function buildAttemptLeaseInput(task: Pick<
+  WorkerRuntimeTask,
+  "attempt_id" | "lease_token" | "protocol_version" | "trace_id" | "idempotency_key"
+>) {
   const attemptId = typeof task.attempt_id === "string" ? task.attempt_id.trim() : "";
   const leaseToken = typeof task.lease_token === "string" ? task.lease_token.trim() : "";
+  const protocolVersion = typeof task.protocol_version === "string" ? task.protocol_version.trim() : "";
+  const traceId = typeof task.trace_id === "string" ? task.trace_id.trim() : "";
+  const idempotencyKey = typeof task.idempotency_key === "string" ? task.idempotency_key.trim() : "";
   return {
     ...(attemptId ? { attemptId } : {}),
     ...(leaseToken ? { leaseToken } : {}),
+    ...(protocolVersion ? { protocolVersion } : {}),
+    ...(traceId ? { traceId } : {}),
+    ...(idempotencyKey ? { idempotencyKey } : {}),
   };
 }
 

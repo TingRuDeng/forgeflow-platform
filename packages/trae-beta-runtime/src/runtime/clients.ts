@@ -42,6 +42,14 @@ interface ArtifactBundle {
   createdAt?: string;
 }
 
+interface WorkerProtocolEnvelopeInput {
+  attemptId?: string;
+  leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
+}
+
 const DEFAULT_DISPATCHER_URL = "http://127.0.0.1:8787";
 const DEFAULT_AUTOMATION_URL = "http://127.0.0.1:8790";
 const DEFAULT_DISPATCHER_REQUEST_TIMEOUT_MS = Number(process.env.TRAE_AUTOMATION_DISPATCHER_TIMEOUT_MS || 30000);
@@ -221,7 +229,7 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
         timeoutMs: requestTimeoutMs,
       });
     },
-    async startTask(workerId: string, taskId: string, attemptLease: { attemptId?: string; leaseToken?: string } = {}) {
+    async startTask(workerId: string, taskId: string, attemptLease: WorkerProtocolEnvelopeInput = {}) {
       return http.request("/api/trae/start-task", {
         method: "POST",
         body: {
@@ -229,6 +237,9 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
           task_id: taskId,
           attempt_id: attemptLease.attemptId,
           lease_token: attemptLease.leaseToken,
+          protocol_version: attemptLease.protocolVersion,
+          trace_id: attemptLease.traceId,
+          idempotency_key: attemptLease.idempotencyKey,
         },
         timeoutMs: requestTimeoutMs,
       });
@@ -261,6 +272,9 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
       taskId: string;
       attemptId?: string;
       leaseToken?: string;
+      protocolVersion?: string;
+      traceId?: string;
+      idempotencyKey?: string;
       status: string;
       summary: string;
       testOutput: string;
@@ -283,6 +297,9 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
           task_id: input.taskId,
           attempt_id: input.attemptId,
           lease_token: input.leaseToken,
+          protocol_version: input.protocolVersion,
+          trace_id: input.traceId,
+          idempotency_key: input.idempotencyKey,
           status: input.status,
           summary: input.summary,
           test_output: input.testOutput,

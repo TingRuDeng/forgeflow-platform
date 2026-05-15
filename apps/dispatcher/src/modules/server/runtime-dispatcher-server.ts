@@ -70,7 +70,21 @@ function classifyTraeMutationError(error?: string): number {
   if (error === "task_not_found" || error === "worker_not_found") {
     return 404;
   }
+  if (
+    error?.startsWith("unsupported worker protocol version:")
+    || error?.startsWith("worker protocol v1 envelope incomplete:")
+  ) {
+    return 400;
+  }
   return 409;
+}
+
+interface WorkerProtocolEnvelopeInput {
+  attemptId?: string;
+  leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
 }
 
 function upsertWorkerRepoDir(
@@ -289,6 +303,9 @@ export function applyTraeSubmitResult(
     taskId: string;
     attemptId?: string;
     leaseToken?: string;
+    protocolVersion?: string;
+    traceId?: string;
+    idempotencyKey?: string;
     status: "review_ready" | "failed";
     summary?: string;
     testOutput?: string;
@@ -323,6 +340,9 @@ export function applyTraeSubmitResult(
       workerId,
       attemptId: input.attemptId,
       leaseToken: input.leaseToken,
+      protocolVersion: input.protocolVersion,
+      traceId: input.traceId,
+      idempotencyKey: input.idempotencyKey,
       result: {
         taskId: input.taskId,
         workerId,
@@ -427,7 +447,7 @@ export function applyTraeStartTask(
   state: RuntimeState,
   workerId: string,
   taskId: string,
-  attemptLease: { attemptId?: string; leaseToken?: string } = {},
+  attemptLease: WorkerProtocolEnvelopeInput = {},
 ): { state: RuntimeState; worker: Worker | null; ok: boolean; error?: string } {
   const worker = state.workers.find((candidate) => candidate.id === workerId);
   if (!worker) {
@@ -468,6 +488,9 @@ export function applyTraeStartTask(
       taskId,
       attemptId: attemptLease.attemptId,
       leaseToken: attemptLease.leaseToken,
+      protocolVersion: attemptLease.protocolVersion,
+      traceId: attemptLease.traceId,
+      idempotencyKey: attemptLease.idempotencyKey,
       at: nowIso(),
     });
     overwriteRuntimeState(state, nextState);
@@ -583,7 +606,9 @@ function handleTraeRouteImpl(
           task_id: result.task.id,
           attempt_id: attempt?.attemptId,
           lease_token: attempt?.leaseToken,
-          trace_id: result.task.traceId ?? undefined,
+          protocol_version: attempt?.protocolVersion,
+          trace_id: attempt?.traceId,
+          idempotency_key: attempt?.idempotencyKey,
           repo: result.task.repo,
           branch: result.task.branchName,
           default_branch: result.task.defaultBranch,
@@ -607,7 +632,9 @@ function handleTraeRouteImpl(
           task_id: result.task.id,
           attempt_id: attempt?.attemptId,
           lease_token: attempt?.leaseToken,
-          trace_id: result.task.traceId ?? undefined,
+          protocol_version: attempt?.protocolVersion,
+          trace_id: attempt?.traceId,
+          idempotency_key: attempt?.idempotencyKey,
           repo: result.task.repo,
           branch: result.task.branchName,
           default_branch: result.task.defaultBranch,
@@ -635,6 +662,9 @@ function handleTraeRouteImpl(
       task_id: taskId,
       attempt_id: attemptId,
       lease_token: leaseToken,
+      protocol_version: protocolVersion,
+      trace_id: traceId,
+      idempotency_key: idempotencyKey,
     } = reqBody;
     if (!workerId || !taskId) {
       return {
@@ -648,11 +678,13 @@ function handleTraeRouteImpl(
     const result = applyTraeStartTask(state, workerId, taskId, {
       attemptId,
       leaseToken,
+      protocolVersion,
+      traceId,
+      idempotencyKey,
     });
     if (!result.ok) {
-      const status = result.error === "worker_not_found" || result.error === "task_not_found" ? 404 : 409;
       return {
-        status,
+        status: classifyTraeMutationError(result.error),
         headers: { "content-type": "application/json" },
         json: { ok: false, error: result.error },
         text: JSON.stringify({ ok: false, error: result.error }),
@@ -715,6 +747,9 @@ function handleTraeRouteImpl(
       artifact_bundle: artifactBundle,
       attempt_id: attemptId,
       lease_token: leaseToken,
+      protocol_version: protocolVersion,
+      trace_id: traceId,
+      idempotency_key: idempotencyKey,
     } = body as unknown as TraeSubmitResultRequest;
 
     if (!taskId || !status) {
@@ -739,6 +774,9 @@ function handleTraeRouteImpl(
       taskId,
       attemptId,
       leaseToken,
+      protocolVersion,
+      traceId,
+      idempotencyKey,
       status,
       summary,
       testOutput,
