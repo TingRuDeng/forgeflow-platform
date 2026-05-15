@@ -226,10 +226,10 @@ The packaged runtime CLI exposes flags such as `forgeflow-dispatcher backup --ba
 
 Do not copy package CLI examples into source-script runbooks without checking the actual script parser.
 
-## 17. Shadow write failure is currently best-effort and quiet
+## 17. Shadow write failure is best-effort, but must be checked through DR health
 
-`apps/dispatcher/src/modules/server/runtime-state-sqlite.ts:saveRuntimeState` calls `syncRuntimeStateShadow()` asynchronously and catches errors without surfacing them to the HTTP response.
+`apps/dispatcher/src/modules/server/runtime-state-sqlite.ts:saveRuntimeState` calls `syncRuntimeStateShadowAndPersistStatus()` asynchronously and does not surface shadow errors to the mutating HTTP response.
 
-`readRuntimeStateShadowHealth()` exists in `runtime-state-shadow.ts`, but current `/api/dr/status` only reports read-only, structured reads, shadow mode, SQLite projection health, and backup manifests.
+Shadow write status is persisted to `runtime-state-shadow-status.json` and exposed through `/api/dr/status.shadowWrite`.
 
-Do not treat a green SQLite write as proof that Postgres / queue shadow stores are healthy.
+Do not treat a green SQLite write as proof that Postgres / queue shadow stores are healthy; check `/api/dr/status.shadowWrite` before shadow rollout or DR cutover decisions.
