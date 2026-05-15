@@ -91,12 +91,14 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 
 - SQLite 仍是真相源
 - shadow 写失败不会改变主链状态机写入结果
+- shadow 写状态会写入 `runtime-state-shadow-status.json`，重启后仍可通过 `/api/dr/status.shadowWrite` 查看
 - drift / shadow 故障应通过告警和对账处理，而不是自动把任务判失败
 
 推荐巡检：
 
 - SQLite projection 正常
 - Postgres shadow 已配置
+- `/api/dr/status.shadowWrite` 最近状态为 `ok`，或失败原因已被人工确认
 - assignment delivery queue 影子计数合理
 
 ## 5. Read-only 与 DR

@@ -188,23 +188,25 @@ Desired direction:
 
 - 继续接入 review workflow、artifact retention 和 Console artifact tabs
 
-## 9. Shadow path failures are not yet persisted as first-class runtime events
+## 9. Shadow path failures have durable health, but not first-class runtime events
 
 Current situation:
 
 - `saveRuntimeState()` writes SQLite snapshot/projection first
 - Postgres / queue shadow sync runs asynchronously
 - `runtime-state-shadow.ts:readRuntimeStateShadowWriteStatus` exposes last shadow attempt status through `/api/dr/status`
-- shadow errors are still in-memory process status only; they are not persisted as runtime events or durable audit records
+- shadow write status is also persisted to `runtime-state-shadow-status.json`
+- backup / restore scripts include `runtime-state-shadow-status.json`
+- shadow errors are still not persisted as first-class `RuntimeState.events[]` audit records
 
 Impact:
 
-- process restart can lose the last shadow failure details
+- process restart keeps the last shadow health record, but event timelines still do not show shadow failures as runtime events
 - shadow-write rollout still needs external alerting before any primary-store cutover
 
 Desired direction:
 
-- persist shadow sync failures as runtime events or durable health records
+- decide whether shadow sync failures should also become first-class runtime events
 - add an operator-visible shadow drift check before treating shadow write as rollout-ready
 
 ## 10. Source DR drill is still a minimal SQLite recovery proof

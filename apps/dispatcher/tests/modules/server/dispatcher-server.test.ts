@@ -444,6 +444,17 @@ describe("dispatcher server", () => {
     expect(sloResponse.json).toHaveProperty("targets");
     expect(sloResponse.json).toHaveProperty("burnRate");
 
+    fs.writeFileSync(path.join(stateDir, "runtime-state-shadow-status.json"), JSON.stringify({
+      status: "failed",
+      mode: "shadow-write",
+      queueMode: "disabled",
+      configured: true,
+      lastAttemptAt: "2999-05-15T00:00:00.000Z",
+      lastSuccessAt: null,
+      lastFailureAt: "2999-05-15T00:00:01.000Z",
+      lastError: "persisted shadow failure",
+    }));
+
     const drResponse = await mod.handleDispatcherHttpRequest({
       stateDir,
       method: "GET",
@@ -453,6 +464,7 @@ describe("dispatcher server", () => {
     expect(drResponse.json.backups).toHaveLength(1);
     expect(drResponse.json).toHaveProperty("projectionHealth");
     expect(drResponse.json).toHaveProperty("shadowWrite");
+    expect(drResponse.json.shadowWrite.lastError).toBe("persisted shadow failure");
   });
 
   it("rejects mutation routes when read-only mode is enabled", async () => {

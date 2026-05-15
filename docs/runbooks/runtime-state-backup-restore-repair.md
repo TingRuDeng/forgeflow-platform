@@ -10,6 +10,7 @@
 ## 1. 关键文件
 
 - `.forgeflow-dispatcher/runtime-state.db`
+- `.forgeflow-dispatcher/runtime-state-shadow-status.json`
 - 可选：
   - `.forgeflow-dispatcher/runtime-state.db-wal`
   - `.forgeflow-dispatcher/runtime-state.db-shm`
@@ -28,6 +29,7 @@ node scripts/backup-runtime-state.mjs \
 该脚本当前会：
 
 - 复制 `runtime-state.db`
+- 如果存在，也会复制 `runtime-state-shadow-status.json`
 - 如果存在，也会复制 `runtime-state.db-wal` / `runtime-state.db-shm`
 - 生成 manifest，写出备份时间和复制文件列表
 

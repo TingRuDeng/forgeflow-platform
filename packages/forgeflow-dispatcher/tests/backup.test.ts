@@ -28,11 +28,23 @@ describe("backup and restore runtime state", () => {
 
     fs.writeFileSync(path.join(stateDir, "runtime-state.db"), "db");
     fs.writeFileSync(path.join(stateDir, "runtime-state.db-wal"), "wal");
+    fs.writeFileSync(path.join(stateDir, "runtime-state-shadow-status.json"), "{\"status\":\"failed\"}");
 
     const backup = backupRuntimeState({ stateDir, backupDir });
-    expect(backup.copiedFiles).toEqual(["runtime-state.db", "runtime-state.db-wal"]);
+    expect(backup.copiedFiles).toEqual([
+      "runtime-state.db",
+      "runtime-state.db-wal",
+      "runtime-state-shadow-status.json",
+    ]);
 
     const restored = restoreRuntimeState({ backupDir, stateDir: restoreDir });
-    expect(restored.restoredFiles).toEqual(["runtime-state.db", "runtime-state.db-wal"]);
+    expect(restored.restoredFiles).toEqual([
+      "runtime-state.db",
+      "runtime-state.db-wal",
+      "runtime-state-shadow-status.json",
+    ]);
+    expect(fs.readFileSync(path.join(restoreDir, "runtime-state-shadow-status.json"), "utf8")).toBe(
+      "{\"status\":\"failed\"}",
+    );
   });
 });

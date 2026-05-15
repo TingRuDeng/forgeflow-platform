@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 import type { AssignmentPayload, RuntimeState } from "./runtime-state.js";
 import type { RuntimeStateStore } from "./runtime-state-store.js";
-import { syncRuntimeStateShadow } from "./runtime-state-shadow.js";
+import { syncRuntimeStateShadowAndPersistStatus } from "./runtime-state-shadow.js";
 import { formatLocalTimestamp } from "../time.js";
 
 const { DatabaseSync } = await import("node:sqlite");
@@ -601,7 +601,7 @@ export function saveRuntimeState(stateDir: string, state: RuntimeState): void {
     `).run(content, checksum, createdAt);
 
     rewriteStructuredProjection(db, persistedState);
-    void syncRuntimeStateShadow(persistedState).catch(ignoreObservedShadowFailure);
+    void syncRuntimeStateShadowAndPersistStatus(stateDir, persistedState).catch(ignoreObservedShadowFailure);
   } finally {
     db.close();
   }

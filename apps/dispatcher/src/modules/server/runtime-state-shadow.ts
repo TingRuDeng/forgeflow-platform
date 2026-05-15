@@ -3,6 +3,7 @@ import { syncAssignmentQueueShadow, readAssignmentQueueCounts } from "@forgeflow
 import { applyShadowProjection, createPgClient, readShadowProjectionCounts } from "@forgeflow/dispatcher-store-postgres";
 
 import type { RuntimeState } from "./runtime-state.js";
+import { persistRuntimeStateShadowWriteStatus, readPersistedRuntimeStateShadowWriteStatus, selectRuntimeStateShadowWriteStatus } from "./runtime-state-shadow-health.js";
 
 const SHADOW_MODE_ENV = "DISPATCHER_SHADOW_MODE";
 const SHADOW_POSTGRES_URL_ENV = "DISPATCHER_POSTGRES_URL";
@@ -54,11 +55,13 @@ function updateShadowWriteStatus(next: Partial<RuntimeStateShadowWriteStatus>): 
   };
 }
 
-export function readRuntimeStateShadowWriteStatus(): RuntimeStateShadowWriteStatus {
+export function readRuntimeStateShadowWriteStatus(stateDir?: string): RuntimeStateShadowWriteStatus {
   const mode = getRuntimeStateShadowMode();
   const queueMode = getQueueShadowMode();
+  const persistedStatus = stateDir ? readPersistedRuntimeStateShadowWriteStatus(stateDir) : null;
+  const selectedStatus = selectRuntimeStateShadowWriteStatus(shadowWriteStatus, persistedStatus);
   return {
-    ...shadowWriteStatus,
+    ...selectedStatus,
     mode,
     queueMode,
     configured: mode !== "disabled" && Boolean(getPostgresUrl()),
@@ -255,6 +258,14 @@ export async function syncRuntimeStateShadow(state: RuntimeState): Promise<void>
   }
 }
 
+export async function syncRuntimeStateShadowAndPersistStatus(stateDir: string, state: RuntimeState): Promise<void> {
+  try {
+    await syncRuntimeStateShadow(state);
+  } finally {
+    // shadow 写失败不能影响 SQLite 主链，但最后一次结果必须落到 durable health record。
+    persistRuntimeStateShadowWriteStatus(stateDir, readRuntimeStateShadowWriteStatus());
+  }
+}
 export async function readRuntimeStateShadowHealth(snapshotState: RuntimeState) {
   const postgresUrl = getPostgresUrl();
   const mode = getRuntimeStateShadowMode();
