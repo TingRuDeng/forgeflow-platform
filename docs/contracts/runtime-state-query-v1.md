@@ -162,7 +162,7 @@
 当前边界：
 
 - shadow 同步失败不会阻断 SQLite 主链写入
-- shadow 同步失败当前不会通过 `/api/dr/status` 暴露为一等健康状态
+- shadow 同步失败会通过 `/api/dr/status.shadowWrite` 暴露最后一次 durable health 状态，但不会阻断 SQLite 主链写入
 - Postgres 当前是 shadow projection / queue shadow，不是 primary runtime store
 
 ## 7. Completion Signals
@@ -172,4 +172,4 @@
 - `pnpm verify:stage3`
 - `/api/query/projection-health` 显示 SQLite projection 无漂移
 - `/api/slo` 可输出 burn-rate 状态
-- `/api/dr/status` 可输出 read-only / structured reads / projection health / backup 清单
+- `/api/dr/status` 可输出 read-only / structured reads / shadow write health / projection health / backup 清单
