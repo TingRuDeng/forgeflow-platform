@@ -1,8 +1,65 @@
+---
+ai_summary:
+  purpose: "定义 forgeflow-platform 内人类维护者、控制层 agent、worker 和审查者的执行规则。"
+  read_when:
+    - "开始任何仓库任务前。"
+    - "判断能否提交、推送、合并、分派 worker 或执行验证前。"
+  source_of_truth:
+    - "docs/README.md"
+    - "docs/AI_CONTEXT.md"
+    - "docs/DOC_SYNC_CHECKLIST.md"
+    - "package.json"
+  verify_with:
+    - "python3 scripts/validate_docs.py . --profile generic"
+    - "pnpm docs:validate"
+    - "git status --short --branch"
+  stale_when:
+    - "agent 角色、分支策略、提交权限、验证命令或文档入口发生变化。"
+---
+
 # ForgeFlow AGENTS
 
-## 目的
+## Purpose
 
 定义本仓库内人类维护者、交互式控制层 agent、执行型 worker 和审查者的协作规则。
+
+## Source of truth
+
+- `docs/README.md` 是唯一文档导航入口。
+- `docs/AI_CONTEXT.md` 是 AI 快速上下文地图。
+- `docs/DOC_SYNC_CHECKLIST.md` 是文档同步收尾门禁。
+- `package.json` 定义当前可运行的验证命令。
+- 代码事实最终以 `apps/`、`packages/`、`scripts/` 和对应测试为准。
+
+## Key facts
+
+- `dispatcher` 是任务、分配、状态流转和审计记录的真相源。
+- 默认从最新 `origin/main` 创建 `codex/` 前缀分支，不直接在 `main` 上做较大开发。
+- 产出代码的 agent 必须给出分支、commit、push 和验证命令证据。
+- 文档与代码冲突时信任代码，并在同一变更里修正文档。
+
+## How to verify
+
+Quick:
+
+```bash
+git status --short --branch
+python3 scripts/validate_docs.py . --profile generic
+pnpm docs:validate
+```
+
+Full:
+
+```bash
+pnpm test
+pnpm typecheck
+git diff --check
+```
+
+## Stale when
+
+- agent 角色、分支策略、提交权限或合并边界变化。
+- 文档入口、验证命令、worker 定位或 dispatcher 真相源变化。
 
 ## 适合读者
 
@@ -16,30 +73,9 @@
 - 产出代码的 agent 必须提供分支、commit、push 和验证命令证据。
 - 文档与代码冲突时信任代码，并在同一变更里修正文档。
 
-```yaml
-ai_summary:
-  authority: "仓库级 agent 协作、权限、分支、提交、合并和验证规则"
-  scope: "所有人类与 AI 代理在 forgeflow-platform 内的执行边界"
-  read_when:
-    - "开始任何仓库任务前"
-    - "判断能否提交、推送、合并或分派 worker 前"
-  verify_with:
-    - "docs/README.md"
-    - "docs/DOC_SYNC_CHECKLIST.md"
-    - "git status --short --branch"
-  stale_when:
-    - "agent 角色、分支策略、提交权限或文档入口发生变化"
-```
-
 ## 权威边界
 
 本文件只定义执行规则和协作边界，不复述完整架构、接口或数据库事实。架构事实看 `docs/ARCHITECTURE.md`，接口事实看 `docs/API_ENDPOINTS.md`，持久化事实看 `docs/DATABASE_SCHEMA.md`。
-
-## 如何验证
-
-- 检查 `docs/README.md` 是否仍把本文件列为唯一规则入口。
-- 检查 `docs/DOC_SYNC_CHECKLIST.md` 是否仍要求收尾时同步文档或写明 `no doc impact`。
-- 执行任务前用 `git status --short --branch` 核对当前分支与工作区状态。
 
 ## 项目定位
 

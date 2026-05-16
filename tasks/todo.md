@@ -146,3 +146,89 @@
 验证已通过：RED 测试先失败于缺少 `walIncluded`；修复后 `pnpm --filter @forgeflow/dispatcher test -- tests/modules/execution/stage3-dr.test.ts`、`node scripts/verify-stage3-dr.mjs`、`pnpm docs:validate`、`git diff --check`、`pnpm verify:stage3` 通过。
 
 剩余风险：该脚本仍不是 live dispatcher 并发写入、锁竞争或崩溃恢复演练；生产级 DR drill 仍需单独设计。
+
+# project-context-bootstrap 上下文文档升级
+
+## 目标
+
+使用 `project-context-bootstrap` 技能升级当前仓库上下文包，保留已有中文文档体系和 ForgeFlow 项目事实。
+
+## 非目标
+
+- 不生成 Android MVP profile 文档，因为仓库没有 Gradle 或 Android Manifest 信号。
+- 不粗暴覆盖现有 `README.md`、架构、接口、数据库或 runbook 详情文档。
+- 不新增工具专属适配文档。
+
+## 当前事实
+
+- 已存在 `AGENTS.md`、`docs/README.md`、`docs/AI_CONTEXT.md` 和 `scripts/validate_docs.py`，本次走 upgrade mode。
+- 当前文档主体语言是中文，应继续使用简体中文。
+- `package.json` 已提供 `docs:validate`、`test`、`typecheck`、`verify:stage2`、`verify:stage3`。
+- 技能 canonical validator 要求 `--profile`、frontmatter `ai_summary`、`source_of_truth` 路径、具体 `verify_with` 命令和 legacy detail docs 边界。
+
+## 决策日志
+
+- 采用核心包原地升级方案，只升级上下文入口和校验器。
+- 使用 `docs/README.md` 的 `## Legacy detail docs` 标记旧详情文档边界，避免把历史文档当作新契约文档强制改写。
+- 校验器保持 canonical 行为，但跳过 `.git`、`node_modules`、`.worktrees` 等本地依赖或运行时目录，避免无关 Markdown 链接污染校验结果。
+
+## 执行计划
+
+- [x] 升级 `scripts/validate_docs.py`，支持 generic/android profile、frontmatter 摘要、legacy detail docs 和本地链接校验。
+- [x] 升级 `docs/AI_CONTEXT.md` 为当前技能契约，同时保留 ForgeFlow 关键上下文。
+- [x] 升级 `docs/README.md` 的元信息、阅读路径和 legacy detail docs 边界。
+- [x] 升级 `AGENTS.md` 的上下文入口说明和验证命令。
+- [x] 运行文档校验、Python 编译校验和 diff 检查，并修复发现的问题。
+- [x] 使用 review-gate 做交付前审查并补充 Review 小结。
+
+## 验证矩阵
+
+- quick: `python3 -m py_compile scripts/validate_docs.py`
+- quick: `python3 scripts/validate_docs.py . --profile generic`
+- quick: `pnpm docs:validate`
+- quick: `git diff --check`
+
+## 进度记录
+
+- [x] 已完成只读现状分析并获得用户确认。
+- [x] 已完成核心包升级，未生成 Android MVP profile 文档。
+- [x] 第一轮校验发现 legacy detail docs 解析误命中行内代码、历史 `docs/superpowers` 链接被扫描；已修复为按二级标题匹配 legacy 区域，并跳过历史目录。
+- [x] 校验器文件已压缩到 300 行以内。
+
+## 验证结果
+
+- `python3 -m py_compile scripts/validate_docs.py` 通过。
+- `python3 scripts/validate_docs.py . --profile generic` 通过。
+- `pnpm docs:validate` 通过。
+- `python3 scripts/validate_docs.py /Users/dengtingru/.agents/skills/project-context-bootstrap/examples/fixtures/android-client-context --profile android` 通过。
+- `git diff --check` 通过。
+
+## Review 小结
+
+终态：finished。
+
+Spec 符合度：通过。已升级核心上下文包：`AGENTS.md`、`docs/README.md`、`docs/AI_CONTEXT.md`、`scripts/validate_docs.py`。本次采用 upgrade mode，没有覆盖旧详情文档，而是在 `docs/README.md` 标明 legacy detail docs 边界，并用校验器保证核心上下文包、frontmatter、source_of_truth、verify_with 和本地链接可验证。
+
+安全检查：通过。未新增 secret、凭据或网络调用；校验脚本只读取本地 Markdown 和路径。
+
+测试与验证：通过。`python3 -m py_compile scripts/validate_docs.py`、`python3 scripts/validate_docs.py . --profile generic`、`pnpm docs:validate`、Android fixture profile 校验和 `git diff --check` 均通过。
+
+复杂度检查：通过。`scripts/validate_docs.py` 为 299 行，所有函数均不超过 50 行；`docs/AI_CONTEXT.md` 为 107 行，未超过上下文预算。
+
+Document-refresh: needed
+原因：本次任务目标就是升级上下文文档体系，已同步 `AGENTS.md`、`docs/README.md` 和 `docs/AI_CONTEXT.md`。
+
+## 二轮审查修复小结
+
+- [x] 删除 `AGENTS.md` 内旧 fenced `ai_summary`，避免新 frontmatter 和旧摘要双头并存。
+- [x] 将 `docs/README.md` 的 `Authority Map` 收敛为 `Detailed Doc Map`，明确 legacy detail docs 不能单独替代代码和验证命令。
+- [x] 在 `docs/AI_CONTEXT.md` 增加非 Trae runtime / npm 包的读取路径，避免 Trae-first 被误读成只维护 Trae。
+- [x] 升级 `scripts/validate_docs.py`，把 `AGENTS.md` 纳入 authority doc 校验，并拒绝重复 `ai_summary:`。
+
+二轮验证已通过：`python3 scripts/validate_docs.py . --profile generic`、`pnpm docs:validate`、`python3 -m py_compile scripts/validate_docs.py`、`git diff --check`。
+
+剩余风险：旧格式详情文档尚未逐份迁移到新 authority doc contract；本次通过 legacy 边界要求使用时回到代码和命令验证。
+
+潜在技术债：后续如果要让所有稳定详情文档也进入新契约，需要逐份补 frontmatter、source_of_truth 和验证命令，不能批量套模板。
+
+结论：通过。
