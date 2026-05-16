@@ -1,38 +1,73 @@
-# forgeflow-platform Docs Guide
-
-这份文档是仓库唯一的文档导航入口。它负责说明哪些文件是权威来源，哪些只是补充、计划或研究材料。
-
-## 目的
-
-提供人类和 AI 代理进入仓库时的唯一文档导航，明确哪些文档权威、哪些只是历史或参考材料。
-
-## 适合读者
-
-适合首次进入仓库的维护者、AI 代理、控制层调度者、worker 执行者、审查者和运维操作者。
-
-## 一分钟摘要
-
-- 规则先读 `../AGENTS.md`，导航读本文件，AI 快速上下文读 `AI_CONTEXT.md`。
-- 稳定知识层由架构、状态机、接口、持久化、坑点和技术债文档组成。
-- `plans/`、`research/`、`archive/`、`external/` 默认不是当前实现权威。
-- 修改文档后运行 `pnpm docs:validate`，收尾仍要检查 `DOC_SYNC_CHECKLIST.md`。
-
-```yaml
+---
 ai_summary:
-  authority: "仓库文档导航、权威级别、阅读路径和非权威材料边界"
-  scope: "docs 目录入口、稳定知识层、任务读取路径、支持材料和归档规则"
+  purpose: "定义 forgeflow-platform 的唯一文档导航入口、权威级别、阅读路径和旧格式详情文档边界。"
   read_when:
-    - "需要判断某份文档是否权威"
-    - "进入仓库后选择最小阅读路径"
-    - "新增、归档或重命名文档前"
-  verify_with:
+    - "进入仓库后需要判断读哪些文档。"
+    - "新增、归档、重命名或升级文档体系前。"
+    - "需要区分当前权威文档、legacy 详情文档和历史材料时。"
+  source_of_truth:
     - "AGENTS.md"
     - "docs/AI_CONTEXT.md"
     - "docs/DOC_SYNC_CHECKLIST.md"
     - "scripts/validate_docs.py"
+    - "package.json"
+  verify_with:
+    - "python3 scripts/validate_docs.py . --profile generic"
+    - "pnpm docs:validate"
   stale_when:
-    - "新增权威文档、AI 索引、模块 README 或归档旧文档"
+    - "新增权威文档、调整阅读路径、归档旧文档或修改文档校验契约。"
+---
+
+# forgeflow-platform Docs Guide
+
+这份文档是仓库唯一的文档导航入口。它负责说明哪些文件是权威来源，哪些只是补充、计划或研究材料。
+
+## Purpose
+
+提供人类和 AI 代理进入仓库时的唯一文档导航，明确哪些文档权威、哪些只是历史或参考材料。
+
+## Source of truth
+
+- `../AGENTS.md` 定义仓库级 agent 执行规则。
+- `AI_CONTEXT.md` 定义 AI 快速上下文地图。
+- `DOC_SYNC_CHECKLIST.md` 定义文档同步收尾门禁。
+- `../package.json` 定义 `docs:validate`、`test`、`typecheck`、`verify:stage2`、`verify:stage3` 等验证命令。
+- `../scripts/validate_docs.py` 定义上下文包校验规则。
+
+## Key facts
+
+- 规则入口只有 `../AGENTS.md`。
+- 文档导航入口只有本文件。
+- AI 快速上下文入口是 `AI_CONTEXT.md`。
+- `plans/`、`research/`、`archive/`、`external/` 默认不是当前实现权威。
+- 旧格式详情文档集中列在 `## Legacy detail docs`，内容可作任务上下文，但新契约 freshness 以本文件、`AI_CONTEXT.md` 和代码校验为准。
+
+## How to verify
+
+Quick:
+
+```bash
+python3 scripts/validate_docs.py . --profile generic
+pnpm docs:validate
+git diff --check
 ```
+
+Full:
+
+```bash
+pnpm test
+pnpm typecheck
+```
+
+## Stale when
+
+- 文档入口、权威级别、阅读路径或 legacy 详情文档边界变化。
+- 上下文包校验规则或 `package.json` 文档命令变化。
+- 新增稳定文档、模块 README 或归档旧文档。
+
+## 适合读者
+
+适合首次进入仓库的维护者、AI 代理、控制层调度者、worker 执行者、审查者和运维操作者。
 
 ## 权威边界
 
@@ -44,7 +79,28 @@ ai_summary:
 - 对支持材料路径，使用 `test -f <path>` 或 `rg --files` 确认文件真实存在。
 - 文档事实变更时，对照 `../apps/dispatcher/src/`、`../scripts/` 和 `../packages/` 的真实入口。
 
-## Authority Map
+## Legacy detail docs
+
+以下文档仍是有用的项目详情入口，但尚未逐份迁移到 `project-context-bootstrap` 当前 authority doc contract。使用这些文档时必须回到对应代码、契约或命令验证；当文档内容与代码冲突时，以代码为准并在同一变更中修正文档。
+
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+- [API_ENDPOINTS.md](API_ENDPOINTS.md)
+- [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)
+- [STATE_MACHINE.md](STATE_MACHINE.md)
+- [KNOWN_PITFALLS.md](KNOWN_PITFALLS.md)
+- [TECH_DEBT.md](TECH_DEBT.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [onboarding.md](onboarding.md)
+- [WORKER_PROTOCOL_V1.md](WORKER_PROTOCOL_V1.md)
+- [TASK_ATTEMPT_MODEL.md](TASK_ATTEMPT_MODEL.md)
+- [ARTIFACT_BUNDLE_V1.md](ARTIFACT_BUNDLE_V1.md)
+- [codex-session-bootstrap.md](codex-session-bootstrap.md)
+- [e2e-smoke-checklist.md](e2e-smoke-checklist.md)
+- [github-operations.md](github-operations.md)
+
+## Detailed Doc Map
+
+以下文档是稳定详情入口，但仍按 legacy detail doc 处理；它们可以指导任务读取路径，不能单独替代代码、契约和验证命令。
 
 - `../AGENTS.md`
   - 仓库唯一规则入口。
