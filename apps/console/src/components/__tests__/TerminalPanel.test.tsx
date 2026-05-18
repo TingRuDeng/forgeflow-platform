@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import { TerminalPanel } from '../TerminalPanel';
 import { LanguageProvider } from '../../lib/i18n';
@@ -72,5 +72,26 @@ describe('TerminalPanel', () => {
   it('should have the terminal header decoration', () => {
     renderWithProviders(<TerminalPanel events={[]} />);
     expect(screen.getByText('SYSTEM_LOG_STREAM')).toBeInTheDocument();
+  });
+
+  it('should not force-scroll when the operator is reading older events', () => {
+    const scrollTo = vi.fn();
+    HTMLElement.prototype.scrollTo = scrollTo;
+    const { container, rerender } = renderWithProviders(<TerminalPanel events={[mockEvents[0]]} />);
+    const scrollPanel = container.querySelector('.overflow-y-auto') as HTMLElement;
+
+    Object.defineProperty(scrollPanel, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(scrollPanel, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(scrollPanel, 'scrollTop', { value: 0, writable: true, configurable: true });
+    fireEvent.scroll(scrollPanel);
+    scrollTo.mockClear();
+
+    rerender(
+      <LanguageProvider>
+        <TerminalPanel events={mockEvents} />
+      </LanguageProvider>
+    );
+
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 });

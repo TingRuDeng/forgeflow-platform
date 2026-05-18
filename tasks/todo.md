@@ -232,3 +232,57 @@ Document-refresh: needed
 潜在技术债：后续如果要让所有稳定详情文档也进入新契约，需要逐份补 frontmatter、source_of_truth 和验证命令，不能批量套模板。
 
 结论：通过。
+
+# Console 与运行入口质量修复
+
+## 目标
+
+收口当前审查发现的高价值问题：源码仓 Trae automation gateway JS/TS 漂移、Console 非 2xx 错误处理、任务分页缩短后的空页、终端日志强制滚动、Worker 启停反馈，以及未引用的 Vite 模板样式。
+
+## 非目标
+
+- 不做 Console 大规模视觉重设计。
+- 不改变 dispatcher 状态机或 worker 协议语义。
+- 不在本轮处理手动发布两阶段恢复方案，因为该项需要单独调整 release 策略和现有测试契约。
+
+## 执行计划
+
+- [x] 补 RED 测试，锁定源码仓 gateway release session、Console fetcher、分页收缩和终端滚动行为。
+- [x] 同步 `scripts/lib/trae-automation-gateway.js` 与客户端 release session 能力。
+- [x] 修复 Console fetcher、Worker 启停刷新、分页 clamp 和终端跟随滚动逻辑。
+- [x] 清理未引用的 Vite 模板样式与资产，微调 Console 响应式布局。
+- [x] 运行受影响测试、类型检查、文档校验和 diff 检查。
+- [x] 使用 review-gate 做交付前审查并补充 Review 小结。
+
+## 验证结果
+
+- RED：新增 gateway release session 测试先失败于 `ApiError: Not found`。
+- RED：新增 Console 测试先失败于非 2xx 响应被当作数据、分页缩短后空页、终端日志强制滚动。
+- GREEN：`pnpm --filter @forgeflow/dispatcher test -- tests/modules/server/trae-automation-gateway.test.ts` 通过，35 个测试文件、394 个测试通过。
+- GREEN：`pnpm --filter console exec vitest run src/__tests__/App.test.tsx src/components/__tests__/Lists.test.tsx src/components/__tests__/TerminalPanel.test.tsx` 通过，3 个测试文件、16 个测试通过。
+- GREEN：`pnpm --filter console lint` 通过。
+- GREEN：`pnpm --filter console build` 通过。
+- GREEN：`pnpm typecheck` 通过。
+- GREEN：`pnpm docs:validate` 通过。
+- GREEN：`git diff --check` 通过。
+
+## Review 小结
+
+终态：finished。
+
+Spec 符合度：通过。已修复源码仓 Trae gateway JS release session 漂移、Console 非 2xx 错误处理、Worker 启停刷新、任务分页缩短空页和终端日志强制滚动；同时清理未引用 Vite 模板样式与资产，并拆分 `TaskDetailsPanel` 降低 `Lists.tsx` 复杂度。
+
+安全检查：通过。未新增 secret、凭据或外部输入拼接；新增 fetcher 对非 2xx 响应显式抛错，不吞掉后端失败。
+
+测试与验证：通过。受影响 dispatcher / Console 测试、Console lint/build、根 typecheck、文档校验和 diff 检查均已通过。
+
+复杂度检查：通过。`Lists.tsx` 已降到 189 行，`TaskDetailsPanel.tsx` 为 261 行，新增组件均按职责拆分；未新增超过 300 行文件。
+
+Document-refresh: not-needed
+原因：本次为运行入口与 Console 行为修复，没有改变稳定文档描述的架构、接口或持久化契约。
+
+剩余风险：手动发布两阶段恢复仍是单独技术债，本轮未改 `.github/workflows/release.yml`；任务详情的展示密度仍可在后续做进一步 UX 设计。
+
+潜在技术债：`scripts/lib` 仍保留 checked-in JS 与 TS 双轨，后续应考虑统一构建产物刷新或减少源码仓 live entrypoint 对手工同步的依赖。
+
+结论：通过。
