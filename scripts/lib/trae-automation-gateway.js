@@ -90,6 +90,27 @@ export async function handleTraeAutomationHttpRequest(input, options = {}) {
             },
         };
     }
+    if (method === "POST" && pathname.startsWith("/v1/sessions/") && pathname.endsWith("/release")) {
+        const sessionId = pathname.slice("/v1/sessions/".length, -"/release".length);
+        if (!sessionId) {
+            throw new ApiError("INVALID_REQUEST", "sessionId is required", 400);
+        }
+        if (!sessionStore) {
+            throw new ApiError("SESSION_STORE_NOT_CONFIGURED", "Session store is not configured", 500);
+        }
+        const released = sessionStore.release(sessionId);
+        return {
+            status: 200,
+            json: {
+                success: true,
+                code: "OK",
+                data: {
+                    sessionId,
+                    released,
+                },
+            },
+        };
+    }
     if (method === "POST" && pathname === "/v1/sessions/prepare") {
         try {
             const bodyObj = body;

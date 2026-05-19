@@ -79,6 +79,23 @@ describe('TaskList Pagination', () => {
     expect(screen.getByTestId('page-indicator').textContent).toContain('1');
     expect(screen.getByText('Task 1')).toBeInTheDocument();
   });
+
+  it('should clamp pagination when the task list shrinks', () => {
+    const { rerender } = renderWithProviders(<TaskList tasks={mockTasks(15)} />);
+    const nextBtn = screen.getByRole('button', { name: /next|下一页/i });
+
+    fireEvent.click(nextBtn);
+    expect(screen.getByText('Task 11')).toBeInTheDocument();
+
+    rerender(
+      <LanguageProvider>
+        <TaskList tasks={mockTasks(5)} />
+      </LanguageProvider>
+    );
+
+    expect(screen.getByText('Task 1')).toBeInTheDocument();
+    expect(screen.queryByTestId('page-indicator')).not.toBeInTheDocument();
+  });
 });
 
 describe('Task drill-down', () => {

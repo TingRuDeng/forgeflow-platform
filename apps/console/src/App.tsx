@@ -7,7 +7,29 @@ import { TerminalPanel } from './components/TerminalPanel';
 import { Panel } from './components/UI';
 import { useTranslation } from './lib/i18n';
 
-const fetcher = (url: string) => fetch(url).then(res => res.json());
+async function parseJsonResponse(res: Response) {
+  const text = await res.text();
+  if (!text.trim()) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+const fetcher = async (url: string) => {
+  const res = await fetch(url);
+  const body = await parseJsonResponse(res);
+  if (!res.ok) {
+    const message = body && typeof body === 'object' && 'message' in body
+      ? String((body as { message?: unknown }).message || res.statusText)
+      : res.statusText;
+    throw new Error(message || `HTTP ${res.status}`);
+  }
+  return body;
+};
 
 const App: React.FC = () => {
   const { t } = useTranslation();
@@ -17,6 +39,7 @@ const App: React.FC = () => {
   });
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
+  const [updatingWorkerId, setUpdatingWorkerId] = useState<string | null>(null);
 
   const selectedTask = useMemo(() => {
     const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
@@ -90,6 +113,7 @@ const App: React.FC = () => {
     }
     
     try {
+      setUpdatingWorkerId(workerId);
       const endpoint = isEnable 
         ? `/api/workers/${encodeURIComponent(workerId)}/enable` 
         : `/api/workers/${encodeURIComponent(workerId)}/disable`;
@@ -101,9 +125,12 @@ const App: React.FC = () => {
       });
       
       if (!res.ok) throw new Error('Failed to update worker');
+      await mutate();
     } catch (err) {
       console.error(err);
-      alert('Action failed');
+      alert(t('workerActionFailed'));
+    } finally {
+      setUpdatingWorkerId(null);
     }
   };
 
@@ -182,7 +209,11 @@ const App: React.FC = () => {
             {/* Sidebar Column: Workers */}
             <div className="lg:col-span-1 flex flex-col gap-6">
               <Panel title={t('workers')}>
-                <WorkerList workers={data.workers} onAction={handleWorkerAction} />
+                <WorkerList
+                  workers={data.workers}
+                  updatingWorkerId={updatingWorkerId}
+                  onAction={handleWorkerAction}
+                />
               </Panel>
             </div>
           </div>

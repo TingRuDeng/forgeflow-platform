@@ -451,6 +451,39 @@ describe("trae dom driver", () => {
   });
 });
 
+describe("trae automation gateway session release", () => {
+  it("releases a stored session through the source gateway entrypoint", async () => {
+    const mod = await import(gatewayModulePath);
+    const release = vi.fn(() => true);
+
+    const result = await mod.handleTraeAutomationHttpRequest(
+      {
+        method: "POST",
+        pathname: "/v1/sessions/source-session/release",
+        query: {},
+        body: {},
+      },
+      {
+        sessionStore: { release },
+        automationDriver: {},
+      },
+    );
+
+    expect(result).toEqual({
+      status: 200,
+      json: {
+        success: true,
+        code: "OK",
+        data: {
+          sessionId: "source-session",
+          released: true,
+        },
+      },
+    });
+    expect(release).toHaveBeenCalledWith("source-session");
+  });
+});
+
 describe("trae automation gateway", () => {
   it("returns readiness through GET /ready", async () => {
     const mod = await import(gatewayModulePath);
