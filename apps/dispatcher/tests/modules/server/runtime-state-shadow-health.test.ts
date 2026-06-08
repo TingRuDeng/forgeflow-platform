@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeStateShadowWriteStatus } from "../../../src/modules/server/runtime-state-shadow.js";
+import { summarizeRuntimeStateShadowDrift } from "../../../src/modules/server/runtime-state-shadow.js";
 import {
   readPersistedRuntimeStateShadowWriteStatus,
   selectRuntimeStateShadowWriteStatus,
@@ -62,5 +63,38 @@ describe("runtime-state-shadow-health", () => {
     expect(persistedStatus?.lastAttemptAt).toEqual(expect.any(String));
     expect(persistedStatus?.lastError).toContain("failed to read shadow health record");
     expect(selected.status).toBe("failed");
+  });
+
+  it("summarizes matching shadow counts as healthy", () => {
+    const drift = summarizeRuntimeStateShadowDrift({
+      mode: "shadow-write",
+      queueMode: "shadow-write",
+      configured: true,
+      projectionCounts: { dispatcher_tasks: 1 },
+      queueCounts: { assignment_delivery: 1 },
+      expectedCounts: { dispatcher_tasks: 1 },
+      expectedQueueCounts: { assignment_delivery: 1 },
+    });
+
+    expect(drift.status).toBe("matched");
+    expect(drift.mismatches).toEqual([]);
+  });
+
+  it("surfaces projection and queue count drift", () => {
+    const drift = summarizeRuntimeStateShadowDrift({
+      mode: "shadow-write",
+      queueMode: "shadow-write",
+      configured: true,
+      projectionCounts: { dispatcher_tasks: 0 },
+      queueCounts: { assignment_delivery: 2 },
+      expectedCounts: { dispatcher_tasks: 1 },
+      expectedQueueCounts: { assignment_delivery: 1 },
+    });
+
+    expect(drift.status).toBe("drifted");
+    expect(drift.mismatches).toEqual([
+      { store: "projection", name: "dispatcher_tasks", expected: 1, actual: 0 },
+      { store: "queue", name: "assignment_delivery", expected: 1, actual: 2 },
+    ]);
   });
 });

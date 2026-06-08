@@ -1,5 +1,10 @@
 # 当前项目审查修复任务
 
+- [x] M4 串行：新增 shadow drift operator check，比较 SQLite truth source 与 shadow projection / queue counts。
+- [x] M4 串行：补充 drift summary 单测和 CLI 脚本测试。
+- [x] M4 串行：同步 runbook、API / DB 文档和技术债边界。
+- [x] M4 串行：运行验证、Review Gate 并提交本地变更。
+
 - [x] M3 串行：新增 live dispatcher DR drill 脚本，覆盖真实 HTTP 写入期间的 SQLite/WAL 备份恢复。
 - [x] M3 串行：补充脚本级测试和 `verify:stage3:live` 命令入口。
 - [x] M3 串行：同步 DR runbook、技术债和 README 的演练边界。

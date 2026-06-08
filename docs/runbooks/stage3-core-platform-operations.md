@@ -100,6 +100,7 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - SQLite projection 正常
 - Postgres shadow 已配置
 - `/api/dr/status.shadowWrite` 最近状态为 `ok`，或失败原因已被人工确认
+- `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher` 返回 `ok=true`
 - assignment delivery queue 影子计数合理
 
 ## 5. Read-only 与 DR

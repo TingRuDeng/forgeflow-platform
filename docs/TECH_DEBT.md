@@ -188,7 +188,7 @@ Desired direction:
 
 - 继续接入 review workflow、artifact retention 和 Console artifact tabs
 
-## 9. Shadow path failures are first-class events, but drift reconciliation is still deferred
+## 9. Shadow path has operator drift check, but automatic reconciliation is still deferred
 
 Current situation:
 
@@ -198,15 +198,16 @@ Current situation:
 - shadow write status is also persisted to `runtime-state-shadow-status.json`
 - backup / restore scripts include `runtime-state-shadow-status.json`
 - shadow write failures now append `shadow_write_failed` system events and feed metrics / SLO
+- `scripts/check-shadow-drift.mjs` compares SQLite expected counts with Postgres projection / queue shadow counts
 
 Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
-- shadow-write rollout still needs drift reconciliation and external alerting before any primary-store cutover
+- shadow-write rollout has a manual drift check, but still needs alerting and reconciliation before any primary-store cutover
 
 Desired direction:
 
-- add an operator-visible shadow drift check before treating shadow write as rollout-ready
+- wire shadow drift into release / rollout gates once operational thresholds are defined
 - keep the event / metric / SLO contract stable while shadow remains best-effort
 
 ## 10. Live dispatcher DR drill exists, but crash consistency is still deferred

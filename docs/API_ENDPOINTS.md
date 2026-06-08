@@ -184,6 +184,7 @@ Current endpoint families:
     - `projectionHealth`
     - `backups`
   - `shadowWrite` 会合并 stateDir 下的 `runtime-state-shadow-status.json`，因此 dispatcher 重启后仍能显示最后一次 shadow 写入结果。
+  - Shadow projection / queue count drift 通过 `node scripts/check-shadow-drift.mjs <stateDir>` 做 operator check；该检查需要异步访问 Postgres，因此不塞进同步 `/api/dr/status` handler。
 
 ### Structured reads, read-only, and shadow modes
 

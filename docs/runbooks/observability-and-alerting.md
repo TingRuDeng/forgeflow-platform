@@ -187,6 +187,7 @@ dispatcher 进程内还会记录：
 2. 再看 `/api/metrics`
 3. 再看 `/api/query/projection-health`
 4. 再看 `/api/slo` 和 `/api/dr/status`
+5. shadow rollout 前执行 `node scripts/check-shadow-drift.mjs <stateDir>`，确认 `drift.status` 不是 `drifted`
 5. 最后再看 worker 日志和 `.worktrees/failed/`
 
 常见入口：
