@@ -348,13 +348,14 @@ node scripts/release-package.js --package automation-gateway-core --bump prerele
 node scripts/release-package.js --package trae-beta-runtime --bump prerelease --tag beta --publish --ci
 ```
 
-该助手默认为 dry-run 模式，只有显式传入 `--publish` 才会真正修改 `package.json` 并发布到 npm。`--publish` 现在是 CI-only 门禁，本地直接执行会失败；推荐入口是 `.github/workflows/release.yml`，由 GitHub Actions 用 OIDC + provenance 执行发布；发布后的 OpenSSF Scorecard 改由独立的 `.github/workflows/release-scorecard.yml` 在 `Release` 成功后跟跑。发包前还会校验 npm `dist-tag`；包含 shell 元字符或非法字符的 tag 会在改版本号之前直接失败。
+该助手默认为 dry-run 模式，只有显式传入 `--publish` 才会真正修改 `package.json` 并发布到 npm。`--publish` 现在是 CI-only 门禁，本地直接执行会失败；推荐入口是 `.github/workflows/release.yml`，由 GitHub Actions 用 OIDC + provenance 执行发布；发布后的 OpenSSF Scorecard 改由独立的 `.github/workflows/release-scorecard.yml` 在 `Release` 成功后跟跑。发包前还会校验 npm `dist-tag`；包含 shell 元字符或非法字符的 tag 会在改版本号之前直接失败。手动发布路径会先完成 `npm publish`，再提交版本变更并推送 release tag，避免 npm 发布失败时 git 历史提前记录未发布版本。
 
 自动发布还有两条硬门禁：
 
 - 只有 `.github/workflows/release.yml` 这一条正式发布链路，`packages/*/package.json` 变更不会再触发重复 workflow 并发发包。
 - 只有当 npm 已把当前仓库 `TingRuDeng/forgeflow-platform` 配置成 `@tingrudeng/*` 包的 Trusted Publisher，且仓库或组织变量 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 时，push 自动发包才会真正执行；否则 workflow 会成功结束并明确写出“已跳过自动发布”。
 - release job 会先把 npm CLI 升到 `11.12.1`；npm Trusted Publishing 至少要求 `npm 11.5.1+`，不要再用 Node 自带的 npm 10.x 直接判断发布链是否可用。
+- 如果手动发布已经成功写入 npm，但后续 git commit/tag/push 失败，Actions summary 会提示 `Manual release recovery required`；此时按 `docs/runbooks/release-cadence.md` 补交版本记录和同名 release tag。
 
 当前还要注意一个外部前置条件：
 

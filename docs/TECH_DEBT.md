@@ -228,19 +228,20 @@ Desired direction:
 - add a heavier live-dispatcher DR drill that runs real dispatcher writes during backup and validates restore under lock / WAL pressure
 - keep the current script as the fast source-level DR gate
 
-## 11. Manual release can leave git ahead of npm when publish fails
+## 11. Manual release still needs post-publish git record recovery
 
 Current situation:
 
-- `.github/workflows/release.yml` manual path bumps package version, commits it, creates a release tag, and pushes before `npm publish`
-- if `npm publish` fails after the push, git history can contain a package version that was not published to npm
+- `.github/workflows/release.yml` manual path publishes to npm before committing the release version and tag
+- if `npm publish` fails, git history no longer advances ahead of npm
+- if `npm publish` succeeds but the later commit / tag / push step fails, npm can contain a version that still needs a matching git record
 
 Impact:
 
-- operators may need to reconcile an already-pushed release commit/tag with a failed npm publish
-- retry or rollback must be explicit to avoid confusing package consumers
+- operators may need to reconcile a published npm version with a missing release commit/tag
+- retry or manual git record repair must be explicit to avoid confusing maintainers
 
 Desired direction:
 
-- document the failed-publish recovery path in release runbooks
-- consider a two-phase release marker or automatic GitHub issue when publish fails
+- keep the release runbook recovery path current
+- consider a two-phase release marker or automatic GitHub issue if post-publish git record failures become common
