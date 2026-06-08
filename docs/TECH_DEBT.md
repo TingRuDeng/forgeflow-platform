@@ -105,12 +105,11 @@ Desired direction:
 
 - 两套实现都已经暴露 `POST /v1/sessions/:sessionId/release`
 - 两套实现都已经在 `POST /v1/sessions/prepare` 中创建会话，并在 prepare 成功后标记为 `running`
-- 默认 session-store 路径仍不同
 - packaged runtime 仍有更强的持久化 session 解析和结构化 debugLog
 
 影响：
 
-- 文档仍可能过度声明两套实现完全等价
+- 默认 session-store 路径已经对齐，但持久化解析与 debugLog 能力仍不同
 - 修复仍可能只落到其中一套实现
 
 期望方向：

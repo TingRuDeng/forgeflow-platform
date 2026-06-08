@@ -56,7 +56,7 @@ Usage:
 Options:
   --host <ip>        Listen address (default: 127.0.0.1)
   --port <port>      Listen port (default: 8790)
-  --state-dir <path> Directory for session state persistence (default: .forgeflow-trae-gateway)
+  --state-dir <path> Directory for session state persistence (default: ~/.forgeflow-trae-beta/sessions)
   --help             Show this help message
 `);
 }

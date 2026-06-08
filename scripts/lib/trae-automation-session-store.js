@@ -1,9 +1,11 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { formatLocalTimestamp } from "./time.js";
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
-export const DEFAULT_STATE_DIR = ".forgeflow-trae-gateway";
+// 默认使用发布包同一用户级目录，避免脚本从不同工作目录启动时写入不同状态文件。
+export const DEFAULT_STATE_DIR = path.join(os.homedir(), ".forgeflow-trae-beta", "sessions");
 export const SessionStatus = {
     PREPARED: "prepared",
     RUNNING: "running",

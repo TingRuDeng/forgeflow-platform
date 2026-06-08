@@ -1,5 +1,9 @@
 # 当前项目审查修复任务
 
+- [x] M7 串行：对齐 scripts/lib Trae gateway 默认 session-store 路径到发布包路径。
+- [x] M7 串行：补充路径契约测试并同步文档。
+- [x] M7 串行：运行验证、Review Gate 并提交本地变更。
+
 - [x] M6 串行：对齐 `scripts/lib` Trae gateway prepare-session 会话状态。
 - [x] M6 串行：补充 source / packaged gateway parity 测试。
 - [x] M6 串行：修正 Trae gateway 技术债事实并运行验证。

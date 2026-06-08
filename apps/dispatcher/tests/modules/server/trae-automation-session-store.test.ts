@@ -23,6 +23,15 @@ describe("trae session store", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it("uses the packaged Trae runtime session directory by default", async () => {
+    const mod = await import(sessionStoreModulePath);
+    const store = mod.createSessionStore(null);
+
+    expect(store.getStateFilePath()).toBe(
+      path.join(os.homedir(), ".forgeflow-trae-beta", "sessions", "sessions.json"),
+    );
+  });
+
   it("creates a session with generated ID when none provided", async () => {
     const mod = await import(sessionStoreModulePath);
     const store = mod.createSessionStore(tempDir);

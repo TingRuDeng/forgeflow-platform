@@ -120,8 +120,9 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
 - Review memory: `.forgeflow-dispatcher/memory.json`
   - owned by `apps/dispatcher/src/modules/server/review-memory.ts`
   - accessed through the thin wrapper `scripts/lib/review-memory.js`
-- Script-local Trae gateway sessions: `.forgeflow-trae-gateway/sessions.json`
-- Packaged Trae runtime sessions: `~/.forgeflow-trae-beta/sessions/sessions.json`
+- Trae gateway sessions: `~/.forgeflow-trae-beta/sessions/sessions.json`
+  - `scripts/lib` 和发布包默认使用同一用户级目录
+  - `scripts/run-trae-automation-gateway.js --state-dir <path>` 仍可显式覆盖
 - Optional Postgres / queue shadow path:
   - enabled with `DISPATCHER_SHADOW_MODE` / `DISPATCHER_POSTGRES_URL`
   - current role is shadow projection / queue shadow, not dispatcher truth source

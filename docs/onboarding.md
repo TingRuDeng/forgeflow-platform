@@ -376,7 +376,7 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 
 补充：
 
-- `start gateway` 默认启用 session store，并将会话状态落在 `.forgeflow-trae-gateway/sessions.json`。
+- `start gateway` 默认启用 session store，并将会话状态落在 `~/.forgeflow-trae-beta/sessions/sessions.json`。
 - Trae worker 的软超时恢复依赖这份会话状态；如需改目录，可在 gateway 启动时传 `--state-dir /abs/path/to/state-dir`。
 - `forgeflow-trae-beta doctor` 会输出 dispatcher/gateway/CDP 连通性检查（标记为 optional），用于快速排查部署连通性问题。
 
