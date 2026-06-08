@@ -373,7 +373,7 @@ Current shadow semantics:
 - SQLite remains the authority
 - Postgres / queue writes are best-effort shadow projection
 - shadow write status is persisted separately in `runtime-state-shadow-status.json`; it is an operational health record, not the runtime truth source
-- drift should be detected through projection health first; `readRuntimeStateShadowHealth()` exists in code, but current `/api/dr/status` does not expose shadow counts yet
+- drift should be checked through `scripts/check-shadow-drift.mjs <stateDir>` before shadow rollout or cutover decisions; `/api/dr/status` stays focused on lightweight DR posture and shadow write health
 
 This is intentionally not a fully normalized operational schema. The current design optimizes for:
 

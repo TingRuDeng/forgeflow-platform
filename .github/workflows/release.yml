@@ -93,6 +93,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      issues: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -161,23 +162,73 @@ jobs:
       - name: Build package
         run: pnpm --filter @tingrudeng/${{ inputs.package }} build
 
-      - name: Commit and tag package version
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add packages/${{ inputs.package }}/package.json
-          git commit -m "chore(release): 发布 @tingrudeng/${{ inputs.package }}@${{ env.NEW_VERSION }} [skip actions]"
-          git tag -a "release/${{ inputs.package }}@${{ env.NEW_VERSION }}" -m "release @tingrudeng/${{ inputs.package }}@${{ env.NEW_VERSION }}"
-          git push origin "HEAD:${{ github.ref_name }}" --follow-tags
-
       - name: Publish to npm with Trusted Publishing (OIDC)
+        id: publish
         env:
           GITHUB_ACTIONS: "true"
           NPM_CONFIG_PROVENANCE: "true"
         run: |
           cd packages/${{ inputs.package }}
+          cp package.json "$RUNNER_TEMP/release-package-json-before-publish"
           npm publish --access public --provenance --tag ${{ inputs.tag }}
+          cp "$RUNNER_TEMP/release-package-json-before-publish" package.json
+          echo "published=true" >> "$GITHUB_OUTPUT"
           echo "✅ Published @tingrudeng/${{ inputs.package }}@${{ env.NEW_VERSION }}"
+
+      - name: Record published package version in git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/${{ inputs.package }}/package.json
+          git diff --cached --quiet && {
+            echo "No package.json version change to record after publish"
+            exit 1
+          }
+          git commit -m "chore(release): 发布 @tingrudeng/${{ inputs.package }}@${{ env.NEW_VERSION }} [skip actions]"
+          git tag -a "release/${{ inputs.package }}@${{ env.NEW_VERSION }}" -m "release @tingrudeng/${{ inputs.package }}@${{ env.NEW_VERSION }}"
+          git push origin "HEAD:${{ github.ref_name }}" --follow-tags
+
+      - name: Summarize post-publish git recovery
+        if: ${{ failure() && steps.publish.outcome == 'success' }}
+        run: |
+          {
+            echo "## 手动发布需要恢复"
+            echo ""
+            echo "npm publish 已成功，但 git commit/tag/push 记录失败。"
+            echo ""
+            echo "- package: @tingrudeng/${{ inputs.package }}"
+            echo "- version: ${{ env.NEW_VERSION }}"
+            echo "- tag: release/${{ inputs.package }}@${{ env.NEW_VERSION }}"
+            echo ""
+            echo "恢复方式：确认 npm 上该版本存在后，在 main 上补交 packages/${{ inputs.package }}/package.json 的版本变更，并创建同名 release tag。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 创建发布后 git 恢复 issue
+        if: ${{ failure() && steps.publish.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PACKAGE: ${{ inputs.package }}
+          RELEASE_VERSION: ${{ env.NEW_VERSION }}
+          RELEASE_TAG: release/${{ inputs.package }}@${{ env.NEW_VERSION }}
+        run: |
+          ISSUE_BODY="$RUNNER_TEMP/release-recovery-issue.md"
+          cat > "$ISSUE_BODY" <<EOF
+          npm publish 已成功，但 git commit / tag / push 记录失败，需要人工补齐版本记录。
+
+          - package: @tingrudeng/${RELEASE_PACKAGE}
+          - version: ${RELEASE_VERSION}
+          - tag: ${RELEASE_TAG}
+          - workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          恢复方式：
+          1. 确认 npm 上 @tingrudeng/${RELEASE_PACKAGE}@${RELEASE_VERSION} 已存在。
+          2. 在 main 上补交 packages/${RELEASE_PACKAGE}/package.json 的版本变更。
+          3. 创建同名 release tag：${RELEASE_TAG}。
+          4. 推送 commit 和 tag 后关闭本 issue。
+          EOF
+          gh issue create \
+            --title "手动发布需要恢复：@tingrudeng/${RELEASE_PACKAGE}@${RELEASE_VERSION}" \
+            --body-file "$ISSUE_BODY"
 
   publish-disabled-summary:
     needs: detect-changes

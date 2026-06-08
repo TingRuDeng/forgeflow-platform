@@ -615,7 +615,7 @@ describe("trae automation gateway", () => {
     ).rejects.toThrow("Session unknown-id not found");
   });
 
-  it("creates session on POST /v1/sessions/prepare with sessionStore", async () => {
+  it("POST /v1/sessions/prepare 会创建并运行 sessionStore 中的会话", async () => {
     const mod = await import(gatewayModulePath);
     const sessionStoreModule = await import(
       path.join(repoRoot, "scripts/lib/trae-automation-session-store.js")
@@ -644,7 +644,41 @@ describe("trae automation gateway", () => {
 
     const session = sessionStore.get(result.json.data.sessionId);
     expect(session).not.toBeNull();
-    expect(session?.status).toBe("prepared");
+    expect(session?.status).toBe("running");
+  });
+
+  it("POST /v1/sessions/prepare 会创建请求指定的 sessionId", async () => {
+    const mod = await import(gatewayModulePath);
+    const sessionStoreModule = await import(
+      path.join(repoRoot, "scripts/lib/trae-automation-session-store.js")
+    );
+
+    const sessionStore = sessionStoreModule.createSessionStore(null);
+    const automationDriver = {
+      prepareSession: vi.fn(async () => ({
+        status: "ok",
+        preparation: { clicked: true },
+      })),
+    };
+
+    const result = await mod.handleTraeAutomationHttpRequest(
+      {
+        method: "POST",
+        pathname: "/v1/sessions/prepare",
+        body: {
+          sessionId: "requested-session",
+          content: "test prompt",
+        },
+      },
+      { automationDriver, sessionStore }
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.json.data.sessionId).toBe("requested-session");
+    expect(sessionStore.get("requested-session")).toMatchObject({
+      sessionId: "requested-session",
+      status: "running",
+    });
   });
 
   it("updates session status during POST /v1/chat", async () => {

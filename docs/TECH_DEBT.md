@@ -99,22 +99,23 @@ Desired direction:
 - keep shadow mode / primary mode boundaries explicit
 - add stronger drift reporting and eventual cutover / rollback discipline before any primary-store switch
 
-## 4. Trae automation gateway has duplicated implementations with behavior drift
+## 4. Trae automation gateway 仍有重复实现和剩余行为漂移
 
-Verified drift:
+已确认情况：
 
-- packaged runtime exposes `POST /v1/sessions/:sessionId/release`
-- `scripts/lib/` gateway does not
-- default session-store paths differ
+- 两套实现都已经暴露 `POST /v1/sessions/:sessionId/release`
+- 两套实现都已经在 `POST /v1/sessions/prepare` 中创建会话，并在 prepare 成功后标记为 `running`
+- 默认 session-store 路径仍不同
+- packaged runtime 仍有更强的持久化 session 解析和结构化 debugLog
 
-Impact:
+影响：
 
-- docs can overclaim parity
-- fixes land in one implementation but not the other
+- 文档仍可能过度声明两套实现完全等价
+- 修复仍可能只落到其中一套实现
 
-Desired direction:
+期望方向：
 
-- reduce duplication or add an explicit sync rule and shared compatibility test coverage
+- 减少重复实现，或增加明确同步规则和共享兼容测试覆盖
 
 ## 5. Stable agent-facing docs were previously concentrated in rule/nav docs but lacked a durable knowledge layer
 
@@ -188,7 +189,7 @@ Desired direction:
 
 - 继续接入 review workflow、artifact retention 和 Console artifact tabs
 
-## 9. Shadow path failures have durable health, but not first-class runtime events
+## 9. Shadow path has operator drift check, but automatic reconciliation is still deferred
 
 Current situation:
 
@@ -197,50 +198,54 @@ Current situation:
 - `runtime-state-shadow.ts:readRuntimeStateShadowWriteStatus` exposes last shadow attempt status through `/api/dr/status`
 - shadow write status is also persisted to `runtime-state-shadow-status.json`
 - backup / restore scripts include `runtime-state-shadow-status.json`
-- shadow errors are still not persisted as first-class `RuntimeState.events[]` audit records
+- shadow write failures now append `shadow_write_failed` system events and feed metrics / SLO
+- `scripts/check-shadow-drift.mjs` compares SQLite expected counts with Postgres projection / queue shadow counts
 
 Impact:
 
-- process restart keeps the last shadow health record, but event timelines still do not show shadow failures as runtime events
-- shadow-write rollout still needs external alerting before any primary-store cutover
+- process restart keeps both the last shadow health record and runtime event history
+- shadow-write rollout has a manual drift check, but still needs alerting and reconciliation before any primary-store cutover
 
 Desired direction:
 
-- decide whether shadow sync failures should also become first-class runtime events
-- add an operator-visible shadow drift check before treating shadow write as rollout-ready
+- wire shadow drift into release / rollout gates once operational thresholds are defined
+- keep the event / metric / SLO contract stable while shadow remains best-effort
 
-## 10. Source DR drill covers WAL restore, but not live dispatcher DR
+## 10. Live dispatcher DR drill exists, but crash consistency is still deferred
 
 Current situation:
 
 - `scripts/verify-stage3-dr.mjs` creates a real SQLite `runtime-state.db`
 - it writes multiple `snapshots` rows while the SQLite connection remains open in WAL mode
 - it verifies that backup / restore includes `runtime-state.db-wal`, then validates `PRAGMA integrity_check`, snapshot count, latest sequence, and checksum
-- it does not simulate a long-running dispatcher with concurrent writes, lock contention, or mid-write crash recovery
+- `scripts/verify-live-dispatcher-dr.mjs` starts a real dispatcher HTTP server, writes through live endpoints, backs up while the server is still open, then restores and validates SQLite integrity
 
 Impact:
 
 - `pnpm verify:stage3` proves the source DR script path, WAL-backed restore, and restored SQLite queryability
-- it is not yet a full production DR exercise for live dispatcher write pressure, lock contention, or crash consistency
+- `pnpm verify:stage3:live` proves the live dispatcher HTTP write path and WAL restore can be exercised locally
+- it is not yet a full production crash-consistency exercise for mid-write process termination, host failure, or multi-node restore
 
 Desired direction:
 
-- add a heavier live-dispatcher DR drill that runs real dispatcher writes during backup and validates restore under lock / WAL pressure
-- keep the current script as the fast source-level DR gate
+- keep the source DR script as the fast gate and run the live drill before risky runtime releases
+- add an explicit crash-consistency drill if production RTO / RPO requirements tighten
 
-## 11. Manual release can leave git ahead of npm when publish fails
+## 11. Manual release recovery is tracked, but still manual
 
 Current situation:
 
-- `.github/workflows/release.yml` manual path bumps package version, commits it, creates a release tag, and pushes before `npm publish`
-- if `npm publish` fails after the push, git history can contain a package version that was not published to npm
+- `.github/workflows/release.yml` manual path publishes to npm before committing the release version and tag
+- if `npm publish` fails, git history no longer advances ahead of npm
+- if `npm publish` succeeds but the later commit / tag / push step fails, npm can contain a version that still needs a matching git record
+- the workflow writes an Actions summary and opens a recovery issue when that post-publish git record step fails
 
 Impact:
 
-- operators may need to reconcile an already-pushed release commit/tag with a failed npm publish
-- retry or rollback must be explicit to avoid confusing package consumers
+- operators still need to reconcile a published npm version with a missing release commit/tag
+- retry or manual git record repair must be explicit to avoid confusing maintainers
 
 Desired direction:
 
-- document the failed-publish recovery path in release runbooks
-- consider a two-phase release marker or automatic GitHub issue when publish fails
+- keep the release runbook recovery path current
+- consider an automated repair workflow only if post-publish git record failures become common

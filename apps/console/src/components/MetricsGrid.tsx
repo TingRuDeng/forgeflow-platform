@@ -17,6 +17,7 @@ interface MetricsGridProps {
     retryRatePct: number;
     deliveryFailedCount: number;
     cleanupFailureCount: number;
+    shadowWriteFailureCount?: number;
   };
 }
 
@@ -78,7 +79,7 @@ export const MetricsGrid: React.FC<MetricsGridProps> = ({ stats, metrics }) => {
           {metrics.retryRatePct.toFixed(1)}%
         </div>
         <div className="text-xs text-white/50">
-          {t('deliveryFailures')}: {metrics.deliveryFailedCount} · {t('cleanupFailures')}: {metrics.cleanupFailureCount}
+          {t('deliveryFailures')}: {metrics.deliveryFailedCount} · {t('cleanupFailures')}: {metrics.cleanupFailureCount} · {t('shadowFailures')}: {metrics.shadowWriteFailureCount ?? 0}
         </div>
       </div>
     </div>

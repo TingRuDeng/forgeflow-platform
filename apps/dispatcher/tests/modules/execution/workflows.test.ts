@@ -19,13 +19,19 @@ describe("workflow quality gates", () => {
     expect(workflow).toContain("pnpm docs:validate");
   });
 
-  it("records manual release version bumps in git history before publishing", () => {
+  it("publishes manual releases before recording git version history", () => {
     const workflow = readWorkflow("release.yml");
 
     expect(workflow).toMatch(/contents:\s+write/);
+    expect(workflow).toMatch(/issues:\s+write/);
+    expect(workflow).toContain("id: publish");
+    expect(workflow).toContain("release-package-json-before-publish");
     expect(workflow).toContain("git commit");
     expect(workflow).toContain("git tag");
     expect(workflow).toContain("git push");
-    expect(workflow.indexOf("git push")).toBeLessThan(workflow.indexOf("npm publish"));
+    expect(workflow).toContain("手动发布需要恢复");
+    expect(workflow).toContain("创建发布后 git 恢复 issue");
+    expect(workflow).toContain("gh issue create");
+    expect(workflow.indexOf("npm publish")).toBeLessThan(workflow.indexOf("git push"));
   });
 });

@@ -20,6 +20,28 @@ export type RuntimeStateShadowWriteStatus = {
   lastError: string | null;
 };
 
+export type RuntimeStateShadowHealth = {
+  mode: ReturnType<typeof normalizeShadowMode>;
+  queueMode: ReturnType<typeof normalizeShadowMode>;
+  configured: boolean;
+  projectionCounts: Record<string, number>;
+  queueCounts: Record<string, number>;
+  expectedCounts: Record<string, number>;
+  expectedQueueCounts: Record<string, number>;
+};
+
+export type RuntimeStateShadowDriftSummary = {
+  status: "not_configured" | "matched" | "drifted";
+  projectionMatches: boolean;
+  queueMatches: boolean;
+  mismatches: Array<{
+    store: "projection" | "queue";
+    name: string;
+    expected: number;
+    actual: number;
+  }>;
+};
+
 let shadowWriteStatus: RuntimeStateShadowWriteStatus = {
   status: "idle",
   mode: "disabled",
@@ -160,6 +182,29 @@ function buildQueueSnapshot(state: RuntimeState) {
   };
 }
 
+function buildQueueExpectedCounts(state: RuntimeState): Record<string, number> {
+  return {
+    assignment_delivery: buildQueueSnapshot(state).rows.length,
+  };
+}
+
+function countValue(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function compareCounts(
+  store: "projection" | "queue",
+  expectedCounts: Record<string, number>,
+  actualCounts: Record<string, number>,
+): RuntimeStateShadowDriftSummary["mismatches"] {
+  const names = new Set([...Object.keys(expectedCounts), ...Object.keys(actualCounts)]);
+  return [...names].flatMap((name) => {
+    const expected = countValue(expectedCounts[name]);
+    const actual = countValue(actualCounts[name]);
+    return expected === actual ? [] : [{ store, name, expected, actual }];
+  });
+}
+
 async function ensureProjectionTables(client: Awaited<ReturnType<typeof createPgClient>>) {
   await client.query(`
     CREATE TABLE IF NOT EXISTS dispatcher_workers (
@@ -266,7 +311,32 @@ export async function syncRuntimeStateShadowAndPersistStatus(stateDir: string, s
     persistRuntimeStateShadowWriteStatus(stateDir, readRuntimeStateShadowWriteStatus());
   }
 }
-export async function readRuntimeStateShadowHealth(snapshotState: RuntimeState) {
+export function summarizeRuntimeStateShadowDrift(
+  health: RuntimeStateShadowHealth,
+): RuntimeStateShadowDriftSummary {
+  if (!health.configured) {
+    return {
+      status: "not_configured",
+      projectionMatches: true,
+      queueMatches: true,
+      mismatches: [],
+    };
+  }
+
+  const projectionMismatches = compareCounts("projection", health.expectedCounts, health.projectionCounts);
+  const queueMismatches = health.queueMode === "disabled"
+    ? []
+    : compareCounts("queue", health.expectedQueueCounts, health.queueCounts);
+  const mismatches = [...projectionMismatches, ...queueMismatches];
+  return {
+    status: mismatches.length === 0 ? "matched" : "drifted",
+    projectionMatches: projectionMismatches.length === 0,
+    queueMatches: queueMismatches.length === 0,
+    mismatches,
+  };
+}
+
+export async function readRuntimeStateShadowHealth(snapshotState: RuntimeState): Promise<RuntimeStateShadowHealth> {
   const postgresUrl = getPostgresUrl();
   const mode = getRuntimeStateShadowMode();
   const queueMode = getQueueShadowMode();
@@ -278,6 +348,7 @@ export async function readRuntimeStateShadowHealth(snapshotState: RuntimeState) 
       projectionCounts: {},
       queueCounts: {},
       expectedCounts: {},
+      expectedQueueCounts: {},
     };
   }
 
@@ -293,6 +364,7 @@ export async function readRuntimeStateShadowHealth(snapshotState: RuntimeState) 
       projectionCounts,
       queueCounts,
       expectedCounts: buildProjectionSnapshot(snapshotState).counts,
+      expectedQueueCounts: queueMode === "disabled" ? {} : buildQueueExpectedCounts(snapshotState),
     };
   } finally {
     await client.end?.();

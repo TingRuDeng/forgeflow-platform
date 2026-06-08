@@ -21,6 +21,7 @@
 
 ```bash
 pnpm verify:stage3
+pnpm verify:stage3:live
 git diff --check
 ```
 
@@ -99,6 +100,7 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - SQLite projection 正常
 - Postgres shadow 已配置
 - `/api/dr/status.shadowWrite` 最近状态为 `ok`，或失败原因已被人工确认
+- `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher` 返回 `ok=true`
 - assignment delivery queue 影子计数合理
 
 ## 5. Read-only 与 DR
@@ -121,12 +123,14 @@ export DISPATCHER_READ_ONLY_MODE=1
 node scripts/backup-runtime-state.mjs .forgeflow-dispatcher .forgeflow-dispatcher/backups/<timestamp>
 node scripts/restore-runtime-state.mjs .forgeflow-dispatcher/backups/<timestamp> .forgeflow-dispatcher
 node scripts/verify-stage3-dr.mjs
+node scripts/verify-live-dispatcher-dr.mjs
 ```
 
 建议：
 
 - 发布前至少做一次 backup
-- 每季度跑一次 `verify-stage3-dr`，它能证明源码级 SQLite WAL 备份恢复与 checksum 校验，但不替代 live dispatcher 并发写入 / 崩溃恢复 DR 演练
+- 每季度跑一次 `verify-stage3-dr`，它能证明源码级 SQLite WAL 备份恢复与 checksum 校验
+- 风险较高的 runtime 发布前跑一次 `verify-live-dispatcher-dr`，它能启动本地 live dispatcher、执行真实 HTTP 写入并验证备份恢复；它仍不替代进程崩溃或主机故障演练
 - 先切 read-only，再做 restore
 
 ## 6. SLO / Burn-rate
@@ -138,6 +142,7 @@ node scripts/verify-stage3-dr.mjs
 - `DISPATCHER_SLO_MAX_ASSIGNMENT_LAG_MS`
 - `DISPATCHER_SLO_MAX_DELIVERY_FAILED`
 - `DISPATCHER_SLO_MAX_LEASE_CONFLICTS`
+- `DISPATCHER_SLO_MAX_SHADOW_WRITE_FAILED`
 
 当前 `/api/slo` 会输出：
 
@@ -153,6 +158,7 @@ node scripts/verify-stage3-dr.mjs
 - `assignment_lag`
 - `delivery_failed`
 - `lease_conflict`
+- `shadow_write_failed`
 
 ## 7. 参考部署
 

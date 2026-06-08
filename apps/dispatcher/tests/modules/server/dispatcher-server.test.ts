@@ -339,6 +339,7 @@ describe("dispatcher server", () => {
       cleanupFailureCount: 0,
       sessionInterruptionCount: 0,
       stateLockTimeoutCount: 0,
+      shadowWriteFailureCount: 0,
       branchProtectionHitCount: 0,
       repoConcurrencySaturation: {
         "/repo": {
@@ -358,6 +359,7 @@ describe("dispatcher server", () => {
       },
     });
     expect(response.json).toHaveProperty("leaseConflictCount");
+    expect(response.json).toHaveProperty("shadowWriteFailureCount");
     expect(response.json).toHaveProperty("activeLeases");
   });
 

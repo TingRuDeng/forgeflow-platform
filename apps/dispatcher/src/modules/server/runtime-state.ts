@@ -437,6 +437,7 @@ export interface DashboardSnapshot {
     cleanupFailureCount: number;
     sessionInterruptionCount: number;
     stateLockTimeoutCount: number;
+    shadowWriteFailureCount: number;
     branchProtectionHitCount: number;
     leaseConflictCount: number;
     leaseReclaimCount: number;
@@ -2747,6 +2748,7 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
       cleanupFailureCount: countEventsByType(reconciledState.events, "worktree_cleanup_failed"),
       sessionInterruptionCount: countEventsByType(reconciledState.events, "session_interrupted"),
       stateLockTimeoutCount: countEventsByType(reconciledState.events, "state_lock_timeout"),
+      shadowWriteFailureCount: countEventsByType(reconciledState.events, "shadow_write_failed"),
       branchProtectionHitCount: failureCodes.branch_protection_hit ?? 0,
       leaseConflictCount: countEventsByType(reconciledState.events, "lease_conflict"),
       leaseReclaimCount: countEventsByType(reconciledState.events, "lease_reclaimed"),
