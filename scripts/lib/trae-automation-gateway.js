@@ -114,14 +114,20 @@ export async function handleTraeAutomationHttpRequest(input, options = {}) {
     if (method === "POST" && pathname === "/v1/sessions/prepare") {
         try {
             const bodyObj = body;
-            let sessionId = bodyObj.sessionId || null;
-            if (sessionStore && !sessionId) {
+            let sessionId = typeof bodyObj.sessionId === "string" && bodyObj.sessionId.trim()
+                ? bodyObj.sessionId.trim()
+                : null;
+            if (sessionStore) {
                 const session = sessionStore.create({
+                    ...(sessionId ? { sessionId } : {}),
                     requestFingerprint: bodyObj.content || null,
                 });
                 sessionId = session.sessionId;
             }
             const result = await automationDriver.prepareSession(bodyObj);
+            if (sessionStore && sessionId) {
+                sessionStore.markRunning(sessionId);
+            }
             return {
                 status: 200,
                 json: {
@@ -129,7 +135,7 @@ export async function handleTraeAutomationHttpRequest(input, options = {}) {
                     code: "OK",
                     data: {
                         ...result,
-                        sessionId,
+                        ...(sessionId ? { sessionId } : {}),
                     },
                 },
             };

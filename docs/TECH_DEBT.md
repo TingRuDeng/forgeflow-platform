@@ -99,22 +99,23 @@ Desired direction:
 - keep shadow mode / primary mode boundaries explicit
 - add stronger drift reporting and eventual cutover / rollback discipline before any primary-store switch
 
-## 4. Trae automation gateway has duplicated implementations with behavior drift
+## 4. Trae automation gateway 仍有重复实现和剩余行为漂移
 
-Verified drift:
+已确认情况：
 
-- packaged runtime exposes `POST /v1/sessions/:sessionId/release`
-- `scripts/lib/` gateway does not
-- default session-store paths differ
+- 两套实现都已经暴露 `POST /v1/sessions/:sessionId/release`
+- 两套实现都已经在 `POST /v1/sessions/prepare` 中创建会话，并在 prepare 成功后标记为 `running`
+- 默认 session-store 路径仍不同
+- packaged runtime 仍有更强的持久化 session 解析和结构化 debugLog
 
-Impact:
+影响：
 
-- docs can overclaim parity
-- fixes land in one implementation but not the other
+- 文档仍可能过度声明两套实现完全等价
+- 修复仍可能只落到其中一套实现
 
-Desired direction:
+期望方向：
 
-- reduce duplication or add an explicit sync rule and shared compatibility test coverage
+- 减少重复实现，或增加明确同步规则和共享兼容测试覆盖
 
 ## 5. Stable agent-facing docs were previously concentrated in rule/nav docs but lacked a durable knowledge layer
 
