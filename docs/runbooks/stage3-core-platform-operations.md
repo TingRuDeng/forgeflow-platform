@@ -21,6 +21,7 @@
 
 ```bash
 pnpm verify:stage3
+pnpm verify:stage3:live
 git diff --check
 ```
 
@@ -121,12 +122,14 @@ export DISPATCHER_READ_ONLY_MODE=1
 node scripts/backup-runtime-state.mjs .forgeflow-dispatcher .forgeflow-dispatcher/backups/<timestamp>
 node scripts/restore-runtime-state.mjs .forgeflow-dispatcher/backups/<timestamp> .forgeflow-dispatcher
 node scripts/verify-stage3-dr.mjs
+node scripts/verify-live-dispatcher-dr.mjs
 ```
 
 建议：
 
 - 发布前至少做一次 backup
-- 每季度跑一次 `verify-stage3-dr`，它能证明源码级 SQLite WAL 备份恢复与 checksum 校验，但不替代 live dispatcher 并发写入 / 崩溃恢复 DR 演练
+- 每季度跑一次 `verify-stage3-dr`，它能证明源码级 SQLite WAL 备份恢复与 checksum 校验
+- 风险较高的 runtime 发布前跑一次 `verify-live-dispatcher-dr`，它能启动本地 live dispatcher、执行真实 HTTP 写入并验证备份恢复；它仍不替代进程崩溃或主机故障演练
 - 先切 read-only，再做 restore
 
 ## 6. SLO / Burn-rate

@@ -209,24 +209,25 @@ Desired direction:
 - add an operator-visible shadow drift check before treating shadow write as rollout-ready
 - keep the event / metric / SLO contract stable while shadow remains best-effort
 
-## 10. Source DR drill covers WAL restore, but not live dispatcher DR
+## 10. Live dispatcher DR drill exists, but crash consistency is still deferred
 
 Current situation:
 
 - `scripts/verify-stage3-dr.mjs` creates a real SQLite `runtime-state.db`
 - it writes multiple `snapshots` rows while the SQLite connection remains open in WAL mode
 - it verifies that backup / restore includes `runtime-state.db-wal`, then validates `PRAGMA integrity_check`, snapshot count, latest sequence, and checksum
-- it does not simulate a long-running dispatcher with concurrent writes, lock contention, or mid-write crash recovery
+- `scripts/verify-live-dispatcher-dr.mjs` starts a real dispatcher HTTP server, writes through live endpoints, backs up while the server is still open, then restores and validates SQLite integrity
 
 Impact:
 
 - `pnpm verify:stage3` proves the source DR script path, WAL-backed restore, and restored SQLite queryability
-- it is not yet a full production DR exercise for live dispatcher write pressure, lock contention, or crash consistency
+- `pnpm verify:stage3:live` proves the live dispatcher HTTP write path and WAL restore can be exercised locally
+- it is not yet a full production crash-consistency exercise for mid-write process termination, host failure, or multi-node restore
 
 Desired direction:
 
-- add a heavier live-dispatcher DR drill that runs real dispatcher writes during backup and validates restore under lock / WAL pressure
-- keep the current script as the fast source-level DR gate
+- keep the source DR script as the fast gate and run the live drill before risky runtime releases
+- add an explicit crash-consistency drill if production RTO / RPO requirements tighten
 
 ## 11. Manual release still needs post-publish git record recovery
 

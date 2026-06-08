@@ -13,6 +13,7 @@
     "coverage:critical": "node scripts/run-critical-coverage.mjs",
     "verify:stage2": "pnpm --filter @forgeflow/dispatcher test tests/modules/server/runtime-state.test.ts tests/modules/server/dispatcher-server.test.ts tests/modules/server/review-memory.test.ts tests/modules/server/task-worktree.test.ts tests/modules/server/run-worker-daemon.test.ts tests/modules/server/trae-automation-worker.test.ts && pnpm --filter @tingrudeng/worker-review-orchestrator-cli test tests/watch.test.ts tests/inspect.test.ts && pnpm --filter console exec vitest run src/components/__tests__/MetricsGrid.test.tsx src/components/__tests__/Lists.test.tsx src/components/__tests__/TerminalPanel.test.tsx && pnpm --filter @tingrudeng/trae-beta-runtime test && pnpm typecheck",
     "verify:stage3": "pnpm --filter @forgeflow/dispatcher test tests/modules/server/runtime-state.test.ts tests/modules/server/runtime-state-sqlite.test.ts tests/modules/server/dispatcher-server.test.ts && pnpm --filter @forgeflow/dispatcher-store-core test && pnpm --filter @forgeflow/dispatcher-store-postgres test && pnpm --filter @forgeflow/dispatcher-queue-postgres test && pnpm --filter @forgeflow/provider-registry test && node scripts/verify-stage3-dr.mjs && pnpm typecheck",
+    "verify:stage3:live": "node scripts/verify-live-dispatcher-dr.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   },

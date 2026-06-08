@@ -1,5 +1,10 @@
 # 当前项目审查修复任务
 
+- [x] M3 串行：新增 live dispatcher DR drill 脚本，覆盖真实 HTTP 写入期间的 SQLite/WAL 备份恢复。
+- [x] M3 串行：补充脚本级测试和 `verify:stage3:live` 命令入口。
+- [x] M3 串行：同步 DR runbook、技术债和 README 的演练边界。
+- [x] M3 串行：运行验证、Review Gate 并提交本地变更。
+
 - [x] 修复 dispatcher read-only 写冻结缺口，补齐真实写路由拦截，并避免只读 GET 在 read-only 下落盘。
 - [x] 将 dispatcher POST 鉴权前置到 body 解析之前，并补充 worker register 结构化输入校验。
 - [x] 让 shadow 写失败可观测，并把 shadow health 接入 DR 状态。
