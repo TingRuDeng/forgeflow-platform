@@ -3,17 +3,21 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { AssignmentPayload, RuntimeState } from "./runtime-state.js";
+import type { AssignmentPayload, Event, RuntimeState } from "./runtime-state.js";
 import type { RuntimeStateStore } from "./runtime-state-store.js";
-import { syncRuntimeStateShadowAndPersistStatus } from "./runtime-state-shadow.js";
+import {
+  readRuntimeStateShadowWriteStatus,
+  syncRuntimeStateShadowAndPersistStatus,
+} from "./runtime-state-shadow.js";
+import type { RuntimeStateShadowWriteStatus } from "./runtime-state-shadow.js";
 import { formatLocalTimestamp } from "../time.js";
 
 const { DatabaseSync } = await import("node:sqlite");
 
 const STATE_FALLBACK_ENV = "FORGEFLOW_ALLOW_STATE_FALLBACK_JSON";
 const SQLITE_BUSY_TIMEOUT_MS = 5_000;
-
-function ignoreObservedShadowFailure(): void {}
+const RUNTIME_EVENTS_RETENTION_LIMIT = 500;
+const SHADOW_WRITE_FAILED_EVENT_TYPE = "shadow_write_failed";
 
 function nowIso(): string {
   return formatLocalTimestamp();
@@ -49,6 +53,20 @@ function parseJsonContent<T>(value: string, label: string): T {
 
 function asJson(value: unknown): string {
   return JSON.stringify(value ?? null);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function appendEvent(state: RuntimeState, event: Event): RuntimeState {
+  const nextEvents = [...state.events, event];
+  return {
+    ...state,
+    events: nextEvents.length > RUNTIME_EVENTS_RETENTION_LIMIT
+      ? nextEvents.slice(-RUNTIME_EVENTS_RETENTION_LIMIT)
+      : nextEvents,
+  };
 }
 
 function fromJson<T>(value: string | null | undefined, fallback: T): T {
@@ -237,6 +255,86 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
       metadata_json TEXT
     );
   `);
+}
+
+function persistRuntimeStateSnapshot(db: InstanceType<typeof DatabaseSync>, state: RuntimeState): RuntimeState {
+  const persistedState = {
+    ...state,
+    updatedAt: nowIso(),
+    leases: state.leases ?? [],
+  };
+  const content = JSON.stringify(persistedState);
+  const createdAt = nowIso();
+  const checksum = checksumSha256(content);
+
+  db.prepare(`
+    INSERT INTO snapshots (data, checksum_sha256, created_at)
+    VALUES (?, ?, ?)
+  `).run(content, checksum, createdAt);
+
+  rewriteStructuredProjection(db, persistedState);
+  return persistedState;
+}
+
+function hasShadowFailureEvent(state: RuntimeState, status: RuntimeStateShadowWriteStatus): boolean {
+  return state.events.some((event) => {
+    if (event.type !== SHADOW_WRITE_FAILED_EVENT_TYPE || !isRecord(event.payload)) {
+      return false;
+    }
+    return event.payload.lastAttemptAt === status.lastAttemptAt;
+  });
+}
+
+function buildShadowFailureEvent(status: RuntimeStateShadowWriteStatus): Event {
+  const at = status.lastFailureAt ?? status.lastAttemptAt ?? nowIso();
+  const message = status.lastError ?? "shadow write failed";
+  return {
+    taskId: "system",
+    type: SHADOW_WRITE_FAILED_EVENT_TYPE,
+    at,
+    summary: message,
+    payload: {
+      message,
+      failureCode: SHADOW_WRITE_FAILED_EVENT_TYPE,
+      mode: status.mode,
+      queueMode: status.queueMode,
+      configured: status.configured,
+      lastAttemptAt: status.lastAttemptAt,
+      lastFailureAt: status.lastFailureAt,
+    },
+  };
+}
+
+function recordShadowFailureEvent(stateDir: string): void {
+  const status = readRuntimeStateShadowWriteStatus(stateDir);
+  if (status.status !== "failed") {
+    return;
+  }
+
+  const state = loadRuntimeState(stateDir);
+  if (hasShadowFailureEvent(state, status)) {
+    return;
+  }
+
+  const db = new DatabaseSync(dbFilePath(stateDir));
+  try {
+    initDb(db);
+    persistRuntimeStateSnapshot(db, appendEvent(state, buildShadowFailureEvent(status)));
+  } finally {
+    db.close();
+  }
+}
+
+function observeShadowFailure(stateDir: string): void {
+  try {
+    recordShadowFailureEvent(stateDir);
+  } catch (error) {
+    // shadow 观察路径不能反向影响 SQLite 真相源。
+    console.error(
+      "[runtime-state-sqlite] 记录 shadow 失败事件失败：",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 function createEmptyRuntimeState(): RuntimeState {
@@ -585,23 +683,9 @@ export function saveRuntimeState(stateDir: string, state: RuntimeState): void {
 
   try {
     initDb(db);
-
-    const persistedState = {
-      ...state,
-      updatedAt: nowIso(),
-      leases: state.leases ?? [],
-    };
-    const content = JSON.stringify(persistedState);
-    const createdAt = nowIso();
-    const checksum = checksumSha256(content);
-
-    db.prepare(`
-      INSERT INTO snapshots (data, checksum_sha256, created_at)
-      VALUES (?, ?, ?)
-    `).run(content, checksum, createdAt);
-
-    rewriteStructuredProjection(db, persistedState);
-    void syncRuntimeStateShadowAndPersistStatus(stateDir, persistedState).catch(ignoreObservedShadowFailure);
+    const persistedState = persistRuntimeStateSnapshot(db, state);
+    void syncRuntimeStateShadowAndPersistStatus(stateDir, persistedState)
+      .catch(() => observeShadowFailure(stateDir));
   } finally {
     db.close();
   }

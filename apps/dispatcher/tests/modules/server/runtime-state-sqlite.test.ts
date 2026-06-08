@@ -160,6 +160,17 @@ async function waitForAsyncShadowWrite(): Promise<void> {
   }
 }
 
+async function waitForShadowFailureEvent(stateDir: string): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 2_000) {
+    const state = loadRuntimeState(stateDir);
+    if (state.events.some((event) => event.type === "shadow_write_failed")) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 function readSnapshotState(stateDir: string): {
   journalMode: string;
   count: number;
@@ -251,6 +262,23 @@ describe("runtime-state-sqlite", () => {
       status: "failed",
       configured: true,
       lastError: status.lastError,
+    });
+
+    await waitForShadowFailureEvent(stateDir);
+    const reloaded = loadRuntimeState(stateDir);
+    const event = reloaded.events.find((candidate) => candidate.type === "shadow_write_failed");
+    expect(event).toMatchObject({
+      taskId: "system",
+      type: "shadow_write_failed",
+      summary: status.lastError,
+      payload: {
+        failureCode: "shadow_write_failed",
+      },
+    });
+    expect(event?.payload).toMatchObject({
+      message: status.lastError,
+      mode: "shadow-write",
+      configured: true,
     });
   });
 

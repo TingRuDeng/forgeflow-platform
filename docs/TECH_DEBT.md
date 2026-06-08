@@ -188,7 +188,7 @@ Desired direction:
 
 - 继续接入 review workflow、artifact retention 和 Console artifact tabs
 
-## 9. Shadow path failures have durable health, but not first-class runtime events
+## 9. Shadow path failures are first-class events, but drift reconciliation is still deferred
 
 Current situation:
 
@@ -197,17 +197,17 @@ Current situation:
 - `runtime-state-shadow.ts:readRuntimeStateShadowWriteStatus` exposes last shadow attempt status through `/api/dr/status`
 - shadow write status is also persisted to `runtime-state-shadow-status.json`
 - backup / restore scripts include `runtime-state-shadow-status.json`
-- shadow errors are still not persisted as first-class `RuntimeState.events[]` audit records
+- shadow write failures now append `shadow_write_failed` system events and feed metrics / SLO
 
 Impact:
 
-- process restart keeps the last shadow health record, but event timelines still do not show shadow failures as runtime events
-- shadow-write rollout still needs external alerting before any primary-store cutover
+- process restart keeps both the last shadow health record and runtime event history
+- shadow-write rollout still needs drift reconciliation and external alerting before any primary-store cutover
 
 Desired direction:
 
-- decide whether shadow sync failures should also become first-class runtime events
 - add an operator-visible shadow drift check before treating shadow write as rollout-ready
+- keep the event / metric / SLO contract stable while shadow remains best-effort
 
 ## 10. Source DR drill covers WAL restore, but not live dispatcher DR
 

@@ -54,6 +54,7 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `cleanupFailureCount`
 - `sessionInterruptionCount`
 - `stateLockTimeoutCount`
+- `shadowWriteFailureCount`
 - `leaseConflictCount`
 - `leaseReclaimCount`
 - `activeLeases`
@@ -76,6 +77,7 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `cleanupFailureCount`: worktree cleanup 失败数
 - `sessionInterruptionCount`: 会话中断信号数
 - `stateLockTimeoutCount`: dispatcher 状态锁竞争超时数
+- `shadowWriteFailureCount`: Postgres / queue shadow 写失败次数，对应 `shadow_write_failed` runtime event
 - `leaseConflictCount`: assignment ownership 争用次数
 - `leaseReclaimCount`: reconcile 回收过期 assignment lease 的次数
 - `activeLeases`: 当前活跃 assignment lease 总数和按资源类型聚合

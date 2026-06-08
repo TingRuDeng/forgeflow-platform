@@ -18,7 +18,8 @@ const mockMetrics = {
   submitResultRetryCount: 2,
   retryRatePct: 16.7,
   deliveryFailedCount: 3,
-  cleanupFailureCount: 1
+  cleanupFailureCount: 1,
+  shadowWriteFailureCount: 2
 };
 
 const renderWithProviders = (ui: React.ReactElement) => {
@@ -47,7 +48,7 @@ describe('MetricsGrid', () => {
     expect(screen.getByText((_, node) => node?.textContent === '12 / 5')).toBeInTheDocument();
     expect(screen.getByText(/待依赖: 4/i)).toBeInTheDocument();
     expect(screen.getByText((_, node) => node?.textContent === '16.7%')).toBeInTheDocument();
-    expect(screen.getByText(/交付失败: 3 · 清理失败: 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/交付失败: 3 · 清理失败: 1 · shadow 失败: 2/i)).toBeInTheDocument();
   });
 
   it('should render localized labels (default to zh)', () => {

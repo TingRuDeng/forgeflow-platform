@@ -138,6 +138,7 @@ node scripts/verify-stage3-dr.mjs
 - `DISPATCHER_SLO_MAX_ASSIGNMENT_LAG_MS`
 - `DISPATCHER_SLO_MAX_DELIVERY_FAILED`
 - `DISPATCHER_SLO_MAX_LEASE_CONFLICTS`
+- `DISPATCHER_SLO_MAX_SHADOW_WRITE_FAILED`
 
 当前 `/api/slo` 会输出：
 
@@ -153,6 +154,7 @@ node scripts/verify-stage3-dr.mjs
 - `assignment_lag`
 - `delivery_failed`
 - `lease_conflict`
+- `shadow_write_failed`
 
 ## 7. 参考部署
 
