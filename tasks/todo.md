@@ -1,5 +1,9 @@
 # 当前项目审查修复任务
 
+- [x] M5 串行：手动发布 post-publish git record 失败时自动创建恢复 issue。
+- [x] M5 串行：补充 workflow 测试和 release 文档。
+- [x] M5 串行：运行验证、Review Gate 并提交本地变更。
+
 - [x] M4 串行：新增 shadow drift operator check，比较 SQLite truth source 与 shadow projection / queue counts。
 - [x] M4 串行：补充 drift summary 单测和 CLI 脚本测试。
 - [x] M4 串行：同步 runbook、API / DB 文档和技术债边界。

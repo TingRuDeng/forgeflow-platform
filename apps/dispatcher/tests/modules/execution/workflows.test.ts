@@ -23,12 +23,15 @@ describe("workflow quality gates", () => {
     const workflow = readWorkflow("release.yml");
 
     expect(workflow).toMatch(/contents:\s+write/);
+    expect(workflow).toMatch(/issues:\s+write/);
     expect(workflow).toContain("id: publish");
     expect(workflow).toContain("release-package-json-before-publish");
     expect(workflow).toContain("git commit");
     expect(workflow).toContain("git tag");
     expect(workflow).toContain("git push");
-    expect(workflow).toContain("Manual release recovery required");
+    expect(workflow).toContain("手动发布需要恢复");
+    expect(workflow).toContain("创建发布后 git 恢复 issue");
+    expect(workflow).toContain("gh issue create");
     expect(workflow.indexOf("npm publish")).toBeLessThan(workflow.indexOf("git push"));
   });
 });

@@ -50,4 +50,4 @@
 
 已将手动发布路径调整为先完成 `npm publish`，再提交 `package.json` 版本变更、创建 release tag 并推送，避免 npm 发布失败时 git 历史提前记录未发布版本。发布前会保存 bump 后的 `package.json`，publish 成功后恢复该文件再提交，避免 `prepublishOnly` 的临时依赖改写被误提交。
 
-剩余风险：如果 `npm publish` 已成功但后续 git commit/tag/push 失败，npm 会短暂领先 git；workflow 会在 Actions summary 中输出 `Manual release recovery required` 和人工恢复步骤。
+剩余风险：如果 `npm publish` 已成功但后续 git commit/tag/push 失败，npm 会短暂领先 git；workflow 会在 Actions summary 中输出 `手动发布需要恢复` 和人工恢复步骤。

@@ -230,20 +230,21 @@ Desired direction:
 - keep the source DR script as the fast gate and run the live drill before risky runtime releases
 - add an explicit crash-consistency drill if production RTO / RPO requirements tighten
 
-## 11. Manual release still needs post-publish git record recovery
+## 11. Manual release recovery is tracked, but still manual
 
 Current situation:
 
 - `.github/workflows/release.yml` manual path publishes to npm before committing the release version and tag
 - if `npm publish` fails, git history no longer advances ahead of npm
 - if `npm publish` succeeds but the later commit / tag / push step fails, npm can contain a version that still needs a matching git record
+- the workflow writes an Actions summary and opens a recovery issue when that post-publish git record step fails
 
 Impact:
 
-- operators may need to reconcile a published npm version with a missing release commit/tag
+- operators still need to reconcile a published npm version with a missing release commit/tag
 - retry or manual git record repair must be explicit to avoid confusing maintainers
 
 Desired direction:
 
 - keep the release runbook recovery path current
-- consider a two-phase release marker or automatic GitHub issue if post-publish git record failures become common
+- consider an automated repair workflow only if post-publish git record failures become common
