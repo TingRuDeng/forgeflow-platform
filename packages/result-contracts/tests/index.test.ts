@@ -388,6 +388,30 @@ describe("ArtifactBundleSchema", () => {
     expect(bundle.nextActions).toEqual([]);
   });
 
+  it("parses retained diff log and test result content", () => {
+    const bundle = ArtifactBundleSchema.parse({
+      taskId: "task-1",
+      attemptId: "attempt-1",
+      schemaVersion: "artifact-bundle/v1",
+      changedFiles: [],
+      refs: {
+        diff: "artifact://attempt-1/diff.patch",
+        logs: "artifact://attempt-1/session.log",
+      },
+      retainedContent: {
+        diff: "diff --git a/src/index.ts b/src/index.ts",
+        logs: "pnpm test passed",
+        testResults: "58 tests passed",
+      },
+    });
+
+    expect(bundle.retainedContent).toEqual({
+      diff: "diff --git a/src/index.ts b/src/index.ts",
+      logs: "pnpm test passed",
+      testResults: "58 tests passed",
+    });
+  });
+
   it("rejects artifact bundles without attempt ownership", () => {
     expect(() => ArtifactBundleSchema.parse({
       taskId: "task-1",

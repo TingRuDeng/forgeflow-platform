@@ -49,13 +49,22 @@ async function readJsonBody(req) {
         });
     });
 }
+function readOptionalString(value) {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+}
 export async function handleTraeAutomationHttpRequest(input, options = {}) {
     const automationDriver = options.automationDriver || createTraeAutomationDriver(options.automationOptions || {});
     const sessionStore = options.sessionStore || null;
+    const debugLog = options.debugLog || (() => { });
     const method = String(input.method || "GET").toUpperCase();
     const pathname = input.pathname || "/";
     const query = input.query || {};
     const body = input.body ?? {};
+    debugLog("request.received", { method, pathname });
     if (method === "GET" && pathname === "/ready") {
         const readiness = await automationDriver.getReadiness({
             discovery: parseDiscoveryFromQuery(query) || undefined,
@@ -159,8 +168,16 @@ export async function handleTraeAutomationHttpRequest(input, options = {}) {
         if (!content) {
             throw new ApiError("INVALID_REQUEST", "content is required", 400);
         }
-        const sessionId = bodyObj.sessionId || null;
+        const sessionId = readOptionalString(bodyObj.sessionId);
         let session = null;
+        debugLog("chat.start", {
+            sessionId,
+            contentLength: content.length,
+            contentPreview: content.slice(0, 120),
+            chatMode: readOptionalString(bodyObj.chatMode),
+            responseRequiredPrefix: readOptionalString(bodyObj.responseRequiredPrefix),
+            responseTimeoutMs: typeof bodyObj.responseTimeoutMs === "number" ? bodyObj.responseTimeoutMs : null,
+        });
         if (sessionStore && sessionId) {
             session = sessionStore.getInternal(sessionId);
             if (session && session.status === "completed" && session.responseText) {
@@ -190,8 +207,11 @@ export async function handleTraeAutomationHttpRequest(input, options = {}) {
         try {
             const result = await automationDriver.sendPrompt({
                 content,
+                sessionId,
+                expectedTaskId: readOptionalString(bodyObj.expectedTaskId),
                 prepare: bodyObj.prepare !== false,
                 discovery: bodyObj.discovery || null,
+                chatMode: readOptionalString(bodyObj.chatMode),
                 responseRequiredPrefix: bodyObj.responseRequiredPrefix || undefined,
                 responseTimeoutMs: bodyObj.responseTimeoutMs || undefined,
                 onProgress: sessionStore && sessionId ? (details) => {
@@ -203,6 +223,11 @@ export async function handleTraeAutomationHttpRequest(input, options = {}) {
                     responseText: result?.response?.text || "",
                 });
             }
+            debugLog("chat.done", {
+                sessionId,
+                hasResponseText: Boolean(result?.response?.text),
+                responseLength: String(result?.response?.text || "").length,
+            });
             return {
                 status: 200,
                 json: {
@@ -213,6 +238,11 @@ export async function handleTraeAutomationHttpRequest(input, options = {}) {
             };
         }
         catch (error) {
+            debugLog("chat.error", {
+                sessionId,
+                message: error instanceof Error ? error.message : String(error),
+                timeout: isTimeoutError(error),
+            });
             if (sessionStore && sessionId && !isTimeoutError(error)) {
                 sessionStore.markFailed(sessionId, error?.message || "Unknown error");
             }

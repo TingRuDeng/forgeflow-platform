@@ -14,7 +14,7 @@ Only code-backed or implementation-backed pitfalls belong here.
 
 - 这里不写泛化最佳实践，只写本仓库当前仍会误导开发或运维的事实。
 - `scripts/lib/*` bridge、Trae 双 gateway、worktree、review memory、release 和 Stage 3 边界都容易被误读。
-- 近期审查确认 read-only、非 assignment lease、shadow failure 和源码 DR 脚本仍有实现边界。
+- 近期审查确认 read-only、repo / branch / session lease、shadow failure 和源码 DR 脚本仍有实现边界。
 - 新坑点必须附带代码、测试、配置或可复现命令证据。
 
 ```yaml
@@ -199,19 +199,21 @@ When debugging suspected delivery problems, check both:
 - dispatcher `/api/metrics` and recent events
 - worker-side logs / failed artifacts under `.worktrees/failed/`
 
-## 14. Read-only mode is not yet a hard write freeze
+## 14. Read-only mode freezes dispatcher HTTP API writes only
 
 `DISPATCHER_READ_ONLY_MODE=1` is enforced by `apps/dispatcher/src/modules/server/dispatcher-server.ts:isMutationRequest`.
 
-Current matcher coverage is not the same thing as “every state-changing route”. In particular, route patterns such as worker claim/start/result and review decisions must be checked against the actual matcher before relying on read-only mode for DR freeze.
+Current matcher behavior defaults to rejecting `POST` / `PUT` / `PATCH` / `DELETE` under `/api/`, so known dispatcher HTTP mutation routes such as worker claim/start/result, review decisions, task cancellation and future `/api` write routes are covered by the freeze.
 
-Do not describe read-only mode as a complete write barrier until the matcher and tests cover every mutation path.
+Do not describe read-only mode as an infrastructure-wide write barrier: direct runtime-state file edits, external database writes or writes that bypass dispatcher HTTP are outside this switch and must be controlled by the operator workflow.
 
-## 15. 尚未实现 repo / branch / session lease ownership
+## 15. Repo / branch / session lease 只覆盖 dispatcher task claim 生命周期
 
-`apps/dispatcher/src/modules/server/leases.ts` 当前只定义 `assignment`。
+`apps/dispatcher/src/modules/server/leases.ts` 当前定义 `assignment`、`repo`、`branch` 和 `session`。
 
-`apps/dispatcher/src/modules/server/runtime-state.ts` 当前通过 `acquireAssignmentLease()` 和 `releaseAssignmentLease()` 强约束 assignment 获取和释放。
+`apps/dispatcher/src/modules/server/runtime-state.ts` 当前通过 `acquireTaskResourceLeases()` 和 `releaseTaskResourceLeases()` 在 task 被 worker claim、start、result、cancel、review decision 或 worker offline 时获取和释放资源。
+
+不要把它描述成全局 Git 仓库互斥锁：它约束 dispatcher 管理的 task 生命周期，不覆盖 dispatcher 外部脚本直接操作同一 repo、branch 或 Trae session 的情况。
 
 不要因为其他位置存在 worktree 检查、Trae session 和 repo concurrency 指标，就假定 repo、branch 或 session ownership 已经是硬并发保护。
 

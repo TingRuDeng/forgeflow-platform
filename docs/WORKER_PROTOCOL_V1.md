@@ -104,12 +104,12 @@ POST /api/tasks/:taskId/attempts/:attemptId/result
 
 当前兼容路径：
 
-- `/api/workers/:workerId/start-task` 和 `/api/workers/:workerId/result` 接受可选 `attemptId` / `leaseToken`。
-- 通用 worker start/result 如果额外携带 `protocolVersion`、`traceId` 或 `idempotencyKey`，dispatcher 会要求完整 v1 envelope，并对照当前 active attempt 校验 worker、attemptId、leaseToken、protocolVersion、traceId 和 idempotencyKey。
+- `/api/workers/:workerId/start-task` 和 `/api/workers/:workerId/result` 在 claim 已创建 active attempt 后必须携带完整 v1 envelope。
+- 通用 worker start/result 会对照当前 active attempt 校验 worker、attemptId、leaseToken、protocolVersion、traceId 和 idempotencyKey。
 - `/api/trae/fetch-task` 会返回 `attempt_id`、`lease_token`、`protocol_version`、`trace_id` 和 `idempotency_key`，Trae runtime 会在 `/api/trae/start-task` 和 `/api/trae/submit-result` 回写时携带它们。
-- 当 Trae 写入声明 v1 envelope 时，dispatcher 会对照当前 active attempt 校验 worker、attemptId、leaseToken、protocolVersion、traceId 和 idempotencyKey。
+- Trae start/result 会对照当前 active attempt 校验 worker、attemptId、leaseToken、protocolVersion、traceId 和 idempotencyKey。
 - 如果 worker 携带的 `attemptId` 已进入 `expired` / `failed` / `succeeded` / `cancelled` / `superseded` 等终态，dispatcher 会拒绝这次 stale 写入。
-- v0 worker 不传 envelope 时仍按既有路径执行，后续批次再决定是否强制所有 worker route 升级到完整 v1 envelope。
+- 无 active attempt 的历史迁移路径仍保留兼容行为；新 worker mutation 不应依赖空 envelope。
 
 ## 错误语义
 

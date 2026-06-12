@@ -45,23 +45,21 @@ ai_summary:
 
 已实现：
 
-- v0 worker claim 会为当前 task 创建 synthetic attempt。
-- v0 start 会把 active attempt 标记为 `running`。
-- v0 result 会把 active attempt 标记为 `succeeded` 或 `failed`。
+- worker claim 会为当前 task 创建 synthetic attempt。
+- claim-backed start 必须携带完整 v1 envelope，并会把 active attempt 标记为 `running`。
+- claim-backed result 必须携带完整 v1 envelope，并会把 active attempt 标记为 `succeeded` 或 `failed`。
 - task cancel 会把 active attempt 标记为 `cancelled`。
 - reconcile 会把离线 worker 的过期 running attempt 标记为 `expired`，并按最小 retry policy redrive 或失败。
 - late result 携带历史终态 `attemptId` 时会被拒绝，不允许覆盖新 attempt 或 task 状态。
 - `taskAttempts[]` 会随 runtime snapshot 一起保存。
 - SQLite structured projection 会写入并读取 `task_attempts`。
-- worker start/result 写入如果携带 `attemptId` 或 `leaseToken`，dispatcher 会校验它们必须匹配当前 active attempt。
-- 通用 worker start/result 写入如果声明 v1 envelope，dispatcher 会校验 `protocolVersion`、`traceId` 和 `idempotencyKey` 必须匹配当前 active attempt。
+- worker start/result 写入在存在 active attempt 时必须携带完整 v1 envelope；dispatcher 会校验 `attemptId`、`leaseToken`、`protocolVersion`、`traceId` 和 `idempotencyKey` 必须匹配当前 active attempt。
 - Trae `fetch-task` 会创建或复用 active attempt，并把 `attempt_id` / `lease_token` / `protocol_version` / `trace_id` / `idempotency_key` 返回给 runtime；Trae runtime 在 start/result 回写时会继续携带这些字段。
-- Trae start/result 写入声明 v1 envelope 时，dispatcher 会拒绝 traceId 或 idempotencyKey 与当前 active attempt 不一致的请求。
+- reconcile 支持 `maxTaskAttempts` retry policy；未配置时默认最多 2 次 attempt。
 
 尚未实现：
 
-- 空 envelope v0 worker mutation 的强制升级；当前通用 worker 与 Trae 主链在声明 v1 envelope 时都会校验 active attempt。
-- 可配置 retry policy；当前只实现默认最多 2 次 attempt 的最小策略。
+- 无 active attempt 的历史迁移/夹具路径仍保留兼容行为，不能当作新 worker 主链。
 
 ## Task 与 Attempt
 
@@ -101,9 +99,8 @@ v1 状态集合：
 
 ## 兼容迁移
 
-vNext alpha 允许 v0 worker 继续工作：
+当前兼容迁移：
 
-- dispatcher 为 v0 claim 自动生成 attemptId 和 leaseToken。
-- v0 result 自动绑定当前 active attempt。
-- CLI doctor 给出 v0 warning。
-- vNext stable 之后再考虑移除 v0 mutation。
+- dispatcher 为 claim 自动生成 attemptId、leaseToken、protocolVersion、traceId 和 idempotencyKey。
+- claim-backed start/result 缺少任一 envelope 字段都会被拒绝。
+- 无 active attempt 的历史迁移路径仍允许旧数据完成收口；新 worker 不应依赖该路径。

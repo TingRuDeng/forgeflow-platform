@@ -48,10 +48,17 @@
   - `leaseReclaimCount`
   - `activeLeases`
 
+当前语义：
+
+- `assignment` lease 以 task id 为资源 ID，约束单个 task 的 worker 占用。
+- `repo` lease 以 task repo 为资源 ID，约束同一 repo 下 dispatcher task 的并发占用。
+- `branch` lease 以 `repo:branchName` 为资源 ID，约束同一仓库分支的并发占用。
+- `session` lease 以 `repo:continueFromTaskId|followUpOfTaskId` 为资源 ID，仅在 continuation 或 follow-up 任务存在会话锚点时创建。
+
 当前边界：
 
-- `session` / `repo` / `branch` 当前不是有效 lease resource type。
-- 不要把 `repoConcurrencySaturation`、Trae session store 或 worktree branch 检查看成 repo / branch / session lease 强约束。
+- lease 只覆盖 dispatcher 管理的 task claim 生命周期；dispatcher 外部直接操作 repo、branch、Trae session store 或运行时文件不受该契约保护。
+- `repoConcurrencySaturation` 仍是指标视图，不替代 lease ownership。
 
 ## 3. SQLite Structured Projection
 
@@ -127,8 +134,8 @@
 
 当前边界：
 
-- read-only 不是独立路由注册系统，而是依赖手写 matcher；matcher 漏掉的 state-changing 路由不会自动获得保护。
-- 在 matcher 和测试补齐前，运行手册不得把该开关描述为完整写冻结。
+- read-only 不是独立路由注册系统，而是通过 `dispatcher-server.ts:isMutationRequest` 默认冻结 `/api/` 下的 `POST` / `PUT` / `PATCH` / `DELETE` 写方法；当前 dispatcher HTTP mutation 路由已纳入保护。
+- 该开关只约束 dispatcher HTTP API 写入；直接修改 runtime state 文件、外部数据库或绕过 dispatcher HTTP 的写入不在本契约保护范围内。
 
 ## 6. Shadow Modes
 

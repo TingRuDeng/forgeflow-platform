@@ -1,5 +1,22 @@
 # 当前项目审查修复任务
 
+- [x] M8 串行：收尾 PR #112 后的本地分支和远端分支状态。
+- [x] M8 串行：同步 read-only `/api` 写方法冻结的文档事实。
+- [x] M8 串行：对齐 Trae automation gateway 双实现差异并补共享测试。
+- [x] M8 串行：推进 repo / branch / session lease 强约束。
+- [x] M8 串行：推进 v1 worker protocol 强制化和可配置 retry policy。
+- [x] M8 串行：推进 ArtifactBundle retention 与 review workflow / Console artifact tabs。
+- [x] M8 串行：把 shadow drift 巡检接入 release / rollout gate。
+- [x] M8 串行：增强生产级 DR 演练覆盖。
+
+## M8 Review 小结
+
+已完成平台硬化 8 项：收尾旧 Trae 分支并建立新迭代分支；同步 read-only 文档事实；对齐 scripts/lib Trae gateway 的 metadata/debugLog/session 解析；把 task claim lease 扩展到 assignment / repo / branch / session；对 claim-backed start/result 强制完整 v1 envelope，并支持 `maxTaskAttempts` retry policy；ArtifactBundle 支持受限 retainedContent 并在 Console 提供摘要 / 引用 / 正文 tabs；`verify:stage3` 与 release workflow 接入 shadow drift gate；live DR drill 增加 SIGKILL crash/restart 恢复验证。
+
+验证已通过：result-contracts、Console Lists、Trae gateway/session-store、runtime-state、runtime-state-sqlite、dispatcher-server、shadow-drift/workflows/stage3-live-dr、`pnpm test`、`pnpm verify:stage3`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:validate`、`git diff --check`。
+
+剩余风险：read-only 仍只覆盖 dispatcher HTTP API 写方法；repo / branch / session lease 约束 dispatcher task 生命周期，不覆盖 dispatcher 外部直接操作；ArtifactBundle 仍没有完整 artifact store 与清理策略；shadow drift gate 不等于自动 reconciliation；DR drill 已覆盖 SIGKILL restart，但仍不是物理断电、磁盘损坏或多节点仲裁恢复演练。
+
 - [x] M7 串行：对齐 scripts/lib Trae gateway 默认 session-store 路径到发布包路径。
 - [x] M7 串行：补充路径契约测试并同步文档。
 - [x] M7 串行：运行验证、Review Gate 并提交本地变更。

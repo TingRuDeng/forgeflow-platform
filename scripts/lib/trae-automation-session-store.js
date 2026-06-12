@@ -13,6 +13,38 @@ export const SessionStatus = {
     FAILED: "failed",
     INTERRUPTED: "interrupted",
 };
+function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function parseSessionStatus(value) {
+    return Object.values(SessionStatus).includes(value)
+        ? value
+        : SessionStatus.PREPARED;
+}
+function isTerminalStatus(status) {
+    return (status === SessionStatus.COMPLETED ||
+        status === SessionStatus.FAILED ||
+        status === SessionStatus.INTERRUPTED);
+}
+function parseSessionRecord(sessionId, value) {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const rawTarget = value.target;
+    return {
+        sessionId: typeof value.sessionId === "string" && value.sessionId.trim() ? value.sessionId : sessionId,
+        status: parseSessionStatus(value.status),
+        startedAt: typeof value.startedAt === "string" ? value.startedAt : "",
+        lastActivityAt: typeof value.lastActivityAt === "string" ? value.lastActivityAt : "",
+        updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : "",
+        responseDetected: value.responseDetected === true,
+        error: typeof value.error === "string" ? value.error : null,
+        responseText: typeof value.responseText === "string" ? value.responseText : null,
+        requestFingerprint: typeof value.requestFingerprint === "string" ? value.requestFingerprint : null,
+        target: isRecord(rawTarget) ? rawTarget : null,
+        completedAt: typeof value.completedAt === "string" ? value.completedAt : null,
+    };
+}
 export function createSessionStore(stateDir, options = {}) {
     const now = options.now || (() => formatLocalTimestamp());
     const randomUUID = options.randomUUID || crypto.randomUUID;
@@ -31,19 +63,25 @@ export function createSessionStore(stateDir, options = {}) {
         }
         try {
             const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
-            sessions = new Map(Object.entries(data.sessions || {}));
-            const nowTs = Date.parse(now());
-            for (const [id, session] of sessions) {
-                if (session.status === SessionStatus.PREPARED ||
-                    session.status === SessionStatus.RUNNING) {
-                    sessions.set(id, {
+            const rawSessions = isRecord(data.sessions) ? data.sessions : {};
+            const nextSessions = new Map();
+            for (const [id, rawSession] of Object.entries(rawSessions)) {
+                const session = parseSessionRecord(id, rawSession);
+                if (!session) {
+                    continue;
+                }
+                if (!isTerminalStatus(session.status)) {
+                    nextSessions.set(id, {
                         ...session,
                         status: SessionStatus.INTERRUPTED,
                         error: "Gateway restarted during execution",
                         updatedAt: now(),
                     });
+                    continue;
                 }
+                nextSessions.set(id, session);
             }
+            sessions = nextSessions;
             loaded = true;
             return sessions;
         }

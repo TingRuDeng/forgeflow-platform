@@ -718,6 +718,58 @@ describe("trae automation gateway", () => {
     expect(internalSession?.responseText).toBe("Final reply");
   });
 
+  it("passes session metadata and emits debug events during POST /v1/chat", async () => {
+    const mod = await import(gatewayModulePath);
+    const sessionStoreModule = await import(
+      path.join(repoRoot, "scripts/lib/trae-automation-session-store.js")
+    );
+
+    const sessionStore = sessionStoreModule.createSessionStore(null);
+    sessionStore.create({ sessionId: "debug-session" });
+    const debugLog = vi.fn();
+    const automationDriver = {
+      sendPrompt: vi.fn(async () => ({
+        status: "ok",
+        response: { text: "Final reply" },
+      })),
+    };
+
+    const result = await mod.handleTraeAutomationHttpRequest(
+      {
+        method: "POST",
+        pathname: "/v1/chat",
+        body: {
+          content: "Summarize the repository",
+          sessionId: "debug-session",
+          expectedTaskId: "dispatch-151:redrive-b5240295",
+          chatMode: "new_chat",
+          responseRequiredPrefix: "任务完成",
+          responseTimeoutMs: 30000,
+        },
+      },
+      { automationDriver, sessionStore, debugLog }
+    );
+
+    expect(result.status).toBe(200);
+    expect(automationDriver.sendPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "debug-session",
+      expectedTaskId: "dispatch-151:redrive-b5240295",
+      chatMode: "new_chat",
+    }));
+    expect(debugLog).toHaveBeenCalledWith("request.received", expect.objectContaining({
+      method: "POST",
+      pathname: "/v1/chat",
+    }));
+    expect(debugLog).toHaveBeenCalledWith("chat.start", expect.objectContaining({
+      sessionId: "debug-session",
+      responseRequiredPrefix: "任务完成",
+    }));
+    expect(debugLog).toHaveBeenCalledWith("chat.done", expect.objectContaining({
+      sessionId: "debug-session",
+      hasResponseText: true,
+    }));
+  });
+
   it("returns cached response for completed session", async () => {
     const mod = await import(gatewayModulePath);
     const sessionStoreModule = await import(

@@ -14,7 +14,7 @@ describe("stage3 live dispatcher DR verification", () => {
     const result = spawnSync("node", [verifyLiveDispatcherDrScriptPath], {
       cwd: repoRoot,
       encoding: "utf8",
-      timeout: 30_000,
+      timeout: 60_000,
     });
 
     expect(result.status, result.stderr).toBe(0);
@@ -28,5 +28,10 @@ describe("stage3 live dispatcher DR verification", () => {
     expect(payload.snapshotCount).toBeGreaterThan(1);
     expect(payload.restoredTaskCount).toBeGreaterThan(0);
     expect(payload.restoredEventCount).toBeGreaterThan(0);
-  }, 30_000);
+    expect(payload.crashRestart.crashProcessSignal).toBe("SIGKILL");
+    expect(payload.crashRestart.restoredDispatcherRestarted).toBe(true);
+    expect(payload.crashRestart.recoveredIntegrityCheck).toBe("ok");
+    expect(payload.crashRestart.recoveredTaskCount).toBeGreaterThan(0);
+    expect(payload.crashRestart.recoveredEventCount).toBeGreaterThan(0);
+  }, 60_000);
 });

@@ -334,6 +334,10 @@ describe("runtime-state-sqlite", () => {
           commit: "abc123",
           changedFiles: [{ path: "src/index.ts", changeType: "modified" as const }],
           refs: { structuredReport: "artifact://attempt/result.json" },
+          retainedContent: {
+            diff: "diff --git a/src/index.ts b/src/index.ts",
+            logs: "pnpm test passed",
+          },
           riskNotes: [],
           nextActions: [],
           createdAt: "2026-04-01T10:02:00.000Z",
@@ -349,6 +353,10 @@ describe("runtime-state-sqlite", () => {
       bundleId: "bundle-1",
       taskId: "dispatch-1:task-1",
       attemptId: "dispatch-1:task-1:attempt-1",
+      retainedContent: {
+        diff: "diff --git a/src/index.ts b/src/index.ts",
+        logs: "pnpm test passed",
+      },
     });
 
     const projection = sqliteStore.compareStructuredProjection(stateDir);

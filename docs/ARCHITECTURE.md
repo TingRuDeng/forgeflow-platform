@@ -184,10 +184,11 @@ Current review states verified in code:
 Current stage-3 ownership additions:
 
 - runtime state now includes `leases[]`
-- 当前活跃 lease resource type 只有 `assignment`
+- 当前活跃 lease resource type 包含 `assignment`、`repo`、`branch`、`session`
+- task 被 worker claim 后会同时获取 assignment / repo / branch lease；continuation 或 follow-up 任务还会获取 session lease，释放任务时同步释放这些资源
 - reconcile may reclaim expired leases and emit audit events
 - read paths can prefer structured projection when `DISPATCHER_STRUCTURED_READS=1`
-- write paths can be partially blocked by `DISPATCHER_READ_ONLY_MODE=1`; current coverage depends on `dispatcher-server.ts:isMutationRequest`, so it is not documented here as a complete write freeze
+- write paths can be blocked by `DISPATCHER_READ_ONLY_MODE=1` for dispatcher HTTP `/api` mutation methods; direct file or external database writes remain operator-controlled
 - SQLite writes may best-effort shadow to Postgres / queue, but those external stores are not the primary authority yet
 
 The control layer should not rewrite state arbitrarily. It should go through the dispatcher review flow.

@@ -190,6 +190,14 @@ describe('Task drill-down', () => {
             bundleId: 'att-001:artifact-bundle',
             summary: '修改鉴权守卫并补充失败测试',
             changedFiles: [{ path: 'src/auth.ts', changeType: 'modified' }],
+            refs: {
+              diff: 'artifact://att-001/diff.patch',
+              logs: 'artifact://att-001/session.log',
+            },
+            retainedContent: {
+              diff: 'diff --git a/src/auth.ts b/src/auth.ts',
+              logs: 'pnpm test passed',
+            },
             riskNotes: ['需要人工复核权限边界'],
             nextActions: ['合并后观察登录链路'],
           },
@@ -209,6 +217,13 @@ describe('Task drill-down', () => {
     expect(screen.getByText(/src\/auth.ts/i)).toBeInTheDocument();
     expect(screen.getByText(/需要人工复核权限边界/i)).toBeInTheDocument();
     expect(screen.getByText(/合并后观察登录链路/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /refs|引用/i }));
+    expect(screen.getByText(/artifact:\/\/att-001\/diff.patch/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /retained|正文/i }));
+    expect(screen.getByText(/diff --git a\/src\/auth.ts b\/src\/auth.ts/i)).toBeInTheDocument();
+    expect(screen.getByText(/pnpm test passed/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /作废任务|cancel task/i }));
 

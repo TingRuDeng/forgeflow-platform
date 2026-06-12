@@ -12,7 +12,7 @@
 
 - ArtifactBundle 绑定 `taskId` 和 `attemptId`。
 - 最小 bundle 包含 `schemaVersion`、`changedFiles` 和 `refs`。
-- 大对象不直接塞进 runtime-state，优先存引用。
+- 大对象不直接塞进 runtime-state，优先存引用；review 需要的短 diff / log / test 摘要可通过 `retainedContent` 保留正文片段。
 - 当前 `packages/result-contracts` 已提供可执行 schema，dispatcher 会保存 result 产出的 bundle，并把 bundleId 绑定到 active attempt。
 
 ```yaml
@@ -67,22 +67,24 @@ ai_summary:
 - `branch` / `commit` / `pullRequestUrl`：代码交付定位。
 - `changedFiles`：用于 review 和风险提示的变更摘要。
 - `refs`：指向 diff、logs、tests、screenshots、terminal transcript 或 structured report。
+- `retainedContent`：可选的短正文片段，目前支持 `diff`、`logs`、`testResults`，用于 Console / review 快速查看。
 - `testResults`：结构化测试结果摘要。
 - `riskNotes`：worker 主动提示的风险。
 - `nextActions`：建议的后续动作。
 
 ## 存储策略
 
-runtime-state 只应保存 bundle 摘要和引用。diff、日志、截图、完整测试输出这类大对象应放在 artifact store 或本地 artifact 目录，并通过 `refs` 引用。
+runtime-state 只应保存 bundle 摘要、引用和受限正文片段。大型 diff、完整日志、截图、完整测试输出这类大对象应放在 artifact store 或本地 artifact 目录，并通过 `refs` 引用。
 
 当前实现：
 
-- `RuntimeState.artifactBundles[]` 保存 bundle 摘要和 refs。
-- SQLite structured projection 使用 `artifact_bundles` 表承载查询投影。
+- `RuntimeState.artifactBundles[]` 保存 bundle 摘要、refs 和可选 `retainedContent`。
+- SQLite structured projection 使用 `artifact_bundles` 表承载查询投影，并保存 `retained_content_json`。
 - `TaskAttempt.artifactBundleId` 指向当前 attempt 的 bundle。
 - `/api/artifacts/:bundleId` 可按 bundleId 获取单个 bundle。
 - CLI 使用 `forgeflow-review-orchestrator artifact-get --bundle-id <id>` 获取 bundle。
 - Trae runtime 在拿到 `attempt_id` 后会随 submitResult 提交 minimal bundle。
+- Console 任务详情提供摘要、引用和正文 tabs；正文 tab 展示 `retainedContent` 中的 diff / logs / testResults。
 
 ## Review 展示
 
@@ -94,3 +96,4 @@ Review UI 和 CLI inspect 应优先展示：
 4. testResults。
 5. riskNotes。
 6. refs 中的 diff 和 logs。
+7. retainedContent 中的短正文片段。

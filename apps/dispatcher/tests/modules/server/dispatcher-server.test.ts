@@ -1059,6 +1059,9 @@ describe("dispatcher server", () => {
       body: {
         taskId,
         attemptId: attempt.attemptId,
+        protocolVersion: attempt.protocolVersion,
+        traceId: attempt.traceId,
+        idempotencyKey: attempt.idempotencyKey,
         leaseToken: "stale-token",
       },
     });
@@ -1073,6 +1076,9 @@ describe("dispatcher server", () => {
         taskId,
         attemptId: attempt.attemptId,
         leaseToken: attempt.leaseToken,
+        protocolVersion: attempt.protocolVersion,
+        traceId: attempt.traceId,
+        idempotencyKey: attempt.idempotencyKey,
       },
     });
 
@@ -1081,6 +1087,9 @@ describe("dispatcher server", () => {
       method: "POST",
       pathname: "/api/workers/codex-lease-http/result",
       body: {
+        protocolVersion: attempt.protocolVersion,
+        traceId: attempt.traceId,
+        idempotencyKey: attempt.idempotencyKey,
         attemptId: "stale-attempt",
         leaseToken: attempt.leaseToken,
         result: {
@@ -1291,15 +1300,22 @@ describe("dispatcher server", () => {
       pathname: "/api/workers/codex-stale-result-http/claim-task",
       body: { at: "2026-05-12T13:00:20.000Z" },
     });
-    await mod.handleDispatcherHttpRequest({
+    const claimedAttempt = stateMod.loadRuntimeState(stateDir).taskAttempts[0];
+    const startResponse = await mod.handleDispatcherHttpRequest({
       stateDir,
       method: "POST",
       pathname: "/api/workers/codex-stale-result-http/start-task",
       body: {
         taskId,
+        attemptId: claimedAttempt.attemptId,
+        leaseToken: claimedAttempt.leaseToken,
+        protocolVersion: claimedAttempt.protocolVersion,
+        traceId: claimedAttempt.traceId,
+        idempotencyKey: claimedAttempt.idempotencyKey,
         at: "2026-05-12T13:00:30.000Z",
       },
     });
+    expect(startResponse.status).toBe(200);
 
     const runningState = stateMod.loadRuntimeState(stateDir);
     const staleAttempt = runningState.taskAttempts[0];
@@ -1315,6 +1331,9 @@ describe("dispatcher server", () => {
       body: {
         attemptId: staleAttempt.attemptId,
         leaseToken: staleAttempt.leaseToken,
+        protocolVersion: staleAttempt.protocolVersion,
+        traceId: staleAttempt.traceId,
+        idempotencyKey: staleAttempt.idempotencyKey,
         result: {
           taskId,
           workerId: "codex-stale-result-http",
@@ -1581,6 +1600,9 @@ describe("dispatcher server", () => {
         task_id: taskId,
         attempt_id: firstFetch.json.task.attempt_id,
         lease_token: "stale-token",
+        protocol_version: firstFetch.json.task.protocol_version,
+        trace_id: firstFetch.json.task.trace_id,
+        idempotency_key: firstFetch.json.task.idempotency_key,
       },
     });
     expect(staleStart.status).toBe(409);
@@ -2066,6 +2088,9 @@ describe("dispatcher server", () => {
         task_id: taskId,
         attempt_id: fetchResponse.json.task.attempt_id,
         lease_token: "stale-token",
+        protocol_version: fetchResponse.json.task.protocol_version,
+        trace_id: fetchResponse.json.task.trace_id,
+        idempotency_key: fetchResponse.json.task.idempotency_key,
         status: "review_ready",
         summary: "Done!",
         test_output: "PASS",
@@ -2217,6 +2242,11 @@ describe("dispatcher server", () => {
       pathname: "/api/trae/submit-result",
       body: {
         task_id: taskId,
+        attempt_id: fetchResponse.json.task.attempt_id,
+        lease_token: fetchResponse.json.task.lease_token,
+        protocol_version: fetchResponse.json.task.protocol_version,
+        trace_id: fetchResponse.json.task.trace_id,
+        idempotency_key: fetchResponse.json.task.idempotency_key,
         status: "failed",
         summary: "Something went wrong",
         branch_name: "ai/trae/task-3",
