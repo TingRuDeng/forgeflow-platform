@@ -1,4 +1,4 @@
-export type LeaseResourceType = "assignment";
+export type LeaseResourceType = "assignment" | "repo" | "branch" | "session";
 
 export interface RuntimeLease {
   id: string;

@@ -64,15 +64,26 @@ export interface HandleTraeAutomationHttpRequestOptions {
   automationDriver?: TraeAutomationDriver;
   sessionStore?: SessionStore | null;
   automationOptions?: Record<string, unknown>;
+  debugLog?: (event: string, details?: Record<string, unknown>) => void;
+}
+
+function readOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 export async function handleTraeAutomationHttpRequest(input: HandleTraeAutomationHttpRequestInput, options: HandleTraeAutomationHttpRequestOptions = {}): Promise<{ status: number; json: unknown }> {
   const automationDriver = options.automationDriver || createTraeAutomationDriver(options.automationOptions || {});
   const sessionStore = options.sessionStore || null;
+  const debugLog = options.debugLog || (() => {});
   const method = String(input.method || "GET").toUpperCase();
   const pathname = input.pathname || "/";
   const query = input.query || {};
   const body = input.body ?? {};
+  debugLog("request.received", { method, pathname });
 
   if (method === "GET" && pathname === "/ready") {
     const readiness = await automationDriver.getReadiness({
@@ -190,8 +201,16 @@ export async function handleTraeAutomationHttpRequest(input: HandleTraeAutomatio
       throw new ApiError("INVALID_REQUEST", "content is required", 400);
     }
 
-    const sessionId = bodyObj.sessionId as string || null;
+    const sessionId = readOptionalString(bodyObj.sessionId);
     let session: Session | null = null;
+    debugLog("chat.start", {
+      sessionId,
+      contentLength: content.length,
+      contentPreview: content.slice(0, 120),
+      chatMode: readOptionalString(bodyObj.chatMode),
+      responseRequiredPrefix: readOptionalString(bodyObj.responseRequiredPrefix),
+      responseTimeoutMs: typeof bodyObj.responseTimeoutMs === "number" ? bodyObj.responseTimeoutMs : null,
+    });
 
     if (sessionStore && sessionId) {
       session = sessionStore.getInternal(sessionId);
@@ -226,8 +245,11 @@ export async function handleTraeAutomationHttpRequest(input: HandleTraeAutomatio
     try {
       const result = await automationDriver.sendPrompt({
         content,
+        sessionId,
+        expectedTaskId: readOptionalString(bodyObj.expectedTaskId),
         prepare: bodyObj.prepare !== false,
         discovery: bodyObj.discovery as Record<string, unknown> || null,
+        chatMode: readOptionalString(bodyObj.chatMode),
         responseRequiredPrefix: bodyObj.responseRequiredPrefix as string || undefined,
         responseTimeoutMs: bodyObj.responseTimeoutMs as number || undefined,
         onProgress: sessionStore && sessionId ? (details) => {
@@ -240,6 +262,11 @@ export async function handleTraeAutomationHttpRequest(input: HandleTraeAutomatio
           responseText: (result?.response as { text?: string })?.text || "",
         });
       }
+      debugLog("chat.done", {
+        sessionId,
+        hasResponseText: Boolean((result?.response as { text?: string })?.text),
+        responseLength: String((result?.response as { text?: string })?.text || "").length,
+      });
 
       return {
         status: 200,
@@ -250,6 +277,11 @@ export async function handleTraeAutomationHttpRequest(input: HandleTraeAutomatio
         },
       };
     } catch (error) {
+      debugLog("chat.error", {
+        sessionId,
+        message: error instanceof Error ? error.message : String(error),
+        timeout: isTimeoutError(error),
+      });
       if (sessionStore && sessionId && !isTimeoutError(error)) {
         sessionStore.markFailed(sessionId, (error as Error)?.message || "Unknown error");
       }

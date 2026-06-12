@@ -103,4 +103,5 @@ node scripts/verify-live-dispatcher-dr.mjs
 - `forgeflow-dispatcher backup --backup-dir ...` / `restore --backup-dir ...` 是打包 runtime CLI 的参数形态，不要混用。
 - `scripts/verify-stage3-dr.mjs` 会创建真实 SQLite `runtime-state.db`，在打开的 WAL 连接上写入多条 snapshot，确认备份包含 `runtime-state.db-wal`，恢复后执行 `PRAGMA integrity_check` 和 snapshot checksum 校验。
 - `scripts/verify-live-dispatcher-dr.mjs` 会启动本地 live dispatcher，通过 HTTP 写入 worker / dispatch / events，在 server 仍运行时备份，然后恢复并校验 SQLite integrity 和关键 runtime state。
-- live drill 仍不是进程崩溃、断电或多节点恢复演练。
+- live drill 还会启动一个子进程 dispatcher，在写入和备份后用 `SIGKILL` 模拟进程崩溃，再把备份恢复到第二个 stateDir 并重新拉起 dispatcher 查询任务和事件。
+- live drill 仍不是物理断电、磁盘损坏或多节点仲裁恢复演练。

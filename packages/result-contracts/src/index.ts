@@ -101,6 +101,11 @@ export const ArtifactBundleSchema = z.object({
     terminalTranscript: z.string().optional(),
     structuredReport: z.string().optional(),
   }),
+  retainedContent: z.object({
+    diff: z.string().optional(),
+    logs: z.string().optional(),
+    testResults: z.string().optional(),
+  }).optional(),
   testResults: z.array(z.object({
     name: z.string().min(1),
     status: z.enum(["passed", "failed", "skipped", "unknown"]),

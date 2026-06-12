@@ -8,6 +8,7 @@ import type {
   Assignment,
   RuntimeState,
   Task,
+  TaskAttempt,
   Worker,
 } from "../../../src/modules/server/runtime-state.js";
 
@@ -36,6 +37,16 @@ function makeTempDir(): string {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-dispatcher-state-ts-"));
   tempRoots.push(tempDir);
   return tempDir;
+}
+
+function workerEnvelope(attempt: TaskAttempt) {
+  return {
+    attemptId: attempt.attemptId,
+    leaseToken: attempt.leaseToken,
+    protocolVersion: attempt.protocolVersion,
+    traceId: attempt.traceId,
+    idempotencyKey: attempt.idempotencyKey,
+  };
 }
 
 afterEach(() => {
@@ -87,6 +98,7 @@ function createRunningAttemptState(taskSlug: string, workerId: string): RuntimeS
   return beginTaskForWorker(claimed.state, {
     taskId: claimed.assignment!.task.id,
     workerId,
+    ...workerEnvelope(claimed.state.taskAttempts[0]!),
     at: "2026-05-12T13:00:30.000Z",
   });
 }
@@ -531,9 +543,11 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
 
     const attemptId = state.taskAttempts[0]!.attemptId;
+    const firstAttempt = state.taskAttempts[0]!;
     state = beginTaskForWorker(state, {
       taskId,
       workerId: "codex-attempt-worker",
+      ...workerEnvelope(firstAttempt),
       at: "2026-05-12T10:00:30.000Z",
     });
 
@@ -545,6 +559,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
 
     state = recordWorkerResult(state, {
       workerId: "codex-attempt-worker",
+      ...workerEnvelope(firstAttempt),
       result: {
         taskId,
         workerId: "codex-attempt-worker",
@@ -622,7 +637,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(() => beginTaskForWorker(state, {
       taskId,
       workerId: "codex-lease-worker",
-      attemptId: attempt.attemptId,
+      ...workerEnvelope(attempt),
       leaseToken: "stale-token",
       at: "2026-05-12T11:00:30.000Z",
     })).toThrow(/lease token mismatch/i);
@@ -630,15 +645,14 @@ describe("dispatcher runtime state (TypeScript)", () => {
     state = beginTaskForWorker(state, {
       taskId,
       workerId: "codex-lease-worker",
-      attemptId: attempt.attemptId,
-      leaseToken: attempt.leaseToken,
+      ...workerEnvelope(attempt),
       at: "2026-05-12T11:00:30.000Z",
     });
 
     expect(() => recordWorkerResult(state, {
       workerId: "codex-lease-worker",
+      ...workerEnvelope(attempt),
       attemptId: "stale-attempt",
-      leaseToken: attempt.leaseToken,
       result: {
         taskId,
         workerId: "codex-lease-worker",
@@ -656,6 +670,83 @@ describe("dispatcher runtime state (TypeScript)", () => {
         },
       },
     })).toThrow(/attempt id mismatch/i);
+  });
+
+  it("rejects claim-backed start and result writes without a complete v1 envelope", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-envelope-required",
+      pool: "codex",
+      hostname: "test-host",
+      labels: ["codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-03-16T12:00:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-envelope-required",
+          title: "校验完整 envelope",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["test"],
+          dependsOn: [],
+          branchName: "ai/codex/task-envelope-required",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-envelope-required",
+          assignment: {
+            taskId: "task-envelope-required",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "ai/codex/task-envelope-required",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+          },
+        },
+      ],
+      createdAt: "2026-03-16T12:00:01.000Z",
+    });
+
+    const claimed = claimAssignedTaskForWorker(dispatch.state, {
+      workerId: "codex-envelope-required",
+      at: "2026-03-16T12:00:02.000Z",
+    });
+
+    expect(() => beginTaskForWorker(claimed.state, {
+      workerId: "codex-envelope-required",
+      taskId: dispatch.taskIds[0],
+      at: "2026-03-16T12:00:03.000Z",
+    })).toThrow(/worker protocol v1 envelope incomplete/i);
+
+    expect(() => recordWorkerResult(claimed.state, {
+      workerId: "codex-envelope-required",
+      result: {
+        taskId: dispatch.taskIds[0],
+        workerId: "codex-envelope-required",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-envelope-required",
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "master",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-03-16T12:00:04.000Z",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+      },
+    })).toThrow(/worker protocol v1 envelope incomplete/i);
   });
 
   it("stores artifact bundles from worker results and binds the active attempt", () => {
@@ -707,12 +798,14 @@ describe("dispatcher runtime state (TypeScript)", () => {
     state = beginTaskForWorker(claimed.state, {
       taskId,
       workerId: "codex-artifact-worker",
+      ...workerEnvelope(claimed.state.taskAttempts[0]!),
       at: "2026-05-12T13:00:30.000Z",
     });
     const attempt = state.taskAttempts[0]!;
 
     state = recordWorkerResult(state, {
       workerId: "codex-artifact-worker",
+      ...workerEnvelope(attempt),
       result: {
         taskId,
         workerId: "codex-artifact-worker",
@@ -808,6 +901,26 @@ describe("dispatcher runtime state (TypeScript)", () => {
     ]));
   });
 
+  it("honors maxTaskAttempts retry policy during reconciliation", () => {
+    let state = createRunningAttemptState("task-retry-policy", "codex-retry-worker");
+
+    state = reconcileRuntimeState(state, {
+      now: "2026-05-12T13:11:00.000Z",
+      heartbeatTimeoutMs: 60_000,
+      maxTaskAttempts: 1,
+    });
+
+    expect(state.tasks[0]).toMatchObject({
+      status: "failed",
+      assignedWorkerId: "codex-retry-worker",
+    });
+    expect(state.taskAttempts).toHaveLength(1);
+    expect(state.taskAttempts[0]).toMatchObject({
+      status: "expired",
+      failureCode: "attempt_lease_expired",
+    });
+  });
+
   it("fails an expired running attempt when retry policy is exhausted", () => {
     let state = createRunningAttemptState("task-retry-exhausted", "codex-retry-worker");
     state = reconcileRuntimeState(state, {
@@ -826,6 +939,8 @@ describe("dispatcher runtime state (TypeScript)", () => {
     state = beginTaskForWorker(claimed.state, {
       taskId: claimed.assignment!.task.id,
       workerId: "codex-retry-worker",
+      ...workerEnvelope(claimed.state.taskAttempts.find((attempt) =>
+        attempt.taskId === claimed.assignment!.task.id && attempt.status === "leased")!),
       at: "2026-05-12T13:12:20.000Z",
     });
 
@@ -2818,7 +2933,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(state.updatedAt).toBeDefined();
   });
 
-  it("buildDashboardSnapshot exposes assignment-only active lease metrics", () => {
+  it("buildDashboardSnapshot exposes active lease metrics by resource type", () => {
     const state = createEmptyRuntimeState();
     state.leases.push({
       id: "assignment:task-lease-metric",
@@ -2847,6 +2962,140 @@ describe("dispatcher runtime state (TypeScript)", () => {
         assignment: 1,
       },
     });
+  });
+
+  it("enforces repo branch and session leases while a task is assigned", () => {
+    const stateDir = makeTempDir();
+    let state = loadRuntimeState(stateDir);
+
+    state = registerWorker(state, {
+      workerId: "codex-resource-a",
+      pool: "codex",
+      hostname: "host-a",
+      labels: ["codex"],
+      repoDir: "/repos/test",
+      at: "2026-04-01T10:00:00.000Z",
+    });
+    state = registerWorker(state, {
+      workerId: "codex-resource-b",
+      pool: "codex",
+      hostname: "host-b",
+      labels: ["codex"],
+      repoDir: "/repos/test",
+      at: "2026-04-01T10:00:01.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      requestedBy: "test",
+      tasks: [
+        {
+          id: "task-resource-1",
+          title: "Resource lease task one",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["test"],
+          dependsOn: [],
+          branchName: "ai/codex/shared-resource",
+          continueFromTaskId: "trae-session-anchor",
+          verification: { mode: "run" },
+        },
+        {
+          id: "task-resource-2",
+          title: "Resource lease task two",
+          pool: "codex",
+          allowedPaths: ["src/**"],
+          acceptance: ["test"],
+          dependsOn: [],
+          branchName: "ai/codex/shared-resource",
+          continueFromTaskId: "trae-session-anchor",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-resource-1",
+          assignment: {
+            taskId: "task-resource-1",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "ai/codex/shared-resource",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/ForgeFlow",
+            defaultBranch: "main",
+            continueFromTaskId: "trae-session-anchor",
+          },
+          workerPrompt: "Test prompt one",
+        },
+        {
+          taskId: "task-resource-2",
+          assignment: {
+            taskId: "task-resource-2",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "ai/codex/shared-resource",
+            allowedPaths: ["src/**"],
+            repo: "TingRuDeng/ForgeFlow",
+            defaultBranch: "main",
+            continueFromTaskId: "trae-session-anchor",
+          },
+          workerPrompt: "Test prompt two",
+        },
+      ],
+      createdAt: "2026-04-01T10:00:02.000Z",
+    });
+    state = dispatch.state;
+
+    const firstClaim = claimAssignedTaskForWorker(state, {
+      workerId: "codex-resource-a",
+      at: "2026-04-01T10:00:03.000Z",
+    });
+    state = firstClaim.state;
+
+    expect(firstClaim.assignment?.task.id).toBe(dispatch.taskIds[0]);
+    expect(buildDashboardSnapshot(state, {
+      now: "2026-04-01T10:00:04.000Z",
+    }).metrics.activeLeases).toEqual({
+      total: 4,
+      byResourceType: {
+        assignment: 1,
+        repo: 1,
+        branch: 1,
+        session: 1,
+      },
+    });
+
+    const blockedClaim = claimAssignedTaskForWorker(state, {
+      workerId: "codex-resource-b",
+      at: "2026-04-01T10:00:05.000Z",
+    });
+    state = blockedClaim.state;
+
+    expect(blockedClaim.assignment).toBeNull();
+    expect(state.events.some((event) =>
+      event.taskId === dispatch.taskIds[1]
+      && event.type === "lease_conflict"
+      && typeof event.payload === "object"
+      && event.payload !== null
+      && "resourceType" in event.payload
+      && event.payload.resourceType === "repo")).toBe(true);
+
+    state = cancelTask(state, {
+      taskId: dispatch.taskIds[0],
+      actor: "test",
+      reason: "release resource leases",
+      at: "2026-04-01T10:00:06.000Z",
+    });
+
+    const secondClaim = claimAssignedTaskForWorker(state, {
+      workerId: "codex-resource-b",
+      at: "2026-04-01T10:00:07.000Z",
+    });
+
+    expect(secondClaim.assignment?.task.id).toBe(dispatch.taskIds[1]);
   });
 
   it("supports chatMode field in task and assignment", () => {
@@ -3714,6 +3963,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
     state = beginTaskForWorker(claimed.state, {
       workerId: "codex-cancel-test",
       taskId: dispatch.taskIds[0],
+      ...workerEnvelope(claimed.state.taskAttempts[0]!),
       at: "2026-04-08T10:00:03.000Z",
     });
 

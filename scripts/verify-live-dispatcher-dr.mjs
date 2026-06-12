@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { backupRuntimeState } from "./backup-runtime-state.mjs";
 import { restoreRuntimeState } from "./restore-runtime-state.mjs";
@@ -9,6 +11,9 @@ import { startDispatcherServer } from "./lib/dispatcher-server.js";
 const { DatabaseSync } = await import("node:sqlite");
 
 const LIVE_EVENT_COUNT = 16;
+const CHILD_START_TIMEOUT_MS = 30_000;
+const __filename = fileURLToPath(import.meta.url);
+const repoRoot = path.resolve(path.dirname(__filename), "..");
 
 function setTemporaryEnv(values) {
   const previous = new Map();
@@ -43,6 +48,98 @@ async function requestJson(baseUrl, method, pathname, body) {
     throw new Error(`${method} ${pathname} failed ${response.status}: ${text}`);
   }
   return json;
+}
+
+function parseChildServerOutput(output) {
+  try {
+    return JSON.parse(output);
+  } catch {
+    return null;
+  }
+}
+
+function waitForProcessExit(child) {
+  return new Promise((resolve) => {
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+  });
+}
+
+function spawnDispatcherChild(stateDir) {
+  return spawn(process.execPath, [
+    "scripts/run-dispatcher-server.js",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "0",
+    "--state-dir",
+    stateDir,
+    "--persistence-backend",
+    "sqlite",
+  ], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      DISPATCHER_AUTH_MODE: "open",
+      RUNTIME_STATE_BACKEND: "sqlite",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function waitForDispatcherChild(child) {
+  return new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill("SIGKILL");
+      reject(new Error(`dispatcher child did not start within ${CHILD_START_TIMEOUT_MS}ms: ${stderr}`));
+    }, CHILD_START_TIMEOUT_MS);
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+      const payload = parseChildServerOutput(stdout);
+      if (!payload || settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      resolve({
+        child,
+        baseUrl: payload.baseUrl,
+        stateDir: payload.stateDir,
+        stderr: () => stderr,
+      });
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.once("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      reject(new Error(`dispatcher child exited before listening: code=${code} signal=${signal} stderr=${stderr}`));
+    });
+  });
+}
+
+function startDispatcherChild(stateDir) {
+  const child = spawnDispatcherChild(stateDir);
+  return waitForDispatcherChild(child);
 }
 
 function createDispatchPayload() {
@@ -188,6 +285,47 @@ function restoreBackedUpState(stateDir, backupDir, taskId) {
   };
 }
 
+async function runCrashRestartDrill(root) {
+  const stateDir = path.join(root, "crash-state");
+  const backupDir = path.join(root, "crash-backup");
+  const recoveredStateDir = path.join(root, "crash-recovered-state");
+  const childInstance = await startDispatcherChild(stateDir);
+  let recoveredInstance = null;
+  let crashExit = null;
+  try {
+    const liveBackup = await backupLiveState(childInstance, stateDir, backupDir);
+    childInstance.child.kill("SIGKILL");
+    crashExit = await waitForProcessExit(childInstance.child);
+
+    restoreRuntimeState({ backupDir, stateDir: recoveredStateDir });
+    const restored = readRestoredRuntimeState(recoveredStateDir);
+    assertRestoredState(restored, liveBackup.taskId);
+
+    recoveredInstance = await startDispatcherServer({ host: "127.0.0.1", port: 0, stateDir: recoveredStateDir });
+    const recoveredSnapshot = await requestJson(recoveredInstance.baseUrl, "GET", "/api/dashboard/snapshot");
+    if (!recoveredSnapshot.tasks.some((task) => task.id === liveBackup.taskId)) {
+      throw new Error(`recovered dispatcher snapshot does not contain task ${liveBackup.taskId}`);
+    }
+
+    return {
+      crashProcessSignal: crashExit.signal,
+      crashProcessExitCode: crashExit.code,
+      restoredDispatcherRestarted: true,
+      recoveredTaskCount: recoveredSnapshot.tasks.length,
+      recoveredEventCount: recoveredSnapshot.events.length,
+      recoveredIntegrityCheck: restored.integrityCheck,
+    };
+  } finally {
+    if (!crashExit) {
+      childInstance.child.kill("SIGKILL");
+      await waitForProcessExit(childInstance.child);
+    }
+    if (recoveredInstance) {
+      await recoveredInstance.close();
+    }
+  }
+}
+
 async function runLiveDrill() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-live-dispatcher-dr-"));
   const stateDir = path.join(root, "state");
@@ -209,6 +347,7 @@ async function runLiveDrill() {
     instance = null;
 
     const { restore, restored } = restoreBackedUpState(stateDir, backupDir, liveBackup.taskId);
+    const crashRestart = await runCrashRestartDrill(root);
 
     return {
       ok: true,
@@ -224,6 +363,7 @@ async function runLiveDrill() {
       snapshotCount: restored.snapshotCount,
       restoredTaskCount: restored.restoredState.tasks.length,
       restoredEventCount: restored.restoredState.events.length,
+      crashRestart,
       metrics: liveBackup.metrics,
     };
   } finally {

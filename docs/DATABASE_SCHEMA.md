@@ -349,7 +349,7 @@ Current role of those tables:
 - they are dispatcher-owned structured projections
 - they support `/api/query/*`, structured reads, and projection health checks
 - `task_attempts` 保存 vNext synthetic attempt projection，authoritative truth 仍以 snapshot 的 `taskAttempts[]` 为准
-- `artifact_bundles` 保存 vNext ArtifactBundle 摘要和 refs projection，不保存 diff / log 正文
+- `artifact_bundles` 保存 vNext ArtifactBundle 摘要、refs projection 和可选 retained diff / log / test result 正文片段
 - they do not replace `snapshots` as the runtime truth source
 
 Current stage-3 optional shadow path:

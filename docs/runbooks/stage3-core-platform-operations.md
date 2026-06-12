@@ -101,6 +101,7 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - Postgres shadow 已配置
 - `/api/dr/status.shadowWrite` 最近状态为 `ok`，或失败原因已被人工确认
 - `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher` 返回 `ok=true`
+- `pnpm verify:stage3` 和 release workflow 会执行 `pnpm verify:shadow-drift`，shadow 配置存在且 drifted 时必须阻断 rollout / release
 - assignment delivery queue 影子计数合理
 
 ## 5. Read-only 与 DR

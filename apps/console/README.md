@@ -5,7 +5,7 @@ ForgeFlow Multi-Agent Control Plane 的可视化控制台。
 ## 功能特性
 
 - **任务监控**：实时查看任务状态、分配情况及对应分支。支持分页浏览（每页 10 条）。
-- **任务详情**：选中任务后查看 attempt timeline、runtime events、review reason 和 artifact summary。
+- **任务详情**：选中任务后查看 attempt timeline、runtime events、review reason，以及 artifact summary / refs / retained content。
 - **节点管理**：监控工作节点（Worker）的存活状态、当前任务及归属 Pool。
 - **指标概览**：顶部展示集群核心指标（活跃节点、空闲/繁忙占比、任务完成进度）。
 - **交互式日志**：集成 `@uiw/react-json-view`，支持可折叠的 JSON 树状结构展示，实时追踪系统事件细节。

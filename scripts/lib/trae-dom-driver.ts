@@ -784,6 +784,9 @@ export interface TraeAutomationDriver {
   sendPrompt: (payload?: {
     content?: string;
     discovery?: Record<string, unknown>;
+    sessionId?: string | null;
+    expectedTaskId?: string | null;
+    chatMode?: string | null;
     prepare?: boolean;
     responseRequiredPrefix?: string;
     responseTimeoutMs?: number | string;

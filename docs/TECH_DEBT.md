@@ -14,7 +14,7 @@ Only confirmed, still-active debt belongs here.
 
 - 本文件只写仍然存在的债务，不写愿望清单。
 - 当前债务集中在 runtime bridge、持久化多形态、shadow 可观测性、Trae gateway 重复实现和 Stage 3 边界。
-- 近期审查确认非 assignment lease、DR drill 深度和手动发布版本落账仍需后续修复。
+- 近期审查确认 dispatcher 外部资源锁、DR drill 深度和手动发布版本落账仍需后续修复。
 - 修复债务时必须同步 `README.md`、`docs/README.md` 和相关稳定文档。
 
 ```yaml
@@ -105,16 +105,16 @@ Desired direction:
 
 - 两套实现都已经暴露 `POST /v1/sessions/:sessionId/release`
 - 两套实现都已经在 `POST /v1/sessions/prepare` 中创建会话，并在 prepare 成功后标记为 `running`
-- packaged runtime 仍有更强的持久化 session 解析和结构化 debugLog
+- 脚本侧已经对齐 packaged runtime 的持久化 session 解析、`POST /v1/chat` 元数据透传和结构化 debugLog 关键事件
 
 影响：
 
-- 默认 session-store 路径已经对齐，但持久化解析与 debugLog 能力仍不同
-- 修复仍可能只落到其中一套实现
+- 默认 session-store 路径、持久化解析和 chat 调用关键行为已经对齐
+- 由于源码脚本与 packaged runtime 仍是两套实现，后续修复仍可能只落到其中一套实现
 
 期望方向：
 
-- 减少重复实现，或增加明确同步规则和共享兼容测试覆盖
+- 继续减少重复实现，或把共享兼容测试扩展到所有 gateway 关键路由
 
 ## 5. Stable agent-facing docs were previously concentrated in rule/nav docs but lacked a durable knowledge layer
 
@@ -147,22 +147,22 @@ Desired direction:
 
 - keep Wave 5 explicitly out of “already supported” docs until governance and compatibility policy are finalized
 
-## 7. Repo / branch / session lease guards 仍是后续工作
+## 7. Repo / branch / session lease guards 已接入 task 生命周期但仍有边界
 
 当前情况：
 
-- `leases.ts` 当前只支持 assignment resource type
-- `runtime-state.ts` 将 acquisition/release helper 接入 assignment 执行路径
-- repo/branch/session 当前不是活跃 lease resource type
+- `leases.ts` 当前支持 `assignment`、`repo`、`branch`、`session` resource type
+- `runtime-state.ts` 将 acquisition/release helper 接入 task claim、start、result、cancel、review decision 和 worker offline 路径
+- continuation / follow-up 任务会基于 `continueFromTaskId` / `followUpOfTaskId` 获取 session lease
 
 影响：
 
-- repo/branch/session 并发尚未由 dispatcher lease ownership 保护
+- dispatcher 管理的 task 生命周期已经有 repo/branch/session lease ownership
+- dispatcher 外部脚本直接操作同一 repo、branch 或 Trae session store 仍不受该 lease 保护
 
 期望方向：
 
-- 如果 worktree branch 冲突需要 dispatcher 层预防，优先实现具体 branch lease 获取点
-- repo/session 语义需要单独定义清楚，再加回 lease type model
+- 如果要覆盖 dispatcher 外部脚本，需要新增统一入口或 operator-level lock，而不是误用 runtime task lease
 
 ## 8. vNext runtime reliability 目标契约尚未接入运行时
 
@@ -172,21 +172,21 @@ Desired direction:
 - `packages/task-schema` 已接纳当前 dispatcher runtime 使用的 `trae` pool、Task/Worker 扩展字段和 AssignmentPayload 形态
 - `packages/worker-protocol` 已提供当前 runtime 事件名到 vNext RuntimeEvent taxonomy 的 normalize helper
 - dispatcher runtime state 已有 `taskAttempts[]`，SQLite `task_attempts` projection 会保存 synthetic attempt
-- dispatcher v0 start/result mutation 已支持可选 `attemptId` / `leaseToken` 校验，并会拒绝携带历史终态 `attemptId` 的 stale result
-- 通用 dispatcher worker start/result 在声明 v1 envelope 时，会校验 `protocolVersion`、`traceId` 和 `idempotencyKey` 与 active attempt 一致
+- claim-backed dispatcher start/result mutation 已强制完整 v1 envelope，并会拒绝携带历史终态 `attemptId` 的 stale result
+- 通用 dispatcher worker start/result 会校验 `protocolVersion`、`traceId` 和 `idempotencyKey` 与 active attempt 一致
 - Trae 兼容主链的 `fetch-task` / `start-task` / `submit-result` 已回显并校验 `protocolVersion`、`traceId`、`idempotencyKey`、`attemptId` 和 `leaseToken`
-- dispatcher runtime state 已有 `artifactBundles[]`，SQLite `artifact_bundles` projection 会保存 ArtifactBundle 摘要和 refs
-- Trae runtime 当前仍走现有兼容路径，但已在 `fetch-task` / `start-task` / `submit-result` 主链携带完整 v1 envelope 字段
+- dispatcher runtime state 已有 `artifactBundles[]`，SQLite `artifact_bundles` projection 会保存 ArtifactBundle 摘要、refs 和可选 retainedContent 正文片段
+- reconcile 支持 `maxTaskAttempts` retry policy，默认仍是 2 次 attempt
 
 影响：
 
 - 代码审查和文档阅读时容易把 vNext 目标契约误读为当前已执行的 runtime 保护
-- 后续 LeaseToken enforcement 仍需要把空 envelope 的 v0 worker 兼容路径、CLI / Console 剩余入口收紧为完整 v1 envelope
-- ArtifactBundle 当前不保存 diff / log 正文，只保存 refs；artifact retention 仍未实现
+- 无 active attempt 的历史迁移路径仍保留兼容行为，新 worker 主链不应依赖空 envelope
+- ArtifactBundle 已支持受限 `retainedContent`，Console 任务详情可通过摘要 / 引用 / 正文 tabs 查看审查证据
 
 期望方向：
 
-- 继续接入 review workflow、artifact retention 和 Console artifact tabs
+- 继续接入完整 artifact store、retention 清理策略和更完整的 review workflow
 
 ## 9. Shadow path has operator drift check, but automatic reconciliation is still deferred
 
@@ -199,15 +199,16 @@ Current situation:
 - backup / restore scripts include `runtime-state-shadow-status.json`
 - shadow write failures now append `shadow_write_failed` system events and feed metrics / SLO
 - `scripts/check-shadow-drift.mjs` compares SQLite expected counts with Postgres projection / queue shadow counts
+- `pnpm verify:stage3` 和 release workflow 都会执行 `pnpm verify:shadow-drift` 作为 rollout / release gate
 
 Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
-- shadow-write rollout has a manual drift check, but still needs alerting and reconciliation before any primary-store cutover
+- shadow-write rollout / release 已有 drift gate，但仍需要 alerting 和 reconciliation 才能进入任何 primary-store cutover
 
 Desired direction:
 
-- wire shadow drift into release / rollout gates once operational thresholds are defined
+- define production thresholds and automatic reconciliation for persistent drift
 - keep the event / metric / SLO contract stable while shadow remains best-effort
 
 ## 10. Live dispatcher DR drill exists, but crash consistency is still deferred
@@ -218,17 +219,18 @@ Current situation:
 - it writes multiple `snapshots` rows while the SQLite connection remains open in WAL mode
 - it verifies that backup / restore includes `runtime-state.db-wal`, then validates `PRAGMA integrity_check`, snapshot count, latest sequence, and checksum
 - `scripts/verify-live-dispatcher-dr.mjs` starts a real dispatcher HTTP server, writes through live endpoints, backs up while the server is still open, then restores and validates SQLite integrity
+- the live drill also starts a dispatcher child process, writes / backs up during live traffic, kills it with `SIGKILL`, restores the backup into a second state directory, and restarts dispatcher against the restored state
 
 Impact:
 
 - `pnpm verify:stage3` proves the source DR script path, WAL-backed restore, and restored SQLite queryability
-- `pnpm verify:stage3:live` proves the live dispatcher HTTP write path and WAL restore can be exercised locally
-- it is not yet a full production crash-consistency exercise for mid-write process termination, host failure, or multi-node restore
+- `pnpm verify:stage3:live` proves the live dispatcher HTTP write path, WAL restore, and SIGKILL restart recovery can be exercised locally
+- it is not yet a full production exercise for physical power loss, disk corruption, or multi-node quorum restore
 
 Desired direction:
 
 - keep the source DR script as the fast gate and run the live drill before risky runtime releases
-- add an explicit crash-consistency drill if production RTO / RPO requirements tighten
+- add host-failure and multi-node restore drills if production RTO / RPO requirements tighten
 
 ## 11. Manual release recovery is tracked, but still manual
 

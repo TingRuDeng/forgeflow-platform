@@ -140,6 +140,11 @@ interface TaskInfo {
 interface TaskPayload {
   assignment: TaskAssignment;
   task: TaskInfo;
+  attemptId?: string;
+  leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
   workerPrompt?: string;
   contextMarkdown?: string;
 }
@@ -453,6 +458,16 @@ interface ProcessTaskAssignmentInput {
   at?: string;
 }
 
+function buildWorkerProtocolEnvelope(payload: TaskPayload) {
+  return {
+    attemptId: payload.attemptId,
+    leaseToken: payload.leaseToken,
+    protocolVersion: payload.protocolVersion,
+    traceId: payload.traceId,
+    idempotencyKey: payload.idempotencyKey,
+  };
+}
+
 async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise<{
   status: string;
   taskId: string;
@@ -491,6 +506,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
 
     await input.client.startTask(input.workerId, {
       taskId: input.payload.task.id,
+      ...buildWorkerProtocolEnvelope(input.payload),
       at: input.at ?? nowIso(),
     });
 
@@ -523,6 +539,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
     for (let attempt = 1; attempt <= submitResultMaxRetries; attempt++) {
       try {
         await input.client.submitResult(input.workerId, {
+          ...buildWorkerProtocolEnvelope(input.payload),
           result: workerResult,
           changedFiles,
           pullRequest,
@@ -626,6 +643,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
       for (let attempt = 1; attempt <= submitResultMaxRetries; attempt++) {
         try {
           await input.client.submitResult(input.workerId, {
+            ...buildWorkerProtocolEnvelope(input.payload),
             result: failedResult,
             changedFiles: [],
             pullRequest: null,
@@ -692,8 +710,8 @@ export interface DispatcherClient {
   heartbeat: (workerId: string, payload: { at: string }) => Promise<unknown>;
   getAssignedTask: (workerId: string) => Promise<TaskPayload | null>;
   claimTask: (workerId: string, payload?: { at?: string }) => Promise<TaskPayload | null>;
-  startTask: (workerId: string, payload: { taskId: string; at: string }) => Promise<unknown>;
-  submitResult: (workerId: string, payload: { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }) => Promise<unknown>;
+  startTask: (workerId: string, payload: ReturnType<typeof buildWorkerProtocolEnvelope> & { taskId: string; at: string }) => Promise<unknown>;
+  submitResult: (workerId: string, payload: ReturnType<typeof buildWorkerProtocolEnvelope> & { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }) => Promise<unknown>;
   reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }) => Promise<unknown>;
 }
 
@@ -778,6 +796,16 @@ export function createDispatcherClient(dispatcherUrl: string): DispatcherClient 
   };
 }
 
+function readStateDirResponseJson(response: { status: number; json: unknown }): unknown {
+  if (response.status >= 400) {
+    const error = response.json && typeof response.json === "object" && "error" in response.json
+      ? String((response.json as { error?: unknown }).error)
+      : `dispatcher state-dir request failed: ${response.status}`;
+    throw new Error(error);
+  }
+  return response.json;
+}
+
 export function createStateDirDispatcherClient(stateDir: string): DispatcherClient {
   return {
     registerWorker(worker) {
@@ -789,7 +817,7 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         clientAddress: "127.0.0.1",
         internalCall: true,
       });
-      return Promise.resolve(response.json);
+      return Promise.resolve(readStateDirResponseJson(response));
     },
     heartbeat(workerId, payload) {
       const response = handleDispatcherHttpRequest({
@@ -800,7 +828,7 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         clientAddress: "127.0.0.1",
         internalCall: true,
       });
-      return Promise.resolve(response.json);
+      return Promise.resolve(readStateDirResponseJson(response));
     },
     getAssignedTask(workerId) {
       const response = handleDispatcherHttpRequest({
@@ -810,7 +838,7 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         clientAddress: "127.0.0.1",
         internalCall: true,
       });
-      return Promise.resolve(response.json) as Promise<TaskPayload | null>;
+      return Promise.resolve(readStateDirResponseJson(response)) as Promise<TaskPayload | null>;
     },
     claimTask(workerId, payload = {}) {
       const response = handleDispatcherHttpRequest({
@@ -821,7 +849,7 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         clientAddress: "127.0.0.1",
         internalCall: true,
       });
-      return Promise.resolve(response.json) as Promise<TaskPayload | null>;
+      return Promise.resolve(readStateDirResponseJson(response)) as Promise<TaskPayload | null>;
     },
     startTask(workerId, payload) {
       const response = handleDispatcherHttpRequest({
@@ -832,7 +860,7 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         clientAddress: "127.0.0.1",
         internalCall: true,
       });
-      return Promise.resolve(response.json);
+      return Promise.resolve(readStateDirResponseJson(response));
     },
     submitResult(workerId, payload) {
       const response = handleDispatcherHttpRequest({
@@ -843,7 +871,7 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         clientAddress: "127.0.0.1",
         internalCall: true,
       });
-      return Promise.resolve(response.json);
+      return Promise.resolve(readStateDirResponseJson(response));
     },
     reportEvent(workerId, payload) {
       const response = handleDispatcherHttpRequest({
@@ -854,7 +882,7 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
         clientAddress: "127.0.0.1",
         internalCall: true,
       });
-      return Promise.resolve(response.json);
+      return Promise.resolve(readStateDirResponseJson(response));
     },
   };
 }
@@ -886,7 +914,7 @@ export async function runWorkerDaemonCycle(input: RunWorkerDaemonCycleInput): Pr
   });
   await client.heartbeat(input.workerId, { at });
 
-  const assigned = await client.claimTask(input.workerId, { at }) as { assignment?: TaskAssignment; task?: TaskInfo } | null;
+  const assigned = await client.claimTask(input.workerId, { at }) as TaskPayload | null;
   if (!assigned || !assigned.assignment || !assigned.task) {
     return {
       status: "idle",
@@ -902,6 +930,7 @@ export async function runWorkerDaemonCycle(input: RunWorkerDaemonCycleInput): Pr
     payload: {
       assignment: assigned.assignment,
       task: assigned.task,
+      ...buildWorkerProtocolEnvelope(assigned),
     } as TaskPayload,
     dryRunExecution: Boolean(input.dryRunExecution),
     at,

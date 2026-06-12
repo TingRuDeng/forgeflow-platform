@@ -89,6 +89,52 @@ describe("trae session store", () => {
     expect(loaded?.error).toBe("Gateway restarted during execution");
   });
 
+  it("skips malformed persisted sessions and normalizes unknown status", async () => {
+    const mod = await import(sessionStoreModulePath);
+    fs.mkdirSync(tempDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tempDir, "sessions.json"),
+      JSON.stringify({
+        version: 1,
+        sessions: {
+          "malformed-session": "not-a-session-record",
+          "unknown-status-session": {
+            sessionId: "unknown-status-session",
+            status: "unknown",
+            startedAt: "2026-03-30T10:00:00.000Z",
+            lastActivityAt: "2026-03-30T10:00:00.000Z",
+            updatedAt: "2026-03-30T10:00:00.000Z",
+            responseDetected: true,
+            error: "stale error",
+            responseText: 42,
+            requestFingerprint: 42,
+            target: "invalid-target",
+            completedAt: 42,
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const store = mod.createSessionStore(tempDir, {
+      now: () => "2026-03-30T10:05:00.000Z",
+    });
+
+    expect(store.get("malformed-session")).toBeNull();
+    expect(store.get("unknown-status-session")).toMatchObject({
+      sessionId: "unknown-status-session",
+      status: "interrupted",
+      error: "Gateway restarted during execution",
+      responseDetected: true,
+    });
+    expect(store.getInternal("unknown-status-session")).toMatchObject({
+      responseText: null,
+      requestFingerprint: null,
+      target: null,
+      completedAt: null,
+    });
+  });
+
   it("marks non-terminal sessions as interrupted on load", async () => {
     const mod = await import(sessionStoreModulePath);
     

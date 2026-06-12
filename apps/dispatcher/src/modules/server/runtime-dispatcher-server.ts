@@ -483,14 +483,21 @@ export function applyTraeStartTask(
   }
 
   try {
+    const resolvedAttemptLease = {
+      attemptId: attemptLease.attemptId ?? claimed.assignment.attemptId,
+      leaseToken: attemptLease.leaseToken ?? claimed.assignment.leaseToken,
+      protocolVersion: attemptLease.protocolVersion ?? claimed.assignment.protocolVersion,
+      traceId: attemptLease.traceId ?? claimed.assignment.traceId,
+      idempotencyKey: attemptLease.idempotencyKey ?? claimed.assignment.idempotencyKey,
+    };
     const nextState = beginTaskForWorker(state, {
       workerId,
       taskId,
-      attemptId: attemptLease.attemptId,
-      leaseToken: attemptLease.leaseToken,
-      protocolVersion: attemptLease.protocolVersion,
-      traceId: attemptLease.traceId,
-      idempotencyKey: attemptLease.idempotencyKey,
+      attemptId: resolvedAttemptLease.attemptId,
+      leaseToken: resolvedAttemptLease.leaseToken,
+      protocolVersion: resolvedAttemptLease.protocolVersion,
+      traceId: resolvedAttemptLease.traceId,
+      idempotencyKey: resolvedAttemptLease.idempotencyKey,
       at: nowIso(),
     });
     overwriteRuntimeState(state, nextState);
