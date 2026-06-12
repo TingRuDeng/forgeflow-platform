@@ -151,7 +151,7 @@ Trae automation gateway 解决的是"如何程序化控制 Trae 客户端"问题
 
 **新增**：查询会话状态。
 
-Gateway 默认启用会话状态持久化（脚本链路默认目录：`.forgeflow-trae-gateway/sessions.json`）；如果调用方显式禁用 session store，则该接口不可用。
+Gateway 默认启用会话状态持久化（默认目录：`~/.forgeflow-trae-beta/sessions/sessions.json`）；如果调用方显式禁用 session store，则该接口不可用。
 
 返回示例：
 

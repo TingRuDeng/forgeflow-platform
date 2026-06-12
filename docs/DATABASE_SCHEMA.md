@@ -56,10 +56,8 @@ Current active persistence sources verified in code:
   - Explicit JSON fallback and one-time SQLite import source.
 - `.forgeflow-dispatcher/memory.json`
   - Review-memory lesson store.
-- `.forgeflow-trae-gateway/sessions.json`
-  - Session store for the script-local automation gateway.
 - `~/.forgeflow-trae-beta/sessions/sessions.json`
-  - Session store for the packaged remote runtime.
+  - Session store for both the script-local automation gateway and the packaged remote runtime by default.
 
 ## 2. Dispatcher Runtime State
 
@@ -290,10 +288,11 @@ This is a selective lesson store for context injection, not a general-purpose kn
 
 ## 4. Trae Session Store
 
-Both gateway implementations use `sessions.json`, but the default storage root differs:
+Both gateway implementations use `sessions.json` and default to the same user-stable storage root:
 
-- script-local gateway: relative `.forgeflow-trae-gateway/`
-- packaged runtime gateway: user-stable `~/.forgeflow-trae-beta/sessions/`
+- script-local gateway: `~/.forgeflow-trae-beta/sessions/`
+- packaged runtime gateway: `~/.forgeflow-trae-beta/sessions/`
+- script-local gateway can still override the directory with `--state-dir <path>`
 
 Verified session fields include:
 
