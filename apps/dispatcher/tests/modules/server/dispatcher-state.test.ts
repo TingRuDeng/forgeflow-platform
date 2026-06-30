@@ -250,6 +250,8 @@ describe("dispatcher runtime state", () => {
         id: `task-${seq}`,
         title: `Task ${seq}`,
         pool: "codex",
+        allowedPaths: ["src/**"],
+        acceptance: ["pnpm test passes"],
         branchName: `ai/codex/task-${seq}`,
         verification: { mode: "run" as const },
       };

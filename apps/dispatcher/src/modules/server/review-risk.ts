@@ -148,6 +148,12 @@ function matchesPattern(filePath: string, pattern: string): boolean {
   return compiled.test(normalizePath(filePath));
 }
 
+// Exported so other dispatcher modules (e.g. the dispatch quality gate) can reuse
+// the same deterministic protected-path matcher instead of duplicating glob logic.
+export function matchesAnyPattern(candidate: string, patterns: string[]): boolean {
+  return patterns.some((pattern) => matchesPattern(candidate, pattern));
+}
+
 export function assessReviewRisk(input: {
   changedFiles: string[];
   config?: ReviewRiskConfig;

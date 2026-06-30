@@ -295,6 +295,7 @@ Current endpoint families:
   - Assignment packages may additionally persist prompt metadata such as:
     - `workerPromptMode`
     - `reportSchemaVersion`
+  - A deterministic dispatch quality gate runs per task at creation. In default `warn` mode, tasks with violations or sensitive scope add a `dispatch_quality_flagged` event; in `enforce` mode (`DISPATCHER_DISPATCH_QUALITY_MODE=enforce`) the call is rejected when a task is missing acceptance / bounded scope, surfacing as a create error.
 - `POST /api/reviews/:taskId/decision`
   - 提交 `merge`、`block`、`rework` 或 `changes_requested`。
   - `merge` 会把任务从 `review` 推进到 `merged`。

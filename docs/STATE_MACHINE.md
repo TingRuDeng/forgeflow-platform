@@ -84,6 +84,23 @@ Current rules:
 - `claimedAt` is written only by the explicit claim path.
 - Trae fetch/start now converges through the same dispatcher authority rules instead of mutating ad hoc route-local state.
 
+## Dispatch Quality Gate
+
+`createDispatch` now applies a deterministic server-side quality gate to every task at creation time, instead of relying only on a dispatch-time prompt checklist. The gate is configurable via env:
+
+- `DISPATCHER_DISPATCH_QUALITY_MODE` — `off` / `warn` (default) / `enforce`.
+- `DISPATCHER_DISPATCH_REQUIRE_ACCEPTANCE` — require ≥1 acceptance criterion (default `true`).
+- `DISPATCHER_DISPATCH_REQUIRE_ALLOWED_PATHS` — require a bounded `allowedPaths` scope (default `true`).
+- Sensitive-tier detection reuses `DISPATCHER_REVIEW_PROTECTED_PATHS`.
+
+Trait-style behavior: a task whose `allowedPaths` intersect protected globs is graded `sensitive` and automatically requires acceptance even when the global flag is off, and must not ship with a catch-all-only scope (`**`, `*`, `.`).
+
+Modes:
+
+- `off` — no grading.
+- `warn` — task is still created, but dispatcher appends a `dispatch_quality_flagged` event carrying `mode`, `riskTier` and `violations[]` when the task has violations or is sensitive.
+- `enforce` — `createDispatch` throws before creating the task when there are blocking violations (`missing_acceptance`, `missing_allowed_paths`, `unbounded_scope_sensitive`).
+
 ## Review Decisions
 
 Supported decisions:

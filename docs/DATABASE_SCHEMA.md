@@ -98,6 +98,7 @@ Top-level collections currently include:
 - `session_interrupted`
 - `state_lock_timeout`
 - `review_risk_flagged`
+- `dispatch_quality_flagged`
 
 当前事件记录还会保留最小关联字段：
 

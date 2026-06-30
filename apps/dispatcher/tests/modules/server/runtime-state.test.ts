@@ -2586,6 +2586,68 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(reloadedReview?.riskAssessment?.level).toBe("needs_human_attention");
   });
 
+  it("flags low-quality dispatch tasks in warn mode and rejects them in enforce mode", () => {
+    const baseInput = {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+      requestedBy: "control",
+      tasks: [
+        {
+          id: "task-thin",
+          title: "缺少验收的薄任务",
+          pool: "codex",
+          allowedPaths: [],
+          acceptance: [],
+          dependsOn: [],
+          branchName: "ai/codex/task-thin",
+          verification: { mode: "run" as const },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-thin",
+          assignment: {
+            taskId: "task-thin",
+            workerId: null,
+            pool: "codex",
+            status: "pending" as const,
+            branchName: "ai/codex/task-thin",
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+          },
+        },
+      ],
+      createdAt: "2026-03-17T10:00:10.000Z",
+    };
+
+    // Default warn mode: dispatch succeeds but records a quality-flag event.
+    const warnDispatch = createDispatch(createEmptyRuntimeState(), baseInput);
+    const warnEvent = warnDispatch.state.events.find(
+      (event) => event.type === "dispatch_quality_flagged",
+    );
+    expect(warnEvent).toBeTruthy();
+    const codes = (warnEvent?.payload as { violations?: { code: string }[] } | undefined)?.violations?.map(
+      (violation) => violation.code,
+    );
+    expect(codes).toContain("missing_acceptance");
+    expect(codes).toContain("missing_allowed_paths");
+
+    // Enforce mode: dispatch is rejected before any task is created.
+    const previousMode = process.env.DISPATCHER_DISPATCH_QUALITY_MODE;
+    process.env.DISPATCHER_DISPATCH_QUALITY_MODE = "enforce";
+    try {
+      expect(() => createDispatch(createEmptyRuntimeState(), baseInput)).toThrow(
+        /dispatch quality gate rejected/i,
+      );
+    } finally {
+      if (previousMode === undefined) {
+        delete process.env.DISPATCHER_DISPATCH_QUALITY_MODE;
+      } else {
+        process.env.DISPATCHER_DISPATCH_QUALITY_MODE = previousMode;
+      }
+    }
+  });
+
   it("records changes_requested as a real review decision event", () => {
     const stateDir = makeTempDir();
 

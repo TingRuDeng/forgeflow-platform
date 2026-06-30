@@ -22,6 +22,10 @@ import {
   resolveReviewRiskConfig,
   type ReviewRiskAssessment,
 } from "./review-risk.js";
+import {
+  evaluateDispatchQuality,
+  resolveDispatchQualityConfig,
+} from "./dispatch-quality.js";
 import { compareTimestampAsc, formatLocalTimestamp } from "../time.js";
 
 const defaultStore: RuntimeStateStore = sqliteStore;
@@ -561,6 +565,14 @@ function summarizeEvent(type: string, payload: unknown): string | null {
     if (level) {
       const count = record?.changedFileCount;
       return typeof count === "number" ? `${level} (${count} files)` : level;
+    }
+  }
+
+  if (type === "dispatch_quality_flagged") {
+    const riskTier = normalizeString(record?.riskTier).trim();
+    const violations = Array.isArray(record?.violations) ? record?.violations.length : 0;
+    if (riskTier || violations) {
+      return `${riskTier || "standard"}${violations ? ` (${violations} violations)` : ""}`;
     }
   }
 
@@ -1847,10 +1859,25 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
   const assignments: Assignment[] = [];
   const taskIds: string[] = [];
   const createdAt = input.createdAt ?? nowIso();
+  const dispatchQualityConfig = resolveDispatchQualityConfig();
 
   for (const taskInput of input.tasks) {
     const taskId = `${dispatchId}:${taskInput.id}`;
     taskIds.push(taskId);
+
+    if (dispatchQualityConfig.mode !== "off") {
+      const quality = evaluateDispatchQuality({
+        allowedPaths: taskInput.allowedPaths ?? [],
+        acceptance: taskInput.acceptance ?? [],
+        config: dispatchQualityConfig,
+      });
+      if (!quality.ok && dispatchQualityConfig.mode === "enforce") {
+        const codes = quality.violations.map((violation) => violation.code).join(", ");
+        throw new Error(
+          `dispatch quality gate rejected task "${taskInput.id}": ${codes}`,
+        );
+      }
+    }
     const followUpOfTaskId = taskInput.followUpOfTaskId ?? taskInput.follow_up_of_task_id ?? null;
     const workerChangeReason = taskInput.workerChangeReason ?? taskInput.worker_change_reason ?? null;
     let targetWorkerId = taskInput.targetWorkerId ?? taskInput.target_worker_id ?? null;
@@ -1929,6 +1956,25 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
         traceId: task.traceId,
       },
     });
+    if (dispatchQualityConfig.mode !== "off") {
+      const quality = evaluateDispatchQuality({
+        allowedPaths: task.allowedPaths,
+        acceptance: task.acceptance,
+        config: dispatchQualityConfig,
+      });
+      if (!quality.ok || quality.riskTier === "sensitive") {
+        nextState = appendEvent(nextState, {
+          taskId,
+          type: "dispatch_quality_flagged",
+          at: createdAt,
+          payload: {
+            mode: dispatchQualityConfig.mode,
+            riskTier: quality.riskTier,
+            violations: quality.violations,
+          },
+        });
+      }
+    }
     if (initialTaskStatus !== "planned") {
       nextState = appendEvent(nextState, {
         taskId,
