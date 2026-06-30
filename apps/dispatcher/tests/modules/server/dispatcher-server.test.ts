@@ -271,6 +271,18 @@ describe("dispatcher server", () => {
     expect(dashboardResponse.headers["cache-control"]).toBe("no-store");
     const dashboardHtml = dashboardResponse.text;
     expect(dashboardHtml).toContain("ForgeFlow");
+
+    const contextResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/context",
+    });
+    expect(contextResponse.status).toBe(200);
+    expect(contextResponse.headers["cache-control"]).toBe("no-store");
+    expect(Array.isArray(contextResponse.json.activeTasks)).toBe(true);
+    expect(Array.isArray(contextResponse.json.reviewBacklog)).toBe(true);
+    expect(Array.isArray(contextResponse.json.blocked)).toBe(true);
+    expect(contextResponse.json.stats.tasks.merged).toBe(1);
   }, 15_000);
 
   it("exports control-plane metrics via a dedicated no-store endpoint", async () => {

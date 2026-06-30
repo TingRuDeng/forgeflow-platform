@@ -14,6 +14,7 @@ import type {
 
 import {
   beginTaskForWorker,
+  buildControlContext,
   buildDashboardSnapshot,
   cancelTask,
   claimAssignedTaskForWorker,
@@ -2584,6 +2585,14 @@ describe("dispatcher runtime state (TypeScript)", () => {
     const reloaded = loadRuntimeState(stateDir);
     const reloadedReview = reloaded.reviews.find((item) => item.taskId === taskId);
     expect(reloadedReview?.riskAssessment?.level).toBe("needs_human_attention");
+
+    // The control context aggregates the review backlog with its risk grade.
+    const context = buildControlContext(buildDashboardSnapshot(state));
+    const backlogItem = context.reviewBacklog.find((item) => item.taskId === taskId);
+    expect(backlogItem?.riskLevel).toBe("needs_human_attention");
+    expect(backlogItem?.changedFileCount).toBe(2);
+    expect(context.metrics.reviewBacklog).toBe(1);
+    expect(context.recentEvents.length).toBeGreaterThan(0);
   });
 
   it("flags low-quality dispatch tasks in warn mode and rejects them in enforce mode", () => {

@@ -119,6 +119,11 @@ Current endpoint families:
     - recent events may include derived `summary`
     - `taskAttempts` 和 `artifactBundles` 可被 Console 任务详情用于渲染 attempt timeline、artifact summary、refs 和 retained content
     - snapshot `reviews[]` 现在可能携带 `riskAssessment`（`level` / `changedFileCount` / `maxChangedFiles` / `protectedPathHits` / `reasons`），由 dispatcher 在任务进入 `review` 时确定性计算；非 `low` 还会出现在 recent events 的 `review_risk_flagged`
+- `GET /api/context`
+  - 面向控制层的一次性聚合上下文视图，复用 reconcile 后的 snapshot（structured-read 感知）。
+  - 返回 `activeTasks`（planned/ready/assigned/in_progress）、`reviewBacklog`（在 review 的任务并附带确定性 `riskLevel` / `riskReasons` / `changedFileCount`）、`blocked`（含 `decision` / `canRedrive` / `reasonCode`）、`recentEvents`（带 traceId 关联）和精简 `stats` / `metrics`。
+  - 支持查询参数 `since`（ISO 时间，按时间过滤 recent events）和 `eventLimit`（限制返回事件数）。
+  - Current GET response sets `Cache-Control: no-store`.
 - `GET /api/metrics`
   - Returns a small control-plane metrics document for automation, dashboards, and alerts.
   - Current GET response sets `Cache-Control: no-store`.

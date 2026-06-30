@@ -17,6 +17,7 @@ import {
 import { getRuntimeStateShadowMode, readRuntimeStateShadowWriteStatus } from "./runtime-state-shadow.js";
 import {
   beginTaskForWorker,
+  buildControlContext,
   buildDashboardSnapshot,
   cancelTask,
   claimAssignedTaskForWorker,
@@ -73,6 +74,7 @@ type DispatcherRequestInput = {
   stateDir: string;
   method: string;
   pathname: string;
+  query?: Record<string, string>;
   body?: Record<string, any>;
   authHeader?: string;
   clientAddress?: string;
@@ -858,7 +860,7 @@ function listBackupManifests(stateDir: string): Array<{ name: string; path: stri
 }
 
 export function handleDispatcherHttpRequest(input: DispatcherRequestInput): JsonResponse {
-  const { stateDir, method, pathname, body = {}, authHeader, clientAddress, internalCall } = input;
+  const { stateDir, method, pathname, query = {}, body = {}, authHeader, clientAddress, internalCall } = input;
 
   const authError = createAuthMiddleware({ method, pathname, authHeader, clientAddress, internalCall });
   if (authError) {
@@ -898,6 +900,24 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
           };
         });
       return createNoStoreJsonResponse(200, snapshot.snapshot);
+    }
+
+    if (method === "GET" && pathname === "/api/context") {
+      const snapshot = useStructuredReads()
+        ? buildStructuredDashboardSnapshot(stateDir)
+        : withState(stateDir, (state) => {
+          const nextState = reconcileRuntimeState(state);
+          return {
+            state: nextState,
+            snapshot: buildDashboardSnapshot(nextState),
+          };
+        }).snapshot;
+      const eventLimitRaw = Number.parseInt(query.eventLimit ?? "", 10);
+      const context = buildControlContext(snapshot, {
+        since: query.since,
+        eventLimit: Number.isFinite(eventLimitRaw) ? eventLimitRaw : undefined,
+      });
+      return createNoStoreJsonResponse(200, context);
     }
 
     if (method === "GET" && pathname === "/api/metrics") {
@@ -1450,6 +1470,7 @@ export async function startDispatcherServer(input: { host?: string; port?: numbe
         stateDir,
         method,
         pathname,
+        query: Object.fromEntries(requestUrl.searchParams.entries()),
         body,
         authHeader,
         clientAddress,
