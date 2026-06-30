@@ -185,6 +185,7 @@ pnpm typecheck
 2. 如果是源码仓运行，读 `../scripts/start-control-plane.sh`
 3. 如果是 install-and-run 控制面，读 `../packages/forgeflow-dispatcher/README.md`
 4. 远程 Codex worker 读 `../packages/codex-beta-runtime/README.md`
+5. 远程 Gemini worker 读 `../packages/gemini-beta-runtime/README.md`
 5. 远程 Trae worker 读 `../packages/trae-beta-runtime/README.md`
 6. 如果需要维护已延期的 control-layer 或双 Codex 演练旧入口，再看 `archive/codex-control-usage.md` 和 `archive/two-machine-codex-drill.md`
 7. 再回到 `../scripts/`、`../packages/` 和实际命令验证
@@ -274,7 +275,7 @@ vNext runtime reliability 推进：
 
 - `dispatcher` 是任务与状态真相源。
 - Phase 1 运行时合并到 TypeScript 已完成；当前主链入口仍在 `scripts/*.js`，但 `worker-daemon`、`review-decision`、`dispatcher-state`、`dispatcher-server` 已桥接到 `apps/dispatcher/dist` 的 TypeScript foundation；`review-memory` 与 `task-worktree` 的权威实现也已下沉到 `apps/dispatcher`。
-- `scripts/` 根目录当前只保留主线入口、`worker-daemon` deferred 链路入口和少量兼容脚本；旧的本地 codex drill 脚本、staging shell wrapper、`trigger-ai-dispatch.*` 与未消费的 checked-in `.d.ts` 已清理或归档。
+- `scripts/` 根目录当前保留主线入口、`codex/gemini` worker daemon 入口和少量兼容脚本；旧的本地 codex drill 脚本、staging shell wrapper、`trigger-ai-dispatch.*` 与未消费的 checked-in `.d.ts` 已清理或归档。
 - Phase 2 持久化主线已切到 SQLite：dispatcher 默认写 `.forgeflow-dispatcher/runtime-state.db`，显式 `--persistence-backend json` 或 `RUNTIME_STATE_BACKEND=json` 才回退到 JSON。
 - dispatcher HTTP 面支持三种认证模式（通过 `DISPATCHER_AUTH_MODE` 控制）：
   - `token`（默认）：强制认证模式，必须设置 `DISPATCHER_API_TOKEN`，除 `/health` 外所有接口需要认证
@@ -286,7 +287,7 @@ vNext runtime reliability 推进：
   - 源码仓运行：`../scripts/start-control-plane.sh`
   - install-and-run runtime 包：`../packages/forgeflow-dispatcher/README.md`
 - `start-control-plane.sh` 现在默认把 dispatcher 绑定到 `127.0.0.1`；监听非 loopback 地址必须显式传 `FORGEFLOW_DISPATCHER_HOST` 或 `--host`。
-- `codex` / `gemini` 的 `worker daemon` 链路仍可用，但当前迭代策略是 Trae-first，相关扩展暂缓投入（deferred），不属于推荐启动路径。
+- `codex` / `gemini` 的 `worker daemon` 链路是受支持的多机执行路径，与 Trae 并列；远程机器可用 `@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 接入。worker-daemon 源码构建收敛仍是后续债务（见 `TECH_DEBT.md`）。
 - `worker-daemon` / Trae runtime 现在只有在结果成功回写到 dispatcher 后才会对外呈现“完成”；`submitResult`、`git push`、自动 PR 创建失败都属于显式失败，而不是假完成。
 - `dependsOn` 现在进入 dispatcher 调度门控：依赖未满足时任务保持 `planned`，满足后自动解锁为 `ready`。
 - generic worker claim 已从副作用 GET 收口为显式 POST：
@@ -307,6 +308,7 @@ vNext runtime reliability 推进：
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - `codex` / `gemini` 多机执行主线是 `worker daemon`。
 - Codex 远程机器优先入口是 `@tingrudeng/codex-beta-runtime`。
+- Gemini 远程机器优先入口是 `@tingrudeng/gemini-beta-runtime`。
 - Trae 的首选无人值守路径是 `automation gateway` + `automation worker`。
 - Trae MCP worker 已降级为 deprecated/fallback 接入。
 - review memory 已进入主线的 dispatch 注入路径，但仍不是完整知识库系统。
@@ -353,6 +355,9 @@ vNext runtime reliability 推进：
 - `../packages/codex-beta-runtime/README.md`
   - 当前对外发布的远程 Codex npm 包入口。
   - 适合远程机器用 `npm install -g @tingrudeng/codex-beta-runtime` 安装。
+- `../packages/gemini-beta-runtime/README.md`
+  - 当前对外发布的远程 Gemini npm 包入口。
+  - 适合远程机器用 `npm install -g @tingrudeng/gemini-beta-runtime` 安装。
 - `../packages/automation-gateway-core/README.md`
   - 远程 Trae runtime 依赖的共享协议 helper 包。
   - 不是远程机器直接安装入口，主要用于发布和复用报告解析/任务 ID 校验逻辑。

@@ -276,3 +276,23 @@ Desired direction:
 
 - 真正的 competitive 执行（同任务多 worktree 并行、择优合并）需要在 codex/gemini worker 主线解封后单独设计 assignment / 并发模型，不应在当前 Trae-first 单串行约束下强行接入。
 - 在那之前，打分原语保持为纯函数库，供控制层或后续竞争选择路径复用。
+
+## 13. codex/gemini 解封：pool 契约与 gemini 包已落地，worker-daemon 构建收敛与消除重复仍待迁移
+
+当前情况：
+
+- worker pool 契约已统一为通用 string（`apps/dispatcher/src/modules/runtime/types.ts`、`tasks/service.ts`、`dispatch/service.ts`、`workers/service.ts`），与 `runtime-state.ts` 既有 string 对齐；`task-schema` 的 `WorkerPoolSchema(codex|gemini|trae)` 作为校验边界保留。
+- gemini 已有对等远程运行时包 `@tingrudeng/gemini-beta-runtime`（镜像 codex-beta-runtime），与 codex/trae 三者在“远程 worker 运行时包”层面并列。
+- generic worker daemon 现在会上报 `progress_reported` 运行阶段事件（worktree_prepared / execution_completed），与 Trae 的进度可观测性对齐。
+
+仍存在的债务：
+
+- **`scripts/lib` 构建不可干净重建（P0 未完成）**：`scripts/lib/worker-daemon.ts` 等在严格 base 配置下有 pre-existing 类型问题，且 `scripts/lib/review-memory.ts` 静态 import `apps/dispatcher/src`（违反 rootDir），导致 `tsc -p scripts/lib/tsconfig.json` 无法干净 emit。当前 `scripts/lib/*.js` 是 out-of-band 维护的 committed 产物，与 `.ts` 已漂移（如 `worker-daemon.ts` 的 `startTime`/metrics 代码从未编译进 live `.js`，且 `startTime` 在 catch 作用域外是 latent bug）。本轮 P1 的 phase events 是 `.ts` 与 `.js` 镜像手改并经端到端测试验证；这不是可持续方式。
+  - 期望方向：把 generic worker 执行逻辑下沉到 `apps/dispatcher/src`（像 dispatcher-server/state 那样），`scripts/lib/worker-daemon.js` 退化为 thin bootstrap 导入 `apps/dispatcher/dist`；同时把 `scripts` 纳入 CI typecheck，使 `.ts` 成为唯一真相、`.js` 可靠重建。
+- **两套 daemon + 闲置 runtime 抽象未收敛（P2 未完成）**：`scripts/lib/worker-daemon.ts`（重型 live）与 `runtime-glue` 的 `runWorkerDaemonCycle`（可注入轻量）职责重叠；`apps/dispatcher/src/modules/runtime/codex.ts|gemini.ts|assignment.ts` 的干净抽象尚未接入 live 启动路径（`run-worker-assignment.ts` 仍内联重写启动逻辑，且有 `FORGEFLOW_CODEX_MODEL` 覆盖、nvm-wrapped verification 等硬化行为，抽象需先补齐这些才能替换）。
+  - 期望方向：先把硬化行为补进 `runtime/*` 抽象，再让 live 启动路径与远程包统一复用，消除重复。
+
+影响：
+
+- codex/gemini 已可作为受支持 worker 接入方式与 Trae 并列；但 worker-daemon 源码的可维护性（构建可重建、单一实现）仍弱于 dispatcher 主链。
+- 任何对 generic worker daemon 的后续改动，应优先推进上面的下沉/收敛迁移，而不是继续手改 committed `.js`。
