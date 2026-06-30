@@ -71,6 +71,37 @@ describe("Codex runtime", () => {
     });
   });
 
+  it("honors an explicit model override for worker tasks", () => {
+    const runtime = createCodexRuntime("worker", { model: "gpt-5.4-codex" });
+    const launch = runtime.launchTask({
+      taskId: "task-ov",
+      prompt: "Implement",
+      mode: "run",
+      worktreeDir: ".worktrees/task-ov",
+    });
+    expect(runtime.model).toBe("gpt-5.4-codex");
+    expect(launch.argv).toEqual([
+      "codex",
+      "exec",
+      "-m",
+      "gpt-5.4-codex",
+      "--sandbox",
+      "workspace-write",
+      "Implement",
+    ]);
+  });
+
+  it("ignores an empty model override and falls back to the role default", () => {
+    const runtime = createCodexRuntime("worker", { model: "  " });
+    const launch = runtime.launchTask({
+      taskId: "task-empty",
+      prompt: "Implement",
+      mode: "run",
+      worktreeDir: ".worktrees/task-empty",
+    });
+    expect(launch.argv).not.toContain("-m");
+  });
+
   it("rejects verification commands containing shell meta characters", () => {
     const runtime = createCodexRuntime("worker");
 
