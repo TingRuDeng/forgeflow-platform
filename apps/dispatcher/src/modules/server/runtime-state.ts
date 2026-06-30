@@ -17,6 +17,15 @@ import type {
   ReviewDecisionEvidence,
   WorkerEvidence,
 } from "./runtime-glue-types.js";
+import {
+  assessReviewRisk,
+  resolveReviewRiskConfig,
+  type ReviewRiskAssessment,
+} from "./review-risk.js";
+import {
+  evaluateDispatchQuality,
+  resolveDispatchQualityConfig,
+} from "./dispatch-quality.js";
 import { compareTimestampAsc, formatLocalTimestamp } from "../time.js";
 
 const defaultStore: RuntimeStateStore = sqliteStore;
@@ -194,6 +203,7 @@ export interface Review {
   reviewMaterial?: ReviewMaterial | null;
   latestWorkerResult?: WorkerResult | null;
   evidence?: ReviewDecisionEvidence | null;
+  riskAssessment?: ReviewRiskAssessment | null;
 }
 
 export interface PullRequest {
@@ -547,6 +557,22 @@ function summarizeEvent(type: string, payload: unknown): string | null {
     const actor = normalizeString(record?.actor).trim();
     if (decision) {
       return actor ? `${decision} by ${actor}` : decision;
+    }
+  }
+
+  if (type === "review_risk_flagged") {
+    const level = normalizeString(record?.level).trim();
+    if (level) {
+      const count = record?.changedFileCount;
+      return typeof count === "number" ? `${level} (${count} files)` : level;
+    }
+  }
+
+  if (type === "dispatch_quality_flagged") {
+    const riskTier = normalizeString(record?.riskTier).trim();
+    const violations = Array.isArray(record?.violations) ? record?.violations.length : 0;
+    if (riskTier || violations) {
+      return `${riskTier || "standard"}${violations ? ` (${violations} violations)` : ""}`;
     }
   }
 
@@ -1833,10 +1859,25 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
   const assignments: Assignment[] = [];
   const taskIds: string[] = [];
   const createdAt = input.createdAt ?? nowIso();
+  const dispatchQualityConfig = resolveDispatchQualityConfig();
 
   for (const taskInput of input.tasks) {
     const taskId = `${dispatchId}:${taskInput.id}`;
     taskIds.push(taskId);
+
+    if (dispatchQualityConfig.mode !== "off") {
+      const quality = evaluateDispatchQuality({
+        allowedPaths: taskInput.allowedPaths ?? [],
+        acceptance: taskInput.acceptance ?? [],
+        config: dispatchQualityConfig,
+      });
+      if (!quality.ok && dispatchQualityConfig.mode === "enforce") {
+        const codes = quality.violations.map((violation) => violation.code).join(", ");
+        throw new Error(
+          `dispatch quality gate rejected task "${taskInput.id}": ${codes}`,
+        );
+      }
+    }
     const followUpOfTaskId = taskInput.followUpOfTaskId ?? taskInput.follow_up_of_task_id ?? null;
     const workerChangeReason = taskInput.workerChangeReason ?? taskInput.worker_change_reason ?? null;
     let targetWorkerId = taskInput.targetWorkerId ?? taskInput.target_worker_id ?? null;
@@ -1915,6 +1956,25 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
         traceId: task.traceId,
       },
     });
+    if (dispatchQualityConfig.mode !== "off") {
+      const quality = evaluateDispatchQuality({
+        allowedPaths: task.allowedPaths,
+        acceptance: task.acceptance,
+        config: dispatchQualityConfig,
+      });
+      if (!quality.ok || quality.riskTier === "sensitive") {
+        nextState = appendEvent(nextState, {
+          taskId,
+          type: "dispatch_quality_flagged",
+          at: createdAt,
+          payload: {
+            mode: dispatchQualityConfig.mode,
+            riskTier: quality.riskTier,
+            violations: quality.violations,
+          },
+        });
+      }
+    }
     if (initialTaskStatus !== "planned") {
       nextState = appendEvent(nextState, {
         taskId,
@@ -2445,15 +2505,22 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     : null;
 
   const nextStatus = canonicalResult.verification.allPassed ? "review" : "failed";
+  const reviewChangedFiles = input.changedFiles ?? [];
   const reviewMaterial = canonicalResult.verification.allPassed
     ? {
         repo: task.repo,
         title: task.title,
-        changedFiles: input.changedFiles ?? [],
+        changedFiles: reviewChangedFiles,
         selfTestPassed: true,
         checks: canonicalResult.verification.commands.map((item) => item.command),
         pullRequest: canonicalPullRequest,
       }
+    : null;
+  const riskAssessment = canonicalResult.verification.allPassed
+    ? assessReviewRisk({
+        changedFiles: reviewChangedFiles,
+        config: resolveReviewRiskConfig(),
+      })
     : null;
 
   let nextState = state;
@@ -2508,8 +2575,24 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
       reviewMaterial,
       latestWorkerResult: clone(canonicalResult),
       evidence: currentReview?.evidence ?? null,
+      riskAssessment,
     }),
   };
+
+  if (riskAssessment && riskAssessment.level !== "low") {
+    nextState = appendEvent(nextState, {
+      taskId: task.id,
+      type: "review_risk_flagged",
+      at: canonicalResult.generatedAt,
+      payload: {
+        level: riskAssessment.level,
+        changedFileCount: riskAssessment.changedFileCount,
+        maxChangedFiles: riskAssessment.maxChangedFiles,
+        protectedPathHits: riskAssessment.protectedPathHits.map((hit) => hit.pattern),
+        reasons: riskAssessment.reasons,
+      },
+    });
+  }
 
   if (canonicalPullRequest) {
     nextState = {
@@ -2616,6 +2699,7 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
       reviewMaterial: review?.reviewMaterial ?? null,
       latestWorkerResult: review?.latestWorkerResult ?? null,
       evidence: input.evidence ?? review?.evidence ?? null,
+      riskAssessment: review?.riskAssessment ?? null,
     }),
   };
 
@@ -2875,6 +2959,140 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
     events: clone(reconciledState.events.slice(-50).reverse()),
     dispatches: clone(reconciledState.dispatches),
     leases: clone(reconciledState.leases ?? []),
+  };
+}
+
+export interface ControlContextTask {
+  taskId: string;
+  externalTaskId: string;
+  traceId: string | null;
+  title: string;
+  pool: string;
+  repo: string;
+  status: TaskStatus;
+  assignedWorkerId: string | null;
+}
+
+export interface ControlContextReviewItem extends ControlContextTask {
+  riskLevel: ReviewRiskAssessment["level"] | null;
+  riskReasons: string[];
+  changedFileCount: number | null;
+}
+
+export interface ControlContextBlockedItem extends ControlContextTask {
+  decision: ReviewDecision | null;
+  canRedrive: boolean;
+  reasonCode: string | null;
+}
+
+export interface ControlContext {
+  updatedAt: string;
+  stats: DashboardSnapshot["stats"];
+  metrics: {
+    queueDepth: number;
+    plannedTasks: number;
+    reviewBacklog: number;
+    failureCodes: Record<string, number>;
+    reviewReasonCodes: Record<string, number>;
+  };
+  activeTasks: ControlContextTask[];
+  reviewBacklog: ControlContextReviewItem[];
+  blocked: ControlContextBlockedItem[];
+  recentEvents: Event[];
+}
+
+const CONTROL_CONTEXT_ACTIVE_STATUSES: TaskStatus[] = [
+  "planned",
+  "ready",
+  "assigned",
+  "in_progress",
+];
+
+function toControlContextTask(task: Task): ControlContextTask {
+  return {
+    taskId: task.id,
+    externalTaskId: task.externalTaskId,
+    traceId: resolveTaskTraceId(task),
+    title: task.title,
+    pool: task.pool,
+    repo: task.repo,
+    status: task.status,
+    assignedWorkerId: task.assignedWorkerId ?? null,
+  };
+}
+
+// One-call control-layer context view. Reuses the reconciled dashboard snapshot
+// (already structured-read aware at the call site) and folds it into the focused
+// slices a planner / reviewer actually acts on: active work, the review backlog
+// with deterministic risk grades, redriveable blocked tasks, and recent events
+// for trace correlation. `since` filters recent events by timestamp.
+export function buildControlContext(
+  snapshot: DashboardSnapshot,
+  options: { since?: string; eventLimit?: number } = {},
+): ControlContext {
+  const reviewByTask = new Map(snapshot.reviews.map((review) => [review.taskId, review]));
+
+  const activeTasks = snapshot.tasks
+    .filter((task) => CONTROL_CONTEXT_ACTIVE_STATUSES.includes(task.status))
+    .map(toControlContextTask);
+
+  const reviewBacklog: ControlContextReviewItem[] = snapshot.tasks
+    .filter((task) => task.status === "review")
+    .map((task) => {
+      const review = reviewByTask.get(task.id);
+      const risk = review?.riskAssessment ?? null;
+      return {
+        ...toControlContextTask(task),
+        riskLevel: risk?.level ?? null,
+        riskReasons: risk?.reasons ?? [],
+        changedFileCount: risk?.changedFileCount ?? null,
+      };
+    });
+
+  const blocked: ControlContextBlockedItem[] = snapshot.tasks
+    .filter((task) => task.status === "blocked")
+    .map((task) => {
+      const review = reviewByTask.get(task.id);
+      const decision = review?.decision ?? null;
+      const evidence = review?.evidence ?? null;
+      const isReworkDecision = decision === "rework" || decision === "changes_requested";
+      const canRedrive = isReworkDecision && evidence?.canRedrive !== false;
+      return {
+        ...toControlContextTask(task),
+        decision,
+        canRedrive,
+        reasonCode: evidence?.reasonCode ?? null,
+      };
+    });
+
+  let recentEvents = snapshot.events;
+  if (options.since) {
+    const sinceMs = Date.parse(options.since);
+    if (Number.isFinite(sinceMs)) {
+      recentEvents = recentEvents.filter((event) => {
+        const at = Date.parse(event.at);
+        return Number.isFinite(at) && at >= sinceMs;
+      });
+    }
+  }
+  if (typeof options.eventLimit === "number" && options.eventLimit >= 0) {
+    recentEvents = recentEvents.slice(0, options.eventLimit);
+  }
+
+  return {
+    updatedAt: snapshot.updatedAt,
+    stats: snapshot.stats,
+    metrics: {
+      queueDepth: snapshot.metrics.queueDepth,
+      plannedTasks: snapshot.metrics.plannedTasks,
+      reviewBacklog: snapshot.metrics.reviewBacklog,
+      failureCodes: snapshot.metrics.failureCodes,
+      reviewReasonCodes: snapshot.metrics.reviewReasonCodes,
+    },
+    activeTasks,
+    reviewBacklog,
+    blocked,
+    recentEvents: clone(recentEvents),
   };
 }
 

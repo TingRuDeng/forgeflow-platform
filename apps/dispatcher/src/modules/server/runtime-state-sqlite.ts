@@ -270,6 +270,7 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
     );
   `);
   ensureColumn(db, "artifact_bundles", "retained_content_json", "TEXT");
+  ensureColumn(db, "reviews", "risk_assessment_json", "TEXT");
 }
 
 function persistRuntimeStateSnapshot(db: InstanceType<typeof DatabaseSync>, state: RuntimeState): RuntimeState {
@@ -554,8 +555,8 @@ function rewriteStructuredProjection(
 
     const insertReview = db.prepare(`
       INSERT INTO reviews (
-        task_id, decision, actor, notes, decided_at, review_material_json, latest_worker_result_json, evidence_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        task_id, decision, actor, notes, decided_at, review_material_json, latest_worker_result_json, evidence_json, risk_assessment_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const review of state.reviews) {
       insertReview.run(
@@ -567,6 +568,7 @@ function rewriteStructuredProjection(
         asJson(review.reviewMaterial ?? null),
         asJson(review.latestWorkerResult ?? null),
         asJson(review.evidence ?? null),
+        asJson(review.riskAssessment ?? null),
       );
     }
 
@@ -865,6 +867,7 @@ export function readStructuredRuntimeState(stateDir: string): RuntimeState {
       reviewMaterial: fromJson(row.review_material_json, null),
       latestWorkerResult: fromJson(row.latest_worker_result_json, null),
       evidence: fromJson(row.evidence_json, null),
+      riskAssessment: fromJson(row.risk_assessment_json, null),
     }));
 
     base.pullRequests = db.prepare(`

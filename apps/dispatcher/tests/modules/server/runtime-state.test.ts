@@ -14,6 +14,7 @@ import type {
 
 import {
   beginTaskForWorker,
+  buildControlContext,
   buildDashboardSnapshot,
   cancelTask,
   claimAssignedTaskForWorker,
@@ -2485,6 +2486,175 @@ describe("dispatcher runtime state (TypeScript)", () => {
       canRedrive: true,
       redriveStrategy: "same_worker_continue",
     });
+  });
+
+  it("attaches a deterministic risk assessment and flags protected-path changes entering review", () => {
+    const stateDir = makeTempDir();
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-risk",
+      pool: "codex",
+      hostname: "mac-mini",
+      labels: ["mac", "codex"],
+      repoDir: "/repos/openclaw",
+    });
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+      requestedBy: "control",
+      tasks: [
+        {
+          id: "task-risk",
+          title: "Risk grading 测试",
+          pool: "codex",
+          allowedPaths: ["src/**", "auth/**"],
+          acceptance: ["完成代码"],
+          dependsOn: [],
+          branchName: "ai/codex/task-risk",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-risk",
+          assignment: {
+            taskId: "task-risk",
+            workerId: "placeholder",
+            pool: "codex",
+            status: "assigned",
+            branchName: "ai/codex/task-risk",
+            allowedPaths: ["src/**", "auth/**"],
+            commands: { test: "pnpm test" },
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+          },
+          workerPrompt: "你是 codex-worker。",
+          contextMarkdown: "# Context",
+        },
+      ],
+      createdAt: "2026-03-17T10:00:10.000Z",
+    });
+    state = dispatch.state;
+    const taskId = dispatch.taskIds[0];
+
+    state = claimAndStartTaskForTest(state, {
+      workerId: "codex-risk",
+      taskId,
+      claimedAt: "2026-03-17T10:00:12.000Z",
+      startedAt: "2026-03-17T10:00:15.000Z",
+    });
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-risk",
+      ...activeWorkerEnvelope(state, taskId!),
+      result: {
+        taskId,
+        workerId: "codex-risk",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-risk",
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "master",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-03-17T10:05:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [{ command: "pnpm test", exitCode: 0, output: "ok" }],
+        },
+      },
+      changedFiles: ["src/main.ts", "auth/login.ts"],
+      pullRequest: null,
+    });
+
+    const review = state.reviews.find((item) => item.taskId === taskId);
+    expect(review?.riskAssessment?.level).toBe("needs_human_attention");
+    expect(review?.riskAssessment?.changedFileCount).toBe(2);
+    expect(review?.riskAssessment?.protectedPathHits.length).toBeGreaterThan(0);
+
+    const riskEvent = state.events.find(
+      (event) => event.taskId === taskId && event.type === "review_risk_flagged",
+    );
+    expect(riskEvent).toBeTruthy();
+    expect((riskEvent?.payload as { level?: string } | undefined)?.level).toBe(
+      "needs_human_attention",
+    );
+
+    // Risk grade survives a save/load round-trip (snapshot + SQLite projection).
+    saveRuntimeState(stateDir, state);
+    const reloaded = loadRuntimeState(stateDir);
+    const reloadedReview = reloaded.reviews.find((item) => item.taskId === taskId);
+    expect(reloadedReview?.riskAssessment?.level).toBe("needs_human_attention");
+
+    // The control context aggregates the review backlog with its risk grade.
+    const context = buildControlContext(buildDashboardSnapshot(state));
+    const backlogItem = context.reviewBacklog.find((item) => item.taskId === taskId);
+    expect(backlogItem?.riskLevel).toBe("needs_human_attention");
+    expect(backlogItem?.changedFileCount).toBe(2);
+    expect(context.metrics.reviewBacklog).toBe(1);
+    expect(context.recentEvents.length).toBeGreaterThan(0);
+  });
+
+  it("flags low-quality dispatch tasks in warn mode and rejects them in enforce mode", () => {
+    const baseInput = {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+      requestedBy: "control",
+      tasks: [
+        {
+          id: "task-thin",
+          title: "缺少验收的薄任务",
+          pool: "codex",
+          allowedPaths: [],
+          acceptance: [],
+          dependsOn: [],
+          branchName: "ai/codex/task-thin",
+          verification: { mode: "run" as const },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-thin",
+          assignment: {
+            taskId: "task-thin",
+            workerId: null,
+            pool: "codex",
+            status: "pending" as const,
+            branchName: "ai/codex/task-thin",
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+          },
+        },
+      ],
+      createdAt: "2026-03-17T10:00:10.000Z",
+    };
+
+    // Default warn mode: dispatch succeeds but records a quality-flag event.
+    const warnDispatch = createDispatch(createEmptyRuntimeState(), baseInput);
+    const warnEvent = warnDispatch.state.events.find(
+      (event) => event.type === "dispatch_quality_flagged",
+    );
+    expect(warnEvent).toBeTruthy();
+    const codes = (warnEvent?.payload as { violations?: { code: string }[] } | undefined)?.violations?.map(
+      (violation) => violation.code,
+    );
+    expect(codes).toContain("missing_acceptance");
+    expect(codes).toContain("missing_allowed_paths");
+
+    // Enforce mode: dispatch is rejected before any task is created.
+    const previousMode = process.env.DISPATCHER_DISPATCH_QUALITY_MODE;
+    process.env.DISPATCHER_DISPATCH_QUALITY_MODE = "enforce";
+    try {
+      expect(() => createDispatch(createEmptyRuntimeState(), baseInput)).toThrow(
+        /dispatch quality gate rejected/i,
+      );
+    } finally {
+      if (previousMode === undefined) {
+        delete process.env.DISPATCHER_DISPATCH_QUALITY_MODE;
+      } else {
+        process.env.DISPATCHER_DISPATCH_QUALITY_MODE = previousMode;
+      }
+    }
   });
 
   it("records changes_requested as a real review decision event", () => {

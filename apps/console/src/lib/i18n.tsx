@@ -54,6 +54,14 @@ const I18N = {
     continueFrom: '继续自',
     followUpOf: '跟进自',
     latestReview: '最新审查',
+    reviewRisk: '审查风险',
+    riskReasons: '风险原因',
+    riskMergeHint: '风险高于 low，合并前请人工确认',
+    riskLevel: {
+      low: '低',
+      needs_human_attention: '需人工关注',
+      too_large_for_auto_review: '改动过大'
+    },
     reviewActions: '审查操作',
     mergeDecision: '合并',
     reworkDecision: '返工',
@@ -177,6 +185,14 @@ const I18N = {
     continueFrom: 'Continue From',
     followUpOf: 'Follow-up Of',
     latestReview: 'Latest Review',
+    reviewRisk: 'Review Risk',
+    riskReasons: 'Risk Reasons',
+    riskMergeHint: 'Risk is above low; confirm manually before merge',
+    riskLevel: {
+      low: 'Low',
+      needs_human_attention: 'Needs Human Attention',
+      too_large_for_auto_review: 'Too Large For Auto Review'
+    },
     reviewActions: 'Review Actions',
     mergeDecision: 'Merge',
     reworkDecision: 'Rework',

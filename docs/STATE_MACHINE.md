@@ -84,6 +84,23 @@ Current rules:
 - `claimedAt` is written only by the explicit claim path.
 - Trae fetch/start now converges through the same dispatcher authority rules instead of mutating ad hoc route-local state.
 
+## Dispatch Quality Gate
+
+`createDispatch` now applies a deterministic server-side quality gate to every task at creation time, instead of relying only on a dispatch-time prompt checklist. The gate is configurable via env:
+
+- `DISPATCHER_DISPATCH_QUALITY_MODE` — `off` / `warn` (default) / `enforce`.
+- `DISPATCHER_DISPATCH_REQUIRE_ACCEPTANCE` — require ≥1 acceptance criterion (default `true`).
+- `DISPATCHER_DISPATCH_REQUIRE_ALLOWED_PATHS` — require a bounded `allowedPaths` scope (default `true`).
+- Sensitive-tier detection reuses `DISPATCHER_REVIEW_PROTECTED_PATHS`.
+
+Trait-style behavior: a task whose `allowedPaths` intersect protected globs is graded `sensitive` and automatically requires acceptance even when the global flag is off, and must not ship with a catch-all-only scope (`**`, `*`, `.`).
+
+Modes:
+
+- `off` — no grading.
+- `warn` — task is still created, but dispatcher appends a `dispatch_quality_flagged` event carrying `mode`, `riskTier` and `violations[]` when the task has violations or is sensitive.
+- `enforce` — `createDispatch` throws before creating the task when there are blocking violations (`missing_acceptance`, `missing_allowed_paths`, `unbounded_scope_sensitive`).
+
 ## Review Decisions
 
 Supported decisions:
@@ -92,6 +109,21 @@ Supported decisions:
 - `block`
 - `rework`
 - `changes_requested`
+
+### Deterministic risk grading on review entry
+
+When a worker result passes verification and the task moves `in_progress -> review`, dispatcher attaches a deterministic, explainable risk grade to the review (`review.riskAssessment`). There is no LLM judge; grading is a pure function of the result's `changedFiles` plus configurable thresholds:
+
+- `low` — no protected path touched and within the changed-file budget; the only auto-merge-eligible grade.
+- `needs_human_attention` — at least one changed file matches a protected-path glob (default set covers `auth`, `payments`, `migrations`, `infra`, `.github/workflows`, and secret/credential/permission-like files).
+- `too_large_for_auto_review` — changed-file count exceeds the budget (default `50`).
+
+Configuration (env, read at result time):
+
+- `DISPATCHER_REVIEW_PROTECTED_PATHS` — comma-separated glob list; an explicitly empty value disables the protected-path gate.
+- `DISPATCHER_REVIEW_MAX_CHANGED_FILES` — positive integer file budget.
+
+When the grade is not `low`, dispatcher appends a `review_risk_flagged` event carrying `level`, `changedFileCount`, `maxChangedFiles`, `protectedPathHits` and `reasons`. The grade is informational: it does not block the control layer's decision, but it surfaces in the dashboard snapshot reviews and is preserved through the final review decision.
 
 Current mapping:
 

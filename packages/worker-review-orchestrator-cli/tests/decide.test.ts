@@ -9,10 +9,19 @@ import { createEmptyRuntimeState, saveRuntimeState } from "../src/http.js";
 
 describe("decide", () => {
   it("posts review decisions to the dispatcher", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify({ taskId: "dispatch-1:task-1", status: "merged" }),
+    const fetchImpl = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/api/dashboard/snapshot")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ reviews: [] }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ taskId: "dispatch-1:task-1", status: "merged" }),
+      });
     });
 
     const result = await runDecide({
@@ -35,7 +44,10 @@ describe("decide", () => {
       "http://127.0.0.1:8787/api/reviews/dispatch-1%3Atask-1/decision",
       expect.objectContaining({ method: "POST" }),
     );
-    const requestBody = JSON.parse((fetchImpl.mock.calls[0] as unknown as [string, { body: string }])[1].body);
+    const decisionCall = (fetchImpl.mock.calls as Array<[string, { method?: string; body?: string }]>).find(
+      (call) => call[0].includes("/decision"),
+    );
+    const requestBody = JSON.parse(decisionCall![1].body as string);
     expect(requestBody).toMatchObject({
       actor: "codex-control",
       decision: "merge",
@@ -102,5 +114,124 @@ describe("decide", () => {
     expect(nextState.pullRequests[0]?.status).toBe("changes_requested");
     expect(nextState.pullRequests[0]?.updatedAt).toMatch(/[+-]\d{2}:\d{2}$/);
     expect(nextState.pullRequests[0]?.updatedAt.endsWith("Z")).toBe(false);
+  });
+
+  it("blocks a merge when the review risk grade is not low", async () => {
+    const fetchImpl = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/api/dashboard/snapshot")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            reviews: [
+              {
+                taskId: "dispatch-1:task-1",
+                riskAssessment: {
+                  level: "needs_human_attention",
+                  reasons: ["protected paths touched: auth/**"],
+                },
+              },
+            ],
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, text: async () => "{}" });
+    });
+
+    await expect(
+      runDecide({
+        dispatcherUrl: "http://127.0.0.1:8787",
+        taskId: "dispatch-1:task-1",
+        decision: "merge",
+        fetchImpl: fetchImpl as typeof globalThis.fetch,
+      }),
+    ).rejects.toThrow(/merge blocked: review risk is "needs_human_attention"/);
+
+    // The decision POST must not have been issued.
+    expect(
+      (fetchImpl.mock.calls as Array<[string]>).some((call) => call[0].includes("/decision")),
+    ).toBe(false);
+  });
+
+  it("allows a risky merge when --acknowledge-risk is passed", async () => {
+    const fetchImpl = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/api/dashboard/snapshot")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            reviews: [{ taskId: "dispatch-1:task-1", riskAssessment: { level: "too_large_for_auto_review", reasons: [] } }],
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ taskId: "dispatch-1:task-1", status: "merged" }),
+      });
+    });
+
+    const result = await runDecide({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-1",
+      decision: "merge",
+      acknowledgeRisk: true,
+      fetchImpl: fetchImpl as typeof globalThis.fetch,
+    });
+
+    expect(result.status).toBe("merged");
+    // With acknowledgement the risk snapshot is not even fetched.
+    expect(
+      (fetchImpl.mock.calls as Array<[string]>).some((call) => call[0].includes("/api/dashboard/snapshot")),
+    ).toBe(false);
+  });
+
+  it("allows a low-risk merge without acknowledgement", async () => {
+    const fetchImpl = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/api/dashboard/snapshot")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            reviews: [{ taskId: "dispatch-1:task-1", riskAssessment: { level: "low", reasons: [] } }],
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ taskId: "dispatch-1:task-1", status: "merged" }),
+      });
+    });
+
+    const result = await runDecide({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-1",
+      decision: "merge",
+      fetchImpl: fetchImpl as typeof globalThis.fetch,
+    });
+
+    expect(result.status).toBe("merged");
+  });
+
+  it("does not gate non-merge decisions on risk", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ taskId: "dispatch-1:task-1", status: "blocked" }),
+    });
+
+    const result = await runDecide({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-1",
+      decision: "block",
+      fetchImpl: fetchImpl as typeof globalThis.fetch,
+    });
+
+    expect(result.status).toBe("blocked");
+    // No risk snapshot fetch for non-merge decisions.
+    expect(
+      (fetchImpl.mock.calls as Array<[string]>).some((call) => call[0].includes("/api/dashboard/snapshot")),
+    ).toBe(false);
   });
 });

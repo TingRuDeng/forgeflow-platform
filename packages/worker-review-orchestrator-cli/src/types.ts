@@ -74,6 +74,7 @@ export interface WatchSummaryResult {
   elapsedMs: number;
   latestResultEvidence?: InspectSummaryResult["latestResultEvidence"];
   reviewState?: InspectSummaryResult["reviewState"];
+  riskAssessment?: InspectSummaryResult["riskAssessment"];
   canRedrive?: boolean | null;
   latestProgressAt?: string | null;
   latestProgressSummary?: string | null;
@@ -92,6 +93,7 @@ export interface DecideOptions {
   mustFix?: string | string[];
   canRedrive?: boolean;
   redriveStrategy?: string;
+  acknowledgeRisk?: boolean;
 }
 
 export interface DecideResult {
@@ -180,6 +182,12 @@ export interface InspectSummaryResult {
     decision: string | null;
     actor: string | null;
     at: string | null;
+  } | null;
+  riskAssessment: {
+    level: string | null;
+    reasons: string[];
+    changedFileCount: number | null;
+    protectedPathHits: string[];
   } | null;
   pullRequestState: {
     url: string | null;

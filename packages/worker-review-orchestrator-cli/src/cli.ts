@@ -98,6 +98,7 @@ Usage:
   forgeflow-review-orchestrator watch --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1
   forgeflow-review-orchestrator watch --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1 --summary
   forgeflow-review-orchestrator decide --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1 --decision merge
+  forgeflow-review-orchestrator decide --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1 --decision merge --acknowledge-risk
   forgeflow-review-orchestrator decide --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1 --decision block --reason-code test_failure --must-fix "补测试,修类型" --can-redrive --redrive-strategy same_worker_continue
   forgeflow-review-orchestrator decide --state-dir /path/to/.forgeflow-dispatcher --task-id dispatch-1:task-1 --decision block
   forgeflow-review-orchestrator inspect --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1
@@ -367,6 +368,7 @@ Examples:
       mustFix: typeof options.mustFix === "string" ? options.mustFix : undefined,
       canRedrive: typeof options.canRedrive === "boolean" ? options.canRedrive : undefined,
       redriveStrategy: typeof options.redriveStrategy === "string" ? options.redriveStrategy : undefined,
+      acknowledgeRisk: options.acknowledgeRisk === true,
     });
     deps.log(JSON.stringify(result, null, 2));
     return result;

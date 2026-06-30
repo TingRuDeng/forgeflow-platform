@@ -144,6 +144,12 @@ describe('Task drill-down', () => {
             redriveStrategy: 'same_worker_continue',
             mustFix: ['补齐失败测试'],
           },
+          riskAssessment: {
+            level: 'needs_human_attention',
+            reasons: ['protected paths touched: auth/**'],
+            changedFileCount: 3,
+            protectedPathHits: [{ pattern: 'auth/**', files: ['auth/login.ts'] }],
+          },
           latestWorkerResult: {
             evidence: {
               failureType: 'verification',
@@ -219,6 +225,11 @@ describe('Task drill-down', () => {
     expect(screen.getByText(/src\/auth.ts/i)).toBeInTheDocument();
     expect(screen.getByText(/需要人工复核权限边界/i)).toBeInTheDocument();
     expect(screen.getByText(/合并后观察登录链路/i)).toBeInTheDocument();
+
+    // Deterministic review risk grade is surfaced with reasons and a merge hint.
+    expect(screen.getAllByText(/需人工关注|needs human attention/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/protected paths touched: auth/i)).toBeInTheDocument();
+    expect(screen.getByText(/合并前请人工确认|confirm manually before merge/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /refs|引用/i }));
     expect(screen.getByText(/artifact:\/\/att-001\/diff.patch/i)).toBeInTheDocument();
