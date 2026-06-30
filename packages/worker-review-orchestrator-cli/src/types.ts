@@ -131,6 +131,7 @@ export interface ArtifactGetOptions {
   dispatcherUrl?: string;
   stateDir?: string;
   bundleId: string;
+  fileName?: string;
   fetchImpl?: typeof globalThis.fetch;
 }
 

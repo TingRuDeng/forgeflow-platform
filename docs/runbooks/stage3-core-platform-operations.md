@@ -101,6 +101,9 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - Postgres shadow 已配置
 - `/api/dr/status.shadowWrite` 最近状态为 `ok`，或失败原因已被人工确认
 - `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher` 返回 `ok=true`
+- `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --max-mismatches 0 --max-delta 0` 可输出 `alert.level`
+- 如果 drift 来自 shadow projection / queue 落后，operator 可执行 `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --reconcile` 主动重放 SQLite truth 到 shadow 后复查
+- 如果需要把 drift 留作运行时告警证据，operator 可追加 `--record-alert` 写入 `shadow_drift_detected` system event
 - `pnpm verify:stage3` 和 release workflow 会执行 `pnpm verify:shadow-drift`，shadow 配置存在且 drifted 时必须阻断 rollout / release
 - assignment delivery queue 影子计数合理
 
@@ -131,7 +134,7 @@ node scripts/verify-live-dispatcher-dr.mjs
 
 - 发布前至少做一次 backup
 - 每季度跑一次 `verify-stage3-dr`，它能证明源码级 SQLite WAL 备份恢复与 checksum 校验
-- 风险较高的 runtime 发布前跑一次 `verify-live-dispatcher-dr`，它能启动本地 live dispatcher、执行真实 HTTP 写入并验证备份恢复；它仍不替代进程崩溃或主机故障演练
+- 风险较高的 runtime 发布前跑一次 `verify-live-dispatcher-dr`，它能启动本地 live dispatcher、执行真实 HTTP 写入，并覆盖 SIGKILL 替换恢复、磁盘损坏后恢复和双 stateDir 多节点恢复一致性；它仍不替代真实生产 quorum / fencing / DNS 切流演练
 - 先切 read-only，再做 restore
 
 ## 6. SLO / Burn-rate
@@ -185,9 +188,10 @@ node scripts/verify-live-dispatcher-dr.mjs
 - SLO / burn-rate
 - DR 演练入口
 - 参考部署与 provider 收口
+- 内部 Worker SDK helper 与第三方 provider admission gate
 
 当前仍未纳入本 runbook 的是生态开放波次：
 
-- 对外 SDK
-- 第三方准入
+- 公网对外 SDK 长期兼容承诺
+- 第三方 provider 自助注册 / 撤销后台
 - 外部公共 API 稳定承诺

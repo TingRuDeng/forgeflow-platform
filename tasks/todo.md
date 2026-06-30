@@ -1,5 +1,60 @@
 # 当前项目审查修复任务
 
+- [x] M9 串行：第 1 轮 Artifact store + retention，支持 artifact 文件落盘、索引、保留策略和按需读取。
+- [x] M9 串行：第 2 轮 shadow reconciliation + alerting，定义 drift 阈值、告警事件和自动对账入口。
+- [x] M9 串行：第 3 轮 Console review workflow，打通 artifact / attempt / review decision 的审查操作链路。
+- [x] M9 串行：第 4 轮移除 v0 / 空 envelope 兼容路径，保留可审计迁移边界。
+- [x] M9 串行：第 5 轮生产级 DR 多场景 drill，覆盖 host failure、磁盘损坏和多节点恢复验收。
+- [x] M9 串行：第 6 轮 Worker SDK / 第三方准入，稳定 worker 接入 API、provider capability 和准入门禁。
+
+## M9 第 1 轮 Review 小结
+
+已新增 dispatcher 本地 artifact store：worker v1 result 与 Trae submit-result 成功记录 ArtifactBundle 后，会把 `retainedContent.diff`、`retainedContent.logs`、`retainedContent.testResults` 写入 `${stateDir}/artifacts/<bundle-dir>/`，生成 `manifest.json` 索引，并把 bundle refs 更新为 `artifact://<bundleId>/<fileName>`。新增 `/api/artifacts/:bundleId/files/:fileName` 按需读取 manifest 登记文件，拒绝路径穿越；CLI `artifact-get --file <name>` 支持 dispatcher URL 与本地 state-dir 两种读取模式。保留策略通过 `DISPATCHER_ARTIFACT_RETENTION_MAX_BUNDLES` 控制，默认保留 100 个 bundle。
+
+验证已通过：Artifact store 单测先因模块缺失失败后通过；worker v1 artifact HTTP 集成测试先因 refs 未更新失败后通过；Trae submit-result artifact 测试先因 refs 未更新失败后通过；CLI `artifact-get --file` 注入测试先失败后通过；`tests/artifact.test.ts`、`pnpm typecheck`、`pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：artifact store 当前是 dispatcher stateDir 下的本地文件 store，不是远端对象存储；Console 仍展示 retainedContent tabs，按需文件展开 / 下载体验留到第 3 轮 Console review workflow 处理。
+
+## M9 第 2 轮 Review 小结
+
+已为 shadow drift 增加阈值化告警和 operator 对账入口：`evaluateRuntimeStateShadowDriftAlert` 会根据 mismatch 数量和绝对 delta 输出 `none` / `warning` / `critical`；`scripts/check-shadow-drift.mjs` 支持 `--max-mismatches`、`--max-delta`、`--reconcile` 和 `--record-alert`。默认 `pnpm verify:shadow-drift` / release gate 仍只读无副作用；operator 显式使用 `--reconcile` 时会把当前 SQLite truth 重放到 shadow projection / queue 后复查；显式使用 `--record-alert` 时会写入 `shadow_drift_detected` system event。
+
+验证已通过：shadow alert RED 测试先因函数缺失失败后通过；shadow drift 脚本 RED 测试先因 usage 拒绝新参数失败后通过；`runtime-state-shadow-health.test.ts`、`shadow-drift.test.ts`、`workflows.test.ts`、`pnpm docs:validate`、`pnpm lint`、`pnpm typecheck`、`git diff --check` 均通过。
+
+剩余风险：自动对账当前是 operator 显式命令，不是后台定时任务；`--record-alert` 是显式写事件入口，默认 release gate 不写 runtime-state，避免 CI/release gate 产生隐式状态副作用。
+
+## M9 第 3 轮 Review 小结
+
+已打通 Console review workflow 最小闭环：任务详情页保留 attempt timeline、runtime events、artifact summary / refs / retained content，并在任务处于 `review` 状态时提供 `merge` / `rework` / `block` 审查按钮。App 会将决策提交到 `/api/reviews/:taskId/decision`，写入 actor、notes、时间戳并刷新 dashboard snapshot。
+
+验证已通过：Console RED 测试先因缺少合并按钮和 App 提交链路失败后通过；`pnpm --filter console exec vitest run`、`pnpm --filter console build`、`pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：Console 当前提交固定 notes 和 actor，不提供 reason code / must-fix 表单；artifact 文件 API 已可按需读取，但 Console 侧 refs 仍以展示为主，文件展开 / 下载体验后续可继续细化。
+
+## M9 第 4 轮 Review 小结
+
+已移除 dispatcher worker mutation 的 v0 / 空 envelope 兼容路径：claim 后的通用 worker start/result、Trae start/result 都必须携带 `attemptId`、`leaseToken`、`protocolVersion`、`traceId` 和 `idempotencyKey`，缺字段、无 active attempt 或 stale attempt 写入都会被拒绝。同步把旧测试夹具改为先 claim/start 再提交 result，并把 Worker Protocol、Task Attempt、API 和技术债文档里的旧兼容表述改为当前事实。
+
+验证已通过：新增/调整的 RED 测试先暴露空 envelope 仍可被旧夹具绕过，修复后 `pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state.test.ts tests/modules/server/runtime-state-sqlite.test.ts tests/modules/server/dispatcher-server.test.ts tests/modules/server/runtime-dispatcher-server.test.ts`、`pnpm --filter @tingrudeng/trae-beta-runtime test -- tests/runtime/clients.test.ts tests/runtime/worker.test.ts`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：独立 progress mutation 仍未升级为 attempt 级 v1 endpoint；Worker Protocol package 的目标 schema 仍未成为 dispatcher HTTP route 的唯一请求解析入口。
+
+## M9 第 5 轮 Review 小结
+
+已把 live dispatcher DR drill 扩展为多场景验收：`scripts/verify-live-dispatcher-dr.mjs` 现在会在 live HTTP 写入期间备份，恢复前主动破坏当前 SQLite runtime 文件，校验磁盘损坏后可从备份恢复；同时通过 `SIGKILL` 子进程模拟 host / 进程丢失并在替换 stateDir 拉起 dispatcher；还会把同一备份恢复到两个独立 stateDir，启动两个 dispatcher 并校验 task / event 计数一致。同步修正旧 dist/bridge 测试夹具，使其遵守第 4 轮完整 v1 envelope 主链。
+
+验证已通过：RED 测试先失败于 `hostFailure` 输出缺失；修复后 `pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/stage3-live-dr.test.ts`、`node scripts/verify-live-dispatcher-dr.mjs`、`pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/dispatcher-state.test.ts tests/modules/server/submit-review-decision.test.ts`、`pnpm verify:stage3`、`pnpm lint`、`pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：当前多节点恢复是本地双 stateDir 一致性验收，不等同真实跨主机 quorum / fencing / DNS 切流演练；物理断电仍需生产环境 runbook 单独覆盖。
+
+## M9 第 6 轮 Review 小结
+
+已落地内部 Worker SDK / 第三方准入最小闭环：`@forgeflow/worker-protocol` 新增 `WorkerSdkStartPayloadSchema`、`WorkerSdkResultPayloadSchema`、`buildWorkerStartPayload` 和 `buildWorkerResultPayload`，用于 worker adapter 复用完整 v1 envelope 构造 start/result payload；`@forgeflow/provider-registry` 新增 `evaluateProviderAdmission`，已知 provider 按支持模式和权限键校验，未知第三方 provider 默认拒绝，只有白名单且声明 `worker-protocol-v1` 时才放行。同步更新 README、Worker Protocol、provider capability contract、Stage 3 runbook 和技术债文档。
+
+验证已通过：RED 测试先失败于 helper / admission gate 缺失；修复后 `pnpm --filter @forgeflow/worker-protocol test`、`pnpm --filter @forgeflow/worker-protocol typecheck`、`pnpm --filter @forgeflow/provider-registry test`、`pnpm --filter @forgeflow/provider-registry typecheck`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：当前 helper 是仓库内部 SDK 契约，不等于公网 npm SDK 长期兼容承诺；第三方 provider admission 仍是代码级白名单门禁，没有自助注册 / 撤销后台。
+
 - [x] M8 串行：收尾 PR #112 后的本地分支和远端分支状态。
 - [x] M8 串行：同步 read-only `/api` 写方法冻结的文档事实。
 - [x] M8 串行：对齐 Trae automation gateway 双实现差异并补共享测试。

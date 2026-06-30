@@ -24,6 +24,55 @@ export const WorkerProtocolEnvelopeSchema = z.object({
   idempotencyKey: IdempotencyKeySchema,
 });
 
+export const WorkerMutationKindSchema = z.enum(["start-task", "result"]);
+
+export const WorkerSdkStartPayloadSchema = WorkerProtocolEnvelopeSchema.omit({
+  workerId: true,
+}).extend({
+  kind: z.literal("start-task"),
+  at: z.string().optional(),
+});
+
+const WorkerResultVerificationCommandSchema = z.object({
+  command: NonEmptyStringSchema,
+  exitCode: z.number().int(),
+  output: z.string().optional(),
+});
+
+const WorkerResultBodySchema = z.object({
+  taskId: NonEmptyStringSchema,
+  workerId: NonEmptyStringSchema,
+  provider: NonEmptyStringSchema,
+  pool: NonEmptyStringSchema,
+  branchName: NonEmptyStringSchema,
+  repo: NonEmptyStringSchema,
+  defaultBranch: NonEmptyStringSchema,
+  mode: z.enum(["run", "review"]),
+  output: z.string(),
+  generatedAt: NonEmptyStringSchema,
+  verification: z.object({
+    allPassed: z.boolean(),
+    commands: z.array(WorkerResultVerificationCommandSchema).default([]),
+  }),
+  evidence: z.unknown().optional(),
+});
+
+const WorkerPullRequestSchema = z.object({
+  number: z.number().int().positive(),
+  url: z.string().url(),
+  headBranch: NonEmptyStringSchema,
+  baseBranch: NonEmptyStringSchema,
+});
+
+export const WorkerSdkResultPayloadSchema = WorkerProtocolEnvelopeSchema.omit({
+  workerId: true,
+}).extend({
+  kind: z.literal("result"),
+  result: WorkerResultBodySchema,
+  changedFiles: z.array(NonEmptyStringSchema).default([]),
+  pullRequest: WorkerPullRequestSchema.nullable().default(null),
+});
+
 export const WorkerRegistrationRequestSchema = z.object({
   protocolVersion: ProtocolVersionSchema,
   workerId: NonEmptyStringSchema,
@@ -160,6 +209,46 @@ export function normalizeRuntimeEventType(value: string): RuntimeEventType | nul
   return LEGACY_RUNTIME_EVENT_TYPE_MAP[value] ?? null;
 }
 
+export function buildWorkerStartPayload(input: {
+  envelope: WorkerProtocolEnvelope;
+  at?: string;
+}): WorkerSdkStartPayload {
+  return WorkerSdkStartPayloadSchema.parse({
+    kind: "start-task",
+    taskId: input.envelope.taskId,
+    attemptId: input.envelope.attemptId,
+    leaseToken: input.envelope.leaseToken,
+    protocolVersion: input.envelope.protocolVersion,
+    traceId: input.envelope.traceId,
+    idempotencyKey: input.envelope.idempotencyKey,
+    at: input.at,
+  });
+}
+
+export function buildWorkerResultPayload(input: {
+  envelope: WorkerProtocolEnvelope;
+  result: Omit<WorkerSdkResultPayload["result"], "taskId" | "workerId">;
+  changedFiles?: string[];
+  pullRequest?: WorkerSdkResultPayload["pullRequest"];
+}): WorkerSdkResultPayload {
+  return WorkerSdkResultPayloadSchema.parse({
+    kind: "result",
+    taskId: input.envelope.taskId,
+    attemptId: input.envelope.attemptId,
+    leaseToken: input.envelope.leaseToken,
+    protocolVersion: input.envelope.protocolVersion,
+    traceId: input.envelope.traceId,
+    idempotencyKey: input.envelope.idempotencyKey,
+    result: {
+      ...input.result,
+      taskId: input.envelope.taskId,
+      workerId: input.envelope.workerId,
+    },
+    changedFiles: input.changedFiles ?? [],
+    pullRequest: input.pullRequest ?? null,
+  });
+}
+
 export const RuntimeEventSchema = z.object({
   eventId: NonEmptyStringSchema,
   sequence: z.number().int().nonnegative(),
@@ -225,6 +314,9 @@ export type IdempotencyKey = z.infer<typeof IdempotencyKeySchema>;
 export type LeaseToken = z.infer<typeof LeaseTokenSchema>;
 export type WorkerRuntime = z.infer<typeof WorkerRuntimeSchema>;
 export type WorkerProtocolEnvelope = z.infer<typeof WorkerProtocolEnvelopeSchema>;
+export type WorkerMutationKind = z.infer<typeof WorkerMutationKindSchema>;
+export type WorkerSdkStartPayload = z.infer<typeof WorkerSdkStartPayloadSchema>;
+export type WorkerSdkResultPayload = z.infer<typeof WorkerSdkResultPayloadSchema>;
 export type WorkerRegistrationRequest = z.infer<typeof WorkerRegistrationRequestSchema>;
 export type WorkerRegistrationResponse = z.infer<typeof WorkerRegistrationResponseSchema>;
 export type TaskAttemptStatus = z.infer<typeof TaskAttemptStatusSchema>;

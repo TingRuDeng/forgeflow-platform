@@ -352,6 +352,13 @@ Current role of those tables:
 - `artifact_bundles` 保存 vNext ArtifactBundle 摘要、refs projection 和可选 retained diff / log / test result 正文片段
 - they do not replace `snapshots` as the runtime truth source
 
+Artifact 文件正文不进入 SQLite 表：
+
+- dispatcher 会把 `retainedContent.diff`、`retainedContent.logs`、`retainedContent.testResults` 写入 `${stateDir}/artifacts/<bundle-dir>/`
+- 每个 bundle 目录包含 `manifest.json`，用于登记可读取的文件名、ref 和字节数
+- 本地 artifact store 的 bundle retention 由 `DISPATCHER_ARTIFACT_RETENTION_MAX_BUNDLES` 控制，默认 100
+- SQLite `artifact_bundles.refs_json` 保存指向这些文件的 `artifact://<bundleId>/<fileName>` 引用
+
 Current stage-3 optional shadow path:
 
 - environment:
@@ -373,6 +380,7 @@ Current shadow semantics:
 - Postgres / queue writes are best-effort shadow projection
 - shadow write status is persisted separately in `runtime-state-shadow-status.json`; it is an operational health record, not the runtime truth source
 - drift should be checked through `scripts/check-shadow-drift.mjs <stateDir>` before shadow rollout or cutover decisions; `/api/dr/status` stays focused on lightweight DR posture and shadow write health
+- `scripts/check-shadow-drift.mjs <stateDir> --reconcile` replays SQLite truth into the configured shadow path, and `--record-alert` can append `shadow_drift_detected` to runtime events
 
 This is intentionally not a fully normalized operational schema. The current design optimizes for:
 

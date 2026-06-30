@@ -42,6 +42,18 @@ export type RuntimeStateShadowDriftSummary = {
   }>;
 };
 
+export type RuntimeStateShadowDriftAlert = {
+  level: "none" | "warning" | "critical";
+  reasonCodes: string[];
+  mismatchCount: number;
+  absoluteDelta: number;
+};
+
+export type RuntimeStateShadowDriftAlertThresholds = {
+  maxMismatchCount?: number;
+  maxAbsoluteDelta?: number;
+};
+
 let shadowWriteStatus: RuntimeStateShadowWriteStatus = {
   status: "idle",
   mode: "disabled",
@@ -203,6 +215,37 @@ function compareCounts(
     const actual = countValue(actualCounts[name]);
     return expected === actual ? [] : [{ store, name, expected, actual }];
   });
+}
+
+function absoluteDriftDelta(summary: RuntimeStateShadowDriftSummary): number {
+  return summary.mismatches.reduce((total, mismatch) => total + Math.abs(mismatch.expected - mismatch.actual), 0);
+}
+
+function thresholdValue(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
+
+// 将 drift 结果转成稳定告警摘要，供 release gate、runbook 和后续 reconciliation 统一消费。
+export function evaluateRuntimeStateShadowDriftAlert(
+  summary: RuntimeStateShadowDriftSummary,
+  thresholds: RuntimeStateShadowDriftAlertThresholds = {},
+): RuntimeStateShadowDriftAlert {
+  const mismatchCount = summary.mismatches.length;
+  const absoluteDelta = absoluteDriftDelta(summary);
+  if (summary.status !== "drifted") {
+    return { level: "none", reasonCodes: [], mismatchCount, absoluteDelta };
+  }
+
+  const reasonCodes = [
+    mismatchCount > thresholdValue(thresholds.maxMismatchCount) ? "shadow_drift_mismatch_count" : null,
+    absoluteDelta > thresholdValue(thresholds.maxAbsoluteDelta) ? "shadow_drift_delta" : null,
+  ].filter((reason): reason is string => Boolean(reason));
+  return {
+    level: reasonCodes.length > 0 ? "critical" : "warning",
+    reasonCodes,
+    mismatchCount,
+    absoluteDelta,
+  };
 }
 
 async function ensureProjectionTables(client: Awaited<ReturnType<typeof createPgClient>>) {

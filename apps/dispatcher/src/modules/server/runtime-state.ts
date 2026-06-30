@@ -1021,7 +1021,7 @@ function createOrReuseTaskAttempt(
       traceId: resolveTaskTraceId(task) ?? buildTaskTraceId(task.id),
       heartbeatAt: at,
       leaseExpiresAt: new Date(Date.parse(at) + DEFAULT_LEASE_TTL_MS).toISOString(),
-      idempotencyKey: `v0:${task.id}:attempt-${attemptNo}`,
+      idempotencyKey: `worker-v1:${task.id}:attempt-${attemptNo}`,
     }),
   };
 }
@@ -1115,16 +1115,10 @@ function assertActiveAttemptLease(input: {
       )
     : null;
   if (!activeAttempt) {
-    if (!input.attemptId && !input.leaseToken && !declaresV1Envelope) {
-      return;
-    }
     if (historicalAttempt && isTerminalAttemptStatus(historicalAttempt.status)) {
       throw new Error(`stale attempt ${operation} rejected: ${input.attemptId}`);
     }
     throw new Error(`active attempt not found for task: ${input.taskId}`);
-  }
-  if (!input.attemptId && !input.leaseToken && !declaresV1Envelope) {
-    assertCompleteWorkerProtocolEnvelope(input);
   }
   if (declaresV1Envelope || activeAttempt) {
     assertCompleteWorkerProtocolEnvelope(input);

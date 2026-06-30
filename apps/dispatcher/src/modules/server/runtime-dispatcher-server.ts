@@ -87,6 +87,17 @@ interface WorkerProtocolEnvelopeInput {
   idempotencyKey?: string;
 }
 
+function validateCompleteWorkerProtocolEnvelope(input: WorkerProtocolEnvelopeInput): string | null {
+  const missingField = [
+    ["protocolVersion", input.protocolVersion],
+    ["attemptId", input.attemptId],
+    ["leaseToken", input.leaseToken],
+    ["traceId", input.traceId],
+    ["idempotencyKey", input.idempotencyKey],
+  ].find(([, value]) => !value);
+  return missingField ? `worker protocol v1 envelope incomplete: ${missingField[0]} required` : null;
+}
+
 function upsertWorkerRepoDir(
   state: RuntimeState,
   workerId: string,
@@ -335,6 +346,11 @@ export function applyTraeSubmitResult(
     return { state, ok: false, error: "worker_not_found" };
   }
 
+  const envelopeError = validateCompleteWorkerProtocolEnvelope(input);
+  if (envelopeError) {
+    return { state, ok: false, error: envelopeError };
+  }
+
   try {
     const nextState = recordWorkerResultFn(state, {
       workerId,
@@ -459,6 +475,11 @@ export function applyTraeStartTask(
     return { state, worker, ok: false, error: "task_not_found" };
   }
 
+  const envelopeError = validateCompleteWorkerProtocolEnvelope(attemptLease);
+  if (envelopeError) {
+    return { state, worker, ok: false, error: envelopeError };
+  }
+
   const claimed = claimAssignedTaskForWorker(state, {
     workerId,
     at: nowIso(),
@@ -483,21 +504,14 @@ export function applyTraeStartTask(
   }
 
   try {
-    const resolvedAttemptLease = {
-      attemptId: attemptLease.attemptId ?? claimed.assignment.attemptId,
-      leaseToken: attemptLease.leaseToken ?? claimed.assignment.leaseToken,
-      protocolVersion: attemptLease.protocolVersion ?? claimed.assignment.protocolVersion,
-      traceId: attemptLease.traceId ?? claimed.assignment.traceId,
-      idempotencyKey: attemptLease.idempotencyKey ?? claimed.assignment.idempotencyKey,
-    };
     const nextState = beginTaskForWorker(state, {
       workerId,
       taskId,
-      attemptId: resolvedAttemptLease.attemptId,
-      leaseToken: resolvedAttemptLease.leaseToken,
-      protocolVersion: resolvedAttemptLease.protocolVersion,
-      traceId: resolvedAttemptLease.traceId,
-      idempotencyKey: resolvedAttemptLease.idempotencyKey,
+      attemptId: attemptLease.attemptId,
+      leaseToken: attemptLease.leaseToken,
+      protocolVersion: attemptLease.protocolVersion,
+      traceId: attemptLease.traceId,
+      idempotencyKey: attemptLease.idempotencyKey,
       at: nowIso(),
     });
     overwriteRuntimeState(state, nextState);

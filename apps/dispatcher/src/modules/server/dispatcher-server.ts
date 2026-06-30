@@ -6,6 +6,10 @@ import { URL } from "node:url";
 
 import { buildDashboardHtml } from "./dashboard.js";
 import {
+  persistArtifactBundleFiles,
+  readArtifactStoreFile,
+} from "./artifact-store.js";
+import {
   buildStructuredDashboardSnapshot,
   loadStructuredRuntimeState,
   readStructuredProjectionHealth,
@@ -49,6 +53,7 @@ const DEFAULT_STATE_LOCK_RETRY_MS = 25;
 const DEFAULT_STATE_LOCK_STALE_MS = 30000;
 const STRUCTURED_READS_ENV = "DISPATCHER_STRUCTURED_READS";
 const READ_ONLY_MODE_ENV = "DISPATCHER_READ_ONLY_MODE";
+const ARTIFACT_RETENTION_MAX_BUNDLES_ENV = "DISPATCHER_ARTIFACT_RETENTION_MAX_BUNDLES";
 const STATE_LOCK_SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 let stateLockTimeoutCount = 0;
@@ -76,6 +81,35 @@ type DispatcherRequestInput = {
 
 function useStructuredReads() {
   return process.env[STRUCTURED_READS_ENV] === "1";
+}
+
+function resolveArtifactMaxBundles(): number | undefined {
+  const raw = process.env[ARTIFACT_RETENTION_MAX_BUNDLES_ENV];
+  if (!raw) {
+    return undefined;
+  }
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
+}
+
+// HTTP 层拥有 stateDir，因此在这里把纯状态机产出的 bundle 正文写入 artifact store。
+function persistAttemptArtifactFiles(stateDir: string, state: RuntimeState, attemptId?: string): RuntimeState {
+  if (!attemptId) {
+    return state;
+  }
+  const bundle = (state.artifactBundles ?? []).find((candidate) => candidate.attemptId === attemptId);
+  if (!bundle) {
+    return state;
+  }
+  const persisted = persistArtifactBundleFiles(stateDir, bundle, {
+    maxBundles: resolveArtifactMaxBundles(),
+  });
+  return {
+    ...state,
+    artifactBundles: (state.artifactBundles ?? []).map((candidate) => (
+      candidate.bundleId === persisted.bundle.bundleId ? persisted.bundle : candidate
+    )),
+  };
 }
 
 function isReadOnlyModeEnabled() {
@@ -1013,6 +1047,27 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
         : createNoStoreJsonResponse(404, { error: "artifact_not_found" });
     }
 
+    const artifactFileMatch = method === "GET"
+      ? pathname.match(/^\/api\/artifacts\/([^/]+)\/files\/([^/]+)$/)
+      : null;
+    if (artifactFileMatch) {
+      const bundleId = decodeURIComponent(artifactFileMatch[1]);
+      const fileName = decodeURIComponent(artifactFileMatch[2]);
+      try {
+        return createNoStoreJsonResponse(200, {
+          bundleId,
+          fileName,
+          content: readArtifactStoreFile(stateDir, bundleId, fileName),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const status = message.includes("invalid artifact file") ? 400 : 404;
+        return createNoStoreJsonResponse(status, {
+          error: status === 400 ? "invalid_artifact_file" : "artifact_file_not_found",
+        });
+      }
+    }
+
     if (method === "GET" && pathname === "/api/query/projection-health") {
       return createNoStoreJsonResponse(200, readStructuredProjectionHealth(stateDir));
     }
@@ -1139,8 +1194,8 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     if (resultMatch) {
       try {
         const validatedBody = validateWorkerResultBody(body);
-        const result = withState(stateDir, (state) => ({
-          state: recordWorkerResult(state, {
+        const result = withState(stateDir, (state) => {
+          const recordedState = recordWorkerResult(state, {
             workerId: decodeURIComponent(resultMatch[1]),
             attemptId: validatedBody.attemptId,
             leaseToken: validatedBody.leaseToken,
@@ -1151,8 +1206,11 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
             changedFiles: validatedBody.changedFiles,
             artifactBundle: validatedBody.artifactBundle,
             pullRequest: validatedBody.pullRequest,
-          }),
-        }));
+          });
+          return {
+            state: persistAttemptArtifactFiles(stateDir, recordedState, validatedBody.attemptId),
+          };
+        });
         return createJsonResponse(200, {
           status: "result_recorded",
           tasks: result.state.tasks,
@@ -1335,10 +1393,16 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     ];
     if (method === "POST" && traeRoutes.includes(pathname)) {
       try {
-        const result = withState(stateDir, (state) => ({
-          state,
-          handled: handleTraeRoute(state, { method, pathname, body }),
-        }));
+        const result = withState(stateDir, (state) => {
+          const handled = handleTraeRoute(state, { method, pathname, body });
+          const attemptId = typeof body.attempt_id === "string" ? body.attempt_id : undefined;
+          return {
+            state: pathname === "/api/trae/submit-result" && handled.status === 200
+              ? persistAttemptArtifactFiles(stateDir, state, attemptId)
+              : state,
+            handled,
+          };
+        });
         return result.handled;
       } catch (err: any) {
         rethrowStateLockTimeout(err);

@@ -167,6 +167,11 @@ Current endpoint families:
   - Returns one persisted ArtifactBundle by `bundleId`.
   - Returned bundles may include refs plus optional retained diff / log / test result snippets.
   - Returns `404 artifact_not_found` when the bundle is unknown.
+- `GET /api/artifacts/:bundleId/files/:fileName`
+  - Returns one artifact store file as `{ bundleId, fileName, content }`.
+  - Only files listed in the artifact store manifest can be read.
+  - Returns `400 invalid_artifact_file` for path traversal or invalid file names.
+  - Returns `404 artifact_file_not_found` when the bundle or file is unknown.
 - `GET /api/slo`
   - Returns stage-3 SLO targets, live indicators, and burn-rate reasons.
   - Current thresholds are controlled by:
@@ -186,6 +191,7 @@ Current endpoint families:
     - `backups`
   - `shadowWrite` 会合并 stateDir 下的 `runtime-state-shadow-status.json`，因此 dispatcher 重启后仍能显示最后一次 shadow 写入结果。
   - Shadow projection / queue count drift 通过 `node scripts/check-shadow-drift.mjs <stateDir>` 做 operator check；该检查需要异步访问 Postgres，因此不塞进同步 `/api/dr/status` handler。
+  - `check-shadow-drift.mjs` 支持 `--max-mismatches` / `--max-delta` 输出 alert 摘要，支持 `--reconcile` 主动重放 shadow，支持 `--record-alert` 写入 `shadow_drift_detected` system event。
 
 ### Structured reads, read-only, and shadow modes
 
@@ -232,11 +238,11 @@ Current endpoint families:
   - Reclaimed retry tasks create the next `TaskAttempt` when they are claimed again, preserving expired attempt history.
 - `POST /api/workers/:workerId/start-task`
   - Move task from `assigned` to `in_progress`.
-  - Optional v1 envelope fields are `attemptId`, `leaseToken`, `protocolVersion`, `traceId`, and `idempotencyKey`.
-  - If any of `protocolVersion` / `traceId` / `idempotencyKey` is provided, dispatcher requires the complete v1 envelope and validates it against the active attempt.
+  - Required v1 envelope fields are `attemptId`, `leaseToken`, `protocolVersion`, `traceId`, and `idempotencyKey`.
+  - Dispatcher validates the complete v1 envelope against the active attempt and rejects missing fields or stale attempt data.
 - `POST /api/workers/:workerId/result`
   - Submit execution result, changed files, and optional PR metadata.
-  - Optional v1 envelope fields follow the same validation rule as `start-task`.
+  - Required v1 envelope fields follow the same validation rule as `start-task`.
   - Caller should only treat the task as durably delivered after this endpoint returns success; `worker-daemon` no longer treats exhausted submission retries as a completed task.
   - Worker execution now uses a child-process env allowlist; do not assume parent-side secrets such as `GITHUB_TOKEN` or `DISPATCHER_API_TOKEN` are visible inside the assignment process.
   - Dispatcher now canonicalizes dispatcher-owned fields:

@@ -232,12 +232,15 @@ function readRestoredRuntimeState(stateDir) {
 }
 
 function corruptRuntimeFiles(stateDir) {
+  const corruptedFiles = [];
   for (const fileName of ["runtime-state.db", "runtime-state.db-wal", "runtime-state.db-shm"]) {
     const target = path.join(stateDir, fileName);
     if (fs.existsSync(target)) {
       fs.writeFileSync(target, "corrupted");
+      corruptedFiles.push(fileName);
     }
   }
+  return corruptedFiles;
 }
 
 function assertRestoredState(restored, taskId) {
@@ -275,13 +278,19 @@ async function backupLiveState(instance, stateDir, backupDir) {
 }
 
 function restoreBackedUpState(stateDir, backupDir, taskId) {
-  corruptRuntimeFiles(stateDir);
+  const corruptedFiles = corruptRuntimeFiles(stateDir);
   const restore = restoreRuntimeState({ backupDir, stateDir });
   const restored = readRestoredRuntimeState(stateDir);
   assertRestoredState(restored, taskId);
   return {
     restore,
     restored,
+    diskCorruption: {
+      corruptionInjected: corruptedFiles.length > 0,
+      corruptedFiles,
+      restoredIntegrityCheck: restored.integrityCheck,
+      restoredSnapshotCount: restored.snapshotCount,
+    },
   };
 }
 
@@ -314,6 +323,7 @@ async function runCrashRestartDrill(root) {
       recoveredTaskCount: recoveredSnapshot.tasks.length,
       recoveredEventCount: recoveredSnapshot.events.length,
       recoveredIntegrityCheck: restored.integrityCheck,
+      replacementStateDir: recoveredStateDir,
     };
   } finally {
     if (!crashExit) {
@@ -323,6 +333,42 @@ async function runCrashRestartDrill(root) {
     if (recoveredInstance) {
       await recoveredInstance.close();
     }
+  }
+}
+
+async function runMultiNodeRestoreDrill(root, backupDir, taskId) {
+  const nodeNames = ["node-a", "node-b"];
+  const instances = [];
+  const nodes = [];
+  try {
+    for (const nodeName of nodeNames) {
+      const nodeStateDir = path.join(root, `${nodeName}-state`);
+      const restore = restoreRuntimeState({ backupDir, stateDir: nodeStateDir });
+      const restored = readRestoredRuntimeState(nodeStateDir);
+      assertRestoredState(restored, taskId);
+      const instance = await startDispatcherServer({ host: "127.0.0.1", port: 0, stateDir: nodeStateDir });
+      instances.push(instance);
+      const snapshot = await requestJson(instance.baseUrl, "GET", "/api/dashboard/snapshot");
+      nodes.push({
+        node: nodeName,
+        stateDir: nodeStateDir,
+        dispatcherRestarted: true,
+        integrityCheck: restored.integrityCheck,
+        snapshotCount: restored.snapshotCount,
+        taskCount: snapshot.tasks.length,
+        eventCount: snapshot.events.length,
+        restoredFiles: restore.restoredFiles,
+      });
+    }
+
+    return {
+      nodeCount: nodes.length,
+      nodes,
+      consistentTaskCounts: new Set(nodes.map((node) => node.taskCount)).size === 1,
+      consistentEventCounts: new Set(nodes.map((node) => node.eventCount)).size === 1,
+    };
+  } finally {
+    await Promise.all(instances.map((instance) => instance.close()));
   }
 }
 
@@ -346,8 +392,9 @@ async function runLiveDrill() {
     await instance.close();
     instance = null;
 
-    const { restore, restored } = restoreBackedUpState(stateDir, backupDir, liveBackup.taskId);
+    const { restore, restored, diskCorruption } = restoreBackedUpState(stateDir, backupDir, liveBackup.taskId);
     const crashRestart = await runCrashRestartDrill(root);
+    const multiNodeRestore = await runMultiNodeRestoreDrill(root, backupDir, liveBackup.taskId);
 
     return {
       ok: true,
@@ -364,6 +411,16 @@ async function runLiveDrill() {
       restoredTaskCount: restored.restoredState.tasks.length,
       restoredEventCount: restored.restoredState.events.length,
       crashRestart,
+      hostFailure: {
+        simulatedHostLost: crashRestart.crashProcessSignal === "SIGKILL",
+        replacementDispatcherRestarted: crashRestart.restoredDispatcherRestarted,
+        recoveredIntegrityCheck: crashRestart.recoveredIntegrityCheck,
+        recoveredTaskCount: crashRestart.recoveredTaskCount,
+        recoveredEventCount: crashRestart.recoveredEventCount,
+        replacementStateDir: crashRestart.replacementStateDir,
+      },
+      diskCorruption,
+      multiNodeRestore,
       metrics: liveBackup.metrics,
     };
   } finally {

@@ -120,6 +120,22 @@ describe("worker-review-orchestrator-cli", () => {
         bundleId: "bundle-1",
       },
     });
+    expect(parseCliArgs([
+      "artifact-get",
+      "--dispatcher-url",
+      "http://127.0.0.1:8787",
+      "--bundle-id",
+      "bundle-1",
+      "--file",
+      "diff.patch",
+    ])).toMatchObject({
+      command: "artifact-get",
+      options: {
+        dispatcherUrl: "http://127.0.0.1:8787",
+        bundleId: "bundle-1",
+        file: "diff.patch",
+      },
+    });
   });
 
   it("parses the watch command with --summary flag", () => {
@@ -475,6 +491,41 @@ describe("worker-review-orchestrator-cli", () => {
     });
     expect(result).toMatchObject({
       bundleId: "bundle-1",
+    });
+    expect(log).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes artifact-get file reads through the injected dependency", async () => {
+    const log = vi.fn();
+    const runArtifactGet = vi.fn().mockResolvedValue({
+      bundleId: "bundle-1",
+      fileName: "diff.patch",
+      content: "diff body",
+    });
+
+    const result = await runCli(
+      [
+        "artifact-get",
+        "--dispatcher-url",
+        "http://127.0.0.1:8787",
+        "--bundle-id",
+        "bundle-1",
+        "--file",
+        "diff.patch",
+      ],
+      {
+        runArtifactGet,
+        log,
+      },
+    );
+
+    expect(runArtifactGet).toHaveBeenCalledWith({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      bundleId: "bundle-1",
+      fileName: "diff.patch",
+    });
+    expect(result).toMatchObject({
+      content: "diff body",
     });
     expect(log).toHaveBeenCalledTimes(1);
   });

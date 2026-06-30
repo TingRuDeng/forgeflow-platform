@@ -131,17 +131,19 @@ Remaining need:
 
 - keep these docs synced whenever runtime boundaries or API surfaces change
 
-## 6. Stage 3 ecosystem wave is intentionally deferred
+## 6. Stage 3 ecosystem wave has internal gates, but public opening is still deferred
 
 Current situation:
 
 - stage-3 core platform waves are now in place
-- external API / SDK / third-party admission remains intentionally postponed
+- `@forgeflow/worker-protocol` now provides internal start/result payload helpers for worker adapter authors
+- `@forgeflow/provider-registry` now evaluates known provider capabilities and defaults third-party providers to deny unless allowlisted and declaring `worker-protocol-v1`
+- public external API / SDK stability guarantees remain intentionally postponed
 
 Impact:
 
-- internal platform maturity is ahead of public integration maturity
-- consumers should not assume stable public API/SDK guarantees yet
+- internal worker adapter integration has executable schema and admission gates
+- external consumers should not assume public API / SDK compatibility guarantees yet
 
 Desired direction:
 
@@ -164,15 +166,16 @@ Desired direction:
 
 - 如果要覆盖 dispatcher 外部脚本，需要新增统一入口或 operator-level lock，而不是误用 runtime task lease
 
-## 8. vNext runtime reliability 目标契约尚未接入运行时
+## 8. vNext runtime reliability 目标契约已接入 worker mutation 主链
 
 当前情况：
 
 - `packages/worker-protocol` 提供 Worker Protocol v1、TaskAttempt、RuntimeEvent 和 ArtifactBundle 的目标 schema
 - `packages/task-schema` 已接纳当前 dispatcher runtime 使用的 `trae` pool、Task/Worker 扩展字段和 AssignmentPayload 形态
 - `packages/worker-protocol` 已提供当前 runtime 事件名到 vNext RuntimeEvent taxonomy 的 normalize helper
+- `packages/worker-protocol` 已提供 start/result payload helper，统一第三方 worker adapter 需要回写的 envelope 字段
 - dispatcher runtime state 已有 `taskAttempts[]`，SQLite `task_attempts` projection 会保存 synthetic attempt
-- claim-backed dispatcher start/result mutation 已强制完整 v1 envelope，并会拒绝携带历史终态 `attemptId` 的 stale result
+- dispatcher start/result mutation 已强制完整 v1 envelope，并会拒绝缺少 active attempt、缺字段或携带历史终态 `attemptId` 的 stale result
 - 通用 dispatcher worker start/result 会校验 `protocolVersion`、`traceId` 和 `idempotencyKey` 与 active attempt 一致
 - Trae 兼容主链的 `fetch-task` / `start-task` / `submit-result` 已回显并校验 `protocolVersion`、`traceId`、`idempotencyKey`、`attemptId` 和 `leaseToken`
 - dispatcher runtime state 已有 `artifactBundles[]`，SQLite `artifact_bundles` projection 会保存 ArtifactBundle 摘要、refs 和可选 retainedContent 正文片段
@@ -181,14 +184,15 @@ Desired direction:
 影响：
 
 - 代码审查和文档阅读时容易把 vNext 目标契约误读为当前已执行的 runtime 保护
-- 无 active attempt 的历史迁移路径仍保留兼容行为，新 worker 主链不应依赖空 envelope
-- ArtifactBundle 已支持受限 `retainedContent`，Console 任务详情可通过摘要 / 引用 / 正文 tabs 查看审查证据
+- 空 envelope / 无 active attempt 的 worker mutation 已被拒绝，历史夹具或迁移脚本必须先补 claim / attempt 语义
+- ArtifactBundle 已支持受限 `retainedContent`，dispatcher 会把 retained diff / log / test result 写入本地 artifact store，并通过 manifest、retention 和 `/api/artifacts/:bundleId/files/:fileName` 支持按需读取
+- Console 任务详情可通过摘要 / 引用 / 正文 tabs 查看审查证据，并可在 `review` 状态直接提交 `merge` / `rework` / `block` 决策
 
 期望方向：
 
-- 继续接入完整 artifact store、retention 清理策略和更完整的 review workflow
+- 继续接入 Console 侧 artifact 文件按需展开 / 下载体验，以及更细粒度的 review reason / must-fix 表单
 
-## 9. Shadow path has operator drift check, but automatic reconciliation is still deferred
+## 9. Shadow path has drift gate and reconciliation entry, but primary cutover is still deferred
 
 Current situation:
 
@@ -199,19 +203,22 @@ Current situation:
 - backup / restore scripts include `runtime-state-shadow-status.json`
 - shadow write failures now append `shadow_write_failed` system events and feed metrics / SLO
 - `scripts/check-shadow-drift.mjs` compares SQLite expected counts with Postgres projection / queue shadow counts
+- `scripts/check-shadow-drift.mjs --max-mismatches <n> --max-delta <n>` emits a stable `alert` summary with `none` / `warning` / `critical` levels
+- `scripts/check-shadow-drift.mjs <stateDir> --reconcile` replays current SQLite truth into the configured shadow projection / queue and checks drift again
+- `scripts/check-shadow-drift.mjs <stateDir> --record-alert` can append a `shadow_drift_detected` system event when drift is present
 - `pnpm verify:stage3` 和 release workflow 都会执行 `pnpm verify:shadow-drift` 作为 rollout / release gate
 
 Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
-- shadow-write rollout / release 已有 drift gate，但仍需要 alerting 和 reconciliation 才能进入任何 primary-store cutover
+- shadow-write rollout / release 已有 drift gate、阈值告警摘要和 operator reconciliation 入口，但仍需要生产阈值演练后才能进入任何 primary-store cutover
 
 Desired direction:
 
-- define production thresholds and automatic reconciliation for persistent drift
+- define production thresholds and automatic reconciliation cadence for persistent drift
 - keep the event / metric / SLO contract stable while shadow remains best-effort
 
-## 10. Live dispatcher DR drill exists, but crash consistency is still deferred
+## 10. Live dispatcher DR drill covers local failure scenarios, but production cutover is still deferred
 
 Current situation:
 
@@ -220,17 +227,19 @@ Current situation:
 - it verifies that backup / restore includes `runtime-state.db-wal`, then validates `PRAGMA integrity_check`, snapshot count, latest sequence, and checksum
 - `scripts/verify-live-dispatcher-dr.mjs` starts a real dispatcher HTTP server, writes through live endpoints, backs up while the server is still open, then restores and validates SQLite integrity
 - the live drill also starts a dispatcher child process, writes / backs up during live traffic, kills it with `SIGKILL`, restores the backup into a second state directory, and restarts dispatcher against the restored state
+- the live drill corrupts the current runtime SQLite files before restore and verifies the restored database passes `PRAGMA integrity_check`
+- the live drill restores the same backup into two independent state directories, starts both dispatchers, and checks task / event counts stay consistent
 
 Impact:
 
 - `pnpm verify:stage3` proves the source DR script path, WAL-backed restore, and restored SQLite queryability
-- `pnpm verify:stage3:live` proves the live dispatcher HTTP write path, WAL restore, and SIGKILL restart recovery can be exercised locally
-- it is not yet a full production exercise for physical power loss, disk corruption, or multi-node quorum restore
+- `pnpm verify:stage3:live` proves the live dispatcher HTTP write path, WAL restore, SIGKILL replacement recovery, local disk-corruption restore, and two-node restore consistency can be exercised locally
+- it is not yet a full production exercise for physical power loss, quorum fencing, DNS cutover, or cross-host storage failure
 
 Desired direction:
 
 - keep the source DR script as the fast gate and run the live drill before risky runtime releases
-- add host-failure and multi-node restore drills if production RTO / RPO requirements tighten
+- add real cross-host failover, quorum restore, and cutover runbooks if production RTO / RPO requirements tighten
 
 ## 11. Manual release recovery is tracked, but still manual
 

@@ -188,7 +188,9 @@ dispatcher 进程内还会记录：
 3. 再看 `/api/query/projection-health`
 4. 再看 `/api/slo` 和 `/api/dr/status`
 5. shadow rollout 前执行 `pnpm verify:shadow-drift` 或 `node scripts/check-shadow-drift.mjs <stateDir>`，确认 `drift.status` 不是 `drifted`；release workflow 也会执行同一 gate
-5. 最后再看 worker 日志和 `.worktrees/failed/`
+6. 需要阈值化告警时执行 `node scripts/check-shadow-drift.mjs <stateDir> --max-mismatches 0 --max-delta 0`，查看 `alert.level` 和 `alert.reasonCodes`
+7. 需要主动对账时执行 `node scripts/check-shadow-drift.mjs <stateDir> --reconcile`；需要落运行时证据时追加 `--record-alert` 写入 `shadow_drift_detected`
+8. 最后再看 worker 日志和 `.worktrees/failed/`
 
 常见入口：
 

@@ -92,7 +92,7 @@ function createTestState(): RuntimeState {
         startedAt: "2026-04-01T10:01:00.000Z",
         heartbeatAt: "2026-04-01T10:01:00.000Z",
         leaseExpiresAt: "2026-04-01T10:06:00.000Z",
-        idempotencyKey: "v0:dispatch-1:task-1:attempt-1",
+        idempotencyKey: "worker-v1:dispatch-1:task-1:attempt-1",
       },
     ],
     artifactBundles: [],
