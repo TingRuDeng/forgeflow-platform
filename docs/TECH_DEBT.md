@@ -259,3 +259,20 @@ Desired direction:
 
 - keep the release runbook recovery path current
 - consider an automated repair workflow only if post-publish git record failures become common
+
+## 12. 确定性候选打分原语已落地，但并行竞争执行仍 deferred
+
+当前情况：
+
+- `apps/dispatcher/src/modules/server/candidate-scoring.ts` 提供确定性、可解释的候选打分 / 排序原语（`scoreCandidate` / `rankCandidates`），打分输入为验证状态、改动规模、测试文件数和受保护路径命中，与 review-risk 共用受保护路径 glob，不使用 LLM 裁判。
+- 该原语只对“已经产出”的候选结果排序，可用于排序 redrive attempt 或外部收集的候选集合。
+
+影响：
+
+- 容易把“能给候选打分”误读为“dispatcher 已支持同任务多 worker 并行竞争执行”。
+- 当前 Trae-first 主链仍是单任务串行 runtime，dispatcher 每个任务只绑定一个 worker / assignment。
+
+期望方向：
+
+- 真正的 competitive 执行（同任务多 worktree 并行、择优合并）需要在 codex/gemini worker 主线解封后单独设计 assignment / 并发模型，不应在当前 Trae-first 单串行约束下强行接入。
+- 在那之前，打分原语保持为纯函数库，供控制层或后续竞争选择路径复用。
