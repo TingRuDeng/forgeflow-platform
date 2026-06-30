@@ -47,7 +47,7 @@ function acquireBuildLock() {
         }
     }
 }
-if (!buildState[DISPATCHER_DIST_BUILT]) {
+if (!buildState[DISPATCHER_DIST_BUILT] && process.env.FORGEFLOW_DISPATCHER_DIST_PREBUILT !== "1") {
     const releaseBuildLock = acquireBuildLock();
     try {
         console.error("[dispatcher-state.ts] building apps/dispatcher to ensure fresh dist...");
