@@ -105,6 +105,7 @@ Usage:
   forgeflow-review-orchestrator inspect --state-dir /path/to/.forgeflow-dispatcher --task-id dispatch-1:task-1
   forgeflow-review-orchestrator inspect --state-dir /path/to/.forgeflow-dispatcher --task-id dispatch-1:task-1 --summary
   forgeflow-review-orchestrator artifact-get --dispatcher-url http://127.0.0.1:8787 --bundle-id bundle-1
+  forgeflow-review-orchestrator artifact-get --dispatcher-url http://127.0.0.1:8787 --bundle-id bundle-1 --file diff.patch
   forgeflow-review-orchestrator artifact-get --state-dir /path/to/.forgeflow-dispatcher --bundle-id bundle-1
   forgeflow-review-orchestrator redrive --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1
   forgeflow-review-orchestrator update
@@ -405,6 +406,7 @@ Examples:
       dispatcherUrl,
       stateDir,
       bundleId,
+      fileName: typeof options.file === "string" ? options.file : undefined,
     });
     deps.log(JSON.stringify(result, null, 2));
     return result;

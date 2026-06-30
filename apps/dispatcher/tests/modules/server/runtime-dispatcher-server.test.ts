@@ -12,7 +12,7 @@ import {
   applyTraeReportProgress,
   applyTraeStartTask,
 } from "../../../src/modules/server/runtime-dispatcher-server.js";
-import type { RuntimeState, Task, Assignment } from "../../../src/modules/server/runtime-state.js";
+import type { RuntimeState, Task, Assignment, TaskAttempt } from "../../../src/modules/server/runtime-state.js";
 import { createEmptyRuntimeState } from "../../../src/modules/server/runtime-state.js";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -58,6 +58,52 @@ function makeAssignment(taskId: string, overrides: Partial<Assignment> = {}): As
     claimedAt: null,
     ...overrides,
   };
+}
+
+function workerEnvelope(attempt: TaskAttempt) {
+  return {
+    attemptId: attempt.attemptId,
+    leaseToken: attempt.leaseToken,
+    protocolVersion: attempt.protocolVersion,
+    traceId: attempt.traceId,
+    idempotencyKey: attempt.idempotencyKey,
+  };
+}
+
+function activeWorkerEnvelope(state: RuntimeState, taskId: string) {
+  const attempt = state.taskAttempts.find((candidate) =>
+    candidate.taskId === taskId && ["leased", "running"].includes(candidate.status)
+  );
+  if (!attempt) {
+    throw new Error(`missing active attempt for ${taskId}`);
+  }
+  return workerEnvelope(attempt);
+}
+
+function createFetchReadyTraeState(taskId: string, workerId = "trae-01"): RuntimeState {
+  const state = createEmptyRuntimeState();
+  state.tasks.push(makeTask({ id: taskId, status: "ready", assignedWorkerId: null }));
+  state.assignments.push(makeAssignment(taskId));
+  state.workers.push({
+    id: workerId,
+    pool: "trae",
+    hostname: "",
+    labels: [],
+    repoDir: "/repo",
+    status: "idle",
+    lastHeartbeatAt: new Date().toISOString(),
+  });
+  findTraeTaskForWorker(state, workerId, "/repo");
+  return state;
+}
+
+function createStartedTraeState(taskId: string, workerId = "trae-01"): RuntimeState {
+  const state = createFetchReadyTraeState(taskId, workerId);
+  const started = applyTraeStartTask(state, workerId, taskId, activeWorkerEnvelope(state, taskId));
+  if (!started.ok) {
+    throw new Error(started.error ?? "failed to start trae task");
+  }
+  return started.state;
 }
 
 describe("runtime-dispatcher-server foundation", () => {
@@ -191,36 +237,11 @@ describe("runtime-dispatcher-server foundation", () => {
 
   describe("applyTraeSubmitResult", () => {
     it("moves task to review on review_ready", () => {
-      const state = createEmptyRuntimeState();
-      const task = makeTask({ id: "task-1", status: "in_progress", assignedWorkerId: "trae-01" });
-      state.tasks.push(task);
-      state.assignments.push(makeAssignment("task-1", {
-        status: "in_progress",
-        workerId: "trae-01",
-        assignment: {
-          taskId: "task-1",
-          workerId: "trae-01",
-          pool: "trae",
-          status: "in_progress",
-          branchName: "ai/trae/test-task-1",
-          allowedPaths: ["src/**", "tests/**"],
-          repo: "test/repo",
-          defaultBranch: "main",
-        },
-      }));
-      state.workers.push({
-        id: "trae-01",
-        pool: "trae",
-        hostname: "",
-        labels: [],
-        repoDir: "/repo",
-        status: "busy",
-        lastHeartbeatAt: new Date().toISOString(),
-        currentTaskId: "task-1",
-      });
+      const state = createStartedTraeState("task-1");
 
       const result = applyTraeSubmitResult(state, {
         taskId: "task-1",
+        ...activeWorkerEnvelope(state, "task-1"),
         status: "review_ready",
         summary: "Done!",
         testOutput: "PASS",
@@ -237,7 +258,9 @@ describe("runtime-dispatcher-server foundation", () => {
       expect(result.state.tasks[0].status).toBe("review");
       expect(result.state.workers[0].status).toBe("idle");
       expect(result.state.workers[0].currentTaskId).toBeUndefined();
-      const event = result.state.events.find((e) => e.taskId === "task-1");
+      const event = result.state.events.find((e) =>
+        e.taskId === "task-1" && (e.payload as { to?: string } | undefined)?.to === "review"
+      );
       expect(event).toBeDefined();
       expect(event!.payload).toMatchObject({
         from: "in_progress",
@@ -246,36 +269,11 @@ describe("runtime-dispatcher-server foundation", () => {
     });
 
     it("moves task to failed on failed status", () => {
-      const state = createEmptyRuntimeState();
-      const task = makeTask({ id: "task-2", status: "in_progress", assignedWorkerId: "trae-01" });
-      state.tasks.push(task);
-      state.assignments.push(makeAssignment("task-2", {
-        status: "in_progress",
-        workerId: "trae-01",
-        assignment: {
-          taskId: "task-2",
-          workerId: "trae-01",
-          pool: "trae",
-          status: "in_progress",
-          branchName: "ai/trae/test-task-1",
-          allowedPaths: ["src/**", "tests/**"],
-          repo: "test/repo",
-          defaultBranch: "main",
-        },
-      }));
-      state.workers.push({
-        id: "trae-01",
-        pool: "trae",
-        hostname: "",
-        labels: [],
-        repoDir: "/repo",
-        status: "busy",
-        lastHeartbeatAt: new Date().toISOString(),
-        currentTaskId: "task-2",
-      });
+      const state = createStartedTraeState("task-2");
 
       const result = applyTraeSubmitResult(state, {
         taskId: "task-2",
+        ...activeWorkerEnvelope(state, "task-2"),
         status: "failed",
         summary: "Error occurred",
         branchName: "ai/trae/test-task-1",
@@ -286,7 +284,9 @@ describe("runtime-dispatcher-server foundation", () => {
 
       expect(result.ok).toBe(true);
       expect(result.state.tasks[0].status).toBe("failed");
-      const event = result.state.events.find((e) => e.taskId === "task-2");
+      const event = result.state.events.find((e) =>
+        e.taskId === "task-2" && (e.payload as { to?: string } | undefined)?.to === "failed"
+      );
       expect(event!.payload).toMatchObject({
         to: "failed",
       });
@@ -303,36 +303,11 @@ describe("runtime-dispatcher-server foundation", () => {
     });
 
     it("writes evidence to reviews on review_ready", () => {
-      const state = createEmptyRuntimeState();
-      const task = makeTask({ id: "task-3", status: "in_progress", assignedWorkerId: "trae-01" });
-      state.tasks.push(task);
-      state.assignments.push(makeAssignment("task-3", {
-        status: "in_progress",
-        workerId: "trae-01",
-        assignment: {
-          taskId: "task-3",
-          workerId: "trae-01",
-          pool: "trae",
-          status: "in_progress",
-          branchName: "ai/trae/test-task-1",
-          allowedPaths: ["src/**", "tests/**"],
-          repo: "test/repo",
-          defaultBranch: "main",
-        },
-      }));
-      state.workers.push({
-        id: "trae-01",
-        pool: "trae",
-        hostname: "",
-        labels: [],
-        repoDir: "/repo",
-        status: "busy",
-        lastHeartbeatAt: new Date().toISOString(),
-        currentTaskId: "task-3",
-      });
+      const state = createStartedTraeState("task-3");
 
       const result = applyTraeSubmitResult(state, {
         taskId: "task-3",
+        ...activeWorkerEnvelope(state, "task-3"),
         status: "review_ready",
         summary: "Done!",
         filesChanged: ["src/a.ts"],
@@ -358,36 +333,11 @@ describe("runtime-dispatcher-server foundation", () => {
     });
 
     it("includes failureType and failureSummary in failed event payload", () => {
-      const state = createEmptyRuntimeState();
-      const task = makeTask({ id: "task-4", status: "in_progress", assignedWorkerId: "trae-01" });
-      state.tasks.push(task);
-      state.assignments.push(makeAssignment("task-4", {
-        status: "in_progress",
-        workerId: "trae-01",
-        assignment: {
-          taskId: "task-4",
-          workerId: "trae-01",
-          pool: "trae",
-          status: "in_progress",
-          branchName: "ai/trae/test-task-1",
-          allowedPaths: ["src/**", "tests/**"],
-          repo: "test/repo",
-          defaultBranch: "main",
-        },
-      }));
-      state.workers.push({
-        id: "trae-01",
-        pool: "trae",
-        hostname: "",
-        labels: [],
-        repoDir: "/repo",
-        status: "busy",
-        lastHeartbeatAt: new Date().toISOString(),
-        currentTaskId: "task-4",
-      });
+      const state = createStartedTraeState("task-4");
 
       const result = applyTraeSubmitResult(state, {
         taskId: "task-4",
+        ...activeWorkerEnvelope(state, "task-4"),
         status: "failed",
         summary: "pnpm test failed",
         evidence: {
@@ -400,7 +350,9 @@ describe("runtime-dispatcher-server foundation", () => {
 
       expect(result.ok).toBe(true);
       expect(result.state.tasks[0].status).toBe("failed");
-      const event = result.state.events.find((e) => e.taskId === "task-4");
+      const event = result.state.events.find((e) =>
+        e.taskId === "task-4" && (e.payload as { to?: string } | undefined)?.to === "failed"
+      );
       expect(event).toBeDefined();
       expect(event!.payload).toMatchObject({
         to: "failed",
@@ -408,44 +360,21 @@ describe("runtime-dispatcher-server foundation", () => {
       expect(result.state.reviews[0].latestWorkerResult?.evidence?.failureType).toBe("verification");
     });
 
-    it("works without evidence for backward compatibility", () => {
-      const state = createEmptyRuntimeState();
-      const task = makeTask({ id: "task-5", status: "in_progress", assignedWorkerId: "trae-01" });
-      state.tasks.push(task);
-      state.assignments.push(makeAssignment("task-5", {
-        status: "in_progress",
-        workerId: "trae-01",
-        assignment: {
-          taskId: "task-5",
-          workerId: "trae-01",
-          pool: "trae",
-          status: "in_progress",
-          branchName: "ai/trae/test-task-1",
-          allowedPaths: ["src/**", "tests/**"],
-          repo: "test/repo",
-          defaultBranch: "main",
-        },
-      }));
-      state.workers.push({
-        id: "trae-01",
-        pool: "trae",
-        hostname: "",
-        labels: [],
-        repoDir: "/repo",
-        status: "busy",
-        lastHeartbeatAt: new Date().toISOString(),
-        currentTaskId: "task-5",
-      });
+    it("accepts a failed v1 result without optional evidence", () => {
+      const state = createStartedTraeState("task-5");
 
       const result = applyTraeSubmitResult(state, {
         taskId: "task-5",
+        ...activeWorkerEnvelope(state, "task-5"),
         status: "failed",
         summary: "Something went wrong",
       });
 
       expect(result.ok).toBe(true);
       expect(result.state.tasks[0].status).toBe("failed");
-      const event = result.state.events.find((e) => e.taskId === "task-5");
+      const event = result.state.events.find((e) =>
+        e.taskId === "task-5" && (e.payload as { to?: string } | undefined)?.to === "failed"
+      );
       expect(event).toBeDefined();
       expect(event!.payload).toMatchObject({
         to: "failed",
@@ -521,35 +450,9 @@ describe("runtime-dispatcher-server foundation", () => {
 
   describe("applyTraeStartTask", () => {
     it("claims then starts an assigned task", () => {
-      const state = createEmptyRuntimeState();
-      const task = makeTask({ id: "task-1", status: "assigned", assignedWorkerId: "trae-01" });
-      state.tasks.push(task);
-      state.assignments.push(makeAssignment("task-1", {
-        status: "assigned",
-        workerId: "trae-01",
-        assignedAt: new Date().toISOString(),
-        assignment: {
-          taskId: "task-1",
-          workerId: "trae-01",
-          pool: "trae",
-          status: "assigned",
-          branchName: "ai/trae/test-task-1",
-          allowedPaths: ["src/**", "tests/**"],
-          repo: "test/repo",
-          defaultBranch: "main",
-        },
-      }));
-      state.workers.push({
-        id: "trae-01",
-        pool: "trae",
-        hostname: "",
-        labels: [],
-        repoDir: "/repo",
-        status: "idle",
-        lastHeartbeatAt: new Date().toISOString(),
-      });
+      const state = createFetchReadyTraeState("task-1");
 
-      const result = applyTraeStartTask(state, "trae-01", "task-1");
+      const result = applyTraeStartTask(state, "trae-01", "task-1", activeWorkerEnvelope(state, "task-1"));
       expect(result.ok).toBe(true);
       expect(result.state.tasks[0].status).toBe("in_progress");
       expect(result.state.assignments[0].status).toBe("in_progress");

@@ -74,7 +74,9 @@ interface TaskDetailsPanelProps {
   attempts?: TaskAttempt[];
   artifactBundles?: ArtifactBundle[];
   cancellingTaskId?: string | null;
+  reviewingTaskId?: string | null;
   onCancel?: (task: Task) => void;
+  onReviewDecision?: (decision: 'merge' | 'rework' | 'block') => void;
 }
 
 function formatTime(isoString?: string): string {
@@ -223,6 +225,48 @@ const PullRequestSection: React.FC<{ pullRequest?: PullRequest | null }> = ({ pu
   );
 };
 
+const ReviewActions: React.FC<{
+  task: Task;
+  reviewingTaskId?: string | null;
+  onReviewDecision?: (decision: 'merge' | 'rework' | 'block') => void;
+}> = ({ task, reviewingTaskId, onReviewDecision }) => {
+  const { t } = useTranslation();
+  if (task.status !== 'review' || !onReviewDecision) {
+    return null;
+  }
+  const disabled = reviewingTaskId === task.id;
+  return (
+    <Section title={t('reviewActions')}>
+      <div className="grid grid-cols-3 gap-2">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onReviewDecision('merge')}
+          className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-400/20 disabled:opacity-50"
+        >
+          {t('mergeDecision')}
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onReviewDecision('rework')}
+          className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-400/20 disabled:opacity-50"
+        >
+          {t('reworkDecision')}
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onReviewDecision('block')}
+          className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-400/20 disabled:opacity-50"
+        >
+          {t('blockDecision')}
+        </button>
+      </div>
+    </Section>
+  );
+};
+
 export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
   task,
   assignment,
@@ -232,7 +276,9 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
   attempts = [],
   artifactBundles = [],
   cancellingTaskId,
+  reviewingTaskId,
   onCancel,
+  onReviewDecision,
 }) => {
   const { t } = useTranslation();
   if (!task) {
@@ -251,6 +297,7 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
       <TaskMetadataGrid task={task} assignment={assignment} workerId={workerId} />
       <LineageSection task={task} parentTaskId={task.continueFromTaskId || task.followUpOfTaskId || null} />
       <ReviewSection review={review} mustFix={mustFix} canRedriveValue={canRedriveValue} />
+      <ReviewActions task={task} reviewingTaskId={reviewingTaskId} onReviewDecision={onReviewDecision} />
       <FailureSection review={review} events={events} />
       <PullRequestSection pullRequest={pullRequest} />
       <AttemptTimeline attempts={attempts} />

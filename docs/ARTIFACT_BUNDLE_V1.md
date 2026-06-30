@@ -80,11 +80,16 @@ runtime-state 只应保存 bundle 摘要、引用和受限正文片段。大型 
 
 - `RuntimeState.artifactBundles[]` 保存 bundle 摘要、refs 和可选 `retainedContent`。
 - SQLite structured projection 使用 `artifact_bundles` 表承载查询投影，并保存 `retained_content_json`。
+- dispatcher HTTP 写入 worker result 或 Trae submit-result 时，会把 `retainedContent.diff`、`retainedContent.logs`、`retainedContent.testResults` 落到 `${stateDir}/artifacts/<bundle-dir>/`。
+- artifact store 使用 `manifest.json` 作为文件索引，当前文件名分别是 `diff.patch`、`session.log`、`test-results.txt`。
+- `DISPATCHER_ARTIFACT_RETENTION_MAX_BUNDLES` 可限制本地 artifact store 保留的最新 bundle 数，默认保留 100 个 bundle。
 - `TaskAttempt.artifactBundleId` 指向当前 attempt 的 bundle。
 - `/api/artifacts/:bundleId` 可按 bundleId 获取单个 bundle。
-- CLI 使用 `forgeflow-review-orchestrator artifact-get --bundle-id <id>` 获取 bundle。
+- `/api/artifacts/:bundleId/files/:fileName` 可按需读取 manifest 登记的 artifact 文件正文。
+- CLI 使用 `forgeflow-review-orchestrator artifact-get --bundle-id <id>` 获取 bundle，使用 `--file diff.patch` 读取正文文件。
 - Trae runtime 在拿到 `attempt_id` 后会随 submitResult 提交 minimal bundle。
 - Console 任务详情提供摘要、引用和正文 tabs；正文 tab 展示 `retainedContent` 中的 diff / logs / testResults。
+- Console 任务详情在任务处于 `review` 状态时可直接提交 `merge` / `rework` / `block` 审查决策，和 attempt timeline / artifact summary 共处同一审查上下文。
 
 ## Review 展示
 

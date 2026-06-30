@@ -33,4 +33,40 @@ describe("shadow drift verification", () => {
     expect(payload.drift.status).toBe("not_configured");
     expect(payload.drift.mismatches).toEqual([]);
   }, 30_000);
+
+  it("accepts reconciliation and alert threshold options", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-drift-"));
+    const result = spawnSync("node", [
+      checkShadowDriftScriptPath,
+      stateDir,
+      "--reconcile",
+      "--max-mismatches",
+      "2",
+      "--max-delta",
+      "4",
+    ], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "disabled",
+        DISPATCHER_QUEUE_SHADOW_MODE: "disabled",
+        DISPATCHER_POSTGRES_URL: "",
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const payload = JSON.parse(result.stdout);
+    expect(payload.alert).toMatchObject({
+      level: "none",
+      mismatchCount: 0,
+      absoluteDelta: 0,
+    });
+    expect(payload.reconciliation).toEqual({
+      requested: true,
+      attempted: false,
+      reason: "shadow_not_configured",
+    });
+  }, 30_000);
 });

@@ -292,15 +292,15 @@ vNext runtime reliability 推进：
 - generic worker claim 已从副作用 GET 收口为显式 POST：
   - `GET /api/workers/:workerId/assigned-task` 只读
   - `POST /api/workers/:workerId/claim-task` 才会真正 claim / assign
-- review decision 现在显式支持 `merge`、`block`、`rework`、`changes_requested`，其中后两者都会把任务落到 `blocked`，但保留原始 decision 供 redrive 和审计使用。
+- review decision 现在显式支持 `merge`、`block`、`rework`、`changes_requested`，其中后两者都会把任务落到 `blocked`，但保留原始 decision 供 redrive 和审计使用；Console 任务详情可直接提交 `merge` / `rework` / `block` 决策并刷新 dashboard snapshot。
 - `forgeflow-review-orchestrator decide` 现在支持 `--reason-code`、`--must-fix`、`--can-redrive`、`--redrive-strategy`，并会把这些字段归一化写入 `review.evidence`。
 - dispatcher 现在会 canonicalize worker result 的 `workerId/pool/repo/defaultBranch/branchName`，worker 不能再覆盖这些 dispatcher-owned 字段。
 - dispatcher 现在会给每个任务生成稳定 `traceId`，并在 snapshot、Trae fetch-task、worker events、CLI summary 与 console drill-down 暴露该关联键。
 - dashboard snapshot 现在附带阶段二控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`、`retryRatePct`、`branchProtectionHitCount`、`repoConcurrencySaturation`、`failureCodes`、`reviewReasonCodes`。
-- dashboard snapshot 现在暴露 `taskAttempts` 与 `artifactBundles`，Console 任务详情可直接查看 attempt timeline、runtime events、artifact summary、refs 和 retained content。
+- dashboard snapshot 现在暴露 `taskAttempts` 与 `artifactBundles`，Console 任务详情可直接查看 attempt timeline、runtime events、artifact summary、refs 和 retained content；dispatcher 会把 retained diff / log / test result 写入本地 artifact store，并通过 artifact 文件 API 和 `artifact-get --file <name>` 按需读取。
 - dispatcher reconcile 现在会扫描离线 worker 的过期 running attempt，按默认最多 2 次 attempt 的最小策略自动 redrive 或把任务显式置为 `failed`。
 - dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，同时输出 `retryRatePct`、失败码聚合和 review reason 聚合。
-- vNext runtime reliability 的目标契约已开始落地到 `@forgeflow/worker-protocol`，但当前 dispatcher mutation 尚未强制 `TaskAttempt` / `LeaseToken` envelope。
+- vNext runtime reliability 的目标契约已落地到 `@forgeflow/worker-protocol`，当前 dispatcher worker start/result mutation 已强制完整 `TaskAttempt` / `LeaseToken` envelope；该包还提供 start/result payload helper 作为内部 Worker SDK 契约。
 - dispatcher 任务状态机现在包含 `cancelled`，控制面和 console 都可以显式作废非终态任务。
 - 阶段三核心底座现在已进入主线：runtime state 增加显式 `leases[]`，SQLite 真相源同步维护 query-first 结构化投影，dispatcher 可选启用 structured reads、read-only 降级、Postgres / queue shadow write、SLO / burn-rate 与 DR 状态检查；当前强约束 lease 只确认接入 assignment，read-only 也仍受 `isMutationRequest` 覆盖范围限制。
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。

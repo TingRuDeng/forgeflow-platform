@@ -21,6 +21,42 @@ function makeTempDir() {
   return tempDir;
 }
 
+function workerEnvelope(attempt: {
+  attemptId: string;
+  leaseToken: string;
+  protocolVersion: string;
+  traceId: string;
+  idempotencyKey: string;
+}) {
+  return {
+    attemptId: attempt.attemptId,
+    leaseToken: attempt.leaseToken,
+    protocolVersion: attempt.protocolVersion,
+    traceId: attempt.traceId,
+    idempotencyKey: attempt.idempotencyKey,
+  };
+}
+
+function activeWorkerEnvelope(state: {
+  taskAttempts: Array<{
+    taskId: string;
+    status: string;
+    attemptId: string;
+    leaseToken: string;
+    protocolVersion: string;
+    traceId: string;
+    idempotencyKey: string;
+  }>;
+}, taskId: string) {
+  const attempt = state.taskAttempts.find((candidate) =>
+    candidate.taskId === taskId && ["leased", "running"].includes(candidate.status)
+  );
+  if (!attempt) {
+    throw new Error(`missing active attempt for ${taskId}`);
+  }
+  return workerEnvelope(attempt);
+}
+
 afterEach(() => {
   for (const tempDir of tempRoots.splice(0)) {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -75,8 +111,19 @@ async function createReviewReadyState(stateDir: string) {
     ],
     createdAt: "2026-03-16T13:01:00.000Z",
   });
-  state = stateMod.recordWorkerResult(dispatch.state, {
+  const claimed = stateMod.claimAssignedTaskForWorker(dispatch.state, {
     workerId: "codex-mac-mini",
+    at: "2026-03-16T13:01:30.000Z",
+  });
+  state = stateMod.beginTaskForWorker(claimed.state, {
+    workerId: "codex-mac-mini",
+    taskId: dispatch.taskIds[0],
+    ...activeWorkerEnvelope(claimed.state, dispatch.taskIds[0]),
+    at: "2026-03-16T13:01:40.000Z",
+  });
+  state = stateMod.recordWorkerResult(state, {
+    workerId: "codex-mac-mini",
+    ...activeWorkerEnvelope(state, dispatch.taskIds[0]),
     result: {
       taskId: dispatch.taskIds[0],
       workerId: "codex-mac-mini",

@@ -5,7 +5,12 @@ import {
   ProtocolVersionSchema,
   ReviewDecisionSchema,
   RuntimeEventTypeSchema,
+  WorkerMutationKindSchema,
   WorkerProtocolEnvelopeSchema,
+  WorkerSdkResultPayloadSchema,
+  WorkerSdkStartPayloadSchema,
+  buildWorkerResultPayload,
+  buildWorkerStartPayload,
   normalizeRuntimeEventType,
 } from "../src/index.js";
 
@@ -21,6 +26,67 @@ describe("WorkerProtocolEnvelopeSchema", () => {
     });
 
     expect(result.success).toBe(false);
+  });
+});
+
+describe("worker SDK payload helpers", () => {
+  const envelope = {
+    protocolVersion: "2026-05-v1" as const,
+    taskId: "task-1",
+    attemptId: "attempt-1",
+    workerId: "worker-1",
+    leaseToken: "lease-token",
+    traceId: "trace-1",
+    idempotencyKey: "result-attempt-1",
+  };
+
+  it("builds a validated start-task payload from the shared envelope", () => {
+    const payload = buildWorkerStartPayload({
+      envelope,
+      at: "2026-06-12T00:00:00.000Z",
+    });
+
+    expect(WorkerMutationKindSchema.parse(payload.kind)).toBe("start-task");
+    expect(WorkerSdkStartPayloadSchema.parse(payload)).toMatchObject({
+      kind: "start-task",
+      taskId: "task-1",
+      attemptId: "attempt-1",
+      leaseToken: "lease-token",
+    });
+  });
+
+  it("builds a validated result payload with dispatcher canonical fields", () => {
+    const payload = buildWorkerResultPayload({
+      envelope,
+      result: {
+        provider: "codex",
+        pool: "codex",
+        branchName: "codex/task-1",
+        repo: "owner/repo",
+        defaultBranch: "main",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-06-12T00:00:10.000Z",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+      },
+      changedFiles: ["src/index.ts"],
+      pullRequest: null,
+    });
+
+    expect(WorkerSdkResultPayloadSchema.parse(payload)).toMatchObject({
+      kind: "result",
+      taskId: "task-1",
+      result: {
+        taskId: "task-1",
+        workerId: "worker-1",
+        repo: "owner/repo",
+      },
+      changedFiles: ["src/index.ts"],
+      pullRequest: null,
+    });
   });
 });
 

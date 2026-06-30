@@ -12,17 +12,18 @@
 
 - 协议版本固定为 `2026-05-v1`。
 - 每个写入 envelope 都必须包含 `taskId`、`attemptId`、`workerId`、`leaseToken`、`traceId` 和 `idempotencyKey`。
-- 当前 Trae 兼容主链已回显并校验完整 v1 envelope；通用 worker start/result 在声明 v1 envelope 时也会校验 active attempt，但空 envelope v0 route 仍保留渐进兼容。
+- 当前 Trae 主链和通用 worker start/result 都必须携带并校验完整 v1 envelope；空 envelope 写入会被拒绝。
+- `@forgeflow/worker-protocol` 提供 `buildWorkerStartPayload` 和 `buildWorkerResultPayload`，作为内部 worker adapter / 第三方准入的最小 SDK helper。
 - 具体 schema 以 `../packages/worker-protocol/src/index.ts` 为可执行契约。
 
 ```yaml
 ai_summary:
   authority: "Worker Protocol v1 目标契约、基础 envelope、主要请求语义和错误码"
-  scope: "vNext worker/dispatcher 协议，不覆盖当前 v0 dispatcher routes 的已实现字段"
+  scope: "vNext worker/dispatcher 协议，以及当前 dispatcher worker mutation 已接入的 v1 envelope 边界"
   read_when:
     - "实现 worker-protocol schema 或 worker adapter 前"
     - "改造 dispatcher claim/start/progress/result 写入前"
-    - "判断 v1 与当前 v0 API 是否混淆时"
+    - "判断 worker mutation 是否缺少完整 v1 envelope 时"
   verify_with:
     - "../packages/worker-protocol/src/index.ts"
     - "../packages/worker-protocol/tests/index.test.ts"
@@ -56,6 +57,16 @@ ai_summary:
   idempotencyKey: "result-attempt-1"
 }
 ```
+
+## Worker SDK Helper
+
+内部 worker adapter 和被白名单放行的第三方 provider 应复用 `@forgeflow/worker-protocol` 的 helper 生成 mutation payload：
+
+- `buildWorkerStartPayload({ envelope, at })` 生成 `/api/workers/:workerId/start-task` 所需 payload，并复用完整 v1 envelope。
+- `buildWorkerResultPayload({ envelope, result, changedFiles, pullRequest })` 生成 `/api/workers/:workerId/result` 所需 payload，并把 dispatcher canonical 的 `taskId` / `workerId` 从 envelope 写入 result。
+- `WorkerSdkStartPayloadSchema` 和 `WorkerSdkResultPayloadSchema` 是 helper 的可执行校验入口。
+
+这些 helper 是仓库内部 SDK 契约，不等于已经承诺公网 npm SDK 的长期兼容窗口。
 
 ## Worker 注册
 
@@ -102,14 +113,14 @@ POST /api/tasks/:taskId/attempts/:attemptId/result
 
 这些写入必须校验 envelope。`result` 必须绑定 `ArtifactBundle`，否则后续 review 不能稳定引用执行证据。
 
-当前兼容路径：
+当前已接入路径：
 
 - `/api/workers/:workerId/start-task` 和 `/api/workers/:workerId/result` 在 claim 已创建 active attempt 后必须携带完整 v1 envelope。
 - 通用 worker start/result 会对照当前 active attempt 校验 worker、attemptId、leaseToken、protocolVersion、traceId 和 idempotencyKey。
 - `/api/trae/fetch-task` 会返回 `attempt_id`、`lease_token`、`protocol_version`、`trace_id` 和 `idempotency_key`，Trae runtime 会在 `/api/trae/start-task` 和 `/api/trae/submit-result` 回写时携带它们。
 - Trae start/result 会对照当前 active attempt 校验 worker、attemptId、leaseToken、protocolVersion、traceId 和 idempotencyKey。
 - 如果 worker 携带的 `attemptId` 已进入 `expired` / `failed` / `succeeded` / `cancelled` / `superseded` 等终态，dispatcher 会拒绝这次 stale 写入。
-- 无 active attempt 的历史迁移路径仍保留兼容行为；新 worker mutation 不应依赖空 envelope。
+- 如果没有 active attempt，worker result 会被拒绝为 `active attempt not found`；缺少任一 envelope 字段会被拒绝为 `worker protocol v1 envelope incomplete`。
 
 ## 错误语义
 

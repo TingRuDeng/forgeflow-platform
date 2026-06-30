@@ -39,6 +39,7 @@ const App: React.FC = () => {
   });
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
+  const [reviewingTaskId, setReviewingTaskId] = useState<string | null>(null);
   const [updatingWorkerId, setUpdatingWorkerId] = useState<string | null>(null);
 
   const selectedTask = useMemo(() => {
@@ -163,6 +164,35 @@ const App: React.FC = () => {
     }
   };
 
+  const handleReviewDecision = async (decision: 'merge' | 'rework' | 'block') => {
+    if (!selectedTask?.id) return;
+
+    try {
+      setReviewingTaskId(selectedTask.id);
+      const res = await fetch(`/api/reviews/${encodeURIComponent(selectedTask.id)}/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          decision,
+          actor: 'console-ui',
+          notes: `${decision} from console UI`,
+          at: new Date().toISOString(),
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to submit review decision');
+      }
+
+      await mutate();
+    } catch (err) {
+      console.error(err);
+      alert(t('reviewActionFailed'));
+    } finally {
+      setReviewingTaskId(null);
+    }
+  };
+
   return (
     <Layout 
       updatedAt={data?.updatedAt} 
@@ -198,7 +228,9 @@ const App: React.FC = () => {
                     attempts={selectedAttempts}
                     artifactBundles={selectedArtifactBundles}
                     cancellingTaskId={cancellingTaskId}
+                    reviewingTaskId={reviewingTaskId}
                     onCancel={handleTaskCancel}
+                    onReviewDecision={handleReviewDecision}
                   />
                 </div>
               </Panel>

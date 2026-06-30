@@ -49,6 +49,37 @@ function workerEnvelope(attempt: TaskAttempt) {
   };
 }
 
+function activeWorkerEnvelope(state: RuntimeState, taskId: string) {
+  const attempt = state.taskAttempts.find((candidate) =>
+    candidate.taskId === taskId && ["leased", "running"].includes(candidate.status)
+  );
+  if (!attempt) {
+    throw new Error(`missing active attempt for ${taskId}`);
+  }
+  return workerEnvelope(attempt);
+}
+
+function claimAndStartTaskForTest(
+  state: RuntimeState,
+  input: {
+    workerId: string;
+    taskId: string;
+    claimedAt: string;
+    startedAt: string;
+  },
+): RuntimeState {
+  const claimed = claimAssignedTaskForWorker(state, {
+    workerId: input.workerId,
+    at: input.claimedAt,
+  });
+  return beginTaskForWorker(claimed.state, {
+    workerId: input.workerId,
+    taskId: input.taskId,
+    ...activeWorkerEnvelope(claimed.state, input.taskId),
+    at: input.startedAt,
+  });
+}
+
 afterEach(() => {
   for (const tempDir of tempRoots.splice(0)) {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -408,8 +439,16 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(assignedTask?.assignment.taskId).toBe(dispatch.taskIds[0]);
     expect(assignedTask?.assignment.workerId).toBe("codex-mac-mini");
 
+    state = claimAndStartTaskForTest(state, {
+      workerId: "codex-mac-mini",
+      taskId: dispatch.taskIds[0]!,
+      claimedAt: "2026-03-16T10:01:30.000Z",
+      startedAt: "2026-03-16T10:01:40.000Z",
+    });
+
     state = recordWorkerResult(state, {
       workerId: "codex-mac-mini",
+      ...activeWorkerEnvelope(state, dispatch.taskIds[0]!),
       result: {
         taskId: dispatch.taskIds[0],
         workerId: "codex-mac-mini",
@@ -481,7 +520,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(snapshot.events.some((event) => event.payload && typeof event.payload === "object" && "to" in event.payload && event.payload.to === "merged")).toBe(true);
   });
 
-  it("creates and advances a synthetic task attempt for the v0 worker flow", () => {
+  it("creates and advances a task attempt with a v1 idempotency key", () => {
     let state = createEmptyRuntimeState();
     state = registerWorker(state, {
       workerId: "codex-attempt-worker",
@@ -539,7 +578,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
       leaseToken: "assignment:codex-attempt-worker",
       status: "leased",
       traceId: "trace-dispatch-1-task-attempt",
-      idempotencyKey: expect.stringContaining(taskId),
+      idempotencyKey: `worker-v1:${taskId}:attempt-1`,
     });
 
     const attemptId = state.taskAttempts[0]!.attemptId;
@@ -747,6 +786,78 @@ describe("dispatcher runtime state (TypeScript)", () => {
         },
       },
     })).toThrow(/worker protocol v1 envelope incomplete/i);
+  });
+
+  it("rejects empty-envelope results when no active attempt exists", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-no-attempt",
+      pool: "codex",
+      hostname: "test-host",
+      labels: ["codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-03-16T12:10:00.000Z",
+    });
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-no-attempt",
+          title: "禁止空 envelope",
+          pool: "codex",
+          branchName: "ai/codex/task-no-attempt",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-no-attempt",
+          assignment: {
+            taskId: "task-no-attempt",
+            workerId: "codex-no-attempt",
+            pool: "codex",
+            status: "in_progress",
+            branchName: "ai/codex/task-no-attempt",
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+          },
+        },
+      ],
+      createdAt: "2026-03-16T12:10:01.000Z",
+    });
+    const taskId = dispatch.taskIds[0]!;
+    state = {
+      ...dispatch.state,
+      tasks: dispatch.state.tasks.map((task) => task.id === taskId
+        ? { ...task, status: "in_progress", assignedWorkerId: "codex-no-attempt" }
+        : task),
+      workers: dispatch.state.workers.map((worker) => worker.id === "codex-no-attempt"
+        ? { ...worker, status: "busy", currentTaskId: taskId }
+        : worker),
+      taskAttempts: [],
+    };
+
+    expect(() => recordWorkerResult(state, {
+      workerId: "codex-no-attempt",
+      result: {
+        taskId,
+        workerId: "codex-no-attempt",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-no-attempt",
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "master",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-03-16T12:10:02.000Z",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+      },
+    })).toThrow(/active attempt not found/i);
   });
 
   it("stores artifact bundles from worker results and binds the active attempt", () => {
@@ -1535,8 +1646,16 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
     expect(claimBeforeUnlock.assignment).toBeNull();
 
+    state = claimAndStartTaskForTest(state, {
+      workerId: "codex-upstream",
+      taskId: upstreamDispatch.taskIds[0]!,
+      claimedAt: "2026-04-05T10:03:10.000Z",
+      startedAt: "2026-04-05T10:03:20.000Z",
+    });
+
     state = recordWorkerResult(state, {
       workerId: "codex-upstream",
+      ...activeWorkerEnvelope(state, upstreamDispatch.taskIds[0]!),
       result: {
         taskId: upstreamDispatch.taskIds[0],
         workerId: "codex-upstream",
@@ -1757,10 +1876,11 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
     state = dispatch.state;
 
-    state = beginTaskForWorker(state, {
+    state = claimAndStartTaskForTest(state, {
       workerId: "codex-executor",
       taskId: dispatch.taskIds[0],
-      at: "2026-03-16T17:00:15.000Z",
+      claimedAt: "2026-03-16T17:00:12.000Z",
+      startedAt: "2026-03-16T17:00:15.000Z",
     });
 
     const snapshot = buildDashboardSnapshot(state, {
@@ -1939,10 +2059,11 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
     state = dispatch.state;
 
-    state = beginTaskForWorker(state, {
+    state = claimAndStartTaskForTest(state, {
       workerId: "codex-submit-review",
       taskId: dispatch.taskIds[0],
-      at: "2026-03-17T10:00:15.000Z",
+      claimedAt: "2026-03-17T10:00:12.000Z",
+      startedAt: "2026-03-17T10:00:15.000Z",
     });
 
     let worker = state.workers.find((w) => w.id === "codex-submit-review");
@@ -1953,6 +2074,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
 
     state = recordWorkerResult(state, {
       workerId: "codex-submit-review",
+      ...activeWorkerEnvelope(state, dispatch.taskIds[0]!),
       result: {
         taskId: dispatch.taskIds[0],
         workerId: "codex-submit-review",
@@ -2061,14 +2183,16 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
     state = dispatch.state;
 
-    state = beginTaskForWorker(state, {
+    state = claimAndStartTaskForTest(state, {
       workerId: "codex-submit-fail",
       taskId: dispatch.taskIds[0],
-      at: "2026-03-17T10:00:15.000Z",
+      claimedAt: "2026-03-17T10:00:12.000Z",
+      startedAt: "2026-03-17T10:00:15.000Z",
     });
 
     state = recordWorkerResult(state, {
       workerId: "codex-submit-fail",
+      ...activeWorkerEnvelope(state, dispatch.taskIds[0]!),
       result: {
         taskId: dispatch.taskIds[0],
         workerId: "codex-submit-fail",
@@ -2173,14 +2297,16 @@ describe("dispatcher runtime state (TypeScript)", () => {
     state = dispatch.state;
     const taskId = dispatch.taskIds[0];
 
-    state = beginTaskForWorker(state, {
+    state = claimAndStartTaskForTest(state, {
       workerId: "codex-submit-evidence",
       taskId,
-      at: "2026-03-17T10:00:15.000Z",
+      claimedAt: "2026-03-17T10:00:12.000Z",
+      startedAt: "2026-03-17T10:00:15.000Z",
     });
 
     state = recordWorkerResult(state, {
       workerId: "codex-submit-evidence",
+      ...activeWorkerEnvelope(state, taskId!),
       result: {
         taskId,
         workerId: "codex-submit-evidence",
@@ -2292,14 +2418,16 @@ describe("dispatcher runtime state (TypeScript)", () => {
     state = dispatch.state;
     const taskId = dispatch.taskIds[0];
 
-    state = beginTaskForWorker(state, {
+    state = claimAndStartTaskForTest(state, {
       workerId: "codex-review-sync",
       taskId,
-      at: "2026-03-17T10:00:15.000Z",
+      claimedAt: "2026-03-17T10:00:12.000Z",
+      startedAt: "2026-03-17T10:00:15.000Z",
     });
 
     state = recordWorkerResult(state, {
       workerId: "codex-review-sync",
+      ...activeWorkerEnvelope(state, taskId!),
       result: {
         taskId,
         workerId: "codex-review-sync",
@@ -2410,14 +2538,16 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
     state = dispatch.state;
 
-    state = beginTaskForWorker(state, {
+    state = claimAndStartTaskForTest(state, {
       workerId: "codex-review-changes",
       taskId: dispatch.taskIds[0],
-      at: "2026-03-17T10:00:15.000Z",
+      claimedAt: "2026-03-17T10:00:12.000Z",
+      startedAt: "2026-03-17T10:00:15.000Z",
     });
 
     state = recordWorkerResult(state, {
       workerId: "codex-review-changes",
+      ...activeWorkerEnvelope(state, dispatch.taskIds[0]!),
       result: {
         taskId: dispatch.taskIds[0],
         workerId: "codex-review-changes",
@@ -4063,8 +4193,16 @@ describe("dispatcher runtime state (TypeScript)", () => {
       createdAt: "2026-04-07T10:00:00.000Z",
     });
 
-    state = recordWorkerResult(dispatch.state, {
+    state = claimAndStartTaskForTest(dispatch.state, {
       workerId: "codex-metrics",
+      taskId: dispatch.taskIds[0]!,
+      claimedAt: "2026-04-07T10:00:01.000Z",
+      startedAt: "2026-04-07T10:00:02.000Z",
+    });
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-metrics",
+      ...activeWorkerEnvelope(state, dispatch.taskIds[0]!),
       result: {
         taskId: dispatch.taskIds[0],
         workerId: "codex-metrics",
@@ -4148,8 +4286,16 @@ describe("dispatcher runtime state (TypeScript)", () => {
       createdAt: "2026-04-08T11:00:00+08:00",
     });
 
-    state = recordWorkerResult(dispatch.state, {
+    state = claimAndStartTaskForTest(dispatch.state, {
       workerId: "trae-observability",
+      taskId: dispatch.taskIds[0]!,
+      claimedAt: "2026-04-08T11:00:01+08:00",
+      startedAt: "2026-04-08T11:00:02+08:00",
+    });
+
+    state = recordWorkerResult(state, {
+      workerId: "trae-observability",
+      ...activeWorkerEnvelope(state, dispatch.taskIds[0]!),
       result: {
         taskId: dispatch.taskIds[0],
         workerId: "trae-observability",
@@ -4247,8 +4393,16 @@ describe("dispatcher runtime state (TypeScript)", () => {
       createdAt: "2026-04-08T12:00:00+08:00",
     });
 
-    state = recordWorkerResult(dispatch.state, {
+    state = claimAndStartTaskForTest(dispatch.state, {
       workerId: "codex-branch-protection",
+      taskId: dispatch.taskIds[0]!,
+      claimedAt: "2026-04-08T12:00:01+08:00",
+      startedAt: "2026-04-08T12:00:02+08:00",
+    });
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-branch-protection",
+      ...activeWorkerEnvelope(state, dispatch.taskIds[0]!),
       result: {
         taskId: dispatch.taskIds[0],
         workerId: "codex-branch-protection",

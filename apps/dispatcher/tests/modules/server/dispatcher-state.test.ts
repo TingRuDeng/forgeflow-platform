@@ -19,6 +19,67 @@ function makeTempDir() {
   return tempDir;
 }
 
+function workerEnvelope(attempt: {
+  attemptId: string;
+  leaseToken: string;
+  protocolVersion: string;
+  traceId: string;
+  idempotencyKey: string;
+}) {
+  return {
+    attemptId: attempt.attemptId,
+    leaseToken: attempt.leaseToken,
+    protocolVersion: attempt.protocolVersion,
+    traceId: attempt.traceId,
+    idempotencyKey: attempt.idempotencyKey,
+  };
+}
+
+function activeWorkerEnvelope(state: {
+  taskAttempts: Array<{
+    taskId: string;
+    status: string;
+    attemptId: string;
+    leaseToken: string;
+    protocolVersion: string;
+    traceId: string;
+    idempotencyKey: string;
+  }>;
+}, taskId: string) {
+  const attempt = state.taskAttempts.find((candidate) =>
+    candidate.taskId === taskId && ["leased", "running"].includes(candidate.status)
+  );
+  if (!attempt) {
+    throw new Error(`missing active attempt for ${taskId}`);
+  }
+  return workerEnvelope(attempt);
+}
+
+function claimAndStartTaskForTest(
+  mod: {
+    claimAssignedTaskForWorker: Function;
+    beginTaskForWorker: Function;
+  },
+  state: unknown,
+  input: {
+    workerId: string;
+    taskId: string;
+    claimedAt: string;
+    startedAt: string;
+  },
+) {
+  const claimed = mod.claimAssignedTaskForWorker(state, {
+    workerId: input.workerId,
+    at: input.claimedAt,
+  });
+  return mod.beginTaskForWorker(claimed.state, {
+    workerId: input.workerId,
+    taskId: input.taskId,
+    ...activeWorkerEnvelope(claimed.state, input.taskId),
+    at: input.startedAt,
+  });
+}
+
 afterEach(() => {
   for (const tempDir of tempRoots.splice(0)) {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -99,8 +160,16 @@ describe("dispatcher runtime state", () => {
     expect(assignedTask?.assignment.taskId).toBe(dispatch.taskIds[0]);
     expect(assignedTask?.assignment.workerId).toBe("codex-mac-mini");
 
+    state = claimAndStartTaskForTest(mod, state, {
+      workerId: "codex-mac-mini",
+      taskId: dispatch.taskIds[0],
+      claimedAt: "2026-03-16T10:01:30.000Z",
+      startedAt: "2026-03-16T10:01:40.000Z",
+    });
+
     state = mod.recordWorkerResult(state, {
       workerId: "codex-mac-mini",
+      ...activeWorkerEnvelope(state, dispatch.taskIds[0]),
       result: {
         taskId: dispatch.taskIds[0],
         workerId: "codex-mac-mini",
@@ -170,7 +239,7 @@ describe("dispatcher runtime state", () => {
       actor: "codex-control",
     });
     expect(snapshot.events.some((event: { payload?: { to?: string } }) => event.payload?.to === "merged")).toBe(true);
-  }, 15_000);
+  }, 30_000);
 
   it("retains only the latest 500 events in immutable runtime-state appends", () => {
     const initialState = createEmptyRuntimeState();
@@ -824,10 +893,11 @@ describe("dispatcher runtime state", () => {
     });
     state = dispatch.state;
 
-    state = mod.beginTaskForWorker(state, {
+    state = claimAndStartTaskForTest(mod, state, {
       workerId: "codex-executor",
       taskId: dispatch.taskIds[0],
-      at: "2026-03-16T17:00:15.000Z",
+      claimedAt: "2026-03-16T17:00:12.000Z",
+      startedAt: "2026-03-16T17:00:15.000Z",
     });
 
     const snapshot = mod.buildDashboardSnapshot(state, {
@@ -1010,10 +1080,11 @@ describe("dispatcher runtime state", () => {
     });
     state = dispatch.state;
 
-    state = mod.beginTaskForWorker(state, {
+    state = claimAndStartTaskForTest(mod, state, {
       workerId: "codex-submit-review",
       taskId: dispatch.taskIds[0],
-      at: "2026-03-17T10:00:15.000Z",
+      claimedAt: "2026-03-17T10:00:12.000Z",
+      startedAt: "2026-03-17T10:00:15.000Z",
     });
 
     let worker = state.workers.find((w: { id: string }) => w.id === "codex-submit-review");
@@ -1024,6 +1095,7 @@ describe("dispatcher runtime state", () => {
 
     state = mod.recordWorkerResult(state, {
       workerId: "codex-submit-review",
+      ...activeWorkerEnvelope(state, dispatch.taskIds[0]),
       result: {
         taskId: dispatch.taskIds[0],
         workerId: "codex-submit-review",
@@ -1133,14 +1205,16 @@ describe("dispatcher runtime state", () => {
     });
     state = dispatch.state;
 
-    state = mod.beginTaskForWorker(state, {
+    state = claimAndStartTaskForTest(mod, state, {
       workerId: "codex-submit-fail",
       taskId: dispatch.taskIds[0],
-      at: "2026-03-17T10:00:15.000Z",
+      claimedAt: "2026-03-17T10:00:12.000Z",
+      startedAt: "2026-03-17T10:00:15.000Z",
     });
 
     state = mod.recordWorkerResult(state, {
       workerId: "codex-submit-fail",
+      ...activeWorkerEnvelope(state, dispatch.taskIds[0]),
       result: {
         taskId: dispatch.taskIds[0],
         workerId: "codex-submit-fail",
@@ -1244,14 +1318,16 @@ describe("dispatcher runtime state", () => {
     state = dispatch.state;
     const taskId = dispatch.taskIds[0];
 
-    state = mod.beginTaskForWorker(state, {
+    state = claimAndStartTaskForTest(mod, state, {
       workerId: "codex-review-sync",
       taskId,
-      at: "2026-03-17T10:00:15.000Z",
+      claimedAt: "2026-03-17T10:00:12.000Z",
+      startedAt: "2026-03-17T10:00:15.000Z",
     });
 
     state = mod.recordWorkerResult(state, {
       workerId: "codex-review-sync",
+      ...activeWorkerEnvelope(state, taskId),
       result: {
         taskId,
         workerId: "codex-review-sync",

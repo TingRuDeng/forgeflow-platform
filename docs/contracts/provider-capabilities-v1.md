@@ -17,6 +17,11 @@ Provider permission keys:
   - no mapped permission keys
 - `qwen`
   - no mapped permission keys
+- `trae`
+  - `automation_url`
+  - `remote_debugging_port`
+  - `git_ssh_command`
+  - default: none
 
 Enforcement semantics:
 
@@ -24,3 +29,10 @@ Enforcement semantics:
   - unsupported permission keys fail closed with `permission_enforcement_failed`
 - `best_effort`
   - unsupported permission keys are dropped before execution
+
+Admission semantics:
+
+- Known providers must use a supported task mode and only request supported permission keys.
+- Unknown third-party providers fail closed by default with `third_party_not_allowlisted`.
+- Allowlisted third-party providers must declare `worker-protocol-v1`; otherwise admission fails with `missing_worker_protocol_v1`.
+- Allowlisted third-party providers currently receive no provider-specific permission keys by default. Any requested permission key fails with `unsupported_permission` until explicitly modeled in this contract.

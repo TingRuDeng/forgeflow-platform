@@ -113,6 +113,7 @@ describe('Task drill-down', () => {
 
   it('renders task details and exposes the cancel action for cancellable tasks', () => {
     const onCancel = vi.fn();
+    const onReviewDecision = vi.fn();
 
     renderWithProviders(
       <TaskDetailsPanel
@@ -120,7 +121,7 @@ describe('Task drill-down', () => {
           id: 'dispatch-1:task-1',
           traceId: 'trace-dispatch-1-task-1',
           title: 'Fix auth gate',
-          status: 'blocked',
+          status: 'review',
           branchName: 'codex/auth-fix',
           repo: 'owner/repo',
           pool: 'trae',
@@ -203,6 +204,7 @@ describe('Task drill-down', () => {
           },
         ]}
         onCancel={onCancel}
+        onReviewDecision={onReviewDecision}
       />
     );
 
@@ -230,5 +232,9 @@ describe('Task drill-down', () => {
     expect(onCancel).toHaveBeenCalledWith(expect.objectContaining({
       id: 'dispatch-1:task-1',
     }));
+
+    fireEvent.click(screen.getByRole('button', { name: /合并|merge/i }));
+
+    expect(onReviewDecision).toHaveBeenCalledWith('merge');
   });
 });

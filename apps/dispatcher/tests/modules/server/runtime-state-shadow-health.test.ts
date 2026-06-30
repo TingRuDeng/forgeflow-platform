@@ -5,7 +5,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeStateShadowWriteStatus } from "../../../src/modules/server/runtime-state-shadow.js";
-import { summarizeRuntimeStateShadowDrift } from "../../../src/modules/server/runtime-state-shadow.js";
+import {
+  evaluateRuntimeStateShadowDriftAlert,
+  summarizeRuntimeStateShadowDrift,
+} from "../../../src/modules/server/runtime-state-shadow.js";
 import {
   readPersistedRuntimeStateShadowWriteStatus,
   selectRuntimeStateShadowWriteStatus,
@@ -96,5 +99,29 @@ describe("runtime-state-shadow-health", () => {
       { store: "projection", name: "dispatcher_tasks", expected: 1, actual: 0 },
       { store: "queue", name: "assignment_delivery", expected: 1, actual: 2 },
     ]);
+  });
+
+  it("classifies drift alerts using mismatch and delta thresholds", () => {
+    const drift = summarizeRuntimeStateShadowDrift({
+      mode: "shadow-write",
+      queueMode: "shadow-write",
+      configured: true,
+      projectionCounts: { dispatcher_tasks: 0, dispatcher_events: 7 },
+      queueCounts: { assignment_delivery: 0 },
+      expectedCounts: { dispatcher_tasks: 3, dispatcher_events: 1 },
+      expectedQueueCounts: { assignment_delivery: 2 },
+    });
+
+    const alert = evaluateRuntimeStateShadowDriftAlert(drift, {
+      maxMismatchCount: 2,
+      maxAbsoluteDelta: 4,
+    });
+
+    expect(alert).toEqual({
+      level: "critical",
+      reasonCodes: ["shadow_drift_mismatch_count", "shadow_drift_delta"],
+      mismatchCount: 3,
+      absoluteDelta: 11,
+    });
   });
 });

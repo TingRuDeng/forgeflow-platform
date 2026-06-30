@@ -33,5 +33,15 @@ describe("stage3 live dispatcher DR verification", () => {
     expect(payload.crashRestart.recoveredIntegrityCheck).toBe("ok");
     expect(payload.crashRestart.recoveredTaskCount).toBeGreaterThan(0);
     expect(payload.crashRestart.recoveredEventCount).toBeGreaterThan(0);
+    expect(payload.hostFailure.simulatedHostLost).toBe(true);
+    expect(payload.hostFailure.replacementDispatcherRestarted).toBe(true);
+    expect(payload.hostFailure.recoveredIntegrityCheck).toBe("ok");
+    expect(payload.diskCorruption.corruptionInjected).toBe(true);
+    expect(payload.diskCorruption.corruptedFiles).toContain("runtime-state.db");
+    expect(payload.diskCorruption.restoredIntegrityCheck).toBe("ok");
+    expect(payload.multiNodeRestore.nodeCount).toBe(2);
+    expect(payload.multiNodeRestore.nodes.every((node: { integrityCheck: string }) => node.integrityCheck === "ok")).toBe(true);
+    expect(payload.multiNodeRestore.consistentTaskCounts).toBe(true);
+    expect(payload.multiNodeRestore.consistentEventCounts).toBe(true);
   }, 60_000);
 });

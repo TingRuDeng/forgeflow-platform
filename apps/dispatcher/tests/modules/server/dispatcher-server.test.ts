@@ -168,11 +168,39 @@ describe("dispatcher server", () => {
     const assignedTaskBody = assignedTaskResponse.json;
     expect(assignedTaskBody.assignment.workerId).toBe("codex-mac-mini");
 
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-mac-mini/claim-task",
+      body: {},
+    });
+    const stateMod = await import(path.join(repoRoot, "scripts/lib/dispatcher-state.js"));
+    const attempt = stateMod.loadRuntimeState(stateDir).taskAttempts[0];
+    const startResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-mac-mini/start-task",
+      body: {
+        taskId: dispatchBody.taskIds[0],
+        attemptId: attempt.attemptId,
+        leaseToken: attempt.leaseToken,
+        protocolVersion: attempt.protocolVersion,
+        traceId: attempt.traceId,
+        idempotencyKey: attempt.idempotencyKey,
+      },
+    });
+    expect(startResponse.status).toBe(200);
+
     const resultResponse = await mod.handleDispatcherHttpRequest({
       stateDir,
       method: "POST",
       pathname: "/api/workers/codex-mac-mini/result",
       body: {
+        attemptId: attempt.attemptId,
+        leaseToken: attempt.leaseToken,
+        protocolVersion: attempt.protocolVersion,
+        traceId: attempt.traceId,
+        idempotencyKey: attempt.idempotencyKey,
         result: {
           taskId: dispatchBody.taskIds[0],
           workerId: "codex-mac-mini",
@@ -1239,6 +1267,159 @@ describe("dispatcher server", () => {
     expect(staleResult.json.error).toBe(`idempotency key mismatch: ${taskId}`);
   });
 
+  it("persists worker result artifact content and serves stored files", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    const stateMod = await import(path.join(repoRoot, "scripts/lib/dispatcher-state.js"));
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-artifact-http",
+        pool: "codex",
+        hostname: "artifact-host",
+        labels: [],
+        repoDir: "/repo",
+      },
+    });
+
+    const dispatchResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/repo",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [
+          {
+            id: "task-http-artifact",
+            title: "HTTP artifact",
+            pool: "codex",
+            dependsOn: [],
+            branchName: "ai/codex/task-http-artifact",
+            verification: { mode: "run" },
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-http-artifact",
+            assignment: {
+              taskId: "task-http-artifact",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/task-http-artifact",
+              repo: "test/repo",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+    const taskId = dispatchResponse.json.taskIds[0];
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-artifact-http/claim-task",
+      body: {},
+    });
+    const attempt = stateMod.loadRuntimeState(stateDir).taskAttempts[0];
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-artifact-http/start-task",
+      body: {
+        taskId,
+        attemptId: attempt.attemptId,
+        leaseToken: attempt.leaseToken,
+        protocolVersion: attempt.protocolVersion,
+        traceId: attempt.traceId,
+        idempotencyKey: attempt.idempotencyKey,
+      },
+    });
+
+    const resultResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-artifact-http/result",
+      body: {
+        attemptId: attempt.attemptId,
+        leaseToken: attempt.leaseToken,
+        protocolVersion: attempt.protocolVersion,
+        traceId: attempt.traceId,
+        idempotencyKey: attempt.idempotencyKey,
+        result: {
+          taskId,
+          workerId: "codex-artifact-http",
+          provider: "codex",
+          pool: "codex",
+          branchName: "ai/codex/task-http-artifact",
+          repo: "test/repo",
+          defaultBranch: "main",
+          mode: "run",
+          output: "done",
+          generatedAt: "2026-06-12T09:00:00.000Z",
+          verification: {
+            allPassed: true,
+            commands: [],
+          },
+        },
+        artifactBundle: {
+          bundleId: "bundle-http-artifact",
+          taskId,
+          attemptId: attempt.attemptId,
+          schemaVersion: "artifact-bundle/v1",
+          summary: "artifact ready",
+          changedFiles: [],
+          refs: {
+            structuredReport: `artifact://${attempt.attemptId}/result.json`,
+          },
+          retainedContent: {
+            diff: "diff --git a/docs/test.md b/docs/test.md",
+            logs: "worker log",
+            testResults: "all passed",
+          },
+          riskNotes: [],
+          nextActions: [],
+          createdAt: "2026-06-12T09:00:00.000Z",
+        },
+      },
+    });
+    expect(resultResponse.status).toBe(200);
+
+    const artifactResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/artifacts/bundle-http-artifact",
+    });
+    expect(artifactResponse.status).toBe(200);
+    expect(artifactResponse.json.refs.diff).toBe("artifact://bundle-http-artifact/diff.patch");
+
+    const diffResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/artifacts/bundle-http-artifact/files/diff.patch",
+    });
+    expect(diffResponse.status).toBe(200);
+    expect(diffResponse.json).toEqual({
+      bundleId: "bundle-http-artifact",
+      fileName: "diff.patch",
+      content: "diff --git a/docs/test.md b/docs/test.md",
+    });
+
+    const traversalResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/artifacts/bundle-http-artifact/files/..%2Fruntime-state.json",
+    });
+    expect(traversalResponse.status).toBe(400);
+    expect(traversalResponse.json.error).toBe("invalid_artifact_file");
+  });
+
   it("rejects late HTTP results from expired attempts after retry redrive", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);
@@ -1412,11 +1593,39 @@ describe("dispatcher server", () => {
     });
     const taskId = dispatchResponse.json.taskIds[0];
 
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-canonical/claim-task",
+      body: {},
+    });
+    const stateMod = await import(path.join(repoRoot, "scripts/lib/dispatcher-state.js"));
+    const attempt = stateMod.loadRuntimeState(stateDir).taskAttempts[0];
+    const startResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-canonical/start-task",
+      body: {
+        taskId,
+        attemptId: attempt.attemptId,
+        leaseToken: attempt.leaseToken,
+        protocolVersion: attempt.protocolVersion,
+        traceId: attempt.traceId,
+        idempotencyKey: attempt.idempotencyKey,
+      },
+    });
+    expect(startResponse.status).toBe(200);
+
     const response = await mod.handleDispatcherHttpRequest({
       stateDir,
       method: "POST",
       pathname: "/api/workers/codex-canonical/result",
       body: {
+        attemptId: attempt.attemptId,
+        leaseToken: attempt.leaseToken,
+        protocolVersion: attempt.protocolVersion,
+        traceId: attempt.traceId,
+        idempotencyKey: attempt.idempotencyKey,
         result: {
           taskId,
           workerId: "codex-canonical",
@@ -1660,6 +1869,73 @@ describe("dispatcher server", () => {
     expect(worker.currentTaskId).toBe(taskId);
     const task = snapshot.json.tasks.find((item: { id: string }) => item.id === taskId);
     expect(task.status).toBe("in_progress");
+  });
+
+  it("rejects Trae start-task without a complete v1 envelope", async () => {
+    const stateDir = makeTempDir();
+    const repoDir = path.join(stateDir, "repo");
+    fs.mkdirSync(repoDir, { recursive: true });
+    const mod = await import(serverModulePath);
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/heartbeat",
+      body: { worker_id: "trae-empty-envelope" },
+    });
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/repo",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [
+          {
+            id: "task-empty-envelope",
+            title: "Reject empty envelope",
+            pool: "trae",
+            dependsOn: [],
+            branchName: "ai/trae/task-empty-envelope",
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-empty-envelope",
+            assignment: {
+              taskId: "task-empty-envelope",
+              workerId: "trae-empty-envelope",
+              pool: "trae",
+              status: "assigned",
+              branchName: "ai/trae/task-empty-envelope",
+              repo: "test/repo",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+
+    const fetchResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/fetch-task",
+      body: { worker_id: "trae-empty-envelope", repo_dir: repoDir },
+    });
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/start-task",
+      body: {
+        worker_id: "trae-empty-envelope",
+        task_id: fetchResponse.json.task.task_id,
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.json.error).toMatch(/worker protocol v1 envelope incomplete/i);
   });
 
   it("fetch_task returns continuation_mode and continue_from_task_id for redrive tasks", async () => {
@@ -2153,6 +2429,25 @@ describe("dispatcher server", () => {
         push_status: "success",
         pr_number: 42,
         pr_url: "https://github.com/test/repo/pull/42",
+        artifact_bundle: {
+          bundleId: "bundle-trae-artifact",
+          taskId,
+          attemptId: fetchResponse.json.task.attempt_id,
+          schemaVersion: "artifact-bundle/v1",
+          summary: "Trae artifact ready",
+          changedFiles: [],
+          refs: {
+            structuredReport: `artifact://${fetchResponse.json.task.attempt_id}/result.json`,
+          },
+          retainedContent: {
+            diff: "diff --git a/docs/test.md b/docs/test.md",
+            logs: "trae log",
+            testResults: "PASS",
+          },
+          riskNotes: [],
+          nextActions: [],
+          createdAt: "2026-06-12T10:00:00.000Z",
+        },
       },
     });
     expect(response.status).toBe(200);
@@ -2178,6 +2473,21 @@ describe("dispatcher server", () => {
     expect(review.latestWorkerResult.output).toBe("Done!");
     expect(review.latestWorkerResult.verification.commands[0].output).toBe("PASS");
     expect(review.reviewMaterial.pullRequest.number).toBe(42);
+
+    const artifactResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/artifacts/bundle-trae-artifact",
+    });
+    expect(artifactResponse.json.refs.diff).toBe("artifact://bundle-trae-artifact/diff.patch");
+
+    const diffResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/artifacts/bundle-trae-artifact/files/diff.patch",
+    });
+    expect(diffResponse.status).toBe(200);
+    expect(diffResponse.json.content).toBe("diff --git a/docs/test.md b/docs/test.md");
   });
 
   it("submit_result with failed moves task to failed", async () => {
