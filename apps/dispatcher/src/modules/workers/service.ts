@@ -24,7 +24,7 @@ export class WorkerService {
     return this.workers.get(workerId);
   }
 
-  listByPool(pool: Worker["pool"]): Worker[] {
+  listByPool(pool: string): Worker[] {
     return [...this.workers.values()].filter((worker) => worker.pool === pool);
   }
 

@@ -264,6 +264,16 @@ describe("worker daemon cycle", () => {
       status: "idle",
     });
 
+    // Generic worker now reports run-phase progress events (parity with Trae).
+    const progressEvents = reloaded.events.filter(
+      (event: { taskId: string; type: string }) =>
+        event.taskId === dispatch.taskIds[0] && event.type === "progress_reported",
+    );
+    expect(progressEvents.length).toBeGreaterThanOrEqual(2);
+    expect(
+      progressEvents.map((event: { payload?: { data?: { stage?: string } } }) => event.payload?.data?.stage),
+    ).toEqual(expect.arrayContaining(["worktree_prepared", "execution_completed"]));
+
     const materializedAssignmentDir = path.join(
       summary.worktreeDir,
       ".orchestrator",

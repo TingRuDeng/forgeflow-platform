@@ -14,7 +14,7 @@ export interface AssignmentCommandMap {
 export interface WorkerAssignmentPayload {
   taskId: string;
   workerId: string;
-  pool: "codex" | "gemini";
+  pool: string;
   status: "assigned" | "pending";
   branchName: string;
   allowedPaths: string[];
@@ -49,7 +49,7 @@ export interface WorkerExecutionResult {
   taskId: string;
   workerId: string;
   provider: "codex" | "gemini";
-  pool: "codex" | "gemini";
+  pool: string;
   branchName: string;
   repo: string;
   defaultBranch: string;

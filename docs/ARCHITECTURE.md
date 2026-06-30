@@ -75,7 +75,7 @@ The current main runtime is hybrid:
 
 - live entrypoints and CLI/bootstrap remain under `scripts/` and `scripts/lib/`
 - the `scripts/` root is intentionally trimmed to supported entrypoints plus a small legacy drill set, rather than keeping duplicate staging wrappers
-- the old local codex drill flow has been retired from active entrypoints; only the deferred `worker-daemon` execution path remains for `codex/gemini`
+- the old local codex drill flow has been retired from active entrypoints; the `worker-daemon` execution path for `codex/gemini` is a supported multi-machine path (co-equal with Trae)
 - the dispatcher TypeScript foundation now owns major runtime logic under `apps/dispatcher/src/modules/server/`
 - current live bridges import built output from `apps/dispatcher/dist/`
 - dispatcher-generated `traceId` is now the stable stage-2 correlation key across snapshot, worker events, CLI summaries, console drill-down, and Trae worker evidence

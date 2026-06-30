@@ -56,7 +56,7 @@ function acquireBuildLock(): () => void {
   }
 }
 
-if (!buildState[DISPATCHER_DIST_BUILT]) {
+if (!buildState[DISPATCHER_DIST_BUILT] && process.env.FORGEFLOW_DISPATCHER_DIST_PREBUILT !== "1") {
   const releaseBuildLock = acquireBuildLock();
   try {
     logger.info({ event: "dispatcher_build_triggered", message: "Building apps/dispatcher to ensure fresh dist" });

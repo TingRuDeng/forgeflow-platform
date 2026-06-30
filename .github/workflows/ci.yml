@@ -55,9 +55,13 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+        env:
+          FORGEFLOW_DISPATCHER_DIST_PREBUILT: '1'
 
       - name: Run critical coverage
         run: pnpm coverage:critical
+        env:
+          FORGEFLOW_DISPATCHER_DIST_PREBUILT: '1'
 
       - name: Upload critical coverage artifacts
         uses: actions/upload-artifact@v4

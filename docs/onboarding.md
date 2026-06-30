@@ -13,7 +13,7 @@
 ## 一分钟摘要
 
 - 业务仓至少需要 `.orchestrator/project.yaml`、仓库规则文件、workflow 模板和默认分支约定。
-- 当前推荐 Trae-first；`codex/gemini` worker daemon 仍可用但处于 deferred 扩展状态。
+- `codex`/`gemini`/`trae` worker 接入并列受支持；Trae automation 是最成熟的无人值守链路。
 - 控制面启动、control-layer skill/CLI 安装和远程 runtime 安装要分开看。
 - 接入后用 `forgeflow-review-orchestrator watch --summary` / `inspect --summary` 和 smoke checklist 验证。
 
@@ -138,12 +138,13 @@ ai_summary:
 
 在当前主线路径里，推荐把“控制层启动”、“control-layer skill 安装”和“远程 runtime npm 包安装”分开看：
 
-当前迭代策略：Trae-first。优先收敛 Trae 无人值守链路稳定性，`codex/gemini` 多机链路能力扩展暂缓投入（deferred）。
+当前 worker 接入策略：`codex`/`gemini`/`trae` 三者并列受支持。Trae automation 是最成熟的无人值守链路；`codex/gemini` worker daemon 也是受支持的多机执行路径（源码构建收敛仍是后续债务，见 `TECH_DEBT.md`）。
 
 - 控制平面机器：从 `scripts/start-control-plane.sh` 启动常驻 dispatcher 控制面
 - 控制层会话：按需安装 `worker-review-orchestrator` skill
 - 控制层机器：按需安装 `@tingrudeng/worker-review-orchestrator-cli`
 - 远程 Codex 机器：按需安装 `@tingrudeng/codex-beta-runtime`
+- 远程 Gemini 机器：按需安装 `@tingrudeng/gemini-beta-runtime`
 - 远程 Trae 机器：按需安装 `@tingrudeng/trae-beta-runtime`
 
 ### 4.1 本地最小闭环
@@ -157,17 +158,17 @@ ai_summary:
 
 - `scripts/start-control-plane.sh`
 - `forgeflow-review-orchestrator dispatch-task/watch/inspect/decide`
-- `@tingrudeng/trae-beta-runtime` 或 deferred 的 `scripts/run-worker-daemon.js`
+- `@tingrudeng/trae-beta-runtime`、`@tingrudeng/codex-beta-runtime`、`@tingrudeng/gemini-beta-runtime` 或源码仓内 `scripts/run-worker-daemon.js`
 
-### 4.2 `codex` / `gemini` 多机链路（deferred）
+### 4.2 `codex` / `gemini` 多机链路
 
-该链路当前仍可用，但在本阶段不作为优先推进范围：
+该链路是受支持的多机执行路径，与 Trae 并列：
 
 1. 启动 `dispatcher server`
 2. 把 `.orchestrator` 发布到 dispatcher
-3. 在各机器上启动 worker runtime（脚本或 npm 包）
+3. 在各机器上启动 worker runtime（`scripts/run-worker-daemon.js` 本地/调试，或 `@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 远程包）
 
-当前不建议把它当作新的接入起点；控制中枢优先只启动 dispatcher，让 Trae runtime 先稳定收口。
+worker daemon 会上报 `progress_reported` 运行阶段事件，可用 `watch --summary` / `inspect --summary` 与 Console 观察进度。源码层 worker-daemon 构建收敛仍是后续债务（见 `TECH_DEBT.md`）。
 
 远程 Codex 机器推荐 npm 入口：
 

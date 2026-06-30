@@ -20,7 +20,7 @@ ai_summary:
 
 # AI Context
 
-ForgeFlow 是 Trae-first 的多智能体协作开发控制平面；本文件只做上下文路由，不替代规则、接口或代码事实。
+ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` worker 接入并列受支持。本文件只做上下文路由，不替代规则、接口或代码事实。
 
 ## Project Snapshot
 
