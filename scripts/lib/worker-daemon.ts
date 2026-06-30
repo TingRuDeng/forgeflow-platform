@@ -521,11 +521,25 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
     const outputDir = path.join(assignmentDir, "execution");
     fs.mkdirSync(outputDir, { recursive: true });
 
+    await reportWorkerEventBestEffort(input.client, input.workerId, {
+      type: "progress_reported",
+      taskId,
+      payload: { stage: "worktree_prepared", message: "worktree prepared, running worker assignment" },
+    });
+
     const workerResult = input.dryRunExecution
       ? buildDryRunWorkerResult(input.payload, outputDir, input.at ?? nowIso())
       : await runWorkerAssignmentScript(input.repoRoot, assignmentDir, worktreeDir, outputDir);
 
     const changedFiles = input.dryRunExecution ? [] : collectChangedFiles(worktreeDir);
+    await reportWorkerEventBestEffort(input.client, input.workerId, {
+      type: "progress_reported",
+      taskId,
+      payload: {
+        stage: "execution_completed",
+        message: `worker execution completed, ${changedFiles.length} changed file(s)`,
+      },
+    });
     if (!input.dryRunExecution) {
       maybeCommitAndPush(worktreeDir, input.payload, changedFiles);
     }
