@@ -19,7 +19,7 @@ export interface DispatcherTask {
   id: string;
   repo: string;
   title: string;
-  pool: "codex" | "gemini";
+  pool: string;
   allowedPaths: string[];
   acceptance: string[];
   dependsOn: string[];

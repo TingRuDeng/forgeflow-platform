@@ -10,7 +10,7 @@ export class DispatchService {
     private readonly tasks: TaskService,
   ) {}
 
-  selectWorkerForTask(pool: "codex" | "gemini") {
+  selectWorkerForTask(pool: string) {
     const idleWorkers = this.workers
       .listByPool(pool)
       .filter((worker) => worker.status === "idle" && !worker.disabledAt)
