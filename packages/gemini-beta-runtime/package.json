@@ -1,0 +1,27 @@
+{
+  "name": "@tingrudeng/gemini-beta-runtime",
+  "version": "0.1.0-beta.2",
+  "description": "Minimal remote-machine runtime package for ForgeFlow Gemini worker daemon",
+  "type": "module",
+  "bin": {
+    "forgeflow-gemini-beta": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "PUBLISHING.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
