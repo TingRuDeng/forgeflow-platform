@@ -93,6 +93,21 @@ Supported decisions:
 - `rework`
 - `changes_requested`
 
+### Deterministic risk grading on review entry
+
+When a worker result passes verification and the task moves `in_progress -> review`, dispatcher attaches a deterministic, explainable risk grade to the review (`review.riskAssessment`). There is no LLM judge; grading is a pure function of the result's `changedFiles` plus configurable thresholds:
+
+- `low` — no protected path touched and within the changed-file budget; the only auto-merge-eligible grade.
+- `needs_human_attention` — at least one changed file matches a protected-path glob (default set covers `auth`, `payments`, `migrations`, `infra`, `.github/workflows`, and secret/credential/permission-like files).
+- `too_large_for_auto_review` — changed-file count exceeds the budget (default `50`).
+
+Configuration (env, read at result time):
+
+- `DISPATCHER_REVIEW_PROTECTED_PATHS` — comma-separated glob list; an explicitly empty value disables the protected-path gate.
+- `DISPATCHER_REVIEW_MAX_CHANGED_FILES` — positive integer file budget.
+
+When the grade is not `low`, dispatcher appends a `review_risk_flagged` event carrying `level`, `changedFileCount`, `maxChangedFiles`, `protectedPathHits` and `reasons`. The grade is informational: it does not block the control layer's decision, but it surfaces in the dashboard snapshot reviews and is preserved through the final review decision.
+
 Current mapping:
 
 - `merge` moves `review -> merged`

@@ -17,6 +17,11 @@ import type {
   ReviewDecisionEvidence,
   WorkerEvidence,
 } from "./runtime-glue-types.js";
+import {
+  assessReviewRisk,
+  resolveReviewRiskConfig,
+  type ReviewRiskAssessment,
+} from "./review-risk.js";
 import { compareTimestampAsc, formatLocalTimestamp } from "../time.js";
 
 const defaultStore: RuntimeStateStore = sqliteStore;
@@ -194,6 +199,7 @@ export interface Review {
   reviewMaterial?: ReviewMaterial | null;
   latestWorkerResult?: WorkerResult | null;
   evidence?: ReviewDecisionEvidence | null;
+  riskAssessment?: ReviewRiskAssessment | null;
 }
 
 export interface PullRequest {
@@ -547,6 +553,14 @@ function summarizeEvent(type: string, payload: unknown): string | null {
     const actor = normalizeString(record?.actor).trim();
     if (decision) {
       return actor ? `${decision} by ${actor}` : decision;
+    }
+  }
+
+  if (type === "review_risk_flagged") {
+    const level = normalizeString(record?.level).trim();
+    if (level) {
+      const count = record?.changedFileCount;
+      return typeof count === "number" ? `${level} (${count} files)` : level;
     }
   }
 
@@ -2445,15 +2459,22 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     : null;
 
   const nextStatus = canonicalResult.verification.allPassed ? "review" : "failed";
+  const reviewChangedFiles = input.changedFiles ?? [];
   const reviewMaterial = canonicalResult.verification.allPassed
     ? {
         repo: task.repo,
         title: task.title,
-        changedFiles: input.changedFiles ?? [],
+        changedFiles: reviewChangedFiles,
         selfTestPassed: true,
         checks: canonicalResult.verification.commands.map((item) => item.command),
         pullRequest: canonicalPullRequest,
       }
+    : null;
+  const riskAssessment = canonicalResult.verification.allPassed
+    ? assessReviewRisk({
+        changedFiles: reviewChangedFiles,
+        config: resolveReviewRiskConfig(),
+      })
     : null;
 
   let nextState = state;
@@ -2508,8 +2529,24 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
       reviewMaterial,
       latestWorkerResult: clone(canonicalResult),
       evidence: currentReview?.evidence ?? null,
+      riskAssessment,
     }),
   };
+
+  if (riskAssessment && riskAssessment.level !== "low") {
+    nextState = appendEvent(nextState, {
+      taskId: task.id,
+      type: "review_risk_flagged",
+      at: canonicalResult.generatedAt,
+      payload: {
+        level: riskAssessment.level,
+        changedFileCount: riskAssessment.changedFileCount,
+        maxChangedFiles: riskAssessment.maxChangedFiles,
+        protectedPathHits: riskAssessment.protectedPathHits.map((hit) => hit.pattern),
+        reasons: riskAssessment.reasons,
+      },
+    });
+  }
 
   if (canonicalPullRequest) {
     nextState = {
@@ -2616,6 +2653,7 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
       reviewMaterial: review?.reviewMaterial ?? null,
       latestWorkerResult: review?.latestWorkerResult ?? null,
       evidence: input.evidence ?? review?.evidence ?? null,
+      riskAssessment: review?.riskAssessment ?? null,
     }),
   };
 

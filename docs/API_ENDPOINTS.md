@@ -118,6 +118,7 @@ Current endpoint families:
     - tasks now carry stable `traceId`
     - recent events may include derived `summary`
     - `taskAttempts` 和 `artifactBundles` 可被 Console 任务详情用于渲染 attempt timeline、artifact summary、refs 和 retained content
+    - snapshot `reviews[]` 现在可能携带 `riskAssessment`（`level` / `changedFileCount` / `maxChangedFiles` / `protectedPathHits` / `reasons`），由 dispatcher 在任务进入 `review` 时确定性计算；非 `low` 还会出现在 recent events 的 `review_risk_flagged`
 - `GET /api/metrics`
   - Returns a small control-plane metrics document for automation, dashboards, and alerts.
   - Current GET response sets `Cache-Control: no-store`.

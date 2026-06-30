@@ -2487,6 +2487,105 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
   });
 
+  it("attaches a deterministic risk assessment and flags protected-path changes entering review", () => {
+    const stateDir = makeTempDir();
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-risk",
+      pool: "codex",
+      hostname: "mac-mini",
+      labels: ["mac", "codex"],
+      repoDir: "/repos/openclaw",
+    });
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+      requestedBy: "control",
+      tasks: [
+        {
+          id: "task-risk",
+          title: "Risk grading 测试",
+          pool: "codex",
+          allowedPaths: ["src/**", "auth/**"],
+          acceptance: ["完成代码"],
+          dependsOn: [],
+          branchName: "ai/codex/task-risk",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-risk",
+          assignment: {
+            taskId: "task-risk",
+            workerId: "placeholder",
+            pool: "codex",
+            status: "assigned",
+            branchName: "ai/codex/task-risk",
+            allowedPaths: ["src/**", "auth/**"],
+            commands: { test: "pnpm test" },
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+          },
+          workerPrompt: "你是 codex-worker。",
+          contextMarkdown: "# Context",
+        },
+      ],
+      createdAt: "2026-03-17T10:00:10.000Z",
+    });
+    state = dispatch.state;
+    const taskId = dispatch.taskIds[0];
+
+    state = claimAndStartTaskForTest(state, {
+      workerId: "codex-risk",
+      taskId,
+      claimedAt: "2026-03-17T10:00:12.000Z",
+      startedAt: "2026-03-17T10:00:15.000Z",
+    });
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-risk",
+      ...activeWorkerEnvelope(state, taskId!),
+      result: {
+        taskId,
+        workerId: "codex-risk",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-risk",
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "master",
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-03-17T10:05:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [{ command: "pnpm test", exitCode: 0, output: "ok" }],
+        },
+      },
+      changedFiles: ["src/main.ts", "auth/login.ts"],
+      pullRequest: null,
+    });
+
+    const review = state.reviews.find((item) => item.taskId === taskId);
+    expect(review?.riskAssessment?.level).toBe("needs_human_attention");
+    expect(review?.riskAssessment?.changedFileCount).toBe(2);
+    expect(review?.riskAssessment?.protectedPathHits.length).toBeGreaterThan(0);
+
+    const riskEvent = state.events.find(
+      (event) => event.taskId === taskId && event.type === "review_risk_flagged",
+    );
+    expect(riskEvent).toBeTruthy();
+    expect((riskEvent?.payload as { level?: string } | undefined)?.level).toBe(
+      "needs_human_attention",
+    );
+
+    // Risk grade survives a save/load round-trip (snapshot + SQLite projection).
+    saveRuntimeState(stateDir, state);
+    const reloaded = loadRuntimeState(stateDir);
+    const reloadedReview = reloaded.reviews.find((item) => item.taskId === taskId);
+    expect(reloadedReview?.riskAssessment?.level).toBe("needs_human_attention");
+  });
+
   it("records changes_requested as a real review decision event", () => {
     const stateDir = makeTempDir();
 

@@ -97,6 +97,7 @@ Top-level collections currently include:
 - `worktree_cleanup_failed`
 - `session_interrupted`
 - `state_lock_timeout`
+- `review_risk_flagged`
 
 当前事件记录还会保留最小关联字段：
 
@@ -191,6 +192,7 @@ Reviews track dispatcher-side review state:
 - `reviewMaterial`
 - `latestWorkerResult`
 - `evidence`
+- `riskAssessment`
 
 `latestWorkerResult` is now dispatcher-canonicalized. The following fields are derived from dispatcher task / assignment truth, not blindly trusted from worker payload:
 
@@ -215,6 +217,13 @@ Current additive review-side structured fields:
   - `mustFix[]`
   - `canRedrive`
   - `redriveStrategy`
+- `riskAssessment`
+  - `level`（`low` / `needs_human_attention` / `too_large_for_auto_review`）
+  - `changedFileCount`
+  - `maxChangedFiles`
+  - `protectedPathHits[]`（`pattern` 与命中的 `files`）
+  - `reasons[]`
+  - 由 dispatcher 在任务进入 `review` 时确定性计算，并持久化到 `reviews.risk_assessment_json`（SQLite 结构化投影列）。
 
 `reviewMaterial` is retained after a final review decision so the control layer keeps the original review snapshot alongside the structured evidence.
 
