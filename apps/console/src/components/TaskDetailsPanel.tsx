@@ -38,6 +38,12 @@ interface Review {
     canRedrive?: boolean;
     redriveStrategy?: string;
   } | null;
+  riskAssessment?: {
+    level?: string | null;
+    reasons?: string[];
+    changedFileCount?: number | null;
+    protectedPathHits?: Array<{ pattern?: string; files?: string[] }>;
+  } | null;
   latestWorkerResult?: {
     evidence?: {
       failureType?: string;
@@ -178,6 +184,48 @@ const LineageSection: React.FC<{ task: Task; parentTaskId: string | null }> = ({
   );
 };
 
+const RISK_LEVEL_STYLES: Record<string, string> = {
+  low: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100',
+  needs_human_attention: 'border-amber-400/30 bg-amber-400/10 text-amber-100',
+  too_large_for_auto_review: 'border-rose-400/30 bg-rose-400/10 text-rose-100',
+};
+
+const RiskBadge: React.FC<{ level: string }> = ({ level }) => {
+  const { t } = useTranslation();
+  const style = RISK_LEVEL_STYLES[level] || 'border-white/20 bg-white/10 text-white/80';
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${style}`}>
+      {t(`riskLevel.${level}`)}
+    </span>
+  );
+};
+
+const RiskSection: React.FC<{ review?: Review | null }> = ({ review }) => {
+  const { t } = useTranslation();
+  const risk = review?.riskAssessment;
+  if (!risk || !risk.level) {
+    return null;
+  }
+  const reasons = Array.isArray(risk.reasons) ? risk.reasons : [];
+  return (
+    <Section title={t('reviewRisk')}>
+      <div className="flex items-center gap-2">
+        <RiskBadge level={risk.level} />
+        {typeof risk.changedFileCount === 'number' && (
+          <span className="text-xs text-white/55">{risk.changedFileCount} {t('changedFiles')}</span>
+        )}
+      </div>
+      {reasons.length > 0 && (
+        <ul className="mt-1 list-disc pl-5 text-sm text-white/70 space-y-0.5">
+          {reasons.map((reason, index) => (
+            <li key={index} className="break-all">{reason}</li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+};
+
 const ReviewSection: React.FC<{ review?: Review | null; mustFix: string[]; canRedriveValue: string }> = ({ review, mustFix, canRedriveValue }) => {
   const { t } = useTranslation();
   return (
@@ -227,16 +275,25 @@ const PullRequestSection: React.FC<{ pullRequest?: PullRequest | null }> = ({ pu
 
 const ReviewActions: React.FC<{
   task: Task;
+  review?: Review | null;
   reviewingTaskId?: string | null;
   onReviewDecision?: (decision: 'merge' | 'rework' | 'block') => void;
-}> = ({ task, reviewingTaskId, onReviewDecision }) => {
+}> = ({ task, review, reviewingTaskId, onReviewDecision }) => {
   const { t } = useTranslation();
   if (task.status !== 'review' || !onReviewDecision) {
     return null;
   }
   const disabled = reviewingTaskId === task.id;
+  const riskLevel = review?.riskAssessment?.level;
+  const riskAboveLow = Boolean(riskLevel && riskLevel !== 'low');
   return (
     <Section title={t('reviewActions')}>
+      {riskAboveLow && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
+          <RiskBadge level={riskLevel as string} />
+          <span>{t('riskMergeHint')}</span>
+        </div>
+      )}
       <div className="grid grid-cols-3 gap-2">
         <button
           type="button"
@@ -296,8 +353,9 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
       <TaskHeader task={task} cancellingTaskId={cancellingTaskId} onCancel={onCancel} />
       <TaskMetadataGrid task={task} assignment={assignment} workerId={workerId} />
       <LineageSection task={task} parentTaskId={task.continueFromTaskId || task.followUpOfTaskId || null} />
+      <RiskSection review={review} />
       <ReviewSection review={review} mustFix={mustFix} canRedriveValue={canRedriveValue} />
-      <ReviewActions task={task} reviewingTaskId={reviewingTaskId} onReviewDecision={onReviewDecision} />
+      <ReviewActions task={task} review={review} reviewingTaskId={reviewingTaskId} onReviewDecision={onReviewDecision} />
       <FailureSection review={review} events={events} />
       <PullRequestSection pullRequest={pullRequest} />
       <AttemptTimeline attempts={attempts} />

@@ -292,7 +292,7 @@ vNext runtime reliability 推进：
 - generic worker claim 已从副作用 GET 收口为显式 POST：
   - `GET /api/workers/:workerId/assigned-task` 只读
   - `POST /api/workers/:workerId/claim-task` 才会真正 claim / assign
-- review decision 现在显式支持 `merge`、`block`、`rework`、`changes_requested`，其中后两者都会把任务落到 `blocked`，但保留原始 decision 供 redrive 和审计使用；Console 任务详情可直接提交 `merge` / `rework` / `block` 决策并刷新 dashboard snapshot。
+- review decision 现在显式支持 `merge`、`block`、`rework`、`changes_requested`，其中后两者都会把任务落到 `blocked`，但保留原始 decision 供 redrive 和审计使用；Console 任务详情可直接提交 `merge` / `rework` / `block` 决策并刷新 dashboard snapshot，并在任务处于 `review` 时展示确定性风险分级 badge（非 `low` 时在合并按钮上方给出人工确认提示）。
 - `forgeflow-review-orchestrator decide` 现在支持 `--reason-code`、`--must-fix`、`--can-redrive`、`--redrive-strategy`，并会把这些字段归一化写入 `review.evidence`。
 - `forgeflow-review-orchestrator` 的 `inspect --summary` / `watch --summary` 现在会带上 review 风险分级（`riskAssessment.level/reasons/changedFileCount/protectedPathHits`）；`decide --decision merge` 现在受该分级软门禁：风险非 `low` 时拒绝合并，需显式 `--acknowledge-risk` 覆盖（门禁 fail-open，无法读取风险时放行，只约束 merge）。
 - dispatcher 现在会 canonicalize worker result 的 `workerId/pool/repo/defaultBranch/branchName`，worker 不能再覆盖这些 dispatcher-owned 字段。
