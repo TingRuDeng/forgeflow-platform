@@ -277,7 +277,7 @@ Desired direction:
 - 真正的 competitive 执行（同任务多 worktree 并行、择优合并）需要在 codex/gemini worker 主线解封后单独设计 assignment / 并发模型，不应在当前 Trae-first 单串行约束下强行接入。
 - 在那之前，打分原语保持为纯函数库，供控制层或后续竞争选择路径复用。
 
-## 13. codex/gemini 解封：pool 契约与 gemini 包已落地，worker-daemon 构建收敛与消除重复仍待迁移
+## 13. codex/gemini 解封：pool 契约 / gemini 包 / 构建可重建已落地，daemon 去重（P2）仍待迁移
 
 当前情况：
 
@@ -287,10 +287,9 @@ Desired direction:
 
 仍存在的债务：
 
-- **`scripts/lib` 构建不可干净重建（P0 未完成）**：`scripts/lib/worker-daemon.ts` 等在严格 base 配置下有 pre-existing 类型问题，且 `scripts/lib/review-memory.ts` 静态 import `apps/dispatcher/src`（违反 rootDir），导致 `tsc -p scripts/lib/tsconfig.json` 无法干净 emit。当前 `scripts/lib/*.js` 是 out-of-band 维护的 committed 产物，与 `.ts` 已漂移（如 `worker-daemon.ts` 的 `startTime`/metrics 代码从未编译进 live `.js`，且 `startTime` 在 catch 作用域外是 latent bug）。本轮 P1 的 phase events 是 `.ts` 与 `.js` 镜像手改并经端到端测试验证；这不是可持续方式。
-  - 期望方向：把 generic worker 执行逻辑下沉到 `apps/dispatcher/src`（像 dispatcher-server/state 那样），`scripts/lib/worker-daemon.js` 退化为 thin bootstrap 导入 `apps/dispatcher/dist`；同时把 `scripts` 纳入 CI typecheck，使 `.ts` 成为唯一真相、`.js` 可靠重建。
-- **两套 daemon + 闲置 runtime 抽象未收敛（P2 未完成）**：`scripts/lib/worker-daemon.ts`（重型 live）与 `runtime-glue` 的 `runWorkerDaemonCycle`（可注入轻量）职责重叠；`apps/dispatcher/src/modules/runtime/codex.ts|gemini.ts|assignment.ts` 的干净抽象尚未接入 live 启动路径（`run-worker-assignment.ts` 仍内联重写启动逻辑，且有 `FORGEFLOW_CODEX_MODEL` 覆盖、nvm-wrapped verification 等硬化行为，抽象需先补齐这些才能替换）。
-  - 期望方向：先把硬化行为补进 `runtime/*` 抽象，再让 live 启动路径与远程包统一复用，消除重复。
+- **`scripts/lib` 构建可重建已修复（P0 完成）**：`scripts/lib/review-memory.ts` 的 type-only re-export 改从 `apps/dispatcher/dist` 的 `.d.ts` 取（消除 rootDir 违规），`worker-daemon.ts` 的 `startTime` 已提到 try 外（修复 latent ReferenceError），`scripts/lib/tsconfig.json` 改为非严格并排除 `*.test.ts`。现在 `tsc -p scripts/lib/tsconfig.json` 可干净、幂等地 emit；committed `.js` 已与 `.ts` 对齐（含此前缺失从未提交的 `logger.js` / `metrics.js` / `dispatcher-auth.js` 运行时依赖）。CI 新增 `Verify scripts/lib build is in sync` 步骤（`tsc` + `git diff --exit-code`）防止再次漂移。`.ts` 现在是真相源。
+- **两套 daemon + 闲置 runtime 抽象未收敛（P2 未完成）**：`scripts/lib/worker-daemon.ts`（重型 live）与 `runtime-glue` 的 `runWorkerDaemonCycle`（可注入轻量）职责重叠；`apps/dispatcher/src/modules/runtime/codex.ts|gemini.ts|assignment.ts` 的干净抽象已支持 model 覆盖 / extraArgs（迁移 step1），但尚未接入 live 启动路径（`run-worker-assignment.ts` 仍内联重写启动逻辑，含 `FORGEFLOW_CODEX_MODEL` 覆盖、nvm-wrapped verification 等硬化行为）。
+  - 期望方向：把硬化行为补进 `runtime/*` 抽象，再让 live 启动路径与远程包统一复用，消除重复；可进一步把 generic worker 执行下沉到 `apps/dispatcher/src` + thin bootstrap。这是 P0 已不再阻塞的纯代码整洁度改进，可作为独立后续。
 
 影响：
 
