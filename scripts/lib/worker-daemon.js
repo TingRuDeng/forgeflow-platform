@@ -5,7 +5,10 @@ import { spawn, spawnSync, execSync } from "node:child_process";
 import { handleDispatcherHttpRequest } from "./dispatcher-server.js";
 import { prepareTaskWorktree, removeTaskWorktree, safeTaskDirName } from "./task-worktree.js";
 import { formatLocalTimestamp } from "./time.js";
-import { buildWorkerEnv, assertSafeBranchName, shouldCreatePullRequest, shouldRemoveWorktreeOnExit } from "./worker-daemon-helpers.js";
+import { logger, logTaskCompleted, logTaskFailed, } from "./logger.js";
+import { recordTaskMetric } from "./metrics.js";
+import { getDispatcherAuthHeader } from "./dispatcher-auth.js";
+import { buildWorkerEnv, assertSafeBranchName, shouldCreatePullRequest, shouldRemoveWorktreeOnExit, } from "./worker-daemon-helpers.js";
 function resolveDispatcherDist() {
     const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
     const distPath = path.join(repoRoot, "apps/dispatcher/dist/modules/server/runtime-glue-dispatcher-client.js");
@@ -48,11 +51,13 @@ async function reportWorkerEventBestEffort(client, workerId, event) {
         });
     }
     catch (error) {
-        console.warn("failed to report worker event", {
+        logger.warn({
+            operation: "reportWorkerEvent",
             workerId,
             taskId: event.taskId,
             eventType: event.type,
             error: error instanceof Error ? error.message : String(error),
+            event: "worker_event_report_failed",
         });
     }
 }
@@ -315,7 +320,7 @@ async function processTaskAssignment(input) {
                 await heartbeatClient.heartbeat(workerId, { at: nowIso() });
             }
             catch (error) {
-                console.error(`heartbeat failed for task ${taskId}:`, error instanceof Error ? error.message : String(error));
+                logger.error({ operation: "heartbeat", taskId, error: error instanceof Error ? error.message : String(error), event: "heartbeat_failed" });
             }
         }, HEARTBEAT_INTERVAL_MS);
     };
@@ -325,6 +330,7 @@ async function processTaskAssignment(input) {
             heartbeatIntervalId = null;
         }
     };
+    const startTime = Date.now();
     try {
         await input.client.startTask(input.workerId, {
             taskId: input.payload.task.id,
@@ -352,7 +358,10 @@ async function processTaskAssignment(input) {
         await reportWorkerEventBestEffort(input.client, input.workerId, {
             type: "progress_reported",
             taskId,
-            payload: { stage: "execution_completed", message: `worker execution completed, ${changedFiles.length} changed file(s)` },
+            payload: {
+                stage: "execution_completed",
+                message: `worker execution completed, ${changedFiles.length} changed file(s)`,
+            },
         });
         if (!input.dryRunExecution) {
             maybeCommitAndPush(worktreeDir, input.payload, changedFiles);
@@ -375,7 +384,7 @@ async function processTaskAssignment(input) {
             }
             catch (error) {
                 lastError = error instanceof Error ? error.message : String(error);
-                console.error(`submitResult attempt ${attempt}/${submitResultMaxRetries} failed for task ${taskId}:`, lastError);
+                logger.error({ operation: "submitResult", taskId, attempt, maxRetries: submitResultMaxRetries, error: lastError, event: "submitResult_retry_failed" });
                 await reportWorkerEventBestEffort(input.client, input.workerId, {
                     type: "submit_result_retry_failed",
                     taskId,
@@ -391,7 +400,7 @@ async function processTaskAssignment(input) {
             }
         }
         if (lastError) {
-            console.error(`all submitResult retries failed for task ${taskId}, worker may need manual recovery:`, lastError);
+            logger.error({ operation: "submitResult", taskId, error: lastError, event: "submitResult_all_retries_failed" });
             await reportWorkerEventBestEffort(input.client, input.workerId, {
                 type: "delivery_failed",
                 taskId,
@@ -403,6 +412,16 @@ async function processTaskAssignment(input) {
             });
             throw new Error(`submitResult failed after ${submitResultMaxRetries} attempts: ${lastError}`);
         }
+        const durationMs = Date.now() - startTime;
+        logTaskCompleted(input.payload.task.id, input.workerId, durationMs, true);
+        recordTaskMetric({
+            taskId: input.payload.task.id,
+            workerId: input.workerId,
+            repo: input.payload.assignment.repo,
+            status: "completed",
+            durationMs,
+            startedAt: new Date(Date.now() - durationMs).toISOString(),
+        });
         return {
             status: "completed",
             taskId: input.payload.task.id,
@@ -416,7 +435,16 @@ async function processTaskAssignment(input) {
     catch (error) {
         stopHeartbeat();
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`task execution failed for ${taskId}:`, errorMessage);
+        logTaskFailed(input.payload.task.id, input.workerId, errorMessage);
+        recordTaskMetric({
+            taskId: input.payload.task.id,
+            workerId: input.workerId,
+            repo: input.payload.assignment.repo,
+            status: "failed",
+            durationMs: Date.now() - startTime,
+            startedAt: new Date(startTime).toISOString(),
+        });
+        logger.error({ operation: "taskExecution", taskId, error: errorMessage, event: "task_execution_failed" });
         try {
             const failedResult = {
                 taskId: input.payload.task.id,
@@ -444,17 +472,17 @@ async function processTaskAssignment(input) {
             const submitResultRetryDelayMs = getSubmitResultRetryDelayMs();
             for (let attempt = 1; attempt <= submitResultMaxRetries; attempt++) {
                 try {
-                await input.client.submitResult(input.workerId, {
-                    ...buildWorkerProtocolEnvelope(input.payload),
-                    result: failedResult,
-                    changedFiles: [],
-                    pullRequest: null,
+                    await input.client.submitResult(input.workerId, {
+                        ...buildWorkerProtocolEnvelope(input.payload),
+                        result: failedResult,
+                        changedFiles: [],
+                        pullRequest: null,
                     });
-                    console.error(`submitted failed result for ${taskId} after catch`);
+                    logger.warn({ operation: "submitResult", taskId, event: "failed_result_submitted" });
                     break;
                 }
                 catch (submitError) {
-                    console.error(`submitResult in catch attempt ${attempt} failed:`, submitError instanceof Error ? submitError.message : String(submitError));
+                    logger.error({ operation: "submitResult", taskId, attempt, error: submitError instanceof Error ? submitError.message : String(submitError), event: "submitResult_catch_failed" });
                     await reportWorkerEventBestEffort(input.client, input.workerId, {
                         type: "submit_result_retry_failed",
                         taskId,
@@ -472,7 +500,7 @@ async function processTaskAssignment(input) {
             }
         }
         catch (fallbackError) {
-            console.error(`failed to submit error result for ${taskId}:`, fallbackError instanceof Error ? fallbackError.message : String(fallbackError));
+            logger.error({ operation: "submitResult", taskId, error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError), event: "submitResult_fallback_failed" });
             await reportWorkerEventBestEffort(input.client, input.workerId, {
                 type: "delivery_failed",
                 taskId,
@@ -491,7 +519,12 @@ async function processTaskAssignment(input) {
                 removeTaskWorktree(input.repoDir, taskId);
             }
             catch (cleanupError) {
-                console.error(`failed to cleanup worktree for ${taskId}:`, cleanupError instanceof Error ? cleanupError.message : String(cleanupError));
+                logger.warn({
+                    operation: "cleanupWorktree",
+                    taskId,
+                    error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+                    event: "worktree_cleanup_failed",
+                });
                 await reportWorkerEventBestEffort(input.client, input.workerId, {
                     type: "worktree_cleanup_failed",
                     taskId,
@@ -511,11 +544,13 @@ export function createDispatcherClient(dispatcherUrl) {
         const timeoutMs = options.timeout ?? 10_000;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        const authHeaders = getDispatcherAuthHeader();
         try {
             const response = await fetch(url, {
                 method,
                 headers: {
                     "content-type": "application/json",
+                    ...authHeaders,
                 },
                 body: body ? JSON.stringify(body) : undefined,
                 signal: controller.signal,

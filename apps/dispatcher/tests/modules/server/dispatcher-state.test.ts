@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { createDispatch, createEmptyRuntimeState } from "../../../src/modules/server/runtime-state.js";
@@ -1930,7 +1931,26 @@ describe("dispatcher runtime state", () => {
       fs.writeFileSync(distPath, staleContent);
     }
 
-    const mod = await import(stateModulePath);
+    // This test verifies the bridge's rebuild-on-stale behavior, which is only
+    // active when the dist is NOT marked prebuilt. CI sets
+    // FORGEFLOW_DISPATCHER_DIST_PREBUILT=1 for the regular test run, so force the
+    // rebuild path here (clear the env + build symbol) and cache-bust the import
+    // so the bridge re-executes and self-heals the corrupted dist.
+    const prevPrebuilt = process.env.FORGEFLOW_DISPATCHER_DIST_PREBUILT;
+    delete process.env.FORGEFLOW_DISPATCHER_DIST_PREBUILT;
+    const buildSymbol = Symbol.for("forgeflow.dispatcher.state.distBuilt");
+    delete (globalThis as unknown as Record<symbol, unknown>)[buildSymbol];
+
+    let mod: typeof import("../../../src/modules/server/runtime-state.js");
+    try {
+      mod = await import(`${pathToFileURL(stateModulePath).href}?rebuild-stale=${Date.now()}`);
+    } finally {
+      if (prevPrebuilt === undefined) {
+        delete process.env.FORGEFLOW_DISPATCHER_DIST_PREBUILT;
+      } else {
+        process.env.FORGEFLOW_DISPATCHER_DIST_PREBUILT = prevPrebuilt;
+      }
+    }
 
     const stateDir = makeTempDir();
     let state = mod.loadRuntimeState(stateDir);
@@ -1980,9 +2000,9 @@ describe("dispatcher runtime state", () => {
     state = dispatch.state;
 
     const task = state.tasks.find((t: { id: string }) => t.id === dispatch.taskIds[0]);
-    expect(task.chatMode).toBe("new_chat");
+    expect(task?.chatMode).toBe("new_chat");
 
     const assignment = state.assignments.find((a: { taskId: string }) => a.taskId === dispatch.taskIds[0]);
-    expect(assignment.assignment.chatMode).toBe("new_chat");
+    expect(assignment?.assignment.chatMode).toBe("new_chat");
   });
 });

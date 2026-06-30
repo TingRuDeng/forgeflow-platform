@@ -41,6 +41,25 @@ describe("Gemini runtime", () => {
     });
   });
 
+  it("honors model override and extra args", () => {
+    const runtime = createGeminiRuntime({ model: "gemini-3-pro", extraArgs: ["--yolo", " "] });
+    const launch = runtime.launchTask({
+      taskId: "task-ov",
+      prompt: "Build",
+      mode: "run",
+      worktreeDir: ".worktrees/task-ov",
+    });
+    expect(runtime.model).toBe("gemini-3-pro");
+    expect(launch.argv).toEqual([
+      "gemini",
+      "-m",
+      "gemini-3-pro",
+      "--yolo",
+      "-p",
+      "Build",
+    ]);
+  });
+
   it("rejects verification commands containing shell meta characters", () => {
     const runtime = createGeminiRuntime();
 

@@ -16,6 +16,12 @@ const CODEX_MODELS: Record<CodexRuntimeRole, string | null> = {
   worker: null,
 };
 
+export interface CodexRuntimeOptions {
+  // Explicit model override (e.g. from FORGEFLOW_CODEX_MODEL). Empty/undefined
+  // falls back to the role default; worker role default is null (no `-m`).
+  model?: string;
+}
+
 function buildLaunchArgs(model: string | null, input: RuntimeLaunchInput): string[] {
   const args = ["codex", "exec"];
   if (model) {
@@ -45,8 +51,9 @@ function normalizeResult(input: RuntimeCollectedResult): NormalizedRuntimeResult
   };
 }
 
-export function createCodexRuntime(role: CodexRuntimeRole): WorkerRuntime {
-  const model = CODEX_MODELS[role];
+export function createCodexRuntime(role: CodexRuntimeRole, options: CodexRuntimeOptions = {}): WorkerRuntime {
+  const overrideModel = typeof options.model === "string" ? options.model.trim() : "";
+  const model = overrideModel.length > 0 ? overrideModel : CODEX_MODELS[role];
 
   return {
     provider: "codex",

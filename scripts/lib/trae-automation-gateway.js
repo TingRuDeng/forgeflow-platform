@@ -272,7 +272,7 @@ export async function startTraeAutomationGateway(options = {}) {
         sessionStore.load();
         const pruned = sessionStore.prune();
         if (pruned > 0) {
-            console.log(`[trae-gateway] pruned ${pruned} expired sessions`);
+            logger.info({ event: "session_pruned", prunedCount: pruned });
         }
     }
     const server = http.createServer(async (req, res) => {

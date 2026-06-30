@@ -501,9 +501,8 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
     }
   };
 
+  const startTime = Date.now();
   try {
-    const startTime = Date.now();
-
     await input.client.startTask(input.workerId, {
       taskId: input.payload.task.id,
       ...buildWorkerProtocolEnvelope(input.payload),

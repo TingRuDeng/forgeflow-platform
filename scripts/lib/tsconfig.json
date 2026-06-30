@@ -5,11 +5,16 @@
     "outDir": ".",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "strict": false,
+    "noImplicitAny": false,
     "noEmit": false,
     "declaration": false
   },
   "include": [
     "**/*.ts"
   ],
-  "exclude": []
+  "exclude": [
+    "**/*.test.ts"
+  ]
 }

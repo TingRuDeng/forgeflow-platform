@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { logger } from "./logger.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
@@ -11,8 +12,8 @@ const distPath = path.join(repoRoot, "apps", "dispatcher", "dist", "modules", "s
 const buildLockPath = path.join(os.tmpdir(), `forgeflow-dispatcher-dist-build-${createHash("sha1").update(repoRoot).digest("hex").slice(0, 12)}`);
 const DISPATCHER_DIST_BUILT = Symbol.for("forgeflow.dispatcher.state.distBuilt");
 const buildState = globalThis;
-const BUILD_LOCK_TIMEOUT_MS = 120000;
-const BUILD_LOCK_STALE_MS = 300000;
+const BUILD_LOCK_TIMEOUT_MS = 120_000;
+const BUILD_LOCK_STALE_MS = 300_000;
 function sleepMs(ms) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -50,7 +51,7 @@ function acquireBuildLock() {
 if (!buildState[DISPATCHER_DIST_BUILT] && process.env.FORGEFLOW_DISPATCHER_DIST_PREBUILT !== "1") {
     const releaseBuildLock = acquireBuildLock();
     try {
-        console.error("[dispatcher-state.ts] building apps/dispatcher to ensure fresh dist...");
+        logger.info({ event: "dispatcher_build_triggered", message: "Building apps/dispatcher to ensure fresh dist" });
         execSync("pnpm --filter @forgeflow/dispatcher build", {
             cwd: repoRoot,
             stdio: ["ignore", "ignore", "inherit"],

@@ -25,7 +25,7 @@ export type {
   WorkerEvidence,
   ReviewEvidence,
   LessonCriteria,
-} from "../../apps/dispatcher/src/modules/server/review-memory.js";
+} from "../../apps/dispatcher/dist/modules/server/review-memory.js";
 
 export const createMemoryStore = tsModule.createMemoryStore;
 export const extractLessonFromReview = tsModule.extractLessonFromReview;
