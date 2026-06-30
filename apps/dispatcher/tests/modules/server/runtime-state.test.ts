@@ -2657,6 +2657,149 @@ describe("dispatcher runtime state (TypeScript)", () => {
     }
   });
 
+  it("enforces the server-side merge risk gate based on env mode", () => {
+    function buildRiskyReviewState() {
+      let state = createEmptyRuntimeState();
+      state = registerWorker(state, {
+        workerId: "codex-gate",
+        pool: "codex",
+        hostname: "mac-mini",
+        labels: ["codex"],
+        repoDir: "/repos/openclaw",
+      });
+      const dispatch = createDispatch(state, {
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "master",
+        requestedBy: "control",
+        tasks: [
+          {
+            id: "task-gate",
+            title: "Merge gate 测试",
+            pool: "codex",
+            allowedPaths: ["src/**", "auth/**"],
+            acceptance: ["完成代码"],
+            dependsOn: [],
+            branchName: "ai/codex/task-gate",
+            verification: { mode: "run" },
+          },
+        ],
+        packages: [
+          {
+            taskId: "task-gate",
+            assignment: {
+              taskId: "task-gate",
+              workerId: "placeholder",
+              pool: "codex",
+              status: "assigned",
+              branchName: "ai/codex/task-gate",
+              allowedPaths: ["src/**", "auth/**"],
+              commands: { test: "pnpm test" },
+              repo: "TingRuDeng/openclaw-multi-agent-mvp",
+              defaultBranch: "master",
+            },
+            workerPrompt: "你是 codex-worker。",
+            contextMarkdown: "# Context",
+          },
+        ],
+        createdAt: "2026-03-17T10:00:10.000Z",
+      });
+      let next = dispatch.state;
+      const taskId = dispatch.taskIds[0]!;
+      next = claimAndStartTaskForTest(next, {
+        workerId: "codex-gate",
+        taskId,
+        claimedAt: "2026-03-17T10:00:12.000Z",
+        startedAt: "2026-03-17T10:00:15.000Z",
+      });
+      next = recordWorkerResult(next, {
+        workerId: "codex-gate",
+        ...activeWorkerEnvelope(next, taskId),
+        result: {
+          taskId,
+          workerId: "codex-gate",
+          provider: "codex",
+          pool: "codex",
+          branchName: "ai/codex/task-gate",
+          repo: "TingRuDeng/openclaw-multi-agent-mvp",
+          defaultBranch: "master",
+          mode: "run",
+          output: "done",
+          generatedAt: "2026-03-17T10:05:00.000Z",
+          verification: {
+            allPassed: true,
+            commands: [{ command: "pnpm test", exitCode: 0, output: "ok" }],
+          },
+        },
+        changedFiles: ["src/main.ts", "auth/login.ts"],
+        pullRequest: null,
+      });
+      return { state: next, taskId };
+    }
+
+    const previousMode = process.env.DISPATCHER_REVIEW_MERGE_GATE;
+    try {
+      // enforce: risky merge without acknowledgement is rejected.
+      process.env.DISPATCHER_REVIEW_MERGE_GATE = "enforce";
+      const enforce = buildRiskyReviewState();
+      expect(() => recordReviewDecision(enforce.state, {
+        taskId: enforce.taskId,
+        decision: "merge",
+        actor: "reviewer",
+        at: "2026-03-17T10:06:00.000Z",
+      })).toThrow(/merge blocked by risk gate/i);
+
+      // enforce + acknowledge: merge proceeds and records an audit event.
+      const acknowledged = buildRiskyReviewState();
+      const ackState = recordReviewDecision(acknowledged.state, {
+        taskId: acknowledged.taskId,
+        decision: "merge",
+        actor: "reviewer",
+        acknowledgeRisk: true,
+        at: "2026-03-17T10:06:00.000Z",
+      });
+      expect(ackState.tasks.find((item) => item.id === acknowledged.taskId)?.status).toBe("merged");
+      expect(ackState.events.some((event) =>
+        event.taskId === acknowledged.taskId
+        && event.type === "review_merge_risk_acknowledged"
+        && (event.payload as { acknowledged?: boolean }).acknowledged === true,
+      )).toBe(true);
+
+      // warn: merge proceeds but still records the audit event.
+      process.env.DISPATCHER_REVIEW_MERGE_GATE = "warn";
+      const warn = buildRiskyReviewState();
+      const warnState = recordReviewDecision(warn.state, {
+        taskId: warn.taskId,
+        decision: "merge",
+        actor: "reviewer",
+        at: "2026-03-17T10:06:00.000Z",
+      });
+      expect(warnState.tasks.find((item) => item.id === warn.taskId)?.status).toBe("merged");
+      expect(warnState.events.some((event) =>
+        event.taskId === warn.taskId && event.type === "review_merge_risk_acknowledged",
+      )).toBe(true);
+
+      // off (default): merge proceeds with no gate and no audit event.
+      delete process.env.DISPATCHER_REVIEW_MERGE_GATE;
+      const off = buildRiskyReviewState();
+      const offState = recordReviewDecision(off.state, {
+        taskId: off.taskId,
+        decision: "merge",
+        actor: "reviewer",
+        at: "2026-03-17T10:06:00.000Z",
+      });
+      expect(offState.tasks.find((item) => item.id === off.taskId)?.status).toBe("merged");
+      expect(offState.events.some((event) =>
+        event.taskId === off.taskId && event.type === "review_merge_risk_acknowledged",
+      )).toBe(false);
+    } finally {
+      if (previousMode === undefined) {
+        delete process.env.DISPATCHER_REVIEW_MERGE_GATE;
+      } else {
+        process.env.DISPATCHER_REVIEW_MERGE_GATE = previousMode;
+      }
+    }
+  });
+
   it("records changes_requested as a real review decision event", () => {
     const stateDir = makeTempDir();
 

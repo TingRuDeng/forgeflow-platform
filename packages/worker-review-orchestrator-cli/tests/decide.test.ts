@@ -184,6 +184,11 @@ describe("decide", () => {
     expect(
       (fetchImpl.mock.calls as Array<[string]>).some((call) => call[0].includes("/api/dashboard/snapshot")),
     ).toBe(false);
+    // The acknowledgement flag is forwarded to the dispatcher so the server gate honors it.
+    const decisionCall = (fetchImpl.mock.calls as Array<[string, { body?: string }]>).find(
+      (call) => call[0].includes("/decision"),
+    );
+    expect(JSON.parse(decisionCall![1].body as string)).toMatchObject({ acknowledgeRisk: true });
   });
 
   it("allows a low-risk merge without acknowledgement", async () => {

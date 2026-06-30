@@ -125,6 +125,16 @@ Configuration (env, read at result time):
 
 When the grade is not `low`, dispatcher appends a `review_risk_flagged` event carrying `level`, `changedFileCount`, `maxChangedFiles`, `protectedPathHits` and `reasons`. The grade is informational: it does not block the control layer's decision, but it surfaces in the dashboard snapshot reviews and is preserved through the final review decision.
 
+### Server-side merge risk gate
+
+`recordReviewDecision` applies an authoritative merge gate (covers Console, CLI, and direct HTTP), configured via `DISPATCHER_REVIEW_MERGE_GATE`:
+
+- `off` (default) — no gate; behavior unchanged.
+- `warn` — a `merge` on a non-`low` review proceeds, but dispatcher appends a `review_merge_risk_acknowledged` audit event.
+- `enforce` — a `merge` on a non-`low` review is rejected unless the decision carries `acknowledgeRisk: true` (HTTP body `acknowledgeRisk` or `acknowledge_risk`); the rejection surfaces as `409` over HTTP. With acknowledgement the merge proceeds and the audit event is recorded.
+
+The CLI `decide --acknowledge-risk` forwards the flag to the dispatcher so the server gate honors it. Only `merge` is gated; `block` / `rework` / `changes_requested` are never gated.
+
 Current mapping:
 
 - `merge` moves `review -> merged`

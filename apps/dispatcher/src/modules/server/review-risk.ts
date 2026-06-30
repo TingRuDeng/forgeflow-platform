@@ -104,6 +104,22 @@ export function resolveReviewRiskConfig(
   };
 }
 
+export type ReviewMergeGateMode = "off" | "warn" | "enforce";
+
+// Server-side merge risk gate mode. Default is `off` so existing dispatcher
+// behavior (and the CLI-side soft gate) is unchanged; operators opt into `warn`
+// (audit-only) or `enforce` (reject non-low merges without acknowledgement),
+// which then covers Console merges and direct HTTP callers too.
+export function resolveReviewMergeGateMode(
+  env: NodeJS.ProcessEnv = process.env,
+): ReviewMergeGateMode {
+  const value = (env.DISPATCHER_REVIEW_MERGE_GATE ?? "").trim().toLowerCase();
+  if (value === "warn" || value === "enforce") {
+    return value;
+  }
+  return "off";
+}
+
 function normalizePath(filePath: string): string {
   return filePath.trim().replace(/^\.\//, "").replace(/^\/+/, "");
 }

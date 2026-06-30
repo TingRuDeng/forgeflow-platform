@@ -267,6 +267,7 @@ export async function runDecide(options: DecideOptions & {
     decision,
     notes: options.notes ?? "",
     at: options.at ?? readNowIso(),
+    ...(options.acknowledgeRisk === true ? { acknowledgeRisk: true } : {}),
     ...(evidence ? { evidence } : {}),
   };
 

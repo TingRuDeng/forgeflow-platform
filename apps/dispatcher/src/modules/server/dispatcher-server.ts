@@ -309,6 +309,9 @@ function classifyReviewDecisionError(error: unknown): number {
   if (message.startsWith("task not in review:")) {
     return 409;
   }
+  if (message.startsWith("merge blocked by risk gate:")) {
+    return 409;
+  }
   return 500;
 }
 
@@ -515,12 +518,14 @@ function validateReviewDecisionBody(body: unknown): Record<string, any> {
     }
   }
   const evidence = normalizeReviewDecisionEvidence(body);
+  const acknowledgeRisk = body.acknowledgeRisk === true || body.acknowledge_risk === true;
 
   return {
     ...body,
     actor,
     decision,
     evidence,
+    acknowledgeRisk,
   };
 }
 
@@ -1388,6 +1393,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
             notes: validatedBody.notes,
             at: validatedBody.at,
             evidence: validatedBody.evidence,
+            acknowledgeRisk: validatedBody.acknowledgeRisk,
           }),
         }));
         return createJsonResponse(200, {
