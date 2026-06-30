@@ -35,6 +35,12 @@ const mockSnapshot = {
       decision: "merge",
       actor: "reviewer-1",
       decidedAt: "2026-03-29T01:00:00Z",
+      riskAssessment: {
+        level: "needs_human_attention",
+        reasons: ["protected paths touched: auth/**"],
+        changedFileCount: 1,
+        protectedPathHits: [{ pattern: "auth/**", files: ["auth/login.ts"] }],
+      },
       reviewMaterial: {
         repo: "owner/repo",
         title: "Test Task",
@@ -191,6 +197,11 @@ describe("inspect", () => {
       decision: "merge",
       actor: "reviewer-1",
       at: "2026-03-29T01:00:00Z",
+    });
+    expect(result.riskAssessment).toMatchObject({
+      level: "needs_human_attention",
+      changedFileCount: 1,
+      protectedPathHits: ["auth/**"],
     });
     expect(result.pullRequestState).toMatchObject({
       url: "https://github.com/owner/repo/pull/1",

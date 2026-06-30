@@ -171,6 +171,10 @@ export function buildInspectSummaryFromSnapshot(
   const latestProgressEvent = [...events].reverse().find((event) => extractStringValue(event, "type") === "progress_reported");
   const latestProgressPayload = latestProgressEvent?.payload as Record<string, unknown> | undefined;
   const latestResultEvidence = extractResultEvidence(reviews, events);
+  const riskAssessmentRaw = latestReview?.riskAssessment as Record<string, unknown> | null;
+  const protectedPathHitsRaw = Array.isArray(riskAssessmentRaw?.protectedPathHits)
+    ? (riskAssessmentRaw?.protectedPathHits as Array<Record<string, unknown>>)
+    : [];
 
   return {
     taskId: extractStringValue(task, "id") ?? "",
@@ -193,6 +197,16 @@ export function buildInspectSummaryFromSnapshot(
           decision: extractStringValue(latestReview, "decision"),
           actor: extractStringValue(latestReview, "actor"),
           at: extractStringValue(latestReview, "decidedAt") ?? extractStringValue(latestReview, "at"),
+        }
+      : null,
+    riskAssessment: riskAssessmentRaw
+      ? {
+          level: extractStringValue(riskAssessmentRaw, "level"),
+          reasons: extractArrayOfStrings(riskAssessmentRaw.reasons),
+          changedFileCount: extractNumberValue(riskAssessmentRaw, "changedFileCount"),
+          protectedPathHits: protectedPathHitsRaw
+            .map((hit) => extractStringValue(hit, "pattern"))
+            .filter((pattern): pattern is string => typeof pattern === "string"),
         }
       : null,
     pullRequestState: pullRequest

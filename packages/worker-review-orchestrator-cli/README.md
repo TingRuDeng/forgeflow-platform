@@ -96,11 +96,16 @@ forgeflow-review-orchestrator dispatch-task --dispatcher-url http://127.0.0.1:87
 forgeflow-review-orchestrator dispatch-task --dispatcher-url http://127.0.0.1:8787 --repo TingRuDeng/ForgeFlow --default-branch main --task-id task-1 --title "Refactor auth" --pool codex --branch-name ai/codex/auth --allowed-paths "packages/auth/**" --acceptance "pnpm typecheck" --worker-prompt "You are a codex worker. Refactor the auth module." --context-markdown "# Context\n\nFocus on packages/auth only."
 forgeflow-review-orchestrator watch --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1
 forgeflow-review-orchestrator decide --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1 --decision merge
+forgeflow-review-orchestrator decide --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1 --decision merge --acknowledge-risk
 forgeflow-review-orchestrator decide --state-dir /path/to/.forgeflow-dispatcher --task-id dispatch-1:task-1 --decision block --notes "Scope exceeded"
 forgeflow-review-orchestrator decide --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1 --decision block --reason-code test_failure --must-fix "补测试,修类型" --can-redrive --redrive-strategy same_worker_continue
 forgeflow-review-orchestrator inspect --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1
 forgeflow-review-orchestrator inspect --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1 --summary
 ```
+
+`inspect --summary` and `watch --summary` now also surface the deterministic review `riskAssessment` (`level` / `reasons` / `changedFileCount` / `protectedPathHits`) when the task is in review, so the control layer sees the risk grade before deciding.
+
+`decide --decision merge` is gated by that risk grade: if the dispatcher reports a review risk other than `low` (e.g. `needs_human_attention` or `too_large_for_auto_review`), the merge is refused until you re-run with `--acknowledge-risk`. The gate fails open — if the risk grade cannot be read (older dispatcher, fetch error, no grade), the merge proceeds. Only `merge` is gated; `block` / `rework` / `changes_requested` are never blocked by it.
 
 When `--target-worker-id` is set, the CLI injects that worker id into every task and assignment package before posting the dispatch. This keeps the existing `dispatch.json` shape but gives the control layer an explicit way to target `trae-local-forgeflow` or `trae-remote-forgeflow`.
 
