@@ -40,10 +40,12 @@ Behavior:
 
 Examples:
   # Dry-run: see what version would be published
+  node scripts/release-package.js --package codex-beta-runtime --bump prerelease
   node scripts/release-package.js --package trae-beta-runtime --bump prerelease
 
   # Actually publish in CI
   node scripts/release-package.js --package trae-beta-runtime --bump prerelease --publish --ci
+  node scripts/release-package.js --package codex-beta-runtime --bump prerelease --publish --ci
 
   # Explicit dry-run
   node scripts/release-package.js --package trae-beta-runtime --bump prerelease --dry-run
@@ -71,11 +73,12 @@ const isCiExecution = parsedArgs.ci === true || process.env.GITHUB_ACTIONS === "
 const distTag = typeof parsedArgs.tag === "string" ? parsedArgs.tag : "";
 const DIST_TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
 function runCommand(command, commandArgs, options = {}) {
-    return execFileSync(command, commandArgs, {
+    const result = execFileSync(command, commandArgs, {
         encoding: "utf-8",
         cwd: workspacePath,
         ...options,
     });
+    return typeof result === "string" ? result : result.toString("utf-8");
 }
 function validateDistTag(tag) {
     if (!tag) {

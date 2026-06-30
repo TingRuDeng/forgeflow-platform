@@ -85,11 +85,12 @@ const distTag = typeof parsedArgs.tag === "string" ? parsedArgs.tag : "";
 const DIST_TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
 
 function runCommand(command: string, commandArgs: string[], options: Parameters<typeof execFileSync>[2] = {}): string {
-  return execFileSync(command, commandArgs, {
+  const result = execFileSync(command, commandArgs, {
     encoding: "utf-8",
     cwd: workspacePath,
     ...options,
   });
+  return typeof result === "string" ? result : result.toString("utf-8");
 }
 
 function validateDistTag(tag: string): void {

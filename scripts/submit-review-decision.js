@@ -141,8 +141,8 @@ async function main() {
     if (!args.taskId) {
         throw new Error("--task-id is required");
     }
-    if (!args.decision || !["merge", "rework"].includes(args.decision)) {
-        throw new Error("--decision must be merge or rework");
+    if (!args.decision || !["merge", "rework", "block", "changes_requested"].includes(args.decision)) {
+        throw new Error("--decision must be merge, block, rework, or changes_requested");
     }
     if (!args.dispatcherUrl && !args.stateDir && !args.dryRun) {
         throw new Error("--dispatcher-url or --state-dir is required unless --dry-run is used");

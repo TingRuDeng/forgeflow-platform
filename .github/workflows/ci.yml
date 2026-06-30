@@ -53,10 +53,11 @@ jobs:
       - name: Build packages
         run: pnpm -r --if-present build
 
-      - name: Verify scripts/lib build is in sync with source
+      - name: Verify scripts build is in sync with source
         run: |
           npx tsc -p scripts/lib/tsconfig.json
-          git diff --exit-code scripts/lib
+          npx tsc -p scripts/tsconfig.json
+          git diff --exit-code scripts
 
       - name: Run tests
         run: pnpm test
