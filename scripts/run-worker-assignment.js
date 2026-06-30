@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { formatLocalTimestamp } from "./lib/time.js";
 const CODEX_MODEL = process.env.FORGEFLOW_CODEX_MODEL?.trim() || "";
 const GEMINI_MODEL = "gemini-2.5-pro";
@@ -67,24 +68,31 @@ function readUtf8(filePath) {
 function buildPrompt(workerPrompt, contextMarkdown) {
     return `${workerPrompt.trim()}\n\n${contextMarkdown.trim()}\n`;
 }
-function buildLaunchCommand(assignment, prompt, worktreeDir) {
-    if (assignment.pool === "codex") {
-        const argv = ["codex", "exec"];
-        if (CODEX_MODEL) {
-            argv.push("-m", CODEX_MODEL);
-        }
-        argv.push("--sandbox", "workspace-write", prompt);
-        return {
-            provider: "codex",
-            argv,
-            cwd: worktreeDir,
-        };
-    }
+// Shared launch-command building lives in the dispatcher runtime abstraction
+// (apps/dispatcher/src/modules/runtime/{codex,gemini}.ts). This leaf script
+// delegates to it via the built dist so the codex/gemini launch argv has a
+// single source of truth instead of an inlined duplicate. A dynamic import is
+// used so this file (compiled under scripts/tsconfig with rootDir ".") does not
+// statically pull dispatcher source into its program.
+async function loadRuntimeFactories() {
+    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const distRuntimeDir = path.join(repoRoot, "apps", "dispatcher", "dist", "modules", "runtime");
+    const codexModule = await import(pathToFileURL(path.join(distRuntimeDir, "codex.js")).href);
+    const geminiModule = await import(pathToFileURL(path.join(distRuntimeDir, "gemini.js")).href);
     return {
-        provider: "gemini",
-        argv: ["gemini", "-m", GEMINI_MODEL, "-p", prompt],
-        cwd: worktreeDir,
+        createCodexRuntime: codexModule.createCodexRuntime,
+        createGeminiRuntime: geminiModule.createGeminiRuntime,
     };
+}
+async function buildLaunchCommand(assignment, prompt, worktreeDir) {
+    const { createCodexRuntime, createGeminiRuntime } = await loadRuntimeFactories();
+    const launchInput = { taskId: assignment.taskId, prompt, mode: "run", worktreeDir };
+    if (assignment.pool === "codex") {
+        const runtime = createCodexRuntime("worker", { model: CODEX_MODEL });
+        return { provider: "codex", argv: runtime.launchTask(launchInput).argv, cwd: worktreeDir };
+    }
+    const runtime = createGeminiRuntime({ model: GEMINI_MODEL });
+    return { provider: "gemini", argv: runtime.launchTask(launchInput).argv, cwd: worktreeDir };
 }
 function buildVerificationCommands(assignment, worktreeDir) {
     const shell = getVerificationShell();
@@ -225,7 +233,7 @@ async function main() {
     const workerPrompt = readUtf8(path.join(assignmentDir, "worker-prompt.md"));
     const contextMarkdown = readUtf8(path.join(assignmentDir, "context.md"));
     const prompt = buildPrompt(workerPrompt, contextMarkdown);
-    const launch = buildLaunchCommand(assignment, prompt, args.worktreeDir);
+    const launch = await buildLaunchCommand(assignment, prompt, args.worktreeDir);
     const verificationCommands = buildVerificationCommands(assignment, args.worktreeDir);
     if (args.dryRun) {
         console.log(JSON.stringify({
