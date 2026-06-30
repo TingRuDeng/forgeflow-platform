@@ -213,7 +213,7 @@ export function checkArtifactReviewability(task, options = {}) {
     else {
         result.evidence.allChangesInScope = true;
     }
-    const remoteCheck = checkRemoteCommitExists(worktreeDir, currentBranch, expectedCommit, {
+    const remoteCheck = checkRemoteCommitExists(worktreeDir, currentBranch, expectedCommit || "", {
         runGit: runGitFn,
     });
     result.evidence.remoteVerified = remoteCheck.exists;

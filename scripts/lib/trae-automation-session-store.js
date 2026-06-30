@@ -176,6 +176,21 @@ export function createSessionStore(stateDir, options = {}) {
             completedAt: now(),
         });
     }
+    function markReleased(sessionId) {
+        return update(sessionId, {
+            status: SessionStatus.INTERRUPTED,
+            error: "Released by user",
+            completedAt: now(),
+        });
+    }
+    function release(sessionId) {
+        ensureLoaded();
+        const existed = sessions.delete(sessionId);
+        if (existed) {
+            save();
+        }
+        return existed;
+    }
     function touchActivity(sessionId, details = {}) {
         const updates = { lastActivityAt: now() };
         if (details.responseDetected !== undefined) {
@@ -232,9 +247,11 @@ export function createSessionStore(stateDir, options = {}) {
         markRunning,
         markCompleted,
         markFailed,
+        markReleased,
         touchActivity,
         list,
         prune,
+        release,
         getStateFilePath,
     };
 }
