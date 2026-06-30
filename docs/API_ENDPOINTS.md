@@ -310,6 +310,7 @@ Current endpoint families:
     - `decision` 必填 enum
     - `notes` 可选字符串
     - `evidence` 可选 object
+    - `acknowledgeRisk` / `acknowledge_risk` 可选布尔（用于服务端 merge 风险门禁）
   - 结构化决策证据可放在 `evidence` 内，也可直接作为顶层便捷字段提交；顶层字段会归一化写入 `review.evidence`：
     - `reasonCode`
     - `mustFix[]`
@@ -317,6 +318,7 @@ Current endpoint families:
     - `redriveStrategy`
   - 标准 `reasonCode` 包括 `looks_good`、`tests_passed`、`minor_fix_needed`、`incomplete_implementation`、`test_failure`、`policy_violation`、`security_risk`、`unclear_diff`、`requires_pairing`、`needs_redrive`、`other`；旧版自定义字符串仍兼容。
   - 最新 review decision 为 `rework` 或 `changes_requested` 的 blocked 任务可由 orchestrator CLI redrive。
+  - 服务端 merge 风险门禁（`DISPATCHER_REVIEW_MERGE_GATE`，默认 `off`）：`enforce` 模式下，对风险非 `low` 的任务提交 `merge` 且未带 `acknowledgeRisk` 时返回 `409`（`merge blocked by risk gate`）；`warn` 模式放行但记 `review_merge_risk_acknowledged` 事件。该门禁覆盖 Console / CLI / 直连 HTTP。
   - 任务或 assignment 不存在时返回 `404`。
   - 任务存在但不在 `review` 状态时返回 `409`。
 - `POST /api/tasks/:taskId/cancel`

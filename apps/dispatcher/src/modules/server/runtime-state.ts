@@ -19,6 +19,7 @@ import type {
 } from "./runtime-glue-types.js";
 import {
   assessReviewRisk,
+  resolveReviewMergeGateMode,
   resolveReviewRiskConfig,
   type ReviewRiskAssessment,
 } from "./review-risk.js";
@@ -411,6 +412,7 @@ export interface RecordReviewDecisionInput {
   notes?: string;
   at?: string;
   evidence?: ReviewDecisionEvidence;
+  acknowledgeRisk?: boolean;
 }
 
 export interface RecordWorkerEventInput {
@@ -573,6 +575,14 @@ function summarizeEvent(type: string, payload: unknown): string | null {
     const violations = Array.isArray(record?.violations) ? record?.violations.length : 0;
     if (riskTier || violations) {
       return `${riskTier || "standard"}${violations ? ` (${violations} violations)` : ""}`;
+    }
+  }
+
+  if (type === "review_merge_risk_acknowledged") {
+    const level = normalizeString(record?.level).trim();
+    const acknowledged = record?.acknowledged === true;
+    if (level) {
+      return `${level} merge ${acknowledged ? "acknowledged" : "(warn)"}`;
     }
   }
 
@@ -2653,6 +2663,21 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
     throw new Error(`task not in review: ${input.taskId}`);
   }
 
+  // Server-side merge risk gate (authoritative across Console, CLI, and direct
+  // HTTP). Disabled by default; opt in via DISPATCHER_REVIEW_MERGE_GATE.
+  const mergeGateMode = resolveReviewMergeGateMode();
+  const riskLevel = review?.riskAssessment?.level ?? null;
+  const riskAboveLow = Boolean(riskLevel && riskLevel !== "low");
+  if (input.decision === "merge" && mergeGateMode !== "off" && riskAboveLow) {
+    if (mergeGateMode === "enforce" && input.acknowledgeRisk !== true) {
+      const reasons = review?.riskAssessment?.reasons ?? [];
+      const reasonText = reasons.length > 0 ? ` (${reasons.join("; ")})` : "";
+      throw new Error(
+        `merge blocked by risk gate: review risk is "${riskLevel}"${reasonText}; acknowledge required`,
+      );
+    }
+  }
+
   const nextStatus = input.decision === "merge" ? "merged" : "blocked";
   let nextState = appendEvent(state, {
     taskId: task.id,
@@ -2674,6 +2699,20 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
       evidence: input.evidence ?? review?.evidence ?? null,
     },
   });
+
+  if (input.decision === "merge" && mergeGateMode !== "off" && riskAboveLow) {
+    nextState = appendEvent(nextState, {
+      taskId: task.id,
+      type: "review_merge_risk_acknowledged",
+      at: input.at ?? nowIso(),
+      payload: {
+        mode: mergeGateMode,
+        level: riskLevel,
+        acknowledged: input.acknowledgeRisk === true,
+        actor: input.actor,
+      },
+    });
+  }
 
   nextState = {
     ...nextState,

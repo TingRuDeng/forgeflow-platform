@@ -285,6 +285,124 @@ describe("dispatcher server", () => {
     expect(contextResponse.json.stats.tasks.merged).toBe(1);
   }, 15_000);
 
+  it("enforces the server-side merge risk gate over HTTP when enabled", async () => {
+    const previousMode = process.env.DISPATCHER_REVIEW_MERGE_GATE;
+    process.env.DISPATCHER_REVIEW_MERGE_GATE = "enforce";
+    try {
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+      const stateMod = await import(path.join(repoRoot, "scripts/lib/dispatcher-state.js"));
+
+      await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "POST",
+        pathname: "/api/workers/register",
+        body: { workerId: "codex-gate-http", pool: "codex", hostname: "mac-mini", labels: ["mac"], repoDir: "/repos/openclaw" },
+      });
+      const dispatchResponse = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "POST",
+        pathname: "/api/dispatches",
+        body: {
+          repo: "TingRuDeng/openclaw-multi-agent-mvp",
+          defaultBranch: "master",
+          requestedBy: "codex-control",
+          tasks: [{
+            id: "task-gate",
+            title: "敏感路径任务",
+            pool: "codex",
+            allowedPaths: ["src/**", "auth/**"],
+            acceptance: ["完成"],
+            dependsOn: [],
+            branchName: "ai/codex/task-gate",
+            verification: { mode: "run" },
+          }],
+          packages: [{
+            taskId: "task-gate",
+            assignment: {
+              taskId: "task-gate",
+              workerId: "placeholder",
+              pool: "codex",
+              status: "assigned",
+              branchName: "ai/codex/task-gate",
+              allowedPaths: ["src/**", "auth/**"],
+              commands: { test: "pnpm test" },
+              repo: "TingRuDeng/openclaw-multi-agent-mvp",
+              defaultBranch: "master",
+            },
+            workerPrompt: "你是 codex-worker。",
+            contextMarkdown: "# Context",
+          }],
+        },
+      });
+      const taskId = dispatchResponse.json.taskIds[0];
+
+      await mod.handleDispatcherHttpRequest({
+        stateDir, method: "POST", pathname: "/api/workers/codex-gate-http/claim-task", body: {},
+      });
+      const attempt = stateMod.loadRuntimeState(stateDir).taskAttempts[0];
+      const envelope = {
+        attemptId: attempt.attemptId,
+        leaseToken: attempt.leaseToken,
+        protocolVersion: attempt.protocolVersion,
+        traceId: attempt.traceId,
+        idempotencyKey: attempt.idempotencyKey,
+      };
+      await mod.handleDispatcherHttpRequest({
+        stateDir, method: "POST", pathname: "/api/workers/codex-gate-http/start-task", body: { taskId, ...envelope },
+      });
+      await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "POST",
+        pathname: "/api/workers/codex-gate-http/result",
+        body: {
+          ...envelope,
+          result: {
+            taskId,
+            workerId: "codex-gate-http",
+            provider: "codex",
+            pool: "codex",
+            branchName: "ai/codex/task-gate",
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+            mode: "run",
+            output: "done",
+            generatedAt: "2026-03-16T11:00:00.000Z",
+            verification: { allPassed: true, commands: [{ command: "pnpm test", exitCode: 0, output: "ok" }] },
+          },
+          changedFiles: ["auth/login.ts"],
+        },
+      });
+
+      // Risky merge without acknowledgement is rejected with 409.
+      const blocked = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "POST",
+        pathname: `/api/reviews/${encodeURIComponent(taskId)}/decision`,
+        body: { actor: "codex-control", decision: "merge" },
+      });
+      expect(blocked.status).toBe(409);
+      expect(blocked.json.error).toMatch(/merge blocked by risk gate/i);
+
+      // With acknowledge_risk the merge proceeds.
+      const acknowledged = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "POST",
+        pathname: `/api/reviews/${encodeURIComponent(taskId)}/decision`,
+        body: { actor: "codex-control", decision: "merge", acknowledge_risk: true },
+      });
+      expect(acknowledged.status).toBe(200);
+      const mergedTask = acknowledged.json.tasks.find((item: { id: string }) => item.id === taskId);
+      expect(mergedTask.status).toBe("merged");
+    } finally {
+      if (previousMode === undefined) {
+        delete process.env.DISPATCHER_REVIEW_MERGE_GATE;
+      } else {
+        process.env.DISPATCHER_REVIEW_MERGE_GATE = previousMode;
+      }
+    }
+  }, 15_000);
+
   it("exports control-plane metrics via a dedicated no-store endpoint", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);

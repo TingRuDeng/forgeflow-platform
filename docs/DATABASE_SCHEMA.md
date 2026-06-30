@@ -99,6 +99,7 @@ Top-level collections currently include:
 - `state_lock_timeout`
 - `review_risk_flagged`
 - `dispatch_quality_flagged`
+- `review_merge_risk_acknowledged`
 
 当前事件记录还会保留最小关联字段：
 

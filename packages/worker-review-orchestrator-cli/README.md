@@ -107,6 +107,8 @@ forgeflow-review-orchestrator inspect --dispatcher-url http://127.0.0.1:8787 --t
 
 `decide --decision merge` is gated by that risk grade: if the dispatcher reports a review risk other than `low` (e.g. `needs_human_attention` or `too_large_for_auto_review`), the merge is refused until you re-run with `--acknowledge-risk`. The gate fails open — if the risk grade cannot be read (older dispatcher, fetch error, no grade), the merge proceeds. Only `merge` is gated; `block` / `rework` / `changes_requested` are never blocked by it.
 
+The dispatcher also has an authoritative server-side gate (`DISPATCHER_REVIEW_MERGE_GATE=enforce`) that rejects risky merges with `409` regardless of client; `--acknowledge-risk` is forwarded to the dispatcher so it satisfies that gate too.
+
 When `--target-worker-id` is set, the CLI injects that worker id into every task and assignment package before posting the dispatch. This keeps the existing `dispatch.json` shape but gives the control layer an explicit way to target `trae-local-forgeflow` or `trae-remote-forgeflow`.
 
 When `--require-existing-worker` is set, the CLI fetches `/api/dashboard/snapshot` before dispatch and hard-fails if the pinned target worker is offline or if no online worker exists for the required task pool. Use this when the control layer must reuse an already running dispatcher + worker runtime instead of implicitly relying on a later bootstrap step.
