@@ -131,7 +131,7 @@ jobs:
         run: pnpm typecheck
 
       - name: Run tests
-        run: pnpm -r --workspace-concurrency=1 --if-present test
+        run: pnpm --filter @tingrudeng/${{ inputs.package }}... --if-present test
 
       - name: Run shadow drift gate
         run: pnpm verify:shadow-drift
@@ -311,7 +311,7 @@ jobs:
         run: pnpm typecheck
 
       - name: Run tests
-        run: pnpm -r --workspace-concurrency=1 --if-present test
+        run: pnpm --filter @tingrudeng/${{ matrix.package.name }}... --if-present test
 
       - name: Run shadow drift gate
         run: pnpm verify:shadow-drift
