@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { createEmptyRuntimeState } from "./http.js";
+
 interface LocalDispatcherResponse {
   status: number;
   headers?: Record<string, string>;
@@ -82,6 +84,10 @@ export async function loadLocalSnapshot(stateDir: string) {
 
   if (fs.existsSync(jsonSnapshotPath) && !fs.existsSync(sqliteSnapshotPath)) {
     return JSON.parse(fs.readFileSync(jsonSnapshotPath, "utf8")) as Record<string, unknown>;
+  }
+
+  if (!fs.existsSync(jsonSnapshotPath) && !fs.existsSync(sqliteSnapshotPath)) {
+    return createEmptyRuntimeState() as unknown as Record<string, unknown>;
   }
 
   const response = await runLocalDispatcherRequest({
