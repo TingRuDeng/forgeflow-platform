@@ -344,6 +344,115 @@ Document-refresh: needed
 
 结论：通过。
 
+# 2026-07-03 dispatcher 全量测试稳定性修复
+
+## 目标
+
+处理上一轮剩余风险：全量 `pnpm test` 中 dispatcher 环境敏感测试失败，尤其是 JSON stdout 污染、live DR child ready 解析和 dist build lock 连锁超时。
+
+## 执行计划
+
+- [x] P1 串行：定位 `shadow-drift` / `submit-review-decision` stdout JSON 污染根因。
+- [x] P1 串行：定位 `stage3-live-dr` 中 `undefined/api/workers/register` 与 child ready 超时根因。
+- [x] P2 串行：将 dispatcher dist 自动构建日志从 stdout 移到 stderr，保持 JSON CLI stdout 纯净。
+- [x] P2 串行：增强 live DR child ready 解析，只接受包含 `status=listening` 和 `baseUrl` 的 JSON 对象。
+- [x] P2 串行：live DR child 进程设置 `FORGEFLOW_DISPATCHER_DIST_PREBUILT=1`，避免 readiness 窗口内重复构建。
+- [x] P3 串行：复跑失败子集、完整验证组合和全量测试。
+- [x] P4 串行：执行 review-gate 并补充收尾小结。
+
+## 验证结果
+
+- RED：`CI=true HOME=/private/tmp/forgeflow-test-home pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/stage3-live-dr.test.ts --maxWorkers=1` 先失败于 child ready 超时；此前全量测试还失败于 stdout JSON 污染和 dist build lock 连锁超时。
+- GREEN：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts tests/modules/server/submit-review-decision.test.ts --maxWorkers=1` 通过，2 个测试文件、6 个测试通过。
+- GREEN：`CI=true HOME=/private/tmp/forgeflow-test-home pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/stage3-live-dr.test.ts --maxWorkers=1` 通过，1 个测试文件、1 个测试通过。
+- GREEN：`CI=true HOME=/private/tmp/forgeflow-test-home pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts tests/modules/server/submit-review-decision.test.ts tests/modules/execution/stage3-live-dr.test.ts tests/modules/server/run-worker-daemon.test.ts tests/modules/server/trae-automation-worker.test.ts --maxWorkers=1` 通过，5 个测试文件、27 个测试通过。
+- GREEN：`CI=true pnpm --filter @tingrudeng/codex-beta-runtime test` 通过，2 个测试文件、7 个测试通过。
+- GREEN：`CI=true pnpm --filter @tingrudeng/gemini-beta-runtime test` 通过，2 个测试文件、8 个测试通过。
+- GREEN：`CI=true pnpm --filter @forgeflow/provider-registry test` 通过，1 个测试文件、7 个测试通过。
+- GREEN：`CI=true pnpm --filter console build` 通过。
+- GREEN：`CI=true pnpm typecheck` 通过。
+- GREEN：`CI=true pnpm lint` 通过。
+- GREEN：`CI=true pnpm docs:validate` 通过。
+- GREEN：`git diff --check` 通过。
+- GREEN：`CI=true HOME=/private/tmp/forgeflow-test-home pnpm test` 非沙箱通过；dispatcher 43 个测试文件、456 个测试通过。
+
+## Review 小结
+
+终态：finished。
+
+Spec 符合度：通过。已处理全量测试剩余风险：JSON CLI stdout 不再混入 dispatcher dist 构建日志，live DR child ready 解析支持多行 ready JSON 且不会把普通日志误认为 ready，child 进程跳过重复 dist 构建。
+
+安全检查：通过。未新增 secret、凭据或外部输入拼接；只调整测试/运维脚本输出通道和子进程构建环境标志。
+
+测试与验证：通过。失败子集、完整影响范围、全量 `pnpm test`、typecheck、lint、docs 校验和 diff 检查均已通过。
+
+复杂度检查：通过。`parseChildServerOutput` 保持单一职责，未引入超过 50 行函数；本轮脚本改动局部且未新增大文件。
+
+Document-refresh: not-needed
+原因：本轮修复测试稳定性和脚本输出通道，没有改变公开架构、接口或运行契约。
+
+剩余风险：全量测试需要非沙箱环境运行，因为 live dispatcher 测试需要监听 `127.0.0.1`；在沙箱内仍会因权限限制失败。
+
+潜在技术债：dispatcher dist 自动构建仍会在多个测试进程中重复触发，虽然当前锁与 stderr 输出已稳定，但后续可考虑测试启动前统一预构建并设置 `FORGEFLOW_DISPATCHER_DIST_PREBUILT=1`。
+
+结论：通过。
+
+# 2026-07-03 runtime 审查发现修复
+
+## 目标
+
+修复 6 月 30 日到 7 月 3 日变动审查中确认的交付可靠性、凭据隔离、能力声明和 Console 配置文档漂移问题。
+
+## 执行计划
+
+- [x] P1 串行：为 packaged Codex runtime 补充 push / PR 失败和子进程 env 隔离 RED 测试。
+- [x] P1 串行：为 packaged Gemini runtime 补充同等 RED 测试。
+- [x] P1 串行：修复 packaged Codex / Gemini runtime 的 push / PR 失败处理和 env allowlist。
+- [x] P2 串行：修正 Gemini provider registry 的 review 能力声明，并补准入测试。
+- [x] P2 串行：修正 Console 配置脚本与 README 漂移。
+- [x] P3 串行：运行受影响测试、typecheck、docs 校验和 diff 检查。
+- [x] P4 串行：执行 review-gate 并补充收尾小结。
+
+## 并行说明
+
+本轮不使用 subagent。两个 packaged runtime 文件结构高度重复，但改动函数同名且测试模式相同；主流程串行处理可以减少重复实现漂移。验证命令之间可并行执行，但最终由主流程统一汇总。
+
+## 验证结果
+
+- RED：`CI=true pnpm --filter @tingrudeng/codex-beta-runtime test` 先失败，push / PR 失败路径错误返回 `completed`，env 测试暴露真实 GitHub fetch 路径。
+- RED：`CI=true pnpm --filter @tingrudeng/gemini-beta-runtime test` 同样失败。
+- RED：`CI=true pnpm --filter @forgeflow/provider-registry test` 先失败，Gemini `review` 被错误声明为支持。
+- GREEN：`CI=true pnpm --filter @tingrudeng/codex-beta-runtime test` 通过，2 个测试文件、7 个测试通过。
+- GREEN：`CI=true pnpm --filter @tingrudeng/gemini-beta-runtime test` 通过，2 个测试文件、8 个测试通过。
+- GREEN：`CI=true pnpm --filter @forgeflow/provider-registry test` 通过，1 个测试文件、7 个测试通过。
+- GREEN：`CI=true pnpm --filter console build` 通过。
+- GREEN：`CI=true pnpm typecheck` 通过。
+- GREEN：`CI=true pnpm lint` 通过。
+- GREEN：`CI=true pnpm docs:validate` 通过。
+- GREEN：`git diff --check` 通过。
+- 全量：`CI=true pnpm test` 在 dispatcher 既有环境敏感测试失败；复跑非沙箱仍失败于 `stage3-live-dr` 的 `undefined/api/workers/register`、`shadow-drift` / `submit-review-decision` stdout JSON 混入构建日志，以及 dispatcher dist build lock 连锁超时。本轮直接相关套件均已单独通过。
+
+## Review 小结
+
+终态：finished。
+
+Spec 符合度：通过。已修复 packaged Codex / Gemini runtime 的 push / PR 失败静默完成问题、子进程 env 凭据暴露问题、Gemini provider review 能力漂移，以及 Console 配置文档与实现不一致。
+
+安全检查：通过。未新增 secret；assignment / 模型子进程改为 allowlist 环境变量，默认不再继承 `GITHUB_TOKEN`、`DISPATCHER_API_TOKEN` 或任意自定义 secret。
+
+测试与验证：通过。新增 RED/GREEN 覆盖 packaged runtime 交付失败、PR 失败、env 隔离和 Gemini review 准入；受影响套件、typecheck、lint、docs 校验和 diff 检查均通过。
+
+复杂度检查：通过。新增测试文件均为 279 行；新增 helper 函数未超过 50 行。两个 packaged runtime 生产文件仍超过 300 行，这是既有文件规模技术债，本轮未扩大职责边界。
+
+Document-refresh: needed
+原因：Console README 的配置命令与环境变量说明属于本轮修复对象，已同步更新。
+
+剩余风险：全量 `pnpm test` 仍受 dispatcher 既有环境敏感测试影响，失败点不在本轮修改文件内；本轮直接相关验证已全部通过。
+
+潜在技术债：Codex/Gemini packaged runtime 仍存在重复实现，后续应抽共享 helper 或生成模板，避免 env allowlist 与交付错误处理再次漂移。
+
+结论：通过。
+
 # Console 与运行入口质量修复
 
 ## 目标

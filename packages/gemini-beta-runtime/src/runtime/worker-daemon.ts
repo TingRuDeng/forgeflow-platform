@@ -51,6 +51,51 @@ function runGit(args: string[], cwd: string): GitResult {
   };
 }
 
+const DEFAULT_WORKER_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "TERM",
+  "TMPDIR",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "FORGEFLOW_CODEX_BIN",
+  "FORGEFLOW_CODEX_MODEL",
+  "FORGEFLOW_CODEX_SANDBOX",
+  "FORGEFLOW_CODEX_ARGS_JSON",
+  "FORGEFLOW_CODEX_ARGS",
+  "FORGEFLOW_GEMINI_BIN",
+  "FORGEFLOW_GEMINI_MODEL",
+  "FORGEFLOW_GEMINI_ARGS_JSON",
+  "FORGEFLOW_GEMINI_ARGS",
+  "FORGEFLOW_EXEC_TIMEOUT_MS",
+  "FORGEFLOW_VERIFICATION_TIMEOUT_MS",
+  "FORGEFLOW_VERIFICATION_SHELL",
+  "FORGEFLOW_GIT_SSH_COMMAND",
+];
+
+function resolveWorkerEnvAllowlist(envSource: NodeJS.ProcessEnv): string[] {
+  return String(envSource.FORGEFLOW_WORKER_ENV_ALLOWLIST || DEFAULT_WORKER_ENV_ALLOWLIST.join(","))
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildWorkerEnv(envSource: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  // 只传递任务执行必需变量，避免控制面 token 暴露给 assignment 和模型进程。
+  for (const key of resolveWorkerEnvAllowlist(envSource)) {
+    if (envSource[key] !== undefined) {
+      env[key] = envSource[key];
+    }
+  }
+  return env;
+}
+
 interface TaskAssignment {
   taskId: string;
   branchName: string;
@@ -154,9 +199,7 @@ function maybeCommitAndPush(worktreeDir: string, payload: TaskPayload, changedFi
     "origin",
     payload.assignment.branchName,
   ], worktreeDir);
-  if ((pushResult.status ?? 1) !== 0) {
-    return;
-  }
+  ensureSuccess(pushResult, `failed to push changes for ${payload.assignment.taskId}`);
 }
 
 async function maybeCreatePullRequest(payload: TaskPayload, changedFiles: string[]): Promise<PullRequestInfo | null> {
@@ -188,7 +231,11 @@ async function maybeCreatePullRequest(payload: TaskPayload, changedFiles: string
   const text = await response.text();
   const json = text ? JSON.parse(text) : {};
   if (!response.ok) {
-    return null;
+    const message = (json as { message?: string; error?: string }).message
+      || (json as { error?: string }).error
+      || text
+      || `failed to create pull request for ${payload.assignment.taskId}`;
+    throw new Error(message);
   }
 
   return {
@@ -244,7 +291,7 @@ function runWorkerAssignmentScript(packageRoot: string, assignmentDir: string, w
       outputDir,
     ], {
       cwd: packageRoot,
-      env: process.env,
+      env: buildWorkerEnv(),
     }) as ChildProcess & { stdout?: NodeJS.ReadableStream; stderr?: NodeJS.ReadableStream };
 
     let stdout = "";

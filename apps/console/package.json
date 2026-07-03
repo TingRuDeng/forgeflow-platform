@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "config:set": "node scripts/config-cli.mjs",
+    "config:show": "node scripts/config-cli.mjs --show",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
