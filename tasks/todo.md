@@ -1,5 +1,21 @@
 # 当前项目审查修复任务
 
+- [x] M10 串行：修复 `@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 与 dispatcher v1 claim/envelope/token 协议漂移，并补协议测试。
+- [x] M10 串行：修复 `runtime-glue-dispatcher-client` 的 worker cycle envelope 类型与测试，避免旧 payload 被测试固化。
+- [x] M10 串行：收紧 release 自动发布门禁，避免 push 到 main 后绕过 CI 直接发布 npm 包。
+- [x] M10 串行：补齐 Console 审查结构化表单、风险确认、错误反馈和 token 配置文档。
+- [x] M10 串行：同步已过期文档事实，运行最小充分验证并补充 review 小结。
+
+## M10 Review 小结
+
+已修复远程 `@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 与 dispatcher v1 worker 协议漂移：worker daemon 现在通过 `POST /api/workers/:workerId/claim-task` 领取任务，带 `DISPATCHER_API_TOKEN` 时发送 bearer token，并把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 透传到 start/result mutation。同步修复 `runtime-glue-dispatcher-client` 的 worker cycle envelope，避免源码测试继续固化旧 payload。
+
+已收紧 release 自动发布门禁：`.github/workflows/release.yml` 的 push 自动发布在 `npm publish` 前先执行 lint、文档校验、typecheck、测试和 shadow drift gate，并用 workflow 测试锁定顺序。Console 任务详情补齐结构化审查表单、风险确认、review decision 错误反馈和 token 配置文档；相关文档入口已同步到 `README.md`、`docs/README.md`、`docs/onboarding.md`、runtime 包 README、`TECH_DEBT.md`、`KNOWN_PITFALLS.md` 和 `ARTIFACT_BUNDLE_V1.md`。
+
+验证已通过：`pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check`、runtime / dispatcher 受影响 Vitest、Console 受影响 Vitest，以及 `tsc --noEmit` 覆盖 codex runtime、gemini runtime、dispatcher 和 Console。`pnpm docs:validate` 初次因 pnpm 依赖状态检查在受限网络下触发 registry 访问被中止；恢复依赖后已重新通过。
+
+剩余风险：本轮未跑全量 `pnpm test` / `pnpm typecheck`，只跑了受影响测试和受影响包类型检查；release workflow 的全量门禁需要在 GitHub Actions 上由真实 CI 环境最终验证。
+
 - [x] M9 串行：第 1 轮 Artifact store + retention，支持 artifact 文件落盘、索引、保留策略和按需读取。
 - [x] M9 串行：第 2 轮 shadow reconciliation + alerting，定义 drift 阈值、告警事件和自动对账入口。
 - [x] M9 串行：第 3 轮 Console review workflow，打通 artifact / attempt / review decision 的审查操作链路。

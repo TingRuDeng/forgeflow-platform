@@ -181,6 +181,11 @@ describe("runtime-glue worker-daemon-cycle", () => {
         claimTask: vi.fn().mockResolvedValue({
           assignment: { taskId: "task-1", workerId: "test-worker" },
           task: { id: "task-1", title: "Test Task" },
+          attemptId: "attempt-1",
+          leaseToken: "lease-1",
+          protocolVersion: "2026-05-v1",
+          traceId: "trace-1",
+          idempotencyKey: "idempotency-1",
         }),
         startTask: vi.fn().mockResolvedValue({ status: "started" }),
         submitResult: vi.fn().mockResolvedValue({ status: "result_recorded" }),
@@ -223,6 +228,11 @@ describe("runtime-glue worker-daemon-cycle", () => {
 
       expect(mockClient.startTask).toHaveBeenCalledWith("test-worker", {
         taskId: "task-1",
+        attemptId: "attempt-1",
+        leaseToken: "lease-1",
+        protocolVersion: "2026-05-v1",
+        traceId: "trace-1",
+        idempotencyKey: "idempotency-1",
         at: expect.any(String),
       });
       expect(mockExecutor.executeTask).toHaveBeenCalledWith(
@@ -230,6 +240,11 @@ describe("runtime-glue worker-daemon-cycle", () => {
         { taskId: "task-1", workerId: "test-worker" },
       );
       expect(mockClient.submitResult).toHaveBeenCalledWith("test-worker", {
+        attemptId: "attempt-1",
+        leaseToken: "lease-1",
+        protocolVersion: "2026-05-v1",
+        traceId: "trace-1",
+        idempotencyKey: "idempotency-1",
         result: { dryRun: true },
         changedFiles: ["file-a.ts", "file-b.ts"],
         pullRequest: { number: 42, url: "https://github.com/org/repo/pull/42", headBranch: "feature-1", baseBranch: "main" },

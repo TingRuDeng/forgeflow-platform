@@ -246,6 +246,12 @@ describe('Task drill-down', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /合并|merge/i }));
 
-    expect(onReviewDecision).toHaveBeenCalledWith('merge');
+    expect(onReviewDecision).toHaveBeenCalledWith('merge', expect.objectContaining({
+      acknowledgeRisk: false,
+      canRedrive: true,
+      mustFix: ['补齐失败测试'],
+      reasonCode: 'test_gap',
+      redriveStrategy: 'same_worker_continue',
+    }));
   });
 });

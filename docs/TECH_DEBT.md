@@ -186,11 +186,12 @@ Desired direction:
 - 代码审查和文档阅读时容易把 vNext 目标契约误读为当前已执行的 runtime 保护
 - 空 envelope / 无 active attempt 的 worker mutation 已被拒绝，历史夹具或迁移脚本必须先补 claim / attempt 语义
 - ArtifactBundle 已支持受限 `retainedContent`，dispatcher 会把 retained diff / log / test result 写入本地 artifact store，并通过 manifest、retention 和 `/api/artifacts/:bundleId/files/:fileName` 支持按需读取
-- Console 任务详情可通过摘要 / 引用 / 正文 tabs 查看审查证据，并可在 `review` 状态直接提交 `merge` / `rework` / `block` 决策
+- Console 任务详情可通过摘要 / 引用 / 正文 tabs 查看审查证据，并可在 `review` 状态直接提交带 `reasonCode`、`mustFix[]`、重驱动策略和高风险确认的 `merge` / `rework` / `block` 决策
 
 期望方向：
 
-- 继续接入 Console 侧 artifact 文件按需展开 / 下载体验，以及更细粒度的 review reason / must-fix 表单
+- 继续接入 Console 侧 artifact 文件按需展开 / 下载体验
+- 继续补齐审查结果的批量筛选、复制链接和跨任务对比体验
 
 ## 9. Shadow path has drift gate and reconciliation entry, but primary cutover is still deferred
 

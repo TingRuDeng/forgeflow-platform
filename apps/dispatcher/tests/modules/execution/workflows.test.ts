@@ -39,6 +39,26 @@ describe("workflow quality gates", () => {
     expect(workflow.indexOf("npm publish")).toBeLessThan(workflow.indexOf("git push"));
   });
 
+  it("runs full verification before automatic npm publish", () => {
+    const workflow = readWorkflow("release.yml");
+    const publishAutoIndex = workflow.indexOf("publish-auto:");
+    const npmPublishIndex = workflow.indexOf("npm publish --access public --provenance", publishAutoIndex);
+
+    expect(publishAutoIndex).toBeGreaterThanOrEqual(0);
+    expect(npmPublishIndex).toBeGreaterThan(publishAutoIndex);
+    for (const gate of [
+      "Run lint",
+      "Validate docs",
+      "Run typecheck",
+      "Run tests",
+      "Run shadow drift gate",
+    ]) {
+      const gateIndex = workflow.indexOf(gate, publishAutoIndex);
+      expect(gateIndex).toBeGreaterThan(publishAutoIndex);
+      expect(gateIndex).toBeLessThan(npmPublishIndex);
+    }
+  });
+
   it("runs shadow drift as part of the stage3 rollout gate", () => {
     const packageJson = fs.readFileSync(path.join(repoRoot, "package.json"), "utf8");
     const scripts = JSON.parse(packageJson).scripts;

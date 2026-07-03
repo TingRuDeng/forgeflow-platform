@@ -54,6 +54,7 @@ describe('App dashboard loading', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -119,6 +120,12 @@ describe('App dashboard loading', () => {
           taskId: 'dispatch-1:task-review',
           decision: 'pending',
           notes: '',
+          riskAssessment: {
+            level: 'needs_human_attention',
+            reasons: ['protected paths touched'],
+            changedFileCount: 2,
+            protectedPathHits: [],
+          },
         },
       ],
     };
@@ -135,16 +142,66 @@ describe('App dashboard loading', () => {
 
     renderApp();
 
+    fireEvent.change(await screen.findByLabelText(/原因码|reason code/i), {
+      target: { value: 'needs_manual_review' },
+    });
+    fireEvent.change(screen.getByLabelText(/必须修复|must fix/i), {
+      target: { value: '补齐协议测试\n更新发布说明' },
+    });
+    fireEvent.click(screen.getByLabelText(/确认风险|acknowledge risk/i));
     fireEvent.click(await screen.findByRole('button', { name: /合并|merge/i }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const submittedBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       '/api/reviews/dispatch-1%3Atask-review/decision',
       expect.objectContaining({
         method: 'POST',
-        body: expect.stringContaining('"decision":"merge"'),
       })
     );
+    expect(submittedBody).toMatchObject({
+      decision: 'merge',
+      acknowledgeRisk: true,
+      evidence: {
+        reasonCode: 'needs_manual_review',
+        mustFix: ['补齐协议测试', '更新发布说明'],
+        canRedrive: true,
+        redriveStrategy: 'same_worker_continue',
+      },
+    });
+  });
+
+  it('shows dispatcher review decision errors in the alert', async () => {
+    const reviewSnapshot = {
+      ...snapshot,
+      tasks: [
+        {
+          id: 'dispatch-1:task-review',
+          title: 'Review task',
+          status: 'review',
+        },
+      ],
+      reviews: [
+        {
+          taskId: 'dispatch-1:task-review',
+          decision: 'pending',
+        },
+      ],
+    };
+    const alertMock = vi.fn();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(reviewSnapshot), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'risk_ack_required' }), { status: 409 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('alert', alertMock);
+
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('button', { name: /合并|merge/i }));
+
+    await waitFor(() => expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('risk_ack_required')));
   });
 });

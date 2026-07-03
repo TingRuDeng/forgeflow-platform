@@ -277,6 +277,16 @@ function nowIso(): string {
   return formatLocalTimestamp();
 }
 
+function buildWorkerProtocolEnvelope(assigned: AssignedTaskResponse) {
+  return {
+    attemptId: assigned.attemptId,
+    leaseToken: assigned.leaseToken,
+    protocolVersion: assigned.protocolVersion,
+    traceId: assigned.traceId,
+    idempotencyKey: assigned.idempotencyKey,
+  };
+}
+
 export async function runWorkerDaemonCycle(
   input: CreateWorkerDaemonCycleOptions,
 ): Promise<WorkerDaemonCycleResult> {
@@ -308,8 +318,9 @@ export async function runWorkerDaemonCycle(
   }
 
   const taskId = (assigned.task as { id?: string })?.id ?? "unknown";
+  const envelope = buildWorkerProtocolEnvelope(assigned);
 
-  await client.startTask(input.workerId, { taskId, at });
+  await client.startTask(input.workerId, { taskId, ...envelope, at });
 
   let executionResult: TaskExecutionResult;
   if (input.taskExecutor) {
@@ -325,6 +336,7 @@ export async function runWorkerDaemonCycle(
   }
 
   await client.submitResult(input.workerId, {
+    ...envelope,
     result: executionResult.result,
     changedFiles: executionResult.changedFiles,
     pullRequest: executionResult.pullRequest,

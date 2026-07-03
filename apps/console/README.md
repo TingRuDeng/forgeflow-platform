@@ -6,6 +6,7 @@ ForgeFlow Multi-Agent Control Plane 的可视化控制台。
 
 - **任务监控**：实时查看任务状态、分配情况及对应分支。支持分页浏览（每页 10 条）。
 - **任务详情**：选中任务后查看 attempt timeline、runtime events、review reason，以及 artifact summary / refs / retained content。
+- **结构化审查**：review 状态下可提交 `merge` / `rework` / `block`，并携带原因码、must-fix 清单、重驱动策略和高风险合并确认。
 - **节点管理**：监控工作节点（Worker）的存活状态、当前任务及归属 Pool。
 - **指标概览**：顶部展示集群核心指标（活跃节点、空闲/繁忙占比、任务完成进度）。
 - **交互式日志**：集成 `@uiw/react-json-view`，支持可折叠的 JSON 树状结构展示，实时追踪系统事件细节。
@@ -20,7 +21,7 @@ ForgeFlow Multi-Agent Control Plane 的可视化控制台。
 - **状态/请求**: SWR (用于实时轮询渲染)
 - **JSON 渲染**: `@uiw/react-json-view`
 - **图标**: Lucide React
-- **测试**: Vitest + React Testing Library (100% 核心组件覆盖)
+- **测试**: Vitest + React Testing Library
 
 ## 快速开始
 
@@ -32,6 +33,22 @@ pnpm --filter console dev
 ```
 
 默认访问地址: [http://localhost:8788](http://localhost:8788) (需配合 `dispatcher` 后端运行)。
+
+### Dispatcher 配置
+
+Console 默认从 `.forgeflow-console.json` 读取 dispatcher 连接配置，也可以通过环境变量覆盖：
+
+```bash
+FORGEFLOW_CONSOLE_DISPATCHER_URL=http://127.0.0.1:8787
+FORGEFLOW_CONSOLE_API_TOKEN=your-secret-token
+```
+
+dispatcher 使用默认 `token` 认证模式时，Console 必须配置与控制面一致的 token。配置助手入口为：
+
+```bash
+pnpm --filter console config:set --url http://127.0.0.1:8787 --token your-secret-token
+pnpm --filter console config:show
+```
 
 ### 生产构建
 
@@ -54,7 +71,7 @@ pnpm --filter console test:run
 pnpm --filter console test:coverage
 ```
 
-测试用例位于 `src/components/__tests__` 目录下。目前已覆盖 `TaskList` 的分页逻辑和边界情况。
+测试用例位于 `src/__tests__` 与 `src/components/__tests__` 目录下。目前覆盖 dashboard 数据加载、审查决策提交、任务列表分页、指标卡片和事件面板渲染。
 
 ## 目录结构
 

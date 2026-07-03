@@ -28,9 +28,19 @@ export interface HeartbeatPayload {
 export interface StartTaskPayload {
   taskId: string;
   at?: string;
+  attemptId?: string;
+  leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
 }
 
 export interface SubmitResultPayload {
+  attemptId?: string;
+  leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
   result: unknown;
   changedFiles: string[];
   pullRequest: PullRequestInfo | null;
@@ -64,6 +74,11 @@ export interface DispatcherWorkerClient {
 export interface AssignedTaskResponse {
   assignment: unknown;
   task: unknown;
+  attemptId?: string;
+  leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
 }
 
 export interface WorkerDaemonCycleInput {

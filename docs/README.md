@@ -293,7 +293,7 @@ vNext runtime reliability 推进：
 - generic worker claim 已从副作用 GET 收口为显式 POST：
   - `GET /api/workers/:workerId/assigned-task` 只读
   - `POST /api/workers/:workerId/claim-task` 才会真正 claim / assign
-- review decision 现在显式支持 `merge`、`block`、`rework`、`changes_requested`，其中后两者都会把任务落到 `blocked`，但保留原始 decision 供 redrive 和审计使用；Console 任务详情可直接提交 `merge` / `rework` / `block` 决策并刷新 dashboard snapshot，并在任务处于 `review` 时展示确定性风险分级 badge（非 `low` 时在合并按钮上方给出人工确认提示）。
+- review decision 现在显式支持 `merge`、`block`、`rework`、`changes_requested`，其中后两者都会把任务落到 `blocked`，但保留原始 decision 供 redrive 和审计使用；Console 任务详情可直接提交 `merge` / `rework` / `block` 决策并刷新 dashboard snapshot，并在任务处于 `review` 时展示确定性风险分级 badge。Console 审查表单会把 `reasonCode`、`mustFix[]`、`canRedrive`、`redriveStrategy` 和高风险合并的 `acknowledgeRisk` 一起透传到 dispatcher。
 - `forgeflow-review-orchestrator decide` 现在支持 `--reason-code`、`--must-fix`、`--can-redrive`、`--redrive-strategy`，并会把这些字段归一化写入 `review.evidence`。
 - `forgeflow-review-orchestrator` 的 `inspect --summary` / `watch --summary` 现在会带上 review 风险分级（`riskAssessment.level/reasons/changedFileCount/protectedPathHits`）；`decide --decision merge` 现在受该分级软门禁：风险非 `low` 时拒绝合并，需显式 `--acknowledge-risk` 覆盖（门禁 fail-open，无法读取风险时放行，只约束 merge）。dispatcher 另提供服务端权威门禁 `DISPATCHER_REVIEW_MERGE_GATE`（默认 `off`，`enforce` 时风险非 `low` 的 merge 返回 `409`，`warn` 放行并记 `review_merge_risk_acknowledged`），覆盖 Console / CLI / 直连 HTTP。
 - dispatcher 现在会 canonicalize worker result 的 `workerId/pool/repo/defaultBranch/branchName`，worker 不能再覆盖这些 dispatcher-owned 字段。
@@ -302,7 +302,7 @@ vNext runtime reliability 推进：
 - dashboard snapshot 现在暴露 `taskAttempts` 与 `artifactBundles`，Console 任务详情可直接查看 attempt timeline、runtime events、artifact summary、refs 和 retained content；dispatcher 会把 retained diff / log / test result 写入本地 artifact store，并通过 artifact 文件 API 和 `artifact-get --file <name>` 按需读取。
 - dispatcher reconcile 现在会扫描离线 worker 的过期 running attempt，按默认最多 2 次 attempt 的最小策略自动 redrive 或把任务显式置为 `failed`。
 - dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，同时输出 `retryRatePct`、失败码聚合和 review reason 聚合。
-- vNext runtime reliability 的目标契约已落地到 `@forgeflow/worker-protocol`，当前 dispatcher worker start/result mutation 已强制完整 `TaskAttempt` / `LeaseToken` envelope；该包还提供 start/result payload helper 作为内部 Worker SDK 契约。
+- vNext runtime reliability 的目标契约已落地到 `@forgeflow/worker-protocol`，当前 dispatcher worker start/result mutation 已强制完整 `TaskAttempt` / `LeaseToken` envelope；`@tingrudeng/codex-beta-runtime` 和 `@tingrudeng/gemini-beta-runtime` 会通过 `POST /api/workers/:workerId/claim-task` 领取任务，并把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 start/result envelope 回写。该包还提供 start/result payload helper 作为内部 Worker SDK 契约。
 - dispatcher 任务状态机现在包含 `cancelled`，控制面和 console 都可以显式作废非终态任务。
 - 阶段三核心底座现在已进入主线：runtime state 增加显式 `leases[]`，SQLite 真相源同步维护 query-first 结构化投影，dispatcher 可选启用 structured reads、read-only 降级、Postgres / queue shadow write、SLO / burn-rate 与 DR 状态检查；当前强约束 lease 只确认接入 assignment，read-only 也仍受 `isMutationRequest` 覆盖范围限制。
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
@@ -329,6 +329,7 @@ vNext runtime reliability 推进：
   - GitHub Actions 发布入口。
   - 用 OIDC + provenance 执行 npm 发布。
   - 发布前会校验包元数据是否与当前仓库 `TingRuDeng/forgeflow-platform` 对齐，并要求 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 作为自动发布显式门禁。
+  - push 自动发布会先运行 lint、文档校验、typecheck、测试和 shadow drift gate，再执行 `npm publish`。
 - `../.github/workflows/release-scorecard.yml`
   - Release 成功后的独立 OpenSSF Scorecard workflow。
   - 避免把 Trusted Publishing 所需的 `id-token` 权限和 scorecard 的 workflow 限制混在同一个发布 workflow 里。

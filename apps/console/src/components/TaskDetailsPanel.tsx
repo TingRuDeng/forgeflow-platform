@@ -2,6 +2,13 @@ import React from 'react';
 import { useTranslation } from '@/lib/i18n';
 import { Badge } from './UI';
 import { ArtifactSummary, AttemptTimeline, RuntimeEventList, type ArtifactBundle, type TaskAttempt } from './TaskTimeline';
+import {
+  FailureSection,
+  ReviewActions,
+  ReviewSection,
+  RiskSection,
+  type ReviewDecisionInput,
+} from './TaskReviewSections';
 
 interface Task {
   id: string;
@@ -82,23 +89,7 @@ interface TaskDetailsPanelProps {
   cancellingTaskId?: string | null;
   reviewingTaskId?: string | null;
   onCancel?: (task: Task) => void;
-  onReviewDecision?: (decision: 'merge' | 'rework' | 'block') => void;
-}
-
-function formatTime(isoString?: string): string {
-  if (!isoString) return '--:--:--';
-  const date = new Date(isoString);
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
-  return `${hours}:${minutes}:${seconds}`;
-}
-
-function extractFailureSummary(review: Review | null, events: EventRecord[]) {
-  const reviewFailure = review?.latestWorkerResult?.evidence?.failureSummary?.trim();
-  if (reviewFailure) return reviewFailure;
-  const event = events.find((item) => item.type === 'status_changed' && item.payload?.failureSummary);
-  return event?.payload?.failureSummary?.trim() || null;
+  onReviewDecision?: (decision: 'merge' | 'rework' | 'block', input?: ReviewDecisionInput) => void;
 }
 
 function canCancelTask(status?: string) {
@@ -184,80 +175,6 @@ const LineageSection: React.FC<{ task: Task; parentTaskId: string | null }> = ({
   );
 };
 
-const RISK_LEVEL_STYLES: Record<string, string> = {
-  low: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100',
-  needs_human_attention: 'border-amber-400/30 bg-amber-400/10 text-amber-100',
-  too_large_for_auto_review: 'border-rose-400/30 bg-rose-400/10 text-rose-100',
-};
-
-const RiskBadge: React.FC<{ level: string }> = ({ level }) => {
-  const { t } = useTranslation();
-  const style = RISK_LEVEL_STYLES[level] || 'border-white/20 bg-white/10 text-white/80';
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${style}`}>
-      {t(`riskLevel.${level}`)}
-    </span>
-  );
-};
-
-const RiskSection: React.FC<{ review?: Review | null }> = ({ review }) => {
-  const { t } = useTranslation();
-  const risk = review?.riskAssessment;
-  if (!risk || !risk.level) {
-    return null;
-  }
-  const reasons = Array.isArray(risk.reasons) ? risk.reasons : [];
-  return (
-    <Section title={t('reviewRisk')}>
-      <div className="flex items-center gap-2">
-        <RiskBadge level={risk.level} />
-        {typeof risk.changedFileCount === 'number' && (
-          <span className="text-xs text-white/55">{risk.changedFileCount} {t('changedFiles')}</span>
-        )}
-      </div>
-      {reasons.length > 0 && (
-        <ul className="mt-1 list-disc pl-5 text-sm text-white/70 space-y-0.5">
-          {reasons.map((reason, index) => (
-            <li key={index} className="break-all">{reason}</li>
-          ))}
-        </ul>
-      )}
-    </Section>
-  );
-};
-
-const ReviewSection: React.FC<{ review?: Review | null; mustFix: string[]; canRedriveValue: string }> = ({ review, mustFix, canRedriveValue }) => {
-  const { t } = useTranslation();
-  return (
-    <Section title={t('latestReview')}>
-      <DetailRow label={t('decision')} value={review?.decision} mono />
-      <DetailRow label={t('actor')} value={review?.actor} mono />
-      <DetailRow label={t('updatedAtLabel')} value={formatTime(review?.decidedAt || review?.at)} mono />
-      <DetailRow label={t('reasonCode')} value={review?.evidence?.reasonCode} mono />
-      <DetailRow label={t('canRedrive')} value={canRedriveValue} mono />
-      <DetailRow label={t('redriveStrategy')} value={review?.evidence?.redriveStrategy} mono />
-      <DetailRow label={t('notes')} value={review?.notes} />
-      <DetailRow label={t('mustFix')} value={mustFix.length > 0 ? mustFix.join('; ') : '--'} />
-    </Section>
-  );
-};
-
-const FailureSection: React.FC<{ review?: Review | null; events: EventRecord[] }> = ({ review, events }) => {
-  const { t } = useTranslation();
-  const latestProgress = events.find((event) => event.type === 'progress_reported') || null;
-  const failureType = review?.latestWorkerResult?.evidence?.failureType || null;
-  const failureCode = review?.latestWorkerResult?.evidence?.blockers?.[0]?.code || null;
-
-  return (
-    <Section title={t('latestFailure')}>
-      <DetailRow label={t('failureType')} value={failureType} mono />
-      <DetailRow label={t('failureCode')} value={failureCode} mono />
-      <DetailRow label={t('failureSummary')} value={extractFailureSummary(review || null, events)} />
-      <DetailRow label={t('latestProgress')} value={latestProgress?.payload?.message || latestProgress?.summary} />
-    </Section>
-  );
-};
-
 const PullRequestSection: React.FC<{ pullRequest?: PullRequest | null }> = ({ pullRequest }) => {
   const { t } = useTranslation();
   const url = pullRequest?.url;
@@ -268,57 +185,6 @@ const PullRequestSection: React.FC<{ pullRequest?: PullRequest | null }> = ({ pu
       <DetailRow label={t('prNumber')} value={pullRequest?.number ?? '--'} mono />
       <div className="text-sm text-white/80">
         {t('url')}: {url ? <a className="text-cyan-300 underline break-all" href={url} target="_blank" rel="noreferrer">{url}</a> : '--'}
-      </div>
-    </Section>
-  );
-};
-
-const ReviewActions: React.FC<{
-  task: Task;
-  review?: Review | null;
-  reviewingTaskId?: string | null;
-  onReviewDecision?: (decision: 'merge' | 'rework' | 'block') => void;
-}> = ({ task, review, reviewingTaskId, onReviewDecision }) => {
-  const { t } = useTranslation();
-  if (task.status !== 'review' || !onReviewDecision) {
-    return null;
-  }
-  const disabled = reviewingTaskId === task.id;
-  const riskLevel = review?.riskAssessment?.level;
-  const riskAboveLow = Boolean(riskLevel && riskLevel !== 'low');
-  return (
-    <Section title={t('reviewActions')}>
-      {riskAboveLow && (
-        <div className="flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
-          <RiskBadge level={riskLevel as string} />
-          <span>{t('riskMergeHint')}</span>
-        </div>
-      )}
-      <div className="grid grid-cols-3 gap-2">
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onReviewDecision('merge')}
-          className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-400/20 disabled:opacity-50"
-        >
-          {t('mergeDecision')}
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onReviewDecision('rework')}
-          className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-400/20 disabled:opacity-50"
-        >
-          {t('reworkDecision')}
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onReviewDecision('block')}
-          className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-400/20 disabled:opacity-50"
-        >
-          {t('blockDecision')}
-        </button>
       </div>
     </Section>
   );

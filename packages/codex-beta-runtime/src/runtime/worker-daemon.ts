@@ -71,6 +71,11 @@ interface TaskPayload {
   task: TaskInfo;
   workerPrompt?: string;
   contextMarkdown?: string;
+  attemptId?: string;
+  leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
 }
 
 interface WorkerResult {
@@ -279,6 +284,14 @@ const HEARTBEAT_RETRY_DELAY_MS = 1_000;
 const SUBMIT_RESULT_MAX_RETRIES = 3;
 const SUBMIT_RESULT_RETRY_DELAY_MS = 2_000;
 
+function getDispatcherAuthHeader(): Record<string, string> {
+  const token = process.env.DISPATCHER_API_TOKEN;
+  if (!token) {
+    return {};
+  }
+  return { Authorization: `Bearer ${token}` };
+}
+
 interface ProcessTaskAssignmentInput {
   client: DispatcherClient;
   packageRoot: string;
@@ -287,6 +300,16 @@ interface ProcessTaskAssignmentInput {
   payload: TaskPayload;
   dryRunExecution: boolean;
   at?: string;
+}
+
+function buildWorkerProtocolEnvelope(payload: TaskPayload) {
+  return {
+    attemptId: payload.attemptId,
+    leaseToken: payload.leaseToken,
+    protocolVersion: payload.protocolVersion,
+    traceId: payload.traceId,
+    idempotencyKey: payload.idempotencyKey,
+  };
 }
 
 async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise<{
@@ -324,6 +347,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
   try {
     await input.client.startTask(input.workerId, {
       taskId: input.payload.task.id,
+      ...buildWorkerProtocolEnvelope(input.payload),
       at: input.at ?? nowIso(),
     });
 
@@ -352,6 +376,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
     for (let attempt = 1; attempt <= SUBMIT_RESULT_MAX_RETRIES; attempt++) {
       try {
         await input.client.submitResult(input.workerId, {
+          ...buildWorkerProtocolEnvelope(input.payload),
           result: workerResult,
           changedFiles,
           pullRequest,
@@ -413,6 +438,7 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
       for (let attempt = 1; attempt <= SUBMIT_RESULT_MAX_RETRIES; attempt++) {
         try {
           await input.client.submitResult(input.workerId, {
+            ...buildWorkerProtocolEnvelope(input.payload),
             result: failedResult,
             changedFiles: [],
             pullRequest: null,
@@ -438,8 +464,9 @@ export interface DispatcherClient {
   registerWorker: (worker: { workerId: string; pool: string; hostname: string; labels: string[]; repoDir: string; at: string }) => Promise<unknown>;
   heartbeat: (workerId: string, payload: { at: string }) => Promise<unknown>;
   getAssignedTask: (workerId: string) => Promise<TaskPayload | null>;
-  startTask: (workerId: string, payload: { taskId: string; at: string }) => Promise<unknown>;
-  submitResult: (workerId: string, payload: { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }) => Promise<unknown>;
+  claimTask: (workerId: string, payload?: { at?: string }) => Promise<TaskPayload | null>;
+  startTask: (workerId: string, payload: ReturnType<typeof buildWorkerProtocolEnvelope> & { taskId: string; at: string }) => Promise<unknown>;
+  submitResult: (workerId: string, payload: ReturnType<typeof buildWorkerProtocolEnvelope> & { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }) => Promise<unknown>;
 }
 
 export function createDispatcherClient(dispatcherUrl: string): DispatcherClient {
@@ -450,12 +477,14 @@ export function createDispatcherClient(dispatcherUrl: string): DispatcherClient 
     const timeoutMs = options.timeout ?? 10_000;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const authHeaders = getDispatcherAuthHeader();
 
     try {
       const response = await fetch(url, {
         method,
         headers: {
           "content-type": "application/json",
+          ...authHeaders,
         },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
@@ -506,6 +535,9 @@ export function createDispatcherClient(dispatcherUrl: string): DispatcherClient 
     getAssignedTask(workerId) {
       return call("GET", `/api/workers/${encodeURIComponent(workerId)}/assigned-task`) as Promise<TaskPayload | null>;
     },
+    claimTask(workerId, payload = {}) {
+      return call("POST", `/api/workers/${encodeURIComponent(workerId)}/claim-task`, payload) as Promise<TaskPayload | null>;
+    },
     startTask(workerId, payload) {
       return call("POST", `/api/workers/${encodeURIComponent(workerId)}/start-task`, payload);
     },
@@ -542,7 +574,7 @@ export async function runWorkerDaemonCycle(input: RunWorkerDaemonCycleInput): Pr
   });
   await client.heartbeat(input.workerId, { at });
 
-  const assigned = await client.getAssignedTask(input.workerId) as { assignment?: TaskAssignment; task?: TaskInfo } | null;
+  const assigned = await client.claimTask(input.workerId, { at }) as TaskPayload | null;
   if (!assigned || !assigned.assignment || !assigned.task) {
     return {
       status: "idle",
@@ -558,6 +590,13 @@ export async function runWorkerDaemonCycle(input: RunWorkerDaemonCycleInput): Pr
     payload: {
       assignment: assigned.assignment,
       task: assigned.task,
+      workerPrompt: assigned.workerPrompt,
+      contextMarkdown: assigned.contextMarkdown,
+      attemptId: assigned.attemptId,
+      leaseToken: assigned.leaseToken,
+      protocolVersion: assigned.protocolVersion,
+      traceId: assigned.traceId,
+      idempotencyKey: assigned.idempotencyKey,
     } as TaskPayload,
     dryRunExecution: Boolean(input.dryRunExecution),
     at,
