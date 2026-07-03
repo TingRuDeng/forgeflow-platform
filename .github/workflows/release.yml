@@ -300,6 +300,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Run lint
+        run: pnpm lint
+
+      - name: Validate docs
+        run: pnpm docs:validate
+
+      - name: Run typecheck
+        run: pnpm typecheck
+
+      - name: Run tests
+        run: pnpm test
+
       - name: Run shadow drift gate
         run: pnpm verify:shadow-drift
 

@@ -66,6 +66,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - generic worker claim 已收口为显式副作用路径：`GET /api/workers/:workerId/assigned-task` 现在只读，真正的 claim / assign 走 `POST /api/workers/:workerId/claim-task`。
 - review decision 现在明确支持 `merge`、`block`、`rework`、`changes_requested`；其中 `rework` 和 `changes_requested` 都会落到 `blocked` 任务态，但保留原始 decision 用于 redrive 和审计。
 - 任务进入 `review` 时 dispatcher 现在会做确定性风险分级（`review.riskAssessment`）：命中受保护路径（默认含 auth/payments/migrations/infra/.github/workflows 及 secret/credential/permission 类文件）会标记 `needs_human_attention`，改动文件数超预算（默认 50）会标记 `too_large_for_auto_review`，只有 `low` 才算可自动合并；非 `low` 会落 `review_risk_flagged` 事件，阈值可用 `DISPATCHER_REVIEW_PROTECTED_PATHS` / `DISPATCHER_REVIEW_MAX_CHANGED_FILES` 覆盖。该分级是信息性信号，不替控制层下合并结论。
+- Console 任务详情现在可提交结构化审查证据：`reasonCode`、`mustFix[]`、`canRedrive`、`redriveStrategy`，并在风险非 `low` 时把人工确认随 `acknowledgeRisk` 透传到 dispatcher。
 - dispatch 创建任务时现在有服务端确定性质量门：默认 `warn` 模式下缺验收 / 缺 `allowedPaths` 边界，或命中受保护路径的 sensitive 任务会落 `dispatch_quality_flagged` 事件；`DISPATCHER_DISPATCH_QUALITY_MODE=enforce` 时会直接拒绝不合规任务创建。sensitive 任务即使全局关闭也强制要求验收，且不允许只用 catch-all 范围。
 - dispatcher 现在额外暴露只读 `GET /api/context`：一次性聚合控制层关心的 active 任务、review backlog（含确定性风险分级）、可 redrive 的 blocked 任务和带 traceId 的 recent events，支持 `since` / `eventLimit` 过滤，减少控制层多次拉取 snapshot/query。
 - dispatcher 现在会 canonicalize worker result 的 `taskId/workerId/pool/repo/defaultBranch/branchName/mode`，worker 只能上送 `output/verification/evidence` 等执行证据；不合法元数据会被拒绝。
@@ -283,6 +284,7 @@ forgeflow-dispatcher start
 npm install -g @tingrudeng/codex-beta-runtime
 forgeflow-codex-beta init
 forgeflow-codex-beta doctor
+export DISPATCHER_API_TOKEN="your-secret-token"
 forgeflow-codex-beta start worker
 ```
 
@@ -292,8 +294,11 @@ forgeflow-codex-beta start worker
 npm install -g @tingrudeng/gemini-beta-runtime
 forgeflow-gemini-beta init
 forgeflow-gemini-beta doctor
+export DISPATCHER_API_TOKEN="your-secret-token"
 forgeflow-gemini-beta start worker
 ```
+
+`codex` / `gemini` 远程 runtime 会通过 `POST /api/workers/:workerId/claim-task` 领取任务，并把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 v1 envelope 回写到 start/result mutation。dispatcher 使用默认 `token` 认证模式时，远程机器必须设置同一个 `DISPATCHER_API_TOKEN`。
 
 远程 Trae 运行时：
 
@@ -365,10 +370,11 @@ node scripts/release-package.js --package trae-beta-runtime --bump prerelease --
 
 该助手默认为 dry-run 模式，只有显式传入 `--publish` 才会真正修改 `package.json` 并发布到 npm。`--publish` 现在是 CI-only 门禁，本地直接执行会失败；推荐入口是 `.github/workflows/release.yml`，由 GitHub Actions 用 OIDC + provenance 执行发布；发布后的 OpenSSF Scorecard 改由独立的 `.github/workflows/release-scorecard.yml` 在 `Release` 成功后跟跑。发包前还会校验 npm `dist-tag`；包含 shell 元字符或非法字符的 tag 会在改版本号之前直接失败。手动发布路径会先完成 `npm publish`，再提交版本变更并推送 release tag，避免 npm 发布失败时 git 历史提前记录未发布版本。
 
-自动发布还有两条硬门禁：
+自动发布还有几条硬门禁：
 
 - 只有 `.github/workflows/release.yml` 这一条正式发布链路，`packages/*/package.json` 变更不会再触发重复 workflow 并发发包。
 - 只有当 npm 已把当前仓库 `TingRuDeng/forgeflow-platform` 配置成 `@tingrudeng/*` 包的 Trusted Publisher，且仓库或组织变量 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 时，push 自动发包才会真正执行；否则 workflow 会成功结束并明确写出“已跳过自动发布”。
+- push 自动发布在 `npm publish` 前会先运行 `pnpm lint`、`pnpm docs:validate`、`pnpm typecheck`、`pnpm test` 和 `pnpm verify:shadow-drift`，避免 main 分支直接绕过常规验证发包。
 - release job 会先把 npm CLI 升到 `11.12.1`；npm Trusted Publishing 至少要求 `npm 11.5.1+`，不要再用 Node 自带的 npm 10.x 直接判断发布链是否可用。
 - 如果手动发布已经成功写入 npm，但后续 git commit/tag/push 失败，Actions summary 会提示 `手动发布需要恢复` 并创建恢复 issue；此时按 `docs/runbooks/release-cadence.md` 补交版本记录和同名 release tag。
 

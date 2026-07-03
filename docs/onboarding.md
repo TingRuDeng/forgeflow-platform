@@ -176,8 +176,11 @@ worker daemon 会上报 `progress_reported` 运行阶段事件，可用 `watch -
 npm install -g @tingrudeng/codex-beta-runtime
 forgeflow-codex-beta init
 forgeflow-codex-beta doctor
+export DISPATCHER_API_TOKEN="your-secret-token"
 forgeflow-codex-beta start worker
 ```
+
+远程 `codex` / `gemini` runtime 通过 `POST /api/workers/:workerId/claim-task` 领取任务，并在 start/result 回写时携带 dispatcher 返回的 v1 envelope。dispatcher 使用默认 `token` 认证模式时，远程机器必须设置同一个 `DISPATCHER_API_TOKEN`；只有显式切到 `open` 或满足 `legacy` loopback 条件时才可匿名访问。
 
 脚本方式仅用于在 ForgeFlow 仓库内做开发或调试：
 

@@ -19,17 +19,31 @@ async function parseJsonResponse(res: Response) {
   }
 }
 
+function extractResponseError(body: unknown, fallback: string) {
+  if (body && typeof body === 'object') {
+    const record = body as { message?: unknown; error?: unknown };
+    return String(record.message || record.error || fallback);
+  }
+  return fallback;
+}
+
 const fetcher = async (url: string) => {
   const res = await fetch(url);
   const body = await parseJsonResponse(res);
   if (!res.ok) {
-    const message = body && typeof body === 'object' && 'message' in body
-      ? String((body as { message?: unknown }).message || res.statusText)
-      : res.statusText;
+    const message = extractResponseError(body, res.statusText);
     throw new Error(message || `HTTP ${res.status}`);
   }
   return body;
 };
+
+interface ReviewDecisionInput {
+  reasonCode?: string;
+  mustFix?: string[];
+  canRedrive?: boolean;
+  redriveStrategy?: string;
+  acknowledgeRisk?: boolean;
+}
 
 const App: React.FC = () => {
   const { t } = useTranslation();
@@ -164,7 +178,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleReviewDecision = async (decision: 'merge' | 'rework' | 'block') => {
+  const handleReviewDecision = async (decision: 'merge' | 'rework' | 'block', input: ReviewDecisionInput = {}) => {
     if (!selectedTask?.id) return;
 
     try {
@@ -176,18 +190,27 @@ const App: React.FC = () => {
           decision,
           actor: 'console-ui',
           notes: `${decision} from console UI`,
+          acknowledgeRisk: input.acknowledgeRisk,
+          evidence: {
+            reasonCode: input.reasonCode,
+            mustFix: input.mustFix,
+            canRedrive: input.canRedrive,
+            redriveStrategy: input.redriveStrategy,
+          },
           at: new Date().toISOString(),
         }),
       });
 
       if (!res.ok) {
-        throw new Error('Failed to submit review decision');
+        const errorMessage = extractResponseError(await parseJsonResponse(res), 'Failed to submit review decision');
+        throw new Error(errorMessage);
       }
 
       await mutate();
     } catch (err) {
       console.error(err);
-      alert(t('reviewActionFailed'));
+      const message = err instanceof Error ? err.message : String(err);
+      alert(`${t('reviewActionFailed')}: ${message}`);
     } finally {
       setReviewingTaskId(null);
     }

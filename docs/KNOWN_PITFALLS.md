@@ -64,9 +64,9 @@ Treating them as one API surface leads to wrong client assumptions.
 
 Verified divergence today:
 
-- packaged runtime gateway has `POST /v1/sessions/:sessionId/release`
-- `scripts/lib/` gateway does not
-- session-store default paths also differ
+- packaged runtime gateway and `scripts/lib/` gateway both expose `POST /v1/sessions/:sessionId/release`
+- both paths now align on persistent session parsing, chat metadata passthrough and key debugLog events
+- they are still two implementations, so default paths, launch wiring and future route behavior can drift again
 
 When you touch one gateway implementation, check the other one in the same task.
 
@@ -171,7 +171,8 @@ the release job can build successfully, sign provenance successfully, and still 
 `npm publish` step.
 
 The repository now keeps push-triggered auto release behind the explicit variable
-`NPM_TRUSTED_PUBLISHING_ENABLED=true` and validates package metadata before publish.
+`NPM_TRUSTED_PUBLISHING_ENABLED=true`, validates package metadata, and runs lint / docs validation /
+typecheck / tests / shadow drift gate before publish.
 
 Do not treat a green OIDC/provenance setup in GitHub Actions as proof that npm-side trusted
 publisher configuration is complete.
