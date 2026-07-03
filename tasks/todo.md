@@ -344,6 +344,55 @@ Document-refresh: needed
 
 结论：通过。
 
+# 2026-07-03 beta runtime 重复实现漂移门禁
+
+## 目标
+
+治理 Codex/Gemini packaged runtime 的重复实现风险。当前两个包的 `worker-daemon.ts` 和 `task-worktree.ts` 完全一致，`run-worker-assignment.ts` 因 Codex/Gemini CLI 参数不同不纳入一致性门禁。
+
+## 执行计划
+
+- [x] P1 串行：补 parity gate，要求两个 beta runtime 的共享 worker daemon / task worktree 源文件保持一致。
+- [x] P2 串行：实现最小 parity 测试辅助函数。
+- [x] P3 串行：运行 beta runtime 测试、typecheck、lint、docs 校验和 diff 检查。
+- [x] P4 串行：执行 review-gate 并补充收尾小结。
+
+## 并行说明
+
+本轮不使用 subagent。改动集中在测试门禁与任务记录，串行处理可以避免误改发布结构。
+
+## 验证结果
+
+- `CI=true pnpm --filter @tingrudeng/codex-beta-runtime test`：通过，3 个测试文件 / 9 个测试。
+- `CI=true pnpm --filter @tingrudeng/gemini-beta-runtime test`：通过，2 个测试文件 / 8 个测试。
+- `CI=true HOME=/private/tmp/forgeflow-test-home pnpm --filter @forgeflow/dispatcher test`：通过，43 个测试文件 / 456 个测试。
+- `CI=true HOME=/private/tmp/forgeflow-test-home pnpm test`：通过，递归全量测试通过。
+- `CI=true pnpm typecheck`：通过。
+- `CI=true pnpm lint`：通过。
+- `CI=true pnpm docs:validate`：通过。
+- `git diff --check`：通过。
+
+## Review-gate 小结
+
+终态：finished
+
+Spec 符合度：符合。新增 parity gate 覆盖 Codex/Gemini beta runtime 的共享 `worker-daemon.ts` 与 `task-worktree.ts`，没有把 provider CLI 差异文件纳入强一致。
+
+安全检查：未新增 secret、外部输入处理或网络写入路径。
+
+测试与验证：最小包测试、dispatcher 集成测试、全量测试、typecheck、lint、docs 校验和 diff 检查均已通过。
+
+复杂度检查：新增测试辅助函数短小，dispatcher 测试脚本变更只显式绑定已有配置；未新增复杂分支。
+
+Document-refresh: not-needed
+原因：本轮只新增测试门禁和测试运行配置，不改变用户能力、协议或对外文档语义。
+
+剩余风险：parity gate 阻止共享源文件单边漂移，但尚未把重复实现抽成真正共享发布模块。
+
+潜在技术债：后续若要彻底去重，需要设计 beta runtime 共享包的发布、版本和回滚边界，不能只靠测试一致性长期替代抽象。
+
+结论：通过。
+
 # 2026-07-03 dispatcher 全量测试稳定性修复
 
 ## 目标
