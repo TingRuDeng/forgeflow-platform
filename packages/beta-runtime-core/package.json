@@ -1,0 +1,63 @@
+{
+  "name": "@tingrudeng/beta-runtime-core",
+  "version": "0.1.0-beta.1",
+  "private": false,
+  "description": "Shared ForgeFlow beta worker daemon and task worktree runtime helpers.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TingRuDeng/forgeflow-platform.git",
+    "directory": "packages/beta-runtime-core"
+  },
+  "homepage": "https://github.com/TingRuDeng/forgeflow-platform/tree/main/packages/beta-runtime-core",
+  "bugs": {
+    "url": "https://github.com/TingRuDeng/forgeflow-platform/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./runtime/worker-daemon.js": {
+      "types": "./dist/runtime/worker-daemon.d.ts",
+      "default": "./dist/runtime/worker-daemon.js"
+    },
+    "./runtime/task-worktree.js": {
+      "types": "./dist/runtime/task-worktree.d.ts",
+      "default": "./dist/runtime/task-worktree.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "PUBLISHING.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "forgeflow",
+    "worker",
+    "runtime",
+    "codex",
+    "gemini"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}

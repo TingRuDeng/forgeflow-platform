@@ -1,23 +1,25 @@
-# Publishing @tingrudeng/gemini-beta-runtime
+# 发布 @tingrudeng/gemini-beta-runtime
 
-This package is prepared for **public beta npm publishing**, but is not published automatically from this repository.
+该包面向 **公开 beta npm 发布**准备，但不会由本仓库自动发布。
 
-## Preconditions
+## 前置条件
 
 - Node 22+
-- pnpm installed
-- npm access to publish the `@tingrudeng` scope
-- a clean checkout of the ForgeFlow repository
+- 已安装 pnpm
+- 具备发布 `@tingrudeng` scope 的 npm 权限
+- 使用干净的 ForgeFlow 仓库 checkout
 
-## Validate before publish
+## 发布前验证
 
 ```bash
 pnpm --filter @tingrudeng/gemini-beta-runtime test
 pnpm --filter @tingrudeng/gemini-beta-runtime typecheck
 pnpm --filter @tingrudeng/gemini-beta-runtime build
+node scripts/release-package.js --package beta-runtime-core --bump prerelease --dry-run
+node scripts/release-package.js --package gemini-beta-runtime --bump prerelease --dry-run
 ```
 
-Before the first public beta publish, also run one real remote-machine smoke check:
+首次公开 beta 发布前，还要在真实远端机器上跑一次 smoke check：
 
 ```bash
 node packages/gemini-beta-runtime/dist/cli.js init ...
@@ -26,7 +28,7 @@ node packages/gemini-beta-runtime/dist/cli.js start worker --once
 node packages/gemini-beta-runtime/dist/cli.js status
 ```
 
-If you want full repository confidence before cutting a package version:
+如果发布前需要完整仓库级信心，再运行：
 
 ```bash
 pnpm test
@@ -34,9 +36,9 @@ pnpm typecheck
 git diff --check
 ```
 
-## Package scope
+## 包发布范围
 
-The package is configured for public publish:
+该包配置为公开发布：
 
 ```json
 {
@@ -46,18 +48,22 @@ The package is configured for public publish:
 }
 ```
 
-## Publish flow
+## 发布流程
 
-From the repository root:
+从仓库根目录执行：
 
 ```bash
+pnpm --filter @tingrudeng/beta-runtime-core build
+pnpm --filter @tingrudeng/beta-runtime-core publish --access public --no-git-checks
 pnpm --filter @tingrudeng/gemini-beta-runtime build
 pnpm --filter @tingrudeng/gemini-beta-runtime publish --access public --no-git-checks
 ```
 
-## Install flow on a remote machine
+当 Gemini runtime 依赖新的 core 版本时，必须先发布 `@tingrudeng/beta-runtime-core`。Gemini 包会在 `prepublishOnly` 阶段把 `workspace:*` runtime 依赖重写为具体 npm 版本，避免发布包携带 workspace 协议。
 
-After publish, the intended install shape is:
+## 远端机器安装流程
+
+发布后，预期安装形态如下：
 
 ```bash
 pnpm add -g @tingrudeng/gemini-beta-runtime
