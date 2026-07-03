@@ -52,7 +52,7 @@ const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
     id: "gemini",
     supportedPermissionKeys: [],
     defaultPermissions: {},
-    supportedModes: ["run", "review"],
+    supportedModes: ["run"],
   },
   opencode: {
     id: "opencode",

@@ -15,6 +15,7 @@ describe("provider registry", () => {
   it("declares gemini with no sandbox support", () => {
     const gemini = getProviderDefinition("gemini");
     expect(gemini.supportedPermissionKeys).not.toContain("sandbox");
+    expect(gemini.supportedModes).toEqual(["run"]);
   });
 
   it("declares trae automation-specific permissions", () => {
@@ -53,6 +54,15 @@ describe("provider registry", () => {
     })).toMatchObject({
       ok: false,
       reasonCode: "unsupported_permission",
+    });
+
+    expect(evaluateProviderAdmission({
+      providerId: "gemini",
+      mode: "review",
+      permissions: {},
+    })).toMatchObject({
+      ok: false,
+      reasonCode: "unsupported_mode",
     });
   });
 

@@ -4,7 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { logger } from "./logger.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
@@ -51,7 +50,12 @@ function acquireBuildLock() {
 if (!buildState[DISPATCHER_DIST_BUILT] && process.env.FORGEFLOW_DISPATCHER_DIST_PREBUILT !== "1") {
     const releaseBuildLock = acquireBuildLock();
     try {
-        logger.info({ event: "dispatcher_build_triggered", message: "Building apps/dispatcher to ensure fresh dist" });
+        process.stderr.write(JSON.stringify({
+            level: "info",
+            service: "forgeflow",
+            event: "dispatcher_build_triggered",
+            message: "Building apps/dispatcher to ensure fresh dist",
+        }) + "\n");
         execSync("pnpm --filter @forgeflow/dispatcher build", {
             cwd: repoRoot,
             stdio: ["ignore", "ignore", "inherit"],

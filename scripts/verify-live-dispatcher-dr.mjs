@@ -51,11 +51,23 @@ async function requestJson(baseUrl, method, pathname, body) {
 }
 
 function parseChildServerOutput(output) {
-  try {
-    return JSON.parse(output);
-  } catch {
-    return null;
+  const starts = [];
+  for (let index = 0; index < output.length; index += 1) {
+    if (output[index] === "{") {
+      starts.unshift(index);
+    }
   }
+  for (const index of starts) {
+    try {
+      const payload = JSON.parse(output.slice(index));
+      if (payload?.status === "listening" && typeof payload.baseUrl === "string") {
+        return payload;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 function waitForProcessExit(child) {
@@ -80,6 +92,7 @@ function spawnDispatcherChild(stateDir) {
     env: {
       ...process.env,
       DISPATCHER_AUTH_MODE: "open",
+      FORGEFLOW_DISPATCHER_DIST_PREBUILT: "1",
       RUNTIME_STATE_BACKEND: "sqlite",
     },
     stdio: ["ignore", "pipe", "pipe"],

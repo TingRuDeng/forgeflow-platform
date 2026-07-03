@@ -46,7 +46,7 @@ FORGEFLOW_CONSOLE_API_TOKEN=your-secret-token
 dispatcher 使用默认 `token` 认证模式时，Console 必须配置与控制面一致的 token。配置助手入口为：
 
 ```bash
-pnpm --filter console config:set --url http://127.0.0.1:8787 --token your-secret-token
+pnpm --filter console config:set -- --url http://127.0.0.1:8787 --token your-secret-token
 pnpm --filter console config:show
 ```
 
