@@ -1,7 +1,18 @@
 {
   "name": "@tingrudeng/codex-beta-runtime",
   "version": "0.1.0-beta.2",
+  "private": false,
   "description": "Minimal remote-machine runtime package for ForgeFlow Codex worker daemon",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TingRuDeng/forgeflow-platform.git",
+    "directory": "packages/codex-beta-runtime"
+  },
+  "homepage": "https://github.com/TingRuDeng/forgeflow-platform/tree/main/packages/codex-beta-runtime",
+  "bugs": {
+    "url": "https://github.com/TingRuDeng/forgeflow-platform/issues"
+  },
   "type": "module",
   "bin": {
     "forgeflow-codex-beta": "dist/cli.js"
