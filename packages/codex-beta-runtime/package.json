@@ -17,6 +17,9 @@
   "bin": {
     "forgeflow-codex-beta": "dist/cli.js"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "files": [
     "dist",
     "README.md",
