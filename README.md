@@ -28,6 +28,8 @@ ai_summary:
     - "scripts/run-dispatcher-server.js"
     - "packages/forgeflow-dispatcher/README.md"
     - "packages/trae-beta-runtime/README.md"
+    - ".github/workflows/release.yml"
+    - "docs/runbooks/release-cadence.md"
   stale_when:
     - "主线运行入口、worker 定位、发布包或阶段能力边界变化"
 ```
@@ -42,7 +44,7 @@ ai_summary:
 - 用 `pnpm test`、`pnpm typecheck` 和 `git diff --check` 做常规交付验证。
 - 对运行入口事实，核对 `scripts/start-control-plane.sh`、`scripts/run-dispatcher-server.js`、`packages/forgeflow-dispatcher/README.md` 和 `packages/trae-beta-runtime/README.md`。
 
-forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都是受支持、并列的 worker 接入方式。三者均有远程运行时包（`@tingrudeng/codex-beta-runtime`、`@tingrudeng/gemini-beta-runtime`、`@tingrudeng/trae-beta-runtime`）。说明：Trae automation 仍是最成熟的无人值守链路；`codex/gemini` worker daemon 在源码可维护性上仍有收敛债务（见 `docs/TECH_DEBT.md`），但已是受支持运行路径。
+forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都是受支持、并列的 worker 接入方式。源码中三者均有远程运行时包；npm registry 当前公开可安装的是 `@tingrudeng/codex-beta-runtime` 与 `@tingrudeng/trae-beta-runtime`，`@tingrudeng/gemini-beta-runtime` 仍需先完成 npm 包名和 Trusted Publisher 配置。说明：Trae automation 仍是最成熟的无人值守链路；`codex/gemini` worker daemon 在源码可维护性上仍有收敛债务（见 `docs/TECH_DEBT.md`），但已是受支持运行路径。
 
 ## 当前主线
 
@@ -51,7 +53,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - Phase 1 运行时合并到 TypeScript 已完成：`worker-daemon`、`review-decision`、`dispatcher-state`、`dispatcher-server` 主链现在都通过 `scripts/*.js` 入口桥接到 `apps/dispatcher/dist` 下的 TypeScript foundation；`review-memory` 和 `task-worktree` 也已下沉到 `apps/dispatcher`，`scripts/lib/*` 仅保留薄 bootstrap wrapper。
 - Phase 2 持久化切换主线已完成：dispatcher 默认真相源现在是 `.forgeflow-dispatcher/runtime-state.db`，基于 `node:sqlite` 落盘；只有显式传 `--persistence-backend json`（或设置 `RUNTIME_STATE_BACKEND=json`）时才回退到 JSON。
 - `scripts/*.js` 仍然是当前 live 入口与本地启动方式；它们现在主要承担 CLI、bootstrap、薄适配层与剩余脚本 glue，而不再单独承载整条 dispatcher 主链实现。
-- `dispatcher server` + `worker daemon` 的 `codex` / `gemini` 链路是受支持的多机执行路径，与 Trae 并列；远程机器可用 `@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 接入。源码层 worker-daemon 构建收敛仍是后续债务（见 `docs/TECH_DEBT.md`）。
+- `dispatcher server` + `worker daemon` 的 `codex` / `gemini` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。源码层 worker-daemon 构建收敛仍是后续债务（见 `docs/TECH_DEBT.md`）。
 - `.orchestrator` assignment package、本地执行脚本、结果回写与 review 决策链路仍然可用。
 - review memory 已有文件存储契约，并会在 dispatcher 创建 dispatch 时按 repo/scope/worker 条件注入上下文。
 - Trae 的首选无人值守路径是 `Trae automation gateway` + `Trae automation worker`。
@@ -192,7 +194,7 @@ node scripts/run-dispatcher-server.js \
 说明：
 
 - 如果确实需要监听非 loopback 地址，必须显式传 `--host` 或设置 `FORGEFLOW_DISPATCHER_HOST`；不要再把 `0.0.0.0` 当成默认值。
-- 控制中枢启动后，可由远程机器通过 `@tingrudeng/trae-beta-runtime`、`@tingrudeng/codex-beta-runtime` 或 `@tingrudeng/gemini-beta-runtime` 接入；`run-worker-daemon.js` 是源码仓内 `codex/gemini` 的本地/调试入口。
+- 控制中枢启动后，可由远程机器通过已公开的 `@tingrudeng/trae-beta-runtime`、`@tingrudeng/codex-beta-runtime` 接入；Gemini 远程包源码在 `packages/gemini-beta-runtime/`，npm 包名配置完成前不要把 `@tingrudeng/gemini-beta-runtime` 当作已可安装入口。`run-worker-daemon.js` 是源码仓内 `codex/gemini` 的本地/调试入口。
 - 本地 `.orchestrator` drill 脚本已退役，控制层不再通过 `run-codex-control-flow.js` 触发旧闭环。
 - 控制平面启动后，当前推荐由远程 Trae 运行时机器执行 `forgeflow-trae-beta start all` 接入。
 - 阶段三核心调试时可额外设置：
@@ -259,13 +261,19 @@ git diff --check
 
 ### 3. 安装公开 npm 包
 
-当前公开发布的 npm 包包括：
+当前 npm registry 可公开安装的包包括：
 
 - 单机 dispatcher/control-plane runtime：`@tingrudeng/forgeflow-dispatcher`
 - 远程 Codex 运行时：`@tingrudeng/codex-beta-runtime`
-- 远程 Gemini 运行时：`@tingrudeng/gemini-beta-runtime`
 - 远程 Trae 运行时：`@tingrudeng/trae-beta-runtime`
 - control-layer CLI：`@tingrudeng/worker-review-orchestrator-cli`
+
+源码内已有但当前不应写成公开安装入口的包：
+
+- 远程 Gemini 运行时：`@tingrudeng/gemini-beta-runtime`
+- Codex / Gemini 共享 runtime core：`@tingrudeng/beta-runtime-core`
+
+这两个包名当前在 npm registry 查询仍返回 E404；需要先完成 npm 包名和 Trusted Publisher 配置，再由后续版本变更触发自动发布。
 
 单机 dispatcher/control-plane runtime：
 
@@ -288,14 +296,13 @@ export DISPATCHER_API_TOKEN="your-secret-token"
 forgeflow-codex-beta start worker
 ```
 
-远程 Gemini worker runtime：
+远程 Gemini worker runtime 当前先使用仓库内源码入口；npm 包名配置完成并发布后，再改用 `npm install -g @tingrudeng/gemini-beta-runtime`：
 
 ```bash
-npm install -g @tingrudeng/gemini-beta-runtime
-forgeflow-gemini-beta init
-forgeflow-gemini-beta doctor
+pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta init
+pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta doctor
 export DISPATCHER_API_TOKEN="your-secret-token"
-forgeflow-gemini-beta start worker
+pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta start worker
 ```
 
 `codex` / `gemini` 远程 runtime 会通过 `POST /api/workers/:workerId/claim-task` 领取任务，并把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 v1 envelope 回写到 start/result mutation。dispatcher 使用默认 `token` 认证模式时，远程机器必须设置同一个 `DISPATCHER_API_TOKEN`。
@@ -382,6 +389,7 @@ node scripts/release-package.js --package trae-beta-runtime --bump prerelease --
 当前还要注意一个外部前置条件：
 
 - 仓库内阶段一发布链已经切到 CI-only + OIDC + provenance；OpenSSF Scorecard 现在单独挂在 `Release` 成功后的 `release-scorecard.yml` 上，避免后置评分把发包主 workflow 拉红。
+- `@tingrudeng/gemini-beta-runtime` 和 `@tingrudeng/beta-runtime-core` 当前还属于“源码内已有、npm 包名待配置”的包；在 npm 返回 E404 时，处理方式不是反复 rerun，而是先完成包名权限 / Trusted Publisher 绑定，再用后续版本变更重新触发自动发布。排查入口见 `docs/runbooks/release-cadence.md`。
 
 如需安装发包助手 skill：
 

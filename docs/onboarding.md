@@ -144,7 +144,7 @@ ai_summary:
 - 控制层会话：按需安装 `worker-review-orchestrator` skill
 - 控制层机器：按需安装 `@tingrudeng/worker-review-orchestrator-cli`
 - 远程 Codex 机器：按需安装 `@tingrudeng/codex-beta-runtime`
-- 远程 Gemini 机器：按需安装 `@tingrudeng/gemini-beta-runtime`
+- 远程 Gemini 机器：当前先使用源码仓 `packages/gemini-beta-runtime/` 入口；`@tingrudeng/gemini-beta-runtime` 的 npm 包名配置完成后再按 npm 包安装
 - 远程 Trae 机器：按需安装 `@tingrudeng/trae-beta-runtime`
 
 ### 4.1 本地最小闭环
@@ -158,7 +158,7 @@ ai_summary:
 
 - `scripts/start-control-plane.sh`
 - `forgeflow-review-orchestrator dispatch-task/watch/inspect/decide`
-- `@tingrudeng/trae-beta-runtime`、`@tingrudeng/codex-beta-runtime`、`@tingrudeng/gemini-beta-runtime` 或源码仓内 `scripts/run-worker-daemon.js`
+- `@tingrudeng/trae-beta-runtime`、`@tingrudeng/codex-beta-runtime`、源码仓内 `packages/gemini-beta-runtime/` 或 `scripts/run-worker-daemon.js`
 
 ### 4.2 `codex` / `gemini` 多机链路
 
@@ -166,7 +166,7 @@ ai_summary:
 
 1. 启动 `dispatcher server`
 2. 把 `.orchestrator` 发布到 dispatcher
-3. 在各机器上启动 worker runtime（`scripts/run-worker-daemon.js` 本地/调试，或 `@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 远程包）
+3. 在各机器上启动 worker runtime（`scripts/run-worker-daemon.js` 本地/调试，或已公开的 `@tingrudeng/codex-beta-runtime` 远程包；Gemini npm 包发布前用 `packages/gemini-beta-runtime/` 源码入口）
 
 worker daemon 会上报 `progress_reported` 运行阶段事件，可用 `watch --summary` / `inspect --summary` 与 Console 观察进度。源码层 worker-daemon 构建收敛仍是后续债务（见 `TECH_DEBT.md`）。
 
@@ -178,6 +178,15 @@ forgeflow-codex-beta init
 forgeflow-codex-beta doctor
 export DISPATCHER_API_TOKEN="your-secret-token"
 forgeflow-codex-beta start worker
+```
+
+远程 Gemini runtime 在 npm 包发布前先用源码入口：
+
+```bash
+pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta init
+pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta doctor
+export DISPATCHER_API_TOKEN="your-secret-token"
+pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta start worker
 ```
 
 远程 `codex` / `gemini` runtime 通过 `POST /api/workers/:workerId/claim-task` 领取任务，并在 start/result 回写时携带 dispatcher 返回的 v1 envelope。dispatcher 使用默认 `token` 认证模式时，远程机器必须设置同一个 `DISPATCHER_API_TOKEN`；只有显式切到 `open` 或满足 `legacy` loopback 条件时才可匿名访问。

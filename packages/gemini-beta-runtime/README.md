@@ -2,6 +2,11 @@
 
 ForgeFlow 远程 Gemini worker runtime 包，用于在没有 forgeflow-platform 源码 checkout 的机器上运行无人值守 Gemini worker。
 
+当前发布状态：
+
+- 源码内 runtime 已存在，可在仓库内用 `pnpm --filter @tingrudeng/gemini-beta-runtime exec ...` 验证。
+- npm 包名当前仍需外部包名和 Trusted Publisher 配置；配置完成并发布前，不要把 `npm install -g @tingrudeng/gemini-beta-runtime` 写成已可用安装入口。
+
 当前范围：
 
 - 初始化本地 runtime 配置
@@ -10,7 +15,7 @@ ForgeFlow 远程 Gemini worker runtime 包，用于在没有 forgeflow-platform 
 - 查看 runtime 状态并停止 worker 进程
 - 直接更新 runtime 包
 
-该包对远程 Gemini runtime 路径是自包含的：
+该包发布后对远程 Gemini runtime 路径是自包含的：
 
 - 不要求本机 checkout forgeflow-platform 仓库
 - 要求本机 checkout worker 要执行任务的目标项目仓库
@@ -29,13 +34,13 @@ pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta update
 pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta version
 ```
 
-后台运行并写日志：
+仓库内后台运行并写日志：
 
 ```bash
-forgeflow-gemini-beta start worker --detach --log-file /tmp/gemini-worker.log
+pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta start worker --detach --log-file /tmp/gemini-worker.log
 ```
 
-发布后的预期用法：
+npm 包名配置并发布后的预期用法：
 
 ```bash
 npm install -g @tingrudeng/gemini-beta-runtime
