@@ -182,7 +182,7 @@ node scripts/verify-live-dispatcher-dr.mjs
 
 阶段三核心底座当前已完成：
 
-- assignment lease / lock；session、repo、branch lease 当前主要是 schema / projection / metrics 表达
+- task 生命周期 lease / lock：claim 获取 assignment / repo / branch，continuation 或 follow-up 任务额外获取 session；dispatcher 外部直接操作仍需 operator-level lock
 - query-first SQLite projection
 - Postgres / queue shadow path
 - SLO / burn-rate

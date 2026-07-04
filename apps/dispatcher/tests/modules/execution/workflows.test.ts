@@ -59,6 +59,22 @@ describe("workflow quality gates", () => {
     }
   });
 
+  it("keeps brand-new npm package names out of the automatic publish matrix", () => {
+    const workflow = readWorkflow("release.yml");
+    const packageExistsIndex = workflow.indexOf('npm view "${pkg_name}" version');
+    const versionExistsIndex = workflow.indexOf('npm view "${pkg_name}@${local_version}" version');
+    const setupSummaryIndex = workflow.indexOf("publish-setup-required-summary:");
+    const publishAutoIndex = workflow.indexOf("publish-auto:");
+
+    expect(workflow).toContain("new-packages");
+    expect(workflow).toContain("has-new-packages");
+    expect(workflow).toContain("自动发布等待 npm 包名配置");
+    expect(packageExistsIndex).toBeGreaterThanOrEqual(0);
+    expect(versionExistsIndex).toBeGreaterThan(packageExistsIndex);
+    expect(setupSummaryIndex).toBeGreaterThan(packageExistsIndex);
+    expect(setupSummaryIndex).toBeLessThan(publishAutoIndex);
+  });
+
   it("runs shadow drift as part of the stage3 rollout gate", () => {
     const packageJson = fs.readFileSync(path.join(repoRoot, "package.json"), "utf8");
     const scripts = JSON.parse(packageJson).scripts;

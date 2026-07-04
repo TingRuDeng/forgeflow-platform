@@ -37,10 +37,15 @@
 当前支持的 `resourceType`：
 
 - `assignment`
+- `repo`
+- `branch`
+- `session`
 
 当前主线强约束：
 
-- assignment claim / start / result / cancel / offline / reconcile 都会检查或释放 `assignment` lease
+- task claim 会获取 `assignment` / `repo` / `branch` lease
+- continuation 或 follow-up 任务会额外获取 `session` lease
+- result / cancel / review decision / offline / reconcile 会释放或回收已获取的 task resource lease
 - lease 冲突会记录 `lease_conflict` 事件
 - 过期回收会记录 `lease_reclaimed` 事件
 - dispatcher metrics 会暴露：

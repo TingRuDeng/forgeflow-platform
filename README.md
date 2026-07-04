@@ -82,7 +82,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - `/api/metrics` 现在还会汇总关键失败信号：`submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，并输出 `retryRatePct`、`failureCodes`、`reviewReasonCodes` 这组阶段二收口指标。
 - 脚本侧 pino logger 现在默认对 `Authorization`、`DISPATCHER_API_TOKEN`、`GITHUB_TOKEN` 等敏感字段做 redact，减少 worker / dispatcher 日志泄露风险。
 - Trae runtime 现在会通过 `POST /api/workers/:workerId/events` 回写结构化 phase events 与 failure blocker codes；generic worker daemon 的 failed result 也会带 blocker code，控制层不必再只靠 regex 猜测失败类型。
-- 阶段三核心底座现在已进入主线：dispatcher 运行时状态引入显式 `leases[]`，当前强约束 acquisition / release 已接入 `assignment`；`session` / `repo` / `branch` 仍主要是 schema、投影和指标预留，不能当作已完整执行的并发治理。
+- 阶段三核心底座现在已进入主线：dispatcher 运行时状态引入显式 `leases[]`，task claim 生命周期会获取 `assignment` / `repo` / `branch` lease；continuation 或 follow-up 任务还会基于会话锚点获取 `session` lease。该强约束只覆盖 dispatcher 管理的 task 生命周期，不覆盖绕过 dispatcher HTTP 或直接操作 repo、branch、Trae session store 的外部脚本。
 - dispatcher SQLite 真相源现在同时维护 query-first 结构化投影；可用 `DISPATCHER_STRUCTURED_READS=1` 切换只读查询到 projection 路径，并通过 `/api/query/*` 与 `/api/query/projection-health` 做一致性核对。
 - dispatcher 现在支持可回滚的 Postgres / queue shadow path：`DISPATCHER_SHADOW_MODE=shadow-write` 与 `DISPATCHER_POSTGRES_URL` 打开后，SQLite 仍是真相源，外部库只承接 best-effort shadow projection；shadow 写失败会进入 durable health record、runtime event、metrics 和 SLO。
 - dispatcher 现在额外暴露 `GET /api/slo` 和 `GET /api/dr/status`，用于读取 burn-rate、只读状态、projection 健康度和备份清单。
@@ -374,6 +374,7 @@ node scripts/release-package.js --package trae-beta-runtime --bump prerelease --
 
 - 只有 `.github/workflows/release.yml` 这一条正式发布链路，`packages/*/package.json` 变更不会再触发重复 workflow 并发发包。
 - 只有当 npm 已把当前仓库 `TingRuDeng/forgeflow-platform` 配置成 `@tingrudeng/*` 包的 Trusted Publisher，且仓库或组织变量 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 时，push 自动发包才会真正执行；否则 workflow 会成功结束并明确写出“已跳过自动发布”。
+- push 自动发布只会把 npm 上已经存在的包名纳入发布矩阵；全新包名会在 Actions summary 标记为 `自动发布等待 npm 包名配置`，先完成 npm 包名和 Trusted Publisher 配置后再由后续版本自动发布。
 - push 自动发布在 `npm publish` 前会先运行 `pnpm lint`、`pnpm docs:validate`、`pnpm typecheck`、`pnpm test` 和 `pnpm verify:shadow-drift`，避免 main 分支直接绕过常规验证发包。
 - release job 会先把 npm CLI 升到 `11.12.1`；npm Trusted Publishing 至少要求 `npm 11.5.1+`，不要再用 Node 自带的 npm 10.x 直接判断发布链是否可用。
 - 如果手动发布已经成功写入 npm，但后续 git commit/tag/push 失败，Actions summary 会提示 `手动发布需要恢复` 并创建恢复 issue；此时按 `docs/runbooks/release-cadence.md` 补交版本记录和同名 release tag。

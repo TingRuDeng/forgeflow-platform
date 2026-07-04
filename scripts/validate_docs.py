@@ -1,113 +1,150 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
+import ast
 import re
 import sys
 from pathlib import Path
-
 AI_CONTEXT_PATH = Path("docs/AI_CONTEXT.md")
 DEFAULT_PROFILE = "generic"
 GENERIC_REQUIRED_FILES = ("AGENTS.md", "docs/README.md", "docs/AI_CONTEXT.md")
 ROOT_AUTHORITY_FILES = ("AGENTS.md",)
-ANDROID_REQUIRED_FILES = (
-    "docs/BUILD_MATRIX.md",
-    "docs/MODULE_MAP.md",
-    "docs/TESTING_MATRIX.md",
-    "docs/MANIFEST_AND_PERMISSIONS.md",
-)
+ANDROID_REQUIRED_FILES = ("docs/BUILD_MATRIX.md", "docs/MODULE_MAP.md", "docs/TESTING_MATRIX.md", "docs/MANIFEST_AND_PERMISSIONS.md")
 MAX_FILE_BYTES = 1_000_000
 MAX_AI_CONTEXT_LINES = 120
-REQUIRED_AUTHORITY_HEADINGS = (
-    "## Purpose",
-    "## Source of truth",
-    "## Key facts",
-    "## How to verify",
-    "## Stale when",
-)
-AI_CONTEXT_SECTIONS = (
-    "## Project Snapshot",
-    "## Core Directories",
-    "## Documentation Map",
-    "## Common Task Reading Paths",
-    "## High-Risk Areas",
-    "## Validation Commands",
-    "## Stale when",
-)
+MAX_AGENTS_LINES = 350
+PLACEHOLDER_PATTERN = re.compile(r"\b(TBD|TODO|placeholder|fill in|later)\b|待补|待补充|后续补充")
+MACHINE_PATH_PATTERN = re.compile(r"(?<![\w.-])(/Users/|/Volumes/|/home/|[A-Za-z]:\\)")
+LINK_PATTERN = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+REQUIRED_AUTHORITY_HEADINGS = ("## Purpose", "## Source of truth", "## Key facts", "## How to verify", "## Stale when")
+LEGACY_AUTHORITY_HEADINGS = ("## Purpose", "## Source Of Truth", "## Key Facts", "## How To Verify", "## Stale When")
 REQUIRED_AI_KEYS = ("purpose", "read_when", "source_of_truth", "verify_with", "stale_when")
-COMMAND_PREFIXES = ("./", "bash ", "git ", "make ", "node ", "npm ", "pnpm ", "python ", "python3 ", "yarn ")
-SKIPPED_DIRS = {".git", ".worktrees", ".next", "archive", "coverage", "dist", "external", "node_modules", "plans", "research", "superpowers"}
-SKIPPED_AUTHORITY_DOCS = {"docs/AGENT_STARTER_PROMPT.md", "docs/CODE_REVIEW_REPORT.md", "docs/DOC_SYNC_CHECKLIST.md"}
-SKIPPED_AUTHORITY_PREFIXES = ("docs/archive/", "docs/contracts/", "docs/external/", "docs/plans/", "docs/research/", "docs/runbooks/", "docs/superpowers/", "docs/templates/")
-GENERIC_VALUES = {
-    "tbd", "todo", "n/a", "coming soon", "run tests", "check manually",
-    "follow best practices", "run appropriate tests", "检查一下", "手动确认",
-    "运行测试", "按需验证", "遵循最佳实践", "后续补充", "待补充", "人工检查",
+AI_CONTEXT_SECTIONS = ("## Project Snapshot", "## Core Directories", "## Documentation Map", "## Common Task Reading Paths", "## High-Risk Areas", "## Validation Commands", "## Stale when")
+GENERIC_SECTION_VALUES = {
+    "tbd", "todo", "n/a", "coming soon", "run tests", "check manually", "follow best practices", "use proper architecture",
+    "use clean architecture", "run appropriate tests", "follow conventions", "检查一下", "手动确认", "运行测试", "按需验证",
+    "遵循最佳实践", "后续补充", "待补充", "人工检查", "执行测试", "使用合适的验证",
 }
-PLACEHOLDER_RE = re.compile(r"\b(TBD|TODO|placeholder|fill in|later)\b|待补|待补充|后续补充")
-FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
-LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+COMMAND_PREFIXES = ("./", "python", "python3", "gradle", "./gradlew", "npm", "pnpm", "yarn", "make", "git")
+VERIFY_TIERS = ("quick", "full", "device-required", "release-side-effect")
+SKIPPED_DOC_PARTS = ("docs/archive/", "docs/AGENT_STARTER_PROMPT.md")
+SKIPPED_LINK_DIRS = {".git", ".idea", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv", "__pycache__", "coverage", "dist", "node_modules"}
 LEGACY_DOC_SECTION = "## Legacy detail docs"
-
-
-def validate_root(root: Path | str, profile: str = DEFAULT_PROFILE) -> list[str]:
+def validate_root(root, profile=DEFAULT_PROFILE):
     base = Path(root).resolve()
     issues = validate_base(base)
     if issues:
         return issues
-    legacy_docs = legacy_detail_docs(base)
+
     issues.extend(validate_profile_files(base, profile))
-    issues.extend(validate_authority_docs(base, legacy_docs))
+    issues.extend(validate_authority_docs(base, legacy_detail_docs(base)))
     issues.extend(validate_ai_context(base))
+    issues.extend(validate_repository_shape(base))
     issues.extend(validate_links(base))
     return issues
-
-
-def validate_base(base: Path) -> list[str]:
-    if not base.exists():
-        return [f"{base}: 路径不存在"]
+def validate_base(base):
+    if not base.exists(): return [f"{base}: 路径不存在"]
     return [] if base.is_dir() else [f"{base}: 必须是目录"]
-
-
-def validate_profile_files(base: Path, profile: str) -> list[str]:
+def validate_profile_files(base, profile):
+    issues = []
+    for rel in required_files_for(profile):
+        if not (base / rel).exists():
+            issues.append(f"{rel}: 缺少必需文件 {rel}")
     if profile not in ("generic", "android"):
-        return [f"{base}: 未知 profile {profile}"]
-    return [f"{rel}: 缺少必需文件 {rel}" for rel in required_files_for(profile) if not (base / rel).exists()]
-
-
-def required_files_for(profile: str) -> tuple[str, ...]:
-    """返回当前 profile 的必需文件。"""
+        issues.append(f"{base}: 未知 profile {profile}")
+    return issues
+def required_files_for(profile):
     return GENERIC_REQUIRED_FILES + (ANDROID_REQUIRED_FILES if profile == "android" else ())
-
-
-def validate_authority_docs(base: Path, legacy_docs: set[str]) -> list[str]:
-    """校验 docs 根目录下仍属于新契约的权威文档。"""
-    issues: list[str] = []
+def validate_authority_docs(base, legacy_docs=()):
+    issues = []
     paths = [base / rel for rel in ROOT_AUTHORITY_FILES]
     paths.extend(sorted((base / "docs").glob("*.md")))
     for path in paths:
         if not path.exists():
             continue
         rel = relative_path(path, base)
-        if skip_authority_doc(rel, legacy_docs):
+        if rel == AI_CONTEXT_PATH.as_posix() or should_skip_authority_doc(rel, legacy_docs):
             continue
         text = read_text(path)
         issues.extend(validate_file_text(path, base, text))
-        if rel != AI_CONTEXT_PATH.as_posix():
-            issues.extend(validate_authority_contract(path, base, text))
+        issues.extend(validate_authority_contract(path, base, text))
     return issues
-
-
-def validate_authority_contract(path: Path, base: Path, text: str) -> list[str]:
-    """检查 authority doc 的章节、摘要和非模板内容。"""
+def validate_file_text(path, base, text):
     rel = relative_path(path, base)
-    issues = [f"{rel}: 缺少必备标题 {heading}" for heading in REQUIRED_AUTHORITY_HEADINGS if heading not in text]
-    issues.extend(validate_ai_summary(rel, text, base))
-    issues.extend(validate_generic_sections(rel, text))
+    issues = []
+    if PLACEHOLDER_PATTERN.search(text):
+        issues.append(f"{rel}: 存在占位词或未完成标记")
+    if text.count("ai_summary:") > 1:
+        issues.append(f"{rel}: 包含多个 ai_summary 摘要块")
+    if MACHINE_PATH_PATTERN.search(text):
+        issues.append(f"{rel}: 包含不可移植的本机绝对路径")
+    if rel == "AGENTS.md" and len(text.splitlines()) > MAX_AGENTS_LINES:
+        issues.append(f"{rel}: 超过 {MAX_AGENTS_LINES} 行路由文件预算")
+    if path.stat().st_size > MAX_FILE_BYTES:
+        issues.append(f"{rel}: 文件超过 {MAX_FILE_BYTES} 字节")
     return issues
+def validate_authority_contract(path, base, text):
+    rel = relative_path(path, base)
+    issues = []
+    headings = authority_headings(text)
+    if not headings:
+        for heading in REQUIRED_AUTHORITY_HEADINGS:
+            issues.append(f"{rel}: 缺少必备标题 {heading}")
+    issues.extend(validate_ai_summary(rel, text, base))
+    issues.extend(validate_generic_sections(rel, text, headings))
+    issues.extend(validate_verify_tiers(rel, text, headings))
+    return issues
+def authority_headings(text):
+    candidates = (REQUIRED_AUTHORITY_HEADINGS, LEGACY_AUTHORITY_HEADINGS)
+    return next((headings for headings in candidates if all(heading in text for heading in headings)), ())
+def validate_ai_summary(rel, text, base):
+    block = find_ai_summary_block(text)
+    if not block:
+        return [f"{rel}: 缺少 ai_summary 摘要块"]
 
-
-def validate_ai_context(base: Path) -> list[str]:
-    """检查 AI_CONTEXT 的摘要、标准章节和长度预算。"""
+    summary = parse_ai_summary(block)
+    issues = []
+    for key in REQUIRED_AI_KEYS:
+        issues.extend(validate_summary_key(rel, key, summary))
+    issues.extend(validate_source_paths(rel, summary, base))
+    issues.extend(validate_verify_commands(rel, summary))
+    return issues
+def validate_summary_key(rel, key, summary):
+    value = summary.get(key)
+    if key == "purpose":
+        return [] if isinstance(value, str) and value.strip() else [f"{rel}: ai_summary.purpose 不能为空"]
+    if isinstance(value, list) and value:
+        return []
+    return [f"{rel}: ai_summary.{key} 必须至少包含一项"]
+def find_ai_summary_block(text):
+    for pattern in (r"```ya?ml\s+(ai_summary:.*?)```", r"^---\s+(ai_summary:.*?)---"):
+        match = re.search(pattern, text, re.DOTALL)
+        if match: return match.group(1)
+    return ""
+def parse_ai_summary(block):
+    data = {}
+    current_key = ""
+    for raw_line in block.splitlines():
+        line = raw_line.strip()
+        if not line or line == "ai_summary:":
+            continue
+        if line.startswith("- ") and current_key:
+            data.setdefault(current_key, []).append(clean_value(line[2:]))
+            continue
+        if ":" in line:
+            key, value = line.split(":", 1)
+            current_key = key.strip()
+            data[current_key] = parse_scalar(value)
+    return data
+def parse_scalar(value):
+    cleaned = clean_value(value)
+    if cleaned in ("", "[]"): return []
+    if cleaned.startswith("[") and cleaned.endswith("]"):
+        try: parsed = ast.literal_eval(cleaned)
+        except (SyntaxError, ValueError): return cleaned
+        if isinstance(parsed, list): return [clean_value(str(item)) for item in parsed]
+    return cleaned
+def clean_value(value):
+    return value.strip().strip('"').strip("'")
+def validate_ai_context(base):
     path = base / AI_CONTEXT_PATH
     if not path.exists():
         return []
@@ -116,191 +153,147 @@ def validate_ai_context(base: Path) -> list[str]:
     issues = validate_file_text(path, base, text)
     issues.extend(validate_ai_summary(rel, text, base))
     issues.extend(validate_ai_context_sections(rel, text))
+    issues.extend(validate_verify_tiers(rel, text, ("## Validation Commands",)))
     if len(text.splitlines()) > MAX_AI_CONTEXT_LINES:
         issues.append(f"{rel}: 超过 {MAX_AI_CONTEXT_LINES} 行上下文预算")
     return issues
-
-
-def validate_file_text(path: Path, base: Path, text: str) -> list[str]:
-    """检查文档体积和占位词。"""
-    rel = relative_path(path, base)
-    issues: list[str] = []
-    if PLACEHOLDER_RE.search(text):
-        issues.append(f"{rel}: 存在占位词或未完成标记")
-    if text.count("ai_summary:") > 1:
-        issues.append(f"{rel}: 包含多个 ai_summary 摘要块")
-    if path.stat().st_size > MAX_FILE_BYTES:
-        issues.append(f"{rel}: 文件超过 {MAX_FILE_BYTES} 字节")
-    return issues
-
-
-def validate_ai_summary(rel: str, text: str, base: Path) -> list[str]:
-    """检查 frontmatter ai_summary 的字段、路径和命令。"""
-    summary = parse_ai_summary(text)
-    if not summary:
-        return [f"{rel}: 缺少 frontmatter ai_summary"]
-    issues = [f"{rel}: ai_summary.{key} 必须填写" for key in REQUIRED_AI_KEYS if not summary_values(summary, key)]
-    for entry in summary_values(summary, "source_of_truth"):
-        if should_check_path(entry) and not (base / entry).exists():
-            issues.append(f"{rel}: source_of_truth 路径不存在 {entry}")
-    for command in summary_values(summary, "verify_with"):
-        if not specific_command(command):
-            issues.append(f"{rel}: verify_with 不是具体命令 {command}")
-    return issues
-
-
-def parse_ai_summary(text: str) -> dict[str, str | list[str]]:
-    match = FRONTMATTER_RE.search(text)
-    return parse_summary_block(match.group(1)) if match else {}
-
-
-def parse_summary_block(block: str) -> dict[str, str | list[str]]:
-    """解析 ai_summary 下的标量和列表。"""
-    data: dict[str, str | list[str]] = {}
-    in_summary = False
-    current_key = ""
-    for raw_line in block.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line == "ai_summary:":
-            in_summary = True
-            continue
-        if not in_summary:
-            continue
-        if line.startswith("- ") and current_key:
-            data.setdefault(current_key, [])
-            cast_list(data[current_key]).append(clean_value(line[2:]))
-        elif ":" in line:
-            current_key, value = [part.strip() for part in line.split(":", 1)]
-            data[current_key] = [] if clean_value(value) in ("", "[]") else clean_value(value)
-    return data
-
-
-def cast_list(value: str | list[str]) -> list[str]:
-    if not isinstance(value, list):
-        raise TypeError("ai_summary 列表字段解析异常")
-    return value
-
-
-def summary_values(summary: dict[str, str | list[str]], key: str) -> list[str]:
-    value = summary.get(key, [])
-    return value if isinstance(value, list) else [value]
-
-
-def validate_ai_context_sections(rel: str, text: str) -> list[str]:
-    """检查 AI_CONTEXT 章节完整性和顺序。"""
+def validate_ai_context_sections(rel, text):
+    issues = []
     positions = [text.find(section) for section in AI_CONTEXT_SECTIONS]
-    issues = [f"{rel}: AI_CONTEXT 缺少章节 {section}" for section, position in zip(AI_CONTEXT_SECTIONS, positions) if position < 0]
+    for section, index in zip(AI_CONTEXT_SECTIONS, positions):
+        if index == -1: issues.append(f"{rel}: AI_CONTEXT 缺少章节 {section}")
     known_positions = [position for position in positions if position >= 0]
     if known_positions != sorted(known_positions):
         issues.append(f"{rel}: AI_CONTEXT 章节顺序错误")
     return issues
-
-
-def validate_generic_sections(rel: str, text: str) -> list[str]:
-    """拒绝空泛模板章节。"""
-    issues: list[str] = []
-    for heading in REQUIRED_AUTHORITY_HEADINGS:
-        if generic_section(section_content(text, heading)):
+def validate_source_paths(rel, summary, base):
+    issues = []
+    for entry in summary_entries(summary, "source_of_truth"):
+        if should_check_path(entry) and not (base / entry).exists():
+            issues.append(f"{rel}: source_of_truth 路径不存在 {entry}")
+    return issues
+def validate_verify_commands(rel, summary):
+    issues = []
+    for command in summary_entries(summary, "verify_with"):
+        if not is_specific_command(command):
+            issues.append(f"{rel}: verify_with 不是具体命令 {command}")
+    return issues
+def summary_entries(summary, key):
+    value = summary.get(key, [])
+    if isinstance(value, list): return value
+    return [value] if isinstance(value, str) and value.strip() else []
+def should_check_path(entry):
+    return not entry.startswith(("http://", "https://")) and ("/" in entry or "." in Path(entry).name)
+def is_specific_command(command):
+    lowered = command.strip().lower()
+    return lowered not in GENERIC_SECTION_VALUES and lowered.startswith(COMMAND_PREFIXES)
+def validate_generic_sections(rel, text, headings):
+    issues = []
+    for heading in headings:
+        content = section_content(text, heading)
+        if is_generic_section(content):
             issues.append(f"{rel}: 章节 {heading} 内容过于空泛")
     return issues
-
-
-def validate_links(base: Path) -> list[str]:
-    """检查本地 Markdown 链接，跳过依赖、归档和本地运行时目录。"""
-    issues: list[str] = []
+def validate_verify_tiers(rel, text, headings):
+    issues = []
+    for heading in headings:
+        if "verify" not in heading.lower() and "Validation Commands" not in heading:
+            continue
+        content = section_content(text, heading)
+        if len(command_lines(content)) > 1 and not has_verify_tier(content):
+            issues.append(f"{rel}: 章节 {heading} 缺少验证命令分层")
+    return issues
+def command_lines(content):
+    return [line for line in map(normalize_command_line, content.splitlines()) if is_specific_command(line)]
+def normalize_command_line(line):
+    line = line.strip().strip("`")
+    if line.startswith("- "): line = line[2:].strip()
+    for tier in VERIFY_TIERS:
+        prefix = f"{tier}:"
+        if line.lower().startswith(prefix): return line[len(prefix):].strip()
+    return line
+def has_verify_tier(content):
+    return bool(re.search(r"(?im)^\s*-?\s*(quick|full|device-required|release-side-effect)\s*:", content))
+def validate_repository_shape(base):
+    nested = nested_git_repositories(base)
+    if len(nested) < 2: return []
+    combined = "\n".join(read_text(base / rel) for rel in GENERIC_REQUIRED_FILES if (base / rel).exists())
+    issues = []
+    if not re.search(r"coordination directory|协调目录", combined, re.I):
+        issues.append("repository shape: coordination directory 未在核心上下文中说明")
+    for repo in nested:
+        command = f"git -C {repo} "
+        if command not in combined: issues.append(f"repository shape: 缺少 {command.strip()} 验证命令")
+    return issues
+def nested_git_repositories(base):
+    return sorted(path.parent.relative_to(base).as_posix() for path in base.glob("*/.git") if path.exists())
+def section_content(text, heading):
+    start = text.find(heading)
+    if start == -1: return ""
+    start += len(heading)
+    match = re.search(r"\n## ", text[start:])
+    end = start + match.start() if match else len(text)
+    return text[start:end].strip()
+def is_generic_section(content):
+    normalized = re.sub(r"[`\s]+", " ", content).strip().lower()
+    return normalized in GENERIC_SECTION_VALUES
+def validate_links(base):
+    issues = []
     for path in sorted(base.rglob("*.md")):
-        if skip_path(path, base):
+        if SKIPPED_LINK_DIRS.intersection(path.parts):
             continue
         text = read_text(path)
-        for target in LINK_RE.findall(text):
-            if not external_or_anchor(target) and not (path.parent / target.split("#", 1)[0]).resolve().exists():
-                issues.append(f"{relative_path(path, base)}: 本地链接不存在 {target}")
+        issues.extend(validate_links_in_file(path, base, text))
     return issues
-
-
-def legacy_detail_docs(base: Path) -> set[str]:
-    """读取 docs/README.md 中标记的旧格式详情文档。"""
+def validate_links_in_file(path, base, text):
+    issues = []
+    for target in LINK_PATTERN.findall(text):
+        if is_external_or_anchor(target):
+            continue
+        target_path = (path.parent / target.split("#", 1)[0]).resolve()
+        if not target_path.exists():
+            rel = relative_path(path, base)
+            issues.append(f"{rel}: 本地链接不存在 {target}")
+    return issues
+def should_skip_authority_doc(rel, legacy_docs=()):
+    return rel in SKIPPED_DOC_PARTS or rel.startswith("docs/archive/") or rel in legacy_docs
+def legacy_detail_docs(base):
     readme = base / "docs/README.md"
-    if not readme.exists():
-        return set()
+    if not readme.exists(): return set()
     section = section_content(read_text(readme), LEGACY_DOC_SECTION)
-    return {rel for target in LINK_RE.findall(section) if (rel := normalize_doc_target(target)).startswith("docs/")}
-
-
-def section_content(text: str, heading: str) -> str:
-    match = re.search(rf"^{re.escape(heading)}\s*$", text, re.MULTILINE)
-    if not match:
-        return ""
-    start = match.end()
-    next_match = re.search(r"^## ", text[start:], re.MULTILINE)
-    end = start + next_match.start() if next_match else len(text)
-    return text[start:end].strip()
-
-
-def normalize_doc_target(target: str) -> str:
+    targets = LINK_PATTERN.findall(section)
+    return {rel for target in targets if (rel := normalize_doc_target(target)).startswith("docs/")}
+def normalize_doc_target(target):
     target = target.split("#", 1)[0]
     for prefix in ("../", "./"):
         if target.startswith(prefix):
             target = target[len(prefix):]
     return target if target.startswith("docs/") else f"docs/{target}"
-
-
-def skip_authority_doc(rel: str, legacy_docs: set[str]) -> bool:
-    return rel in legacy_docs or rel in SKIPPED_AUTHORITY_DOCS or any(rel.startswith(prefix) for prefix in SKIPPED_AUTHORITY_PREFIXES)
-
-
-def skip_path(path: Path, base: Path) -> bool:
-    return bool(set(path.resolve().relative_to(base).parts) & SKIPPED_DIRS)
-
-
-def should_check_path(entry: str) -> bool:
-    return not entry.startswith(("http://", "https://")) and ("/" in entry or "." in Path(entry).name)
-
-
-def specific_command(command: str) -> bool:
-    return command.strip().lower() not in GENERIC_VALUES and command.strip().lower().startswith(COMMAND_PREFIXES)
-
-
-def generic_section(content: str) -> bool:
-    return re.sub(r"[`\s]+", " ", content).strip().lower() in GENERIC_VALUES
-
-
-def external_or_anchor(target: str) -> bool:
+def is_external_or_anchor(target):
     return target.startswith("#") or "://" in target or target.startswith("mailto:")
-
-
-def clean_value(value: str) -> str:
-    return value.strip().strip('"').strip("'")
-
-
-def read_text(path: Path) -> str:
+def read_text(path):
     return path.read_text(encoding="utf-8")
-
-
-def relative_path(path: Path, base: Path) -> str:
+def relative_path(path, base):
     return path.resolve().relative_to(base).as_posix()
-
-
-def parse_args(args: list[str]) -> tuple[Path, str]:
+def main(argv=None):
+    args = sys.argv[1:] if argv is None else argv
+    root, profile = parse_args(args)
+    issues = validate_root(root, profile=profile)
+    for issue in issues: print(issue)
+    return 1 if issues else 0
+def parse_args(args):
     root = Path.cwd()
     profile = DEFAULT_PROFILE
     if args and not args[0].startswith("--"):
         root = Path(args[0])
         args = args[1:]
-    if "--profile" in args and args.index("--profile") + 1 < len(args):
-        profile = args[args.index("--profile") + 1]
+    index = 0
+    while index < len(args):
+        if args[index] == "--profile" and index + 1 < len(args):
+            profile = args[index + 1]
+            index += 2
+            continue
+        index += 1
     return root, profile
-
-
-def main(argv: list[str] | None = None) -> int:
-    root, profile = parse_args(sys.argv[1:] if argv is None else argv)
-    issues = validate_root(root, profile)
-    for issue in issues:
-        print(issue)
-    return 1 if issues else 0
-
-
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -40,7 +40,7 @@ ai_summary:
 - 文档导航入口只有本文件。
 - AI 快速上下文入口是 `AI_CONTEXT.md`。
 - `plans/`、`research/`、`archive/`、`external/` 默认不是当前实现权威。
-- 旧格式详情文档集中列在 `## Legacy detail docs`，内容可作任务上下文，但新契约 freshness 以本文件、`AI_CONTEXT.md` 和代码校验为准。
+- 旧格式详情文档集中列在 legacy detail docs 小节，内容可作任务上下文，但新契约 freshness 以本文件、`AI_CONTEXT.md` 和代码校验为准。
 
 ## How to verify
 
@@ -304,7 +304,7 @@ vNext runtime reliability 推进：
 - dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，同时输出 `retryRatePct`、失败码聚合和 review reason 聚合。
 - vNext runtime reliability 的目标契约已落地到 `@forgeflow/worker-protocol`，当前 dispatcher worker start/result mutation 已强制完整 `TaskAttempt` / `LeaseToken` envelope；`@tingrudeng/codex-beta-runtime` 和 `@tingrudeng/gemini-beta-runtime` 会通过 `POST /api/workers/:workerId/claim-task` 领取任务，并把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 start/result envelope 回写。该包还提供 start/result payload helper 作为内部 Worker SDK 契约。
 - dispatcher 任务状态机现在包含 `cancelled`，控制面和 console 都可以显式作废非终态任务。
-- 阶段三核心底座现在已进入主线：runtime state 增加显式 `leases[]`，SQLite 真相源同步维护 query-first 结构化投影，dispatcher 可选启用 structured reads、read-only 降级、Postgres / queue shadow write、SLO / burn-rate 与 DR 状态检查；当前强约束 lease 只确认接入 assignment，read-only 也仍受 `isMutationRequest` 覆盖范围限制。
+- 阶段三核心底座现在已进入主线：runtime state 增加显式 `leases[]`，SQLite 真相源同步维护 query-first 结构化投影，dispatcher 可选启用 structured reads、read-only 降级、Postgres / queue shadow write、SLO / burn-rate 与 DR 状态检查；task 生命周期内的 `assignment` / `repo` / `branch` lease 已接入强约束，continuation 或 follow-up 任务还会获取 `session` lease。read-only 默认冻结 `/api/` 写方法，但直接文件、外部数据库或绕过 dispatcher HTTP 的写入仍需运维流程管控。
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - `codex` / `gemini` 多机执行主线是 `worker daemon`。
 - Codex 远程机器优先入口是 `@tingrudeng/codex-beta-runtime`。
@@ -329,6 +329,7 @@ vNext runtime reliability 推进：
   - GitHub Actions 发布入口。
   - 用 OIDC + provenance 执行 npm 发布。
   - 发布前会校验包元数据是否与当前仓库 `TingRuDeng/forgeflow-platform` 对齐，并要求 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 作为自动发布显式门禁。
+  - push 自动发布只发布 npm 上已存在包名的缺失版本；全新包名会进入 `自动发布等待 npm 包名配置` summary。
   - push 自动发布会先运行 lint、文档校验、typecheck、测试和 shadow drift gate，再执行 `npm publish`。
 - `../.github/workflows/release-scorecard.yml`
   - Release 成功后的独立 OpenSSF Scorecard workflow。
@@ -426,7 +427,7 @@ vNext runtime reliability 推进：
     - `archive/release-v1.md`
     - `archive/phase-2-openclaw.md`
     - `archive/multi-repo-validation.md`
-- `CODE_REVIEW_REPORT.md`
+- `archive/code-review-report-2026-04-05.md`
   - 2026-04-05 的历史审查快照。
   - 可借鉴审查维度与部分工程观察，但不再代表当前阶段状态。
   - 当前阶段结论优先查看 `external/5、权威文档执行状态回写（2026-04-08）.md` 与 `superpowers/plans/2026-04-09-stage3-execution-status-backfill.md`。
