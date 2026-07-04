@@ -11,6 +11,8 @@ ai_summary:
     - "apps/dispatcher/src/modules/server/dispatcher-server.ts"
     - "apps/dispatcher/src/modules/server/runtime-state.ts"
     - "packages/trae-beta-runtime/src/runtime/worker.ts"
+    - ".github/workflows/release.yml"
+    - "docs/runbooks/release-cadence.md"
   verify_with:
     - "python3 scripts/validate_docs.py . --profile generic"
     - "pnpm docs:validate"
@@ -29,6 +31,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - 当前推荐路径：源码仓运行读 `scripts/start-control-plane.sh`；install-and-run 读 `packages/forgeflow-dispatcher/README.md`。
 - Worker 定位：Trae automation gateway + Trae automation worker 是首选无人值守路径，Trae MCP worker 是 fallback。
 - 持久化定位：SQLite snapshot 是当前 runtime state 真相源，Postgres / queue shadow path 不是 primary store。
+- 发布包定位：`@tingrudeng/codex-beta-runtime` 与 `@tingrudeng/trae-beta-runtime` 当前在 npm registry 可安装；`@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 源码已存在，但仍需 npm 包名和 Trusted Publisher 外部配置。
 
 ## Core Directories
 
@@ -60,6 +63,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - 修改持久化或 DR：读 `docs/DATABASE_SCHEMA.md`、`docs/runbooks/runtime-state-backup-restore-repair.md`，再查 `runtime-state-sqlite.ts` 和 `scripts/*runtime-state.mjs`。
 - 修改 Trae 无人值守链路：读 `docs/ARCHITECTURE.md`、`docs/API_ENDPOINTS.md`、`docs/KNOWN_PITFALLS.md`，再查 `scripts/lib/trae-automation-worker.ts` 与 `packages/trae-beta-runtime/src/`。
 - 修改非 Trae runtime 或 npm 包：读对应 `packages/*/README.md`、`package.json` 和包内测试，再回到根级 `pnpm test` / `pnpm typecheck` 验证。
+- 修改发布或 runtime 包可安装性：读 `README.md`、`.github/workflows/release.yml`、`docs/runbooks/release-cadence.md` 和对应 `packages/*/package.json`，再用 `npm view <pkg> version dist-tags --json` 核对 registry 事实。
 - 推进 vNext runtime reliability：读 `docs/rfcs/0001-runtime-reliability-vnext.md`、`docs/WORKER_PROTOCOL_V1.md`、`docs/TASK_ATTEMPT_MODEL.md`、`docs/ARTIFACT_BUNDLE_V1.md`。
 - 修改文档体系：读 `docs/README.md`、`docs/DOC_SYNC_CHECKLIST.md` 和本文件，改完运行 `pnpm docs:validate`。
 
@@ -69,6 +73,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - `leases[]` 当前在 task claim 生命周期内强约束 assignment / repo / branch；continuation 或 follow-up 任务还会强约束 session。
 - `DISPATCHER_READ_ONLY_MODE=1` 默认冻结 `/api/` 写方法；它覆盖 dispatcher HTTP API 写入，但不覆盖直接文件、外部数据库或绕过 HTTP 的写入。
 - Postgres / queue shadow path 是 best-effort shadow；SQLite snapshot 仍是真相源。
+- 不要把源码中存在的 `@tingrudeng/gemini-beta-runtime` / `@tingrudeng/beta-runtime-core` 误写成当前已公开 npm 安装入口；npm registry 返回 E404 时先处理包名权限和 Trusted Publisher 配置。
 - `backup-runtime-state.mjs` / `restore-runtime-state.mjs` 使用位置参数；打包 CLI 的 `--backup-dir` 是另一路入口。
 - `docs/plans/`、`docs/research/`、`docs/archive/`、`docs/external/` 默认不是当前实现权威。
 
@@ -89,6 +94,9 @@ pnpm test
 pnpm typecheck
 pnpm verify:stage2
 pnpm verify:stage3
+# 只读 registry 可安装性检查，无发布副作用
+npm view @tingrudeng/codex-beta-runtime version dist-tags --json
+npm view @tingrudeng/trae-beta-runtime version dist-tags --json
 ```
 
 Device-required:
@@ -103,6 +111,6 @@ node scripts/release-publish-preflight.mjs
 
 ## Stale when
 
-- `scripts/` live entrypoint、dispatcher runtime、Trae runtime、SQLite / shadow path 或发布包入口变化。
+- `scripts/` live entrypoint、dispatcher runtime、Trae runtime、SQLite / shadow path、发布包入口或 npm registry 可安装状态变化。
 - 新增、归档或重命名权威文档。
 - `package.json` 的验证脚本或 stage gate 变化。

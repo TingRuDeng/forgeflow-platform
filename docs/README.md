@@ -185,10 +185,10 @@ pnpm typecheck
 2. 如果是源码仓运行，读 `../scripts/start-control-plane.sh`
 3. 如果是 install-and-run 控制面，读 `../packages/forgeflow-dispatcher/README.md`
 4. 远程 Codex worker 读 `../packages/codex-beta-runtime/README.md`
-5. 远程 Gemini worker 读 `../packages/gemini-beta-runtime/README.md`
-5. 远程 Trae worker 读 `../packages/trae-beta-runtime/README.md`
-6. 如果需要维护已延期的 control-layer 或双 Codex 演练旧入口，再看 `archive/codex-control-usage.md` 和 `archive/two-machine-codex-drill.md`
-7. 再回到 `../scripts/`、`../packages/` 和实际命令验证
+5. 远程 Gemini worker 源码入口读 `../packages/gemini-beta-runtime/README.md`
+6. 远程 Trae worker 读 `../packages/trae-beta-runtime/README.md`
+7. 如果需要维护已延期的 control-layer 或双 Codex 演练旧入口，再看 `archive/codex-control-usage.md` 和 `archive/two-machine-codex-drill.md`
+8. 再回到 `../scripts/`、`../packages/` 和实际命令验证
 
 业务仓接入或模板调整：
 
@@ -287,7 +287,7 @@ vNext runtime reliability 推进：
   - 源码仓运行：`../scripts/start-control-plane.sh`
   - install-and-run runtime 包：`../packages/forgeflow-dispatcher/README.md`
 - `start-control-plane.sh` 现在默认把 dispatcher 绑定到 `127.0.0.1`；监听非 loopback 地址必须显式传 `FORGEFLOW_DISPATCHER_HOST` 或 `--host`。
-- `codex` / `gemini` 的 `worker daemon` 链路是受支持的多机执行路径，与 Trae 并列；远程机器可用 `@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 接入。worker-daemon 源码构建收敛仍是后续债务（见 `TECH_DEBT.md`）。
+- `codex` / `gemini` 的 `worker daemon` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `../packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。worker-daemon 源码构建收敛仍是后续债务（见 `TECH_DEBT.md`）。
 - `worker-daemon` / Trae runtime 现在只有在结果成功回写到 dispatcher 后才会对外呈现“完成”；`submitResult`、`git push`、自动 PR 创建失败都属于显式失败，而不是假完成。
 - `dependsOn` 现在进入 dispatcher 调度门控：依赖未满足时任务保持 `planned`，满足后自动解锁为 `ready`。
 - generic worker claim 已从副作用 GET 收口为显式 POST：
@@ -308,7 +308,7 @@ vNext runtime reliability 推进：
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - `codex` / `gemini` 多机执行主线是 `worker daemon`。
 - Codex 远程机器优先入口是 `@tingrudeng/codex-beta-runtime`。
-- Gemini 远程机器优先入口是 `@tingrudeng/gemini-beta-runtime`。
+- Gemini 远程机器当前优先读 `../packages/gemini-beta-runtime/README.md` 的源码入口；`@tingrudeng/gemini-beta-runtime` 完成 npm 包名配置并发布后，才作为远程 npm 安装入口。
 - Trae 的首选无人值守路径是 `automation gateway` + `automation worker`。
 - Trae MCP worker 已降级为 deprecated/fallback 接入。
 - review memory 已进入主线的 dispatch 注入路径，但仍不是完整知识库系统。
@@ -331,6 +331,7 @@ vNext runtime reliability 推进：
   - 发布前会校验包元数据是否与当前仓库 `TingRuDeng/forgeflow-platform` 对齐，并要求 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 作为自动发布显式门禁。
   - push 自动发布只发布 npm 上已存在包名的缺失版本；全新包名会进入 `自动发布等待 npm 包名配置` summary。
   - push 自动发布会先运行 lint、文档校验、typecheck、测试和 shadow drift gate，再执行 `npm publish`。
+  - `@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 当前属于全新包名配置缺口，不应在配置完成前写成已公开安装入口。
 - `../.github/workflows/release-scorecard.yml`
   - Release 成功后的独立 OpenSSF Scorecard workflow。
   - 避免把 Trusted Publishing 所需的 `id-token` 权限和 scorecard 的 workflow 限制混在同一个发布 workflow 里。
@@ -358,8 +359,8 @@ vNext runtime reliability 推进：
   - 当前对外发布的远程 Codex npm 包入口。
   - 适合远程机器用 `npm install -g @tingrudeng/codex-beta-runtime` 安装。
 - `../packages/gemini-beta-runtime/README.md`
-  - 当前对外发布的远程 Gemini npm 包入口。
-  - 适合远程机器用 `npm install -g @tingrudeng/gemini-beta-runtime` 安装。
+  - 源码内远程 Gemini runtime 包入口。
+  - 当前用于仓库内 `pnpm --filter @tingrudeng/gemini-beta-runtime exec ...` 验证；npm 包名配置完成前不要写成公开安装入口。
 - `../packages/automation-gateway-core/README.md`
   - 远程 Trae runtime 依赖的共享协议 helper 包。
   - 不是远程机器直接安装入口，主要用于发布和复用报告解析/任务 ID 校验逻辑。

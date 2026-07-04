@@ -58,4 +58,11 @@ push 自动发布入口会先区分两类包：
 3. 保持仓库或组织变量 `NPM_TRUSTED_PUBLISHING_ENABLED=true`。
 4. 配置完成后，用后续版本变更重新触发 push 自动发布。
 
+当前已知属于这类外部前置缺口的包：
+
+- `@tingrudeng/beta-runtime-core`
+- `@tingrudeng/gemini-beta-runtime`
+
+如果 `npm view <pkg> version dist-tags --json` 返回 E404，先按上述配置路径处理，不要把它当作代码测试失败。
+
 如果检测 npm registry 时返回的不是 E404，workflow 会直接失败并暴露 registry 错误，不会把网络或权限异常误判成可跳过的首次配置问题。
