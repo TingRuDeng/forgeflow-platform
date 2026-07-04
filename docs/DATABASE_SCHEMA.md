@@ -14,7 +14,7 @@
 
 - `.forgeflow-dispatcher/runtime-state.db` 是 dispatcher 默认真相源，JSON 只是显式 fallback / import。
 - `snapshots` 仍是权威 runtime snapshot，结构化表是 query projection。
-- `leases[]` 当前代码层只支持 assignment resource type；repo/branch/session 并发治理尚未实现。
+- `leases[]` 当前支持 `assignment`、`repo`、`branch`、`session` resource type；dispatcher 管理的 task 生命周期会获取并释放对应资源。
 - Postgres / queue shadow path 是 best-effort，不是 primary store。
 - `apps/dispatcher/src/db/schema.ts` 不是当前 live runtime persistence path。
 
@@ -262,12 +262,18 @@ Verified core lease fields include:
 当前 schema-level resource types：
 
 - `assignment`
+- `repo`
+- `branch`
+- `session`
 
 Current enforced ownership path verified in code:
 
 - `assignment`
+- `repo`
+- `branch`
+- `session`（仅 continuation 或 follow-up 任务存在会话锚点时）
 
-`session` / `repo` / `branch` are present in the shared lease type, SQLite projection and metrics aggregation, but current `runtime-state.ts` acquisition / release helpers only wire assignment lease into task execution paths.
+`runtime-state.ts` task claim 会获取 `assignment` / `repo` / `branch` lease；存在 `continueFromTaskId` 或 `followUpOfTaskId` 时还会获取 `session` lease。释放路径覆盖 result、cancel、review decision、worker offline 和 reconcile 回收。该约束不覆盖 dispatcher 外部直接操作同一 repo、branch 或 Trae session store 的脚本。
 
 ## 3. Review Memory Store
 

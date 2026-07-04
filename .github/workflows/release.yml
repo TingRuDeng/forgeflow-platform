@@ -42,6 +42,8 @@ jobs:
     outputs:
       packages: ${{ steps.detect.outputs.packages }}
       has-packages: ${{ steps.detect.outputs.has-packages }}
+      new-packages: ${{ steps.detect.outputs.new-packages }}
+      has-new-packages: ${{ steps.detect.outputs.has-new-packages }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -63,27 +65,49 @@ jobs:
         id: detect
         run: |
           PACKAGES='[]'
+          NEW_PACKAGES='[]'
           
           for pkg_dir in packages/*/; do
             pkg_name=$(node -p "require('./${pkg_dir}package.json').name")
             local_version=$(node -p "require('./${pkg_dir}package.json').version")
             
             if [[ "$pkg_name" == @tingrudeng/* ]]; then
-              if npm view "${pkg_name}@${local_version}" version >/dev/null 2>&1; then
-                echo "✓ $pkg_name@$local_version already exists on npm -> up to date"
-              else
-                echo "📦 $pkg_name@$local_version is not published yet -> NEEDS RELEASE"
+              package_view_log="$RUNNER_TEMP/npm-view-package.log"
+              version_view_log="$RUNNER_TEMP/npm-view-version.log"
+
+              if npm view "${pkg_name}" version >"$package_view_log" 2>&1; then
+                if npm view "${pkg_name}@${local_version}" version >"$version_view_log" 2>&1; then
+                  echo "✓ $pkg_name@$local_version already exists on npm -> up to date"
+                elif grep -q "E404" "$version_view_log"; then
+                  echo "📦 $pkg_name@$local_version is not published yet -> NEEDS RELEASE"
+                  pkg_short=$(echo "$pkg_name" | sed 's/@tingrudeng\///')
+                  PACKAGES=$(echo "$PACKAGES" | jq -c --arg name "$pkg_short" --arg version "$local_version" '. += [{"name": $name, "version": $version}]')
+                else
+                  cat "$version_view_log"
+                  exit 1
+                fi
+              elif grep -q "E404" "$package_view_log"; then
+                echo "⚠️ $pkg_name does not exist on npm yet -> PACKAGE SETUP REQUIRED"
                 pkg_short=$(echo "$pkg_name" | sed 's/@tingrudeng\///')
-                PACKAGES=$(echo "$PACKAGES" | jq -c --arg name "$pkg_short" --arg version "$local_version" '. += [{"name": $name, "version": $version}]')
+                NEW_PACKAGES=$(echo "$NEW_PACKAGES" | jq -c --arg name "$pkg_short" --arg version "$local_version" '. += [{"name": $name, "version": $version}]')
+              else
+                cat "$package_view_log"
+                exit 1
               fi
             fi
           done
           
           echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
+          echo "new-packages=$NEW_PACKAGES" >> $GITHUB_OUTPUT
           if [ "$PACKAGES" != "[]" ]; then
             echo "has-packages=true" >> $GITHUB_OUTPUT
           else
             echo "has-packages=false" >> $GITHUB_OUTPUT
+          fi
+          if [ "$NEW_PACKAGES" != "[]" ]; then
+            echo "has-new-packages=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-new-packages=false" >> $GITHUB_OUTPUT
           fi
 
   publish-manual:
@@ -250,6 +274,26 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Pending package set:" >> "$GITHUB_STEP_SUMMARY"
           echo '${{ needs.detect-changes.outputs.packages }}' | jq -r '.[] | "- \(.name)@\(.version)"' >> "$GITHUB_STEP_SUMMARY"
+
+  publish-setup-required-summary:
+    needs: detect-changes
+    if: github.event_name == 'push' && needs.detect-changes.outputs.has-new-packages == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 输出全新包名配置缺口
+        run: |
+          echo "## 自动发布等待 npm 包名配置" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "检测到仓库里有 @tingrudeng scope 的全新包名，但这些包名尚不存在于 npm registry。" >> "$GITHUB_STEP_SUMMARY"
+          echo "自动发布只处理已完成 npm 包名和 Trusted Publisher 配置的包；全新包名需要先完成人工配置，避免发布阶段才以 E404 失败。" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "待配置包：" >> "$GITHUB_STEP_SUMMARY"
+          echo '${{ needs.detect-changes.outputs.new-packages }}' | jq -r '.[] | "- @tingrudeng/\(.name)@\(.version)"' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "处理方式：" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 在 npm 为上述包名完成首次创建或权限确认。" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 为仓库 \`${{ github.repository }}\` 配置对应包的 Trusted Publisher。" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 配置完成后，后续版本变更会重新进入自动发布矩阵。" >> "$GITHUB_STEP_SUMMARY"
 
   publish-auto:
     needs: detect-changes

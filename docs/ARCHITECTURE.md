@@ -16,7 +16,7 @@
 - `apps/dispatcher/src/modules/server/*` 承载 dispatcher TypeScript runtime foundation。
 - Trae 首选 automation gateway + automation worker；Trae MCP worker 是 fallback。
 - SQLite snapshot 是当前真相源，结构化投影和 Postgres / queue shadow 不是 primary store。
-- 阶段三 lease 通用结构已存在，但强约束路径当前只确认接入 assignment。
+- 阶段三 lease 强约束已接入 dispatcher 管理的 task 生命周期：claim 获取 assignment / repo / branch，continuation 或 follow-up 任务还会获取 session。
 
 ```yaml
 ai_summary:

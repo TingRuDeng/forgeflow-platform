@@ -78,9 +78,9 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `sessionInterruptionCount`: 会话中断信号数
 - `stateLockTimeoutCount`: dispatcher 状态锁竞争超时数
 - `shadowWriteFailureCount`: Postgres / queue shadow 写失败次数，对应 `shadow_write_failed` runtime event
-- `leaseConflictCount`: assignment ownership 争用次数
-- `leaseReclaimCount`: reconcile 回收过期 assignment lease 的次数
-- `activeLeases`: 当前活跃 assignment lease 总数和按资源类型聚合
+- `leaseConflictCount`: dispatcher task resource lease 争用次数，可能来自 assignment / repo / branch / session
+- `leaseReclaimCount`: reconcile 回收过期 task resource lease 的次数
+- `activeLeases`: 当前活跃 lease 总数和按资源类型聚合
 - `branchProtectionHitCount`: 保护分支/分支前缀策略命中数
 - `repoConcurrencySaturation`: 按 `repoDir` 聚合的活跃 worker 并发饱和度
 - `failureCodes`: 基于 worker evidence / blocker code 的失败码聚合

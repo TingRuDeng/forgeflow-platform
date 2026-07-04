@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This file does not replace [2026-04-08-stage3-minimum-execution-checklist.md](/Volumes/Data/code/MyCode/forgeflow-platform/docs/superpowers/plans/2026-04-08-stage3-minimum-execution-checklist.md).
+This file does not replace [2026-04-08-stage3-minimum-execution-checklist.md](2026-04-08-stage3-minimum-execution-checklist.md).
 It records what is actually landed on `main`, what is still deferred, and what should not yet be described as complete.
 
 ## Summary
@@ -21,10 +21,10 @@ Status: `completed`
 
 Evidence:
 
-- [leases.ts](/Volumes/Data/code/MyCode/forgeflow-platform/apps/dispatcher/src/modules/server/leases.ts)
-- [runtime-state.ts](/Volumes/Data/code/MyCode/forgeflow-platform/apps/dispatcher/src/modules/server/runtime-state.ts)
-- [dispatcher-server.ts](/Volumes/Data/code/MyCode/forgeflow-platform/apps/dispatcher/src/modules/server/dispatcher-server.ts)
-- [runtime-state-query-v1.md](/Volumes/Data/code/MyCode/forgeflow-platform/docs/contracts/runtime-state-query-v1.md)
+- [leases.ts](../../../apps/dispatcher/src/modules/server/leases.ts)
+- [runtime-state.ts](../../../apps/dispatcher/src/modules/server/runtime-state.ts)
+- [dispatcher-server.ts](../../../apps/dispatcher/src/modules/server/dispatcher-server.ts)
+- [runtime-state-query-v1.md](../../contracts/runtime-state-query-v1.md)
 
 Observed repository state:
 
@@ -38,10 +38,10 @@ Status: `completed`
 
 Evidence:
 
-- [runtime-state-query-store.ts](/Volumes/Data/code/MyCode/forgeflow-platform/apps/dispatcher/src/modules/server/runtime-state-query-store.ts)
-- [runtime-state-sqlite.ts](/Volumes/Data/code/MyCode/forgeflow-platform/apps/dispatcher/src/modules/server/runtime-state-sqlite.ts)
-- [dispatcher-server.ts](/Volumes/Data/code/MyCode/forgeflow-platform/apps/dispatcher/src/modules/server/dispatcher-server.ts)
-- [runtime-state-query-v1.md](/Volumes/Data/code/MyCode/forgeflow-platform/docs/contracts/runtime-state-query-v1.md)
+- [runtime-state-query-store.ts](../../../apps/dispatcher/src/modules/server/runtime-state-query-store.ts)
+- [runtime-state-sqlite.ts](../../../apps/dispatcher/src/modules/server/runtime-state-sqlite.ts)
+- [dispatcher-server.ts](../../../apps/dispatcher/src/modules/server/dispatcher-server.ts)
+- [runtime-state-query-v1.md](../../contracts/runtime-state-query-v1.md)
 
 Observed repository state:
 
@@ -55,11 +55,11 @@ Status: `completed`
 
 Evidence:
 
-- [dispatcher-store-core](/Volumes/Data/code/MyCode/forgeflow-platform/packages/dispatcher-store-core)
-- [dispatcher-store-postgres](/Volumes/Data/code/MyCode/forgeflow-platform/packages/dispatcher-store-postgres)
-- [dispatcher-queue-core](/Volumes/Data/code/MyCode/forgeflow-platform/packages/dispatcher-queue-core)
-- [dispatcher-queue-postgres](/Volumes/Data/code/MyCode/forgeflow-platform/packages/dispatcher-queue-postgres)
-- [runtime-state-shadow.ts](/Volumes/Data/code/MyCode/forgeflow-platform/apps/dispatcher/src/modules/server/runtime-state-shadow.ts)
+- [dispatcher-store-core](../../../packages/dispatcher-store-core)
+- [dispatcher-store-postgres](../../../packages/dispatcher-store-postgres)
+- [dispatcher-queue-core](../../../packages/dispatcher-queue-core)
+- [dispatcher-queue-postgres](../../../packages/dispatcher-queue-postgres)
+- [runtime-state-shadow.ts](../../../apps/dispatcher/src/modules/server/runtime-state-shadow.ts)
 
 Observed repository state:
 
@@ -73,10 +73,10 @@ Status: `completed`
 
 Evidence:
 
-- [dispatcher-server.ts](/Volumes/Data/code/MyCode/forgeflow-platform/apps/dispatcher/src/modules/server/dispatcher-server.ts)
-- [verify-stage3-dr.mjs](/Volumes/Data/code/MyCode/forgeflow-platform/scripts/verify-stage3-dr.mjs)
-- [stage3-drill.yml](/Volumes/Data/code/MyCode/forgeflow-platform/.github/workflows/stage3-drill.yml)
-- [stage3-core-platform-operations.md](/Volumes/Data/code/MyCode/forgeflow-platform/docs/runbooks/stage3-core-platform-operations.md)
+- [dispatcher-server.ts](../../../apps/dispatcher/src/modules/server/dispatcher-server.ts)
+- [verify-stage3-dr.mjs](../../../scripts/verify-stage3-dr.mjs)
+- [stage3-drill.yml](../../../.github/workflows/stage3-drill.yml)
+- [stage3-core-platform-operations.md](../../runbooks/stage3-core-platform-operations.md)
 
 Observed repository state:
 
@@ -91,10 +91,10 @@ Status: `completed`
 
 Evidence:
 
-- [README.md](/Volumes/Data/code/MyCode/forgeflow-platform/README.md)
-- [docs/README.md](/Volumes/Data/code/MyCode/forgeflow-platform/docs/README.md)
-- [deploy/compose](/Volumes/Data/code/MyCode/forgeflow-platform/deploy/compose)
-- [deploy/helm/forgeflow](/Volumes/Data/code/MyCode/forgeflow-platform/deploy/helm/forgeflow)
+- [README.md](../../../README.md)
+- [docs/README.md](../../README.md)
+- [deploy/compose](../../../deploy/compose)
+- [deploy/helm/forgeflow](../../../deploy/helm/forgeflow)
 
 Observed repository state:
 
@@ -108,10 +108,10 @@ Status: `not_started`
 
 Missing planned deliverables from the original checklist:
 
-- [docs/contracts/public-api-readonly.md](/Volumes/Data/code/MyCode/forgeflow-platform/docs/contracts/public-api-readonly.md) does not exist
-- [docs/contracts/public-api-write-tier.md](/Volumes/Data/code/MyCode/forgeflow-platform/docs/contracts/public-api-write-tier.md) does not exist
-- [docs/runbooks/provider-admission.md](/Volumes/Data/code/MyCode/forgeflow-platform/docs/runbooks/provider-admission.md) does not exist
-- [templates/rfc/third-party-provider.md](/Volumes/Data/code/MyCode/forgeflow-platform/templates/rfc/third-party-provider.md) does not exist
+- `docs/contracts/public-api-readonly.md` does not exist
+- `docs/contracts/public-api-write-tier.md` does not exist
+- `docs/runbooks/provider-admission.md` does not exist
+- `templates/rfc/third-party-provider.md` does not exist
 
 Interpretation:
 

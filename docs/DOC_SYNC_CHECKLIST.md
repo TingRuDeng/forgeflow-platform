@@ -1,10 +1,70 @@
+---
+ai_summary:
+  purpose: "定义 forgeflow-platform 任务收尾前的文档同步门禁和受影响文档更新映射。"
+  read_when:
+    - "任务准备收尾前，需要判断是否更新文档。"
+    - "新增、归档、重命名或修改权威文档后。"
+    - "PR 摘要需要说明 doc impact 或 no doc impact 时。"
+  source_of_truth:
+    - "AGENTS.md"
+    - "docs/README.md"
+    - "docs/AI_CONTEXT.md"
+    - "scripts/validate_docs.py"
+    - "package.json"
+  verify_with:
+    - "python3 scripts/validate_docs.py . --profile generic"
+    - "pnpm docs:validate"
+    - "git diff --check"
+  stale_when:
+    - "文档入口、权威级别、验证脚本或任务收尾要求变化。"
+    - "README、runbook、contract、module README 的同步边界变化。"
+---
+
 # Doc Sync Checklist
 
 Every code task must either update the affected docs or explicitly record `no doc impact` with a reason.
 
-## 目的
+## Purpose
 
 定义代码、接口、运行时或文档变更收尾前必须完成的文档同步检查。
+
+## Source of truth
+
+- `AGENTS.md` 定义任务执行、提交边界和收尾要求。
+- `docs/README.md` 定义文档导航、权威级别和 legacy 边界。
+- `docs/AI_CONTEXT.md` 定义 AI 快速上下文地图。
+- `scripts/validate_docs.py` 定义上下文包结构校验规则。
+- `package.json` 定义 `docs:validate` 等可运行校验命令。
+
+## Key facts
+
+- 任务结束前必须更新受影响文档，或明确写出 `no doc impact` 和原因。
+- 运行时、接口、状态机、持久化、坑点和技术债都有对应文档同步入口。
+- 文档入口、权威级别或归档变化必须同步 `docs/README.md` 和 `docs/AI_CONTEXT.md`。
+- 文档结构变更后运行 `python3 scripts/validate_docs.py . --profile generic` 或 `pnpm docs:validate`。
+
+## How to verify
+
+Quick:
+
+```bash
+python3 scripts/validate_docs.py . --profile generic
+pnpm docs:validate
+git diff --check
+```
+
+Full:
+
+```bash
+pnpm test
+pnpm typecheck
+```
+
+## Stale when
+
+- 新增、归档、重命名或升级稳定文档。
+- 文档同步规则、模块 README 边界或 `scripts/validate_docs.py` 校验契约变化。
+- `package.json` 中的文档验证命令变化。
 
 ## 适合读者
 
@@ -16,23 +76,6 @@ Every code task must either update the affected docs or explicitly record `no do
 - 运行时、接口、状态机、持久化、坑点和技术债都有对应文档同步入口。
 - 文档入口、权威级别或归档变化必须同步 `docs/README.md` 和 `docs/AI_CONTEXT.md`。
 - 文档结构变更后运行 `pnpm docs:validate`。
-
-```yaml
-ai_summary:
-  authority: "文档同步收尾门禁和受影响文档更新映射"
-  scope: "README、docs 导航、onboarding、架构、接口、持久化、坑点、技术债和模块 README 同步规则"
-  read_when:
-    - "任务准备收尾前"
-    - "判断是否需要同步文档"
-    - "新增、归档或修改权威文档后"
-  verify_with:
-    - "docs/README.md"
-    - "docs/AI_CONTEXT.md"
-    - "scripts/validate_docs.py"
-    - "pnpm docs:validate"
-  stale_when:
-    - "新增稳定文档、模块 README、校验脚本或文档同步规则变化"
-```
 
 ## 权威边界
 
