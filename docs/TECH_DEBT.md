@@ -185,7 +185,7 @@ Desired direction:
 
 - 代码审查和文档阅读时容易把 vNext 目标契约误读为当前已执行的 runtime 保护
 - 空 envelope / 无 active attempt 的 worker mutation 已被拒绝，历史夹具或迁移脚本必须先补 claim / attempt 语义
-- ArtifactBundle 已支持受限 `retainedContent`，dispatcher 会把 retained diff / log / test result 写入本地 artifact store，并通过 manifest、retention 和 `/api/artifacts/:bundleId/files/:fileName` 支持按需读取
+- ArtifactBundle 已支持受限 `retainedContent`，dispatcher 会把 retained diff / log / test result / trajectory 写入本地 artifact store，并通过 manifest、retention 和 `/api/artifacts/:bundleId/files/:fileName` 支持按需读取
 - Console 任务详情可通过摘要 / 引用 / 正文 tabs 查看审查证据，并可在 `review` 状态直接提交带 `reasonCode`、`mustFix[]`、重驱动策略和高风险确认的 `merge` / `rework` / `block` 决策
 
 期望方向：
@@ -204,7 +204,7 @@ Current situation:
 - backup / restore scripts include `runtime-state-shadow-status.json`
 - shadow write failures now append `shadow_write_failed` system events and feed metrics / SLO
 - `scripts/check-shadow-drift.mjs` compares SQLite expected counts with Postgres projection / queue shadow counts
-- `scripts/check-shadow-drift.mjs --max-mismatches <n> --max-delta <n>` emits a stable `alert` summary with `none` / `warning` / `critical` levels
+- `scripts/check-shadow-drift.mjs --max-mismatches <n> --max-delta <n>` emits a stable `alert` summary with `none` / `warning` / `critical` levels; rollout / release environments can also set `DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES` and `DISPATCHER_SHADOW_DRIFT_MAX_DELTA`
 - `scripts/check-shadow-drift.mjs <stateDir> --reconcile` replays current SQLite truth into the configured shadow projection / queue and checks drift again
 - `scripts/check-shadow-drift.mjs <stateDir> --record-alert` can append a `shadow_drift_detected` system event when drift is present
 - `pnpm verify:stage3` 和 release workflow 都会执行 `pnpm verify:shadow-drift` 作为 rollout / release gate
@@ -285,14 +285,15 @@ Desired direction:
 - worker pool 契约已统一为通用 string（`apps/dispatcher/src/modules/runtime/types.ts`、`tasks/service.ts`、`dispatch/service.ts`、`workers/service.ts`），与 `runtime-state.ts` 既有 string 对齐；`task-schema` 的 `WorkerPoolSchema(codex|gemini|trae)` 作为校验边界保留。
 - gemini 已有对等远程运行时包 `@tingrudeng/gemini-beta-runtime`（镜像 codex-beta-runtime），与 codex/trae 三者在“远程 worker 运行时包”层面并列。
 - generic worker daemon 现在会上报 `progress_reported` 运行阶段事件（worktree_prepared / execution_completed），与 Trae 的进度可观测性对齐。
+- `scripts/lib/worker-daemon.ts` 的 register / heartbeat / claim / start / completed submitResult 主循环已委托给 `apps/dispatcher/src/modules/server/runtime-glue-dispatcher-client.ts:runWorkerDaemonCycle`；脚本侧保留 worktree、child worker execution、commit/push、PR 创建、失败 fallback result 和 cleanup executor。
 
 仍存在的债务：
 
 - **`scripts/lib` 构建可重建已修复（P0 完成）**：`scripts/lib/review-memory.ts` 的 type-only re-export 改从 `apps/dispatcher/dist` 的 `.d.ts` 取（消除 rootDir 违规），`worker-daemon.ts` 的 `startTime` 已提到 try 外（修复 latent ReferenceError），`scripts/lib/tsconfig.json` 改为非严格并排除 `*.test.ts`。现在 `tsc -p scripts/lib/tsconfig.json` 可干净、幂等地 emit；committed `.js` 已与 `.ts` 对齐（含此前缺失从未提交的 `logger.js` / `metrics.js` / `dispatcher-auth.js` 运行时依赖）。CI 新增 `Verify scripts/lib build is in sync` 步骤（`tsc` + `git diff --exit-code`）防止再次漂移。`.ts` 现在是真相源。
-- **两套 daemon + 闲置 runtime 抽象未收敛（P2 未完成）**：`scripts/lib/worker-daemon.ts`（重型 live）与 `runtime-glue` 的 `runWorkerDaemonCycle`（可注入轻量）职责重叠；`apps/dispatcher/src/modules/runtime/codex.ts|gemini.ts|assignment.ts` 的干净抽象已支持 model 覆盖 / extraArgs（迁移 step1），但尚未接入 live 启动路径（`run-worker-assignment.ts` 仍内联重写启动逻辑，含 `FORGEFLOW_CODEX_MODEL` 覆盖、nvm-wrapped verification 等硬化行为）。
-  - 期望方向：把硬化行为补进 `runtime/*` 抽象，再让 live 启动路径与远程包统一复用，消除重复；可进一步把 generic worker 执行下沉到 `apps/dispatcher/src` + thin bootstrap。这是 P0 已不再阻塞的纯代码整洁度改进，可作为独立后续。
+- **daemon 主循环已收敛，执行器仍待继续下沉（P2 部分完成）**：`scripts/lib/worker-daemon.ts` 已复用 `runtime-glue` 的 `runWorkerDaemonCycle`，completed submitResult retry / delivery_failed 事件由 shared cycle 负责；脚本侧仍拥有重型 live executor。`apps/dispatcher/src/modules/runtime/codex.ts|gemini.ts|assignment.ts` 的干净抽象已支持 model 覆盖 / extraArgs（迁移 step1），但 `run-worker-assignment.ts` 仍保留 verification shell / nvm 包装等硬化行为。
+  - 期望方向：把 verification shell、runtime launch 和 assignment execution 继续下沉到 `runtime/*` 抽象或可发布 runtime core，让 `scripts/lib/worker-daemon.ts` 最终只保留 thin bootstrap 和本地兼容入口。
 
 影响：
 
-- codex/gemini 已可作为受支持 worker 接入方式与 Trae 并列；但 worker-daemon 源码的可维护性（构建可重建、单一实现）仍弱于 dispatcher 主链。
-- 任何对 generic worker daemon 的后续改动，应优先推进上面的下沉/收敛迁移，而不是继续手改 committed `.js`。
+- codex/gemini 已可作为受支持 worker 接入方式与 Trae 并列；worker-daemon 主循环已与 dispatcher runtime-glue 对齐，但 executor 和 runtime launch 仍弱于 dispatcher 主链。
+- 任何对 generic worker daemon 的后续改动，应优先继续下沉 executor / launch 逻辑，而不是重新在脚本侧扩写主循环。

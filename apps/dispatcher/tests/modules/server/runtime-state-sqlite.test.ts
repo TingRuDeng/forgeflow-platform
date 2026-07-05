@@ -319,6 +319,30 @@ describe("runtime-state-sqlite", () => {
     expect(projection.matches).toBe(true);
   });
 
+  it("preserves task termination policy in the structured sqlite projection", () => {
+    const stateDir = makeTempDir();
+    const state = {
+      ...createTestState(),
+      tasks: createTestState().tasks.map((task) => ({
+        ...task,
+        terminationPolicy: {
+          maxAttempts: 1,
+          attemptLeaseTimeoutMs: 120_000,
+        },
+      })),
+    };
+
+    saveRuntimeState(stateDir, state);
+
+    const structured = sqliteStore.readStructuredRuntimeState(stateDir);
+    expect(structured.tasks[0]).toMatchObject({
+      terminationPolicy: {
+        maxAttempts: 1,
+        attemptLeaseTimeoutMs: 120_000,
+      },
+    });
+  });
+
   it("writes artifact bundles to the structured sqlite projection", () => {
     const stateDir = makeTempDir();
     const state = {

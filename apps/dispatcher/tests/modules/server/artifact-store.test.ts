@@ -35,6 +35,7 @@ function createBundle(bundleId: string, createdAt: string): ArtifactBundle {
       diff: "diff --git a/src/a.ts b/src/a.ts",
       logs: "pnpm test passed",
       testResults: "1 passed",
+      trajectory: JSON.stringify([{ action: "edit", observation: "docs/smoke.md changed" }]),
     },
     riskNotes: [],
     nextActions: [],
@@ -57,13 +58,16 @@ describe("artifact store", () => {
       diff: "artifact://bundle-1/diff.patch",
       logs: "artifact://bundle-1/session.log",
       testResults: "artifact://bundle-1/test-results.txt",
+      trajectory: "artifact://bundle-1/trajectory.json",
     });
     expect(stored.manifest.files.map((file) => file.fileName)).toEqual([
       "diff.patch",
       "session.log",
       "test-results.txt",
+      "trajectory.json",
     ]);
     expect(readArtifactStoreFile(stateDir, "bundle-1", "diff.patch")).toBe("diff --git a/src/a.ts b/src/a.ts");
+    expect(readArtifactStoreFile(stateDir, "bundle-1", "trajectory.json")).toContain("docs/smoke.md changed");
   });
 
   it("rejects artifact file path traversal", () => {

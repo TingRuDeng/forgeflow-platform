@@ -1033,6 +1033,35 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
   });
 
+  it("honors task-level termination policy during reconciliation", () => {
+    let state = createRunningAttemptState("task-termination-policy", "codex-retry-worker");
+    state = {
+      ...state,
+      tasks: state.tasks.map((task) => ({
+        ...task,
+        terminationPolicy: {
+          maxAttempts: 1,
+        },
+      })),
+    };
+
+    state = reconcileRuntimeState(state, {
+      now: "2026-05-12T13:11:00.000Z",
+      heartbeatTimeoutMs: 60_000,
+    });
+
+    expect(state.tasks[0]).toMatchObject({
+      status: "failed",
+      terminationPolicy: {
+        maxAttempts: 1,
+      },
+    });
+    expect(state.taskAttempts[0]).toMatchObject({
+      status: "expired",
+      failureCode: "attempt_lease_expired",
+    });
+  });
+
   it("fails an expired running attempt when retry policy is exhausted", () => {
     let state = createRunningAttemptState("task-retry-exhausted", "codex-retry-worker");
     state = reconcileRuntimeState(state, {

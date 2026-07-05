@@ -111,11 +111,13 @@ describe("ArtifactBundleSchema", () => {
       ],
       refs: {
         diff: "artifact://attempt-1/diff.patch",
+        trajectory: "artifact://attempt-1/trajectory.json",
       },
     });
 
     expect(bundle.schemaVersion).toBe("artifact-bundle/v1");
     expect(bundle.changedFiles[0]?.changeType).toBe("modified");
+    expect(bundle.refs.trajectory).toBe("artifact://attempt-1/trajectory.json");
   });
 
   it("rejects artifact bundles without attempt ownership", () => {

@@ -22,6 +22,12 @@ export const VerificationModeSchema = z.enum(["run", "review"]);
 export const VerificationSchema = z.object({
   mode: VerificationModeSchema,
 });
+export const TerminationPolicySchema = z.object({
+  maxAttempts: z.number().int().positive().optional(),
+  attemptLeaseTimeoutMs: z.number().int().positive().optional(),
+  heartbeatTimeoutMs: z.number().int().positive().optional(),
+  assignmentTimeoutMs: z.number().int().positive().optional(),
+}).default({});
 
 export const TaskSchema = z.object({
   id: z.string().min(1),
@@ -37,6 +43,7 @@ export const TaskSchema = z.object({
   branchName: z.string().min(1).optional(),
   targetWorkerId: z.string().min(1).optional(),
   verification: VerificationSchema.optional(),
+  terminationPolicy: TerminationPolicySchema.optional(),
   chatMode: z.string().min(1).optional(),
   continuationMode: z.string().min(1).optional(),
   continueFromTaskId: z.string().min(1).optional(),
@@ -120,6 +127,7 @@ export const TaskEventSchema = z.object({
 });
 
 export type Task = z.infer<typeof TaskSchema>;
+export type TerminationPolicy = z.infer<typeof TerminationPolicySchema>;
 export type Worker = z.infer<typeof WorkerSchema>;
 export type AssignmentPayload = z.infer<typeof AssignmentPayloadSchema>;
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;

@@ -196,6 +196,8 @@ describe("runtime-glue worker-daemon-cycle", () => {
           result: { dryRun: true },
           changedFiles: ["file-a.ts", "file-b.ts"],
           pullRequest: { number: 42, url: "https://github.com/org/repo/pull/42", headBranch: "feature-1", baseBranch: "main" },
+          worktreeDir: "/tmp/test/.worktrees/task-1",
+          outputDir: "/tmp/test/.orchestrator/assignments/task-1/execution",
         }),
       };
 
@@ -210,6 +212,8 @@ describe("runtime-glue worker-daemon-cycle", () => {
       expect(result.status).toBe("completed");
       expect(result.workerId).toBe("test-worker");
       expect(result.taskId).toBe("task-1");
+      expect(result.worktreeDir).toBe("/tmp/test/.worktrees/task-1");
+      expect(result.outputDir).toBe("/tmp/test/.orchestrator/assignments/task-1/execution");
       expect(result.changedFiles).toEqual(["file-a.ts", "file-b.ts"]);
       expect(result.pullRequest).toEqual({ number: 42, url: "https://github.com/org/repo/pull/42", headBranch: "feature-1", baseBranch: "main" });
 
@@ -238,6 +242,13 @@ describe("runtime-glue worker-daemon-cycle", () => {
       expect(mockExecutor.executeTask).toHaveBeenCalledWith(
         { id: "task-1", title: "Test Task" },
         { taskId: "task-1", workerId: "test-worker" },
+        expect.objectContaining({
+          attemptId: "attempt-1",
+          leaseToken: "lease-1",
+          protocolVersion: "2026-05-v1",
+          traceId: "trace-1",
+          idempotencyKey: "idempotency-1",
+        }),
       );
       expect(mockClient.submitResult).toHaveBeenCalledWith("test-worker", {
         attemptId: "attempt-1",
@@ -282,6 +293,53 @@ describe("runtime-glue worker-daemon-cycle", () => {
         changedFiles: [],
         pullRequest: null,
       });
+    });
+
+    it("retries submitResult and reports delivery failure before throwing", async () => {
+      vi.useFakeTimers();
+      try {
+        const mockClient = {
+          registerWorker: vi.fn().mockResolvedValue({ status: "registered" }),
+          heartbeat: vi.fn().mockResolvedValue({ status: "heartbeat" }),
+          getAssignedTask: vi.fn(),
+          claimTask: vi.fn().mockResolvedValue({
+            assignment: { taskId: "task-retry", workerId: "test-worker" },
+            task: { id: "task-retry", title: "Retry Task" },
+            attemptId: "attempt-retry",
+            leaseToken: "lease-retry",
+            protocolVersion: "2026-05-v1",
+            traceId: "trace-retry",
+            idempotencyKey: "idempotency-retry",
+          }),
+          startTask: vi.fn().mockResolvedValue({ status: "started" }),
+          submitResult: vi.fn().mockRejectedValue(new Error("dispatcher unavailable")),
+          reportEvent: vi.fn().mockResolvedValue({ status: "event_recorded" }),
+        };
+        const mockExecutor = {
+          executeTask: vi.fn().mockResolvedValue({
+            result: { ok: true },
+            changedFiles: [],
+            pullRequest: null,
+          }),
+        };
+        const pending = expect(runWorkerDaemonCycle({
+          client: mockClient as never,
+          workerId: "test-worker",
+          pool: "codex",
+          repoDir: "/tmp/test",
+          taskExecutor: mockExecutor as never,
+        })).rejects.toThrow("submitResult failed after 3 attempts");
+
+        await vi.runAllTimersAsync();
+        await pending;
+        expect(mockClient.submitResult).toHaveBeenCalledTimes(3);
+        expect(mockClient.reportEvent).toHaveBeenCalledWith("test-worker", expect.objectContaining({
+          type: "delivery_failed",
+          taskId: "task-retry",
+        }));
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("throws when client is not provided", async () => {

@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync, execSync, ChildProcess } from "node:child_process";
 
@@ -42,6 +41,25 @@ function ensureDispatcherDist(): void {
 interface DispatcherClientBridge {
   createHttpDispatcherClient: (url: string) => DispatcherClient;
   createStateDirDispatcherClient: (handler: typeof handleDispatcherHttpRequest, stateDir: string) => DispatcherClient;
+  runWorkerDaemonCycle: (input: {
+    client: DispatcherClient;
+    workerId: string;
+    pool: string;
+    hostname?: string;
+    labels?: string[];
+    repoDir: string;
+    dryRunExecution?: boolean;
+    at?: string;
+    taskExecutor: {
+      executeTask: (task: unknown, assignment: unknown, assigned: unknown) => Promise<{
+        result: WorkerResult;
+        changedFiles: string[];
+        pullRequest: PullRequestInfo | null;
+        worktreeDir?: string;
+        outputDir?: string;
+      }>;
+    };
+  }) => Promise<RunWorkerDaemonCycleSummary>;
 }
 
 async function bootstrapDispatcherBridge(): Promise<DispatcherClientBridge> {
@@ -458,7 +476,7 @@ interface ProcessTaskAssignmentInput {
   at?: string;
 }
 
-function buildWorkerProtocolEnvelope(payload: TaskPayload) {
+function buildWorkerProtocolEnvelope(payload: Pick<TaskPayload, "attemptId" | "leaseToken" | "protocolVersion" | "traceId" | "idempotencyKey">) {
   return {
     attemptId: payload.attemptId,
     leaseToken: payload.leaseToken,
@@ -468,21 +486,22 @@ function buildWorkerProtocolEnvelope(payload: TaskPayload) {
   };
 }
 
-async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise<{
-  status: string;
-  taskId: string;
-  workerId: string;
-  worktreeDir: string;
-  outputDir: string;
+type ExecuteClaimedTaskInput = ProcessTaskAssignmentInput;
+
+async function executeClaimedTask(input: ExecuteClaimedTaskInput): Promise<{
+  result: WorkerResult;
   changedFiles: string[];
   pullRequest: PullRequestInfo | null;
+  worktreeDir: string;
+  outputDir: string;
 }> {
   const heartbeatClient = input.client;
   const taskId = input.payload.task.id;
   const workerId = input.workerId;
   let worktreeDir: string | null = null;
-
+  let outputDir = "";
   let heartbeatIntervalId: ReturnType<typeof setInterval> | null = null;
+  const startTime = Date.now();
 
   const startHeartbeat = () => {
     heartbeatIntervalId = setInterval(async () => {
@@ -501,23 +520,15 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
     }
   };
 
-  const startTime = Date.now();
   try {
-    await input.client.startTask(input.workerId, {
-      taskId: input.payload.task.id,
-      ...buildWorkerProtocolEnvelope(input.payload),
-      at: input.at ?? nowIso(),
-    });
-
     startHeartbeat();
-
     assertSafeBranchName(input.repoDir, input.payload.assignment.branchName, input.payload.assignment.defaultBranch);
     worktreeDir = prepareTaskWorktree(input.repoDir, input.payload.assignment, {
       allowReuse: true,
       resetOnReuse: true,
     });
     const assignmentDir = materializeAssignmentPackage(worktreeDir, input.payload);
-    const outputDir = path.join(assignmentDir, "execution");
+    outputDir = path.join(assignmentDir, "execution");
     fs.mkdirSync(outputDir, { recursive: true });
 
     await reportWorkerEventBestEffort(input.client, input.workerId, {
@@ -539,58 +550,11 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
         message: `worker execution completed, ${changedFiles.length} changed file(s)`,
       },
     });
+
     if (!input.dryRunExecution) {
       maybeCommitAndPush(worktreeDir, input.payload, changedFiles);
     }
     const pullRequest = input.dryRunExecution ? null : await maybeCreatePullRequest(input.payload, changedFiles);
-
-    stopHeartbeat();
-
-    let lastError: string | null = null;
-    const submitResultMaxRetries = getSubmitResultMaxRetries();
-    const submitResultRetryDelayMs = getSubmitResultRetryDelayMs();
-    for (let attempt = 1; attempt <= submitResultMaxRetries; attempt++) {
-      try {
-        await input.client.submitResult(input.workerId, {
-          ...buildWorkerProtocolEnvelope(input.payload),
-          result: workerResult,
-          changedFiles,
-          pullRequest,
-        });
-        lastError = null;
-        break;
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
-        logger.error({ operation: "submitResult", taskId, attempt, maxRetries: submitResultMaxRetries, error: lastError, event: "submitResult_retry_failed" });
-        await reportWorkerEventBestEffort(input.client, input.workerId, {
-          type: "submit_result_retry_failed",
-          taskId,
-          payload: {
-            attempt,
-            maxRetries: submitResultMaxRetries,
-            error: lastError,
-          },
-        });
-        if (attempt < submitResultMaxRetries) {
-          await sleep(submitResultRetryDelayMs);
-        }
-      }
-    }
-
-    if (lastError) {
-      logger.error({ operation: "submitResult", taskId, error: lastError, event: "submitResult_all_retries_failed" });
-      await reportWorkerEventBestEffort(input.client, input.workerId, {
-        type: "delivery_failed",
-        taskId,
-        payload: {
-          stage: "submit_result",
-          error: lastError,
-          failureCode: "delivery_failed",
-        },
-      });
-      throw new Error(`submitResult failed after ${submitResultMaxRetries} attempts: ${lastError}`);
-    }
-
     const durationMs = Date.now() - startTime;
     logTaskCompleted(input.payload.task.id, input.workerId, durationMs, true);
     recordTaskMetric({
@@ -601,19 +565,14 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
       durationMs,
       startedAt: new Date(Date.now() - durationMs).toISOString(),
     });
-
     return {
-      status: "completed",
-      taskId: input.payload.task.id,
-      workerId: input.workerId,
-      worktreeDir,
-      outputDir,
+      result: workerResult,
       changedFiles,
       pullRequest,
+      worktreeDir,
+      outputDir,
     };
   } catch (error) {
-    stopHeartbeat();
-
     const errorMessage = error instanceof Error ? error.message : String(error);
     logTaskFailed(input.payload.task.id, input.workerId, errorMessage);
     recordTaskMetric({
@@ -625,76 +584,10 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
       startedAt: new Date(startTime).toISOString(),
     });
     logger.error({ operation: "taskExecution", taskId, error: errorMessage, event: "task_execution_failed" });
-
-    try {
-      const failedResult: WorkerResult = {
-        taskId: input.payload.task.id,
-        workerId: input.workerId,
-        provider: input.payload.assignment.pool,
-        pool: input.payload.assignment.pool,
-        branchName: input.payload.assignment.branchName,
-        repo: input.payload.assignment.repo,
-        defaultBranch: input.payload.assignment.defaultBranch,
-        mode: "run",
-        output: `ERROR: ${errorMessage}`,
-        generatedAt: nowIso(),
-        verification: {
-          allPassed: false,
-          commands: [],
-        },
-        evidence: buildWorkerFailureEvidence(errorMessage),
-      };
-
-      const failedOutputDir = path.join(input.repoDir, ".worktrees", "failed", safeTaskDirName(taskId));
-      fs.mkdirSync(failedOutputDir, { recursive: true });
-      writeJson(path.join(failedOutputDir, "worker-result.json"), failedResult);
-      writeJson(path.join(failedOutputDir, "worker-verification.json"), failedResult.verification);
-      fs.writeFileSync(path.join(failedOutputDir, "worker-output.raw.txt"), `ERROR: ${errorMessage}\n`);
-
-      const submitResultMaxRetries = getSubmitResultMaxRetries();
-      const submitResultRetryDelayMs = getSubmitResultRetryDelayMs();
-      for (let attempt = 1; attempt <= submitResultMaxRetries; attempt++) {
-        try {
-          await input.client.submitResult(input.workerId, {
-            ...buildWorkerProtocolEnvelope(input.payload),
-            result: failedResult,
-            changedFiles: [],
-            pullRequest: null,
-          });
-          logger.warn({ operation: "submitResult", taskId, event: "failed_result_submitted" });
-          break;
-        } catch (submitError) {
-          logger.error({ operation: "submitResult", taskId, attempt, error: submitError instanceof Error ? submitError.message : String(submitError), event: "submitResult_catch_failed" });
-          await reportWorkerEventBestEffort(input.client, input.workerId, {
-            type: "submit_result_retry_failed",
-            taskId,
-            payload: {
-              attempt,
-              maxRetries: submitResultMaxRetries,
-              error: submitError instanceof Error ? submitError.message : String(submitError),
-              fallback: true,
-            },
-          });
-          if (attempt < submitResultMaxRetries) {
-            await sleep(submitResultRetryDelayMs);
-          }
-        }
-      }
-    } catch (fallbackError) {
-      logger.error({ operation: "submitResult", taskId, error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError), event: "submitResult_fallback_failed" });
-      await reportWorkerEventBestEffort(input.client, input.workerId, {
-        type: "delivery_failed",
-        taskId,
-        payload: {
-          stage: "failed_result_fallback",
-          error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
-          failureCode: "delivery_failed",
-        },
-      });
-    }
-
+    await submitFailedClaimedTaskResult(input, errorMessage);
     throw error;
   } finally {
+    stopHeartbeat();
     if (worktreeDir && shouldRemoveWorktreeOnExit()) {
       try {
         removeTaskWorktree(input.repoDir, taskId);
@@ -715,6 +608,76 @@ async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise
         });
       }
     }
+  }
+}
+
+async function submitFailedClaimedTaskResult(input: ProcessTaskAssignmentInput, errorMessage: string): Promise<void> {
+  const taskId = input.payload.task.id;
+  try {
+    const failedResult: WorkerResult = {
+      taskId,
+      workerId: input.workerId,
+      provider: input.payload.assignment.pool,
+      pool: input.payload.assignment.pool,
+      branchName: input.payload.assignment.branchName,
+      repo: input.payload.assignment.repo,
+      defaultBranch: input.payload.assignment.defaultBranch,
+      mode: "run",
+      output: `ERROR: ${errorMessage}`,
+      generatedAt: nowIso(),
+      verification: {
+        allPassed: false,
+        commands: [],
+      },
+      evidence: buildWorkerFailureEvidence(errorMessage),
+    };
+
+    const failedOutputDir = path.join(input.repoDir, ".worktrees", "failed", safeTaskDirName(taskId));
+    fs.mkdirSync(failedOutputDir, { recursive: true });
+    writeJson(path.join(failedOutputDir, "worker-result.json"), failedResult);
+    writeJson(path.join(failedOutputDir, "worker-verification.json"), failedResult.verification);
+    fs.writeFileSync(path.join(failedOutputDir, "worker-output.raw.txt"), `ERROR: ${errorMessage}\n`);
+
+    const submitResultMaxRetries = getSubmitResultMaxRetries();
+    const submitResultRetryDelayMs = getSubmitResultRetryDelayMs();
+    for (let attempt = 1; attempt <= submitResultMaxRetries; attempt++) {
+      try {
+        await input.client.submitResult(input.workerId, {
+          ...buildWorkerProtocolEnvelope(input.payload),
+          result: failedResult,
+          changedFiles: [],
+          pullRequest: null,
+        });
+        logger.warn({ operation: "submitResult", taskId, event: "failed_result_submitted" });
+        return;
+      } catch (submitError) {
+        logger.error({ operation: "submitResult", taskId, attempt, error: submitError instanceof Error ? submitError.message : String(submitError), event: "submitResult_catch_failed" });
+        await reportWorkerEventBestEffort(input.client, input.workerId, {
+          type: "submit_result_retry_failed",
+          taskId,
+          payload: {
+            attempt,
+            maxRetries: submitResultMaxRetries,
+            error: submitError instanceof Error ? submitError.message : String(submitError),
+            fallback: true,
+          },
+        });
+        if (attempt < submitResultMaxRetries) {
+          await sleep(submitResultRetryDelayMs);
+        }
+      }
+    }
+  } catch (fallbackError) {
+    logger.error({ operation: "submitResult", taskId, error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError), event: "submitResult_fallback_failed" });
+    await reportWorkerEventBestEffort(input.client, input.workerId, {
+      type: "delivery_failed",
+      taskId,
+      payload: {
+        stage: "failed_result_fallback",
+        error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+        failureCode: "delivery_failed",
+      },
+    });
   }
 }
 
@@ -913,41 +876,70 @@ export interface RunWorkerDaemonCycleInput {
   at?: string;
 }
 
-export async function runWorkerDaemonCycle(input: RunWorkerDaemonCycleInput): Promise<{ status: string; workerId: string } | { status: string; taskId: string; workerId: string; worktreeDir: string; outputDir: string; changedFiles: string[]; pullRequest: PullRequestInfo | null }> {
+export type RunWorkerDaemonCycleSummary =
+  | { status: string; workerId: string }
+  | {
+    status: string;
+    taskId: string;
+    workerId: string;
+    worktreeDir?: string;
+    outputDir?: string;
+    changedFiles: string[];
+    pullRequest: PullRequestInfo | null;
+  };
+
+function buildClaimedTaskPayload(task: unknown, assignment: unknown, assigned: unknown): TaskPayload {
+  return {
+    task,
+    assignment,
+    ...buildWorkerProtocolEnvelope(assigned as Pick<TaskPayload, "attemptId" | "leaseToken" | "protocolVersion" | "traceId" | "idempotencyKey">),
+  } as TaskPayload;
+}
+
+export async function runWorkerDaemonCycle(input: RunWorkerDaemonCycleInput): Promise<RunWorkerDaemonCycleSummary> {
   const client = input.client ?? createDispatcherClient(input.dispatcherUrl || "");
-  const at = input.at ?? nowIso();
-
-  await client.registerWorker({
-    workerId: input.workerId,
-    pool: input.pool,
-    hostname: input.hostname ?? os.hostname(),
-    labels: input.labels ?? [],
-    repoDir: input.repoDir,
-    at,
-  });
-  await client.heartbeat(input.workerId, { at });
-
-  const assigned = await client.claimTask(input.workerId, { at }) as TaskPayload | null;
-  if (!assigned || !assigned.assignment || !assigned.task) {
-    return {
-      status: "idle",
+  const bridge = await bootstrapDispatcherBridge();
+  let claimedPayload: TaskPayload | null = null;
+  try {
+    return await bridge.runWorkerDaemonCycle({
+      client,
       workerId: input.workerId,
-    };
+      pool: input.pool,
+      hostname: input.hostname,
+      labels: input.labels,
+      repoDir: input.repoDir,
+      dryRunExecution: input.dryRunExecution,
+      at: input.at,
+      taskExecutor: {
+        executeTask: (task, assignment, assigned) => {
+          claimedPayload = buildClaimedTaskPayload(task, assignment, assigned);
+          return executeClaimedTask({
+            client,
+            repoRoot: input.repoRoot ?? path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.."),
+            workerId: input.workerId,
+            repoDir: input.repoDir,
+            payload: claimedPayload,
+            dryRunExecution: Boolean(input.dryRunExecution),
+            at: input.at,
+          });
+        },
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (claimedPayload && message.startsWith("submitResult failed after")) {
+      await submitFailedClaimedTaskResult({
+        client,
+        repoRoot: input.repoRoot ?? path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.."),
+        workerId: input.workerId,
+        repoDir: input.repoDir,
+        payload: claimedPayload,
+        dryRunExecution: Boolean(input.dryRunExecution),
+        at: input.at,
+      }, message);
+    }
+    throw error;
   }
-
-  return processTaskAssignment({
-    client,
-    repoRoot: input.repoRoot ?? path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.."),
-    workerId: input.workerId,
-    repoDir: input.repoDir,
-    payload: {
-      assignment: assigned.assignment,
-      task: assigned.task,
-      ...buildWorkerProtocolEnvelope(assigned),
-    } as TaskPayload,
-    dryRunExecution: Boolean(input.dryRunExecution),
-    at,
-  });
 }
 
 export interface RunWorkerDaemonInput extends RunWorkerDaemonCycleInput {
