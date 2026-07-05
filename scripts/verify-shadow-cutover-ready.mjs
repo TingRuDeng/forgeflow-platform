@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,12 +12,21 @@ const verifyApprovalScriptPath = path.join(repoRoot, "scripts", "verify-shadow-c
 function parseArgs(argv) {
   const stateDir = argv[0];
   if (!stateDir) {
-    throw new Error("usage: node scripts/verify-shadow-cutover-ready.mjs <stateDir>");
+    throw new Error("usage: node scripts/verify-shadow-cutover-ready.mjs <stateDir> [--output path]");
   }
-  if (argv.length > 1) {
-    throw new Error(`unknown argument: ${argv[1]}`);
+  const options = { stateDir, outputPath: undefined };
+  for (let index = 1; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--output") {
+      const outputPath = argv[index + 1];
+      if (!outputPath) throw new Error("--output requires a path");
+      options.outputPath = outputPath;
+      index += 1;
+      continue;
+    }
+    throw new Error(`unknown argument: ${arg}`);
   }
-  return { stateDir };
+  return options;
 }
 
 function parsePayload(stdout) {
@@ -70,8 +80,22 @@ function printResult(result) {
   }
 }
 
+function writeEvidenceFile(outputPath, result) {
+  if (!outputPath) {
+    return;
+  }
+  const resolvedPath = path.resolve(outputPath);
+  fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+  const tempPath = `${resolvedPath}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+  fs.renameSync(tempPath, resolvedPath);
+}
+
 function main() {
-  printResult(runCutoverReady(parseArgs(process.argv.slice(2))));
+  const options = parseArgs(process.argv.slice(2));
+  const result = runCutoverReady(options);
+  writeEvidenceFile(options.outputPath, result);
+  printResult(result);
 }
 
 try {
@@ -81,4 +105,4 @@ try {
   process.exitCode = 1;
 }
 
-export { parseArgs, runCutoverReady };
+export { parseArgs, runCutoverReady, writeEvidenceFile };

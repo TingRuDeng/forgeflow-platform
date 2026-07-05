@@ -156,6 +156,42 @@ describe("shadow cutover approval", () => {
     expect(payload.phases[1].ok).toBe(true);
   }, 90_000);
 
+  it("writes final cutover readiness evidence to an output file", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-cutover-ready-evidence-"));
+    const evidencePath = writeSuccessfulDrillEvidence(stateDir);
+    const readyEvidencePath = path.join(stateDir, "evidence", "shadow-cutover-ready.json");
+    const approvalResult = spawnSync("node", [approveCutoverScriptPath, stateDir, "--evidence", evidencePath], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(approvalResult.status, approvalResult.stderr).toBe(0);
+
+    const readyResult = spawnSync("node", [verifyCutoverReadyScriptPath, stateDir, "--output", readyEvidencePath], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 90_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "disabled",
+        DISPATCHER_QUEUE_SHADOW_MODE: "disabled",
+        DISPATCHER_POSTGRES_URL: "",
+        RUNTIME_STATE_BACKEND: "postgres",
+        DISPATCHER_PRIMARY_POSTGRES_URL: "postgres://example.invalid/forgeflow",
+      },
+    });
+
+    expect(readyResult.status).toBe(2);
+    const stdoutPayload = JSON.parse(readyResult.stdout);
+    const filePayload = JSON.parse(fs.readFileSync(readyEvidencePath, "utf8"));
+    expect(filePayload).toEqual(stdoutPayload);
+    expect(filePayload.phases.map((phase: { name: string }) => phase.name)).toEqual([
+      "strict_cutover_preflight",
+      "approval_evidence",
+    ]);
+    expect(filePayload.phases[1].ok).toBe(true);
+  }, 90_000);
+
   it("rejects cutover approval when drill evidence is not successful", () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-cutover-approve-"));
     const evidencePath = path.join(stateDir, "shadow-cutover-drill.json");

@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M74 串行：补齐 shadow cutover ready 最终门禁 evidence 归档入口。
 - [x] M73 串行：补齐 HITL resume payload 的 dispatcher 服务端 schema 校验。
 - [x] M72 串行：收口 `DISPATCHER_SHADOW_MODE=primary` 的生产 cutover 兼容语义。
 - [x] M71 串行：为结构化 trajectory 生成 `.traj` 回放文件。
@@ -19,6 +20,16 @@
 - [x] M56 串行：继续拆分共享 `trae-dom-driver.ts` 大文件，按 browser expressions / response collection / driver facade 收敛到 300 行以内。
 - [x] M57 串行：把 Codex/Gemini packaged runtime launch builder 下沉到 beta-runtime-core。
 - [x] M58 串行：让 generic assignment runner 产出可回放 trajectory artifact。
+
+## M74 Review 小结
+
+已让 `scripts/verify-shadow-cutover-ready.mjs` 支持 `--output <path>`，并新增 `pnpm verify:shadow-cutover:ready:evidence`，将最终切换前 `strict_cutover_preflight` + `approval_evidence` payload 原子写入 `.forgeflow-dispatcher/shadow-cutover-ready.json`。这样 production cutover 的最后一道门禁不再只有 stdout，可和 drill evidence、approval marker、revocation marker 一起归档。
+
+Review Gate：finished。Spec 符合度通过，本轮只补齐 production cutover 最终 ready gate 的 evidence 归档能力，不改变 strict preflight、approval marker、revocation marker、primary backend guard 或 shadow drift 判断语义。安全检查通过，脚本仍只调用固定仓库脚本并原子写本地 JSON 文件，不新增 secret、网络调用、shell 拼接、mock 成功路径或静默 fallback；即使 ready gate 失败，也会归档失败 phase payload 供审计。复杂度检查通过，`verify-shadow-cutover-ready.mjs` 108 行，`shadow-cutover-approval.test.ts` 260 行，`workflows.test.ts` 104 行，均低于 300 行。Document-refresh: needed，原因：新增 `verify:shadow-cutover:ready:evidence` operator 入口，已同步 README、API endpoints、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-cutover-approval.test.ts tests/modules/execution/workflows.test.ts --maxWorkers=1` 通过，2 个测试文件、14 个测试通过；`node --check scripts/verify-shadow-cutover-ready.mjs`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：仓库内最终 ready evidence 归档已补齐；真实生产切换仍依赖 operator 在生产环境配置 Postgres、运行 drill / approval / ready evidence，并在变更窗口切换 `RUNTIME_STATE_BACKEND=postgres`。
 
 ## M73 Review 小结
 
