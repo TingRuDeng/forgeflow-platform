@@ -58,9 +58,9 @@ export function saveRuntimeState(stateDir: string, state: RuntimeState): void {
 
 export type WorkerStatus = "idle" | "busy" | "offline" | "disabled";
 
-export type TaskStatus = "planned" | "ready" | "assigned" | "in_progress" | "review" | "merged" | "blocked" | "failed" | "cancelled";
+export type TaskStatus = "planned" | "ready" | "assigned" | "in_progress" | "waiting_for_input" | "review" | "merged" | "blocked" | "failed" | "cancelled";
 
-export type AssignmentStatus = "pending" | "assigned" | "in_progress" | "review" | "merged" | "blocked" | "failed" | "cancelled";
+export type AssignmentStatus = "pending" | "assigned" | "in_progress" | "waiting_for_input" | "review" | "merged" | "blocked" | "failed" | "cancelled";
 
 export type ReviewDecision = "pending" | "merge" | "block" | "rework" | "changes_requested";
 
@@ -119,6 +119,12 @@ export interface Task {
   continueFromTaskId?: string | null;
   followUpOfTaskId?: string | null;
   workerChangeReason?: string | null;
+  waitingForInput?: {
+    requestedBy: string;
+    reason?: string;
+    requestedAt: string;
+  } | null;
+  resumePayload?: Record<string, unknown> | null;
   status: TaskStatus;
   assignedWorkerId?: string | null;
   lastAssignedWorkerId?: string | null;
@@ -171,6 +177,7 @@ export interface AssignmentPayload {
   continueFromTaskId?: string | null;
   followUpOfTaskId?: string | null;
   workerChangeReason?: string | null;
+  resumePayload?: Record<string, unknown> | null;
 }
 
 export interface Assignment {
@@ -329,6 +336,7 @@ export interface GetAssignedTaskResult {
   continueFromTaskId?: string | null;
   followUpOfTaskId?: string | null;
   workerChangeReason?: string | null;
+  resumePayload?: Record<string, unknown> | null;
 }
 
 function withActiveAttemptEnvelope(state: RuntimeState, result: GetAssignedTaskResult): GetAssignedTaskResult {
@@ -420,6 +428,20 @@ export interface RecordReviewDecisionInput {
   at?: string;
   evidence?: ReviewDecisionEvidence;
   acknowledgeRisk?: boolean;
+}
+
+export interface InterruptTaskForInputInput {
+  taskId: string;
+  actor: string;
+  reason?: string;
+  at?: string;
+}
+
+export interface ResumeTaskFromInputInput {
+  taskId: string;
+  actor: string;
+  resumePayload?: Record<string, unknown> | null;
+  at?: string;
 }
 
 export interface RecordWorkerEventInput {
@@ -2150,6 +2172,7 @@ export function getAssignedTaskForWorker(state: RuntimeState, workerId: string):
     chatMode: (assignment as { chatMode?: string }).chatMode ?? task.chatMode ?? "new_chat",
     continuationMode: (assignment as { continuationMode?: string }).continuationMode ?? task.continuationMode,
     continueFromTaskId: (assignment as { continueFromTaskId?: string | null }).continueFromTaskId ?? task.continueFromTaskId ?? null,
+    resumePayload: (assignment as { resumePayload?: Record<string, unknown> | null }).resumePayload ?? task.resumePayload ?? null,
   });
 }
 
@@ -2298,6 +2321,7 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
         continueFromTaskId: (assignmentRecord as { continueFromTaskId?: string | null }).continueFromTaskId ?? preAssignedTask.continueFromTaskId ?? null,
         followUpOfTaskId: (assignmentRecord as { followUpOfTaskId?: string | null }).followUpOfTaskId ?? preAssignedTask.followUpOfTaskId ?? null,
         workerChangeReason: (assignmentRecord as { workerChangeReason?: string | null }).workerChangeReason ?? preAssignedTask.workerChangeReason ?? null,
+        resumePayload: (assignmentRecord as { resumePayload?: Record<string, unknown> | null }).resumePayload ?? preAssignedTask.resumePayload ?? null,
       }),
     };
   }
@@ -2400,6 +2424,7 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
       contextMarkdown: assignment.contextMarkdown,
       workerPromptMode: assignment.workerPromptMode,
       reportSchemaVersion: assignment.reportSchemaVersion,
+      resumePayload: readyTask.resumePayload ?? null,
     }),
   };
 }
@@ -2790,6 +2815,176 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
     return nextState;
   }
   return releaseTaskResourceLeases(nextState, task.id, task.assignedWorkerId, input.at ?? nowIso());
+}
+
+function requireTaskAndAssignment(state: RuntimeState, taskId: string): { task: Task; assignment: Assignment } {
+  const task = state.tasks.find((candidate) => candidate.id === taskId);
+  if (!task) {
+    throw new Error(`task not found: ${taskId}`);
+  }
+  const assignment = state.assignments.find((candidate) => candidate.taskId === taskId);
+  if (!assignment) {
+    throw new Error(`assignment not found for task: ${taskId}`);
+  }
+  return { task, assignment };
+}
+
+function appendTaskStatusChange(state: RuntimeState, input: {
+  taskId: string;
+  from: TaskStatus;
+  to: TaskStatus;
+  at: string;
+}): RuntimeState {
+  return appendEvent(state, {
+    taskId: input.taskId,
+    type: "status_changed",
+    at: input.at,
+    payload: { from: input.from, to: input.to },
+  });
+}
+
+function releaseWorkerFromTask(workers: Worker[], taskId: string, at: string): Worker[] {
+  return workers.map((worker) => worker.currentTaskId === taskId
+    ? {
+        ...worker,
+        status: (worker.disabledAt ? "disabled" : "idle") as WorkerStatus,
+        currentTaskId: undefined,
+        lastHeartbeatAt: at,
+      }
+    : worker);
+}
+
+function checkpointActiveAttempt(state: RuntimeState, taskId: string, at: string): RuntimeState {
+  return updateActiveTaskAttempt(state, taskId, (attempt) => ({
+    ...attempt,
+    status: "checkpointed",
+    heartbeatAt: at,
+    endedAt: at,
+  }));
+}
+
+function applyInterruptedTaskState(state: RuntimeState, input: {
+  task: Task;
+  assignment: Assignment;
+  actor: string;
+  reason?: string;
+  at: string;
+}): RuntimeState {
+  return {
+    ...state,
+    updatedAt: input.at,
+    tasks: upsertTask(state.tasks, {
+      ...input.task,
+      status: "waiting_for_input",
+      assignedWorkerId: null,
+      waitingForInput: {
+        requestedBy: input.actor,
+        reason: input.reason ?? "",
+        requestedAt: input.at,
+      },
+    }),
+    assignments: upsertAssignment(state.assignments, {
+      ...input.assignment,
+      workerId: null,
+      status: "waiting_for_input",
+      assignment: {
+        ...input.assignment.assignment,
+        workerId: null,
+        status: "waiting_for_input",
+      },
+    }),
+    workers: releaseWorkerFromTask(state.workers, input.task.id, input.at),
+  };
+}
+
+export function interruptTaskForInput(state: RuntimeState, input: InterruptTaskForInputInput): RuntimeState {
+  const { task, assignment } = requireTaskAndAssignment(state, input.taskId);
+  if (task.status === "waiting_for_input") {
+    return state;
+  }
+  if (!["ready", "assigned", "in_progress", "blocked"].includes(task.status)) {
+    throw new Error(`task not interruptible from state: ${task.status}`);
+  }
+
+  const at = input.at ?? nowIso();
+  let nextState = appendTaskStatusChange(state, {
+    taskId: input.taskId,
+    from: task.status,
+    to: "waiting_for_input",
+    at,
+  });
+  nextState = appendEvent(nextState, {
+    taskId: input.taskId,
+    type: "task_interrupted",
+    at,
+    payload: {
+      actor: input.actor,
+      reason: input.reason ?? "",
+    },
+  });
+
+  nextState = applyInterruptedTaskState(nextState, {
+    task,
+    assignment,
+    actor: input.actor,
+    reason: input.reason,
+    at,
+  });
+
+  const releasedState = task.assignedWorkerId
+    ? releaseTaskResourceLeases(nextState, task.id, task.assignedWorkerId, at, "waiting_for_input")
+    : nextState;
+
+  return checkpointActiveAttempt(releasedState, task.id, at);
+}
+
+export function resumeTaskFromInput(state: RuntimeState, input: ResumeTaskFromInputInput): RuntimeState {
+  const { task, assignment } = requireTaskAndAssignment(state, input.taskId);
+  if (task.status !== "waiting_for_input") {
+    throw new Error(`task not waiting for input: ${input.taskId}`);
+  }
+
+  const at = input.at ?? nowIso();
+  let nextState = appendTaskStatusChange(state, {
+    taskId: input.taskId,
+    from: "waiting_for_input",
+    to: "ready",
+    at,
+  });
+  nextState = appendEvent(nextState, {
+    taskId: input.taskId,
+    type: "task_resumed",
+    at,
+    payload: {
+      actor: input.actor,
+      resumePayload: input.resumePayload ?? null,
+    },
+  });
+
+  return {
+    ...nextState,
+    updatedAt: at,
+    tasks: upsertTask(nextState.tasks, {
+      ...task,
+      status: "ready",
+      assignedWorkerId: null,
+      waitingForInput: null,
+      resumePayload: input.resumePayload ?? null,
+    }),
+    assignments: upsertAssignment(nextState.assignments, {
+      ...assignment,
+      workerId: null,
+      status: "pending",
+      assignment: {
+        ...assignment.assignment,
+        workerId: null,
+        status: "pending",
+        resumePayload: input.resumePayload ?? null,
+      },
+      assignedAt: null,
+      claimedAt: null,
+    }),
+  };
 }
 
 export function cancelTask(state: RuntimeState, input: CancelTaskInput): RuntimeState {

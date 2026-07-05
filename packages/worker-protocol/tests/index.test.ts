@@ -162,6 +162,8 @@ describe("RuntimeEventTypeSchema", () => {
     expect(RuntimeEventTypeSchema.parse("artifact_bundle_created")).toBe("artifact_bundle_created");
     expect(RuntimeEventTypeSchema.parse("worker_disabled")).toBe("worker_disabled");
     expect(RuntimeEventTypeSchema.parse("lease_conflict")).toBe("lease_conflict");
+    expect(RuntimeEventTypeSchema.parse("task_interrupted")).toBe("task_interrupted");
+    expect(RuntimeEventTypeSchema.parse("task_resumed")).toBe("task_resumed");
     expect(() => RuntimeEventTypeSchema.parse("attempt_started_again")).toThrow();
   });
 

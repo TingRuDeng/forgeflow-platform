@@ -146,6 +146,8 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
       continue_from_task_id TEXT,
       follow_up_of_task_id TEXT,
       worker_change_reason TEXT,
+      waiting_for_input_json TEXT,
+      resume_payload_json TEXT,
       status TEXT NOT NULL,
       assigned_worker_id TEXT,
       last_assigned_worker_id TEXT,
@@ -273,6 +275,8 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
   `);
   ensureColumn(db, "artifact_bundles", "trajectory_json", "TEXT");
   ensureColumn(db, "artifact_bundles", "retained_content_json", "TEXT");
+  ensureColumn(db, "tasks", "waiting_for_input_json", "TEXT");
+  ensureColumn(db, "tasks", "resume_payload_json", "TEXT");
   ensureColumn(db, "reviews", "risk_assessment_json", "TEXT");
   ensureColumn(db, "tasks", "termination_policy_json", "TEXT");
 }
@@ -450,8 +454,8 @@ function rewriteStructuredProjection(
       INSERT INTO tasks (
         id, external_task_id, trace_id, repo, default_branch, title, pool, allowed_paths_json, acceptance_json, depends_on_json,
         branch_name, target_worker_id, verification_json, termination_policy_json, chat_mode, continuation_mode, continue_from_task_id, follow_up_of_task_id,
-        worker_change_reason, status, assigned_worker_id, last_assigned_worker_id, requested_by, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        worker_change_reason, waiting_for_input_json, resume_payload_json, status, assigned_worker_id, last_assigned_worker_id, requested_by, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const task of state.tasks) {
       insertTask.run(
@@ -474,6 +478,8 @@ function rewriteStructuredProjection(
         task.continueFromTaskId ?? null,
         task.followUpOfTaskId ?? null,
         task.workerChangeReason ?? null,
+        asJson(task.waitingForInput ?? null),
+        asJson(task.resumePayload ?? null),
         task.status,
         task.assignedWorkerId ?? null,
         task.lastAssignedWorkerId ?? null,
@@ -782,6 +788,8 @@ export function readStructuredRuntimeState(stateDir: string): RuntimeState {
       continueFromTaskId: row.continue_from_task_id ?? null,
       followUpOfTaskId: row.follow_up_of_task_id ?? null,
       workerChangeReason: row.worker_change_reason ?? null,
+      waitingForInput: fromJson(row.waiting_for_input_json, null),
+      resumePayload: fromJson(row.resume_payload_json, null),
       status: row.status,
       assignedWorkerId: row.assigned_worker_id ?? null,
       lastAssignedWorkerId: row.last_assigned_worker_id ?? null,

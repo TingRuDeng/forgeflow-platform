@@ -26,6 +26,7 @@ import {
   enableWorker,
   getAssignedTaskForWorker,
   heartbeatWorker,
+  interruptTaskForInput,
   loadRuntimeState,
   markWorkerOffline,
   reconcileRuntimeState,
@@ -33,6 +34,7 @@ import {
   recordWorkerEvent,
   recordWorkerResult,
   registerWorker,
+  resumeTaskFromInput,
   saveRuntimeState,
 } from "./runtime-state.js";
 import type { RegisterWorkerInput, RuntimeState, Task } from "./runtime-state.js";
@@ -1324,6 +1326,61 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
         const taskId = decodeURIComponent(cancelTaskMatch[1]);
         return createJsonResponse(200, {
           status: "cancelled",
+          task: result.state.tasks.find((candidate: Task) => candidate.id === taskId) ?? null,
+          workers: result.state.workers,
+        });
+      } catch (error: any) {
+        rethrowStateLockTimeout(error);
+        return createJsonResponse(classifyTaskCancellationError(error), {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const interruptTaskMatch = method === "POST"
+      ? pathname.match(/^\/api\/tasks\/([^/]+)\/interrupt$/)
+      : null;
+    if (interruptTaskMatch) {
+      try {
+        const taskId = decodeURIComponent(interruptTaskMatch[1]);
+        const result = withState(stateDir, (state) => ({
+          state: interruptTaskForInput(state, {
+            taskId,
+            actor: String(body.actor || "").trim() || "codex-control",
+            reason: typeof body.reason === "string" ? body.reason : undefined,
+            at: body.at,
+          }),
+        }));
+        return createJsonResponse(200, {
+          status: "waiting_for_input",
+          task: result.state.tasks.find((candidate: Task) => candidate.id === taskId) ?? null,
+          workers: result.state.workers,
+        });
+      } catch (error: any) {
+        rethrowStateLockTimeout(error);
+        return createJsonResponse(classifyTaskCancellationError(error), {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const resumeTaskMatch = method === "POST"
+      ? pathname.match(/^\/api\/tasks\/([^/]+)\/resume$/)
+      : null;
+    if (resumeTaskMatch) {
+      try {
+        const taskId = decodeURIComponent(resumeTaskMatch[1]);
+        const resumePayload = isPlainObject(body.resumePayload) ? body.resumePayload : null;
+        const result = withState(stateDir, (state) => ({
+          state: resumeTaskFromInput(state, {
+            taskId,
+            actor: String(body.actor || "").trim() || "codex-control",
+            resumePayload,
+            at: body.at,
+          }),
+        }));
+        return createJsonResponse(200, {
+          status: "resumed",
           task: result.state.tasks.find((candidate: Task) => candidate.id === taskId) ?? null,
           workers: result.state.workers,
         });

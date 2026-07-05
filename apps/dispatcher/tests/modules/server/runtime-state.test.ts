@@ -24,11 +24,13 @@ import {
   enableWorker,
   getAssignedTaskForWorker,
   heartbeatWorker,
+  interruptTaskForInput,
   loadRuntimeState,
   reconcileRuntimeState,
   recordReviewDecision,
   recordWorkerResult,
   registerWorker,
+  resumeTaskFromInput,
   saveRuntimeState,
 } from "../../../src/modules/server/runtime-state.js";
 
@@ -4640,6 +4642,94 @@ describe("dispatcher runtime state (TypeScript)", () => {
         reason: "voided by operator",
       },
     });
+  });
+
+  it("interrupts a running task for human input and resumes it with payload", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-hitl-test",
+      pool: "codex",
+      hostname: "hitl-host",
+      labels: ["codex"],
+      repoDir: "/repos/test",
+      at: "2026-04-08T10:10:00.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/forgeflow-platform",
+      defaultBranch: "main",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-hitl",
+          title: "Need input",
+          pool: "codex",
+          branchName: "ai/codex/task-hitl",
+          verification: { mode: "run" },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-hitl",
+          assignment: {
+            taskId: "task-hitl",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "ai/codex/task-hitl",
+            repo: "TingRuDeng/forgeflow-platform",
+            defaultBranch: "main",
+          },
+          workerPrompt: "Test prompt",
+        },
+      ],
+      createdAt: "2026-04-08T10:10:01.000Z",
+    });
+    const claimed = claimAssignedTaskForWorker(dispatch.state, {
+      workerId: "codex-hitl-test",
+      at: "2026-04-08T10:10:02.000Z",
+    });
+    state = beginTaskForWorker(claimed.state, {
+      workerId: "codex-hitl-test",
+      taskId: dispatch.taskIds[0],
+      ...workerEnvelope(claimed.state.taskAttempts[0]!),
+      at: "2026-04-08T10:10:03.000Z",
+    });
+
+    state = interruptTaskForInput(state, {
+      taskId: dispatch.taskIds[0],
+      actor: "codex-control",
+      reason: "need product decision",
+      at: "2026-04-08T10:10:04.000Z",
+    });
+
+    expect(state.tasks[0]).toMatchObject({
+      status: "waiting_for_input",
+      waitingForInput: {
+        requestedBy: "codex-control",
+        reason: "need product decision",
+        requestedAt: "2026-04-08T10:10:04.000Z",
+      },
+    });
+    expect(state.assignments[0]).toMatchObject({ status: "waiting_for_input" });
+    expect(state.workers[0]).toMatchObject({ status: "idle", currentTaskId: undefined });
+    expect(state.taskAttempts[0]).toMatchObject({ status: "checkpointed", endedAt: "2026-04-08T10:10:04.000Z" });
+    expect(state.events.some((event) => event.type === "task_interrupted")).toBe(true);
+
+    state = resumeTaskFromInput(state, {
+      taskId: dispatch.taskIds[0],
+      actor: "codex-control",
+      resumePayload: { decision: "ship narrow scope" },
+      at: "2026-04-08T10:10:05.000Z",
+    });
+
+    expect(state.tasks[0]).toMatchObject({
+      status: "ready",
+      resumePayload: { decision: "ship narrow scope" },
+      waitingForInput: null,
+    });
+    expect(state.assignments[0]).toMatchObject({ status: "pending" });
+    expect(state.events.some((event) => event.type === "task_resumed")).toBe(true);
   });
 
   it("buildDashboardSnapshot exposes queue depth, review backlog, and assignment lag metrics", () => {

@@ -181,6 +181,7 @@ Desired direction:
 - dispatcher runtime state 已有 `artifactBundles[]`，SQLite `artifact_bundles` projection 会保存 ArtifactBundle 摘要、refs、结构化 trajectory 和可选 retainedContent 正文片段
 - reconcile 支持 `maxTaskAttempts` retry policy，默认仍是 2 次 attempt
 - task-level `terminationPolicy.maxAttempts`、`attemptLeaseTimeoutMs`、`heartbeatTimeoutMs`、`assignmentTimeoutMs` 已接入 retry / lease / offline / assignment 回收主链
+- HITL 已有 dispatcher 级 `waiting_for_input` / `resumePayload` 基础协议，HTTP interrupt/resume 会释放 worker / lease 并 checkpoint active attempt
 
 影响：
 
@@ -188,10 +189,12 @@ Desired direction:
 - 空 envelope / 无 active attempt 的 worker mutation 已被拒绝，历史夹具或迁移脚本必须先补 claim / attempt 语义
 - ArtifactBundle 已支持结构化 `trajectory` 和受限 `retainedContent`，dispatcher 会把 trajectory / retained diff / log / test result 写入本地 artifact store，并通过 manifest、retention 和 `/api/artifacts/:bundleId/files/:fileName` 支持按需读取
 - Console 任务详情可通过摘要 / 引用 / 正文 / 轨迹 tabs 查看审查证据，并可在 `review` 状态直接提交带 `reasonCode`、`mustFix[]`、重驱动策略和高风险确认的 `merge` / `rework` / `block` 决策
+- HITL 当前已统一 dispatcher 状态语义，但 worker runtime 还没有主动发起 interrupt 或消费细粒度 resume UI 表单
 
 期望方向：
 
 - 继续接入 Console 侧 artifact 文件按需展开 / 下载体验
+- 继续把 worker runtime 的主动 interrupt、resume payload 消费和 Console 表单化输入接入 `waiting_for_input` 主链
 - 继续补齐审查结果的批量筛选、复制链接和跨任务对比体验
 
 ## 9. Shadow path has drift gate and reconciliation entry, but primary cutover is still deferred

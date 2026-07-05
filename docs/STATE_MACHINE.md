@@ -53,9 +53,10 @@ ai_summary:
 
 Terminal or branch states:
 
+- `ready|assigned|in_progress|blocked -> waiting_for_input -> ready`
 - `review -> blocked`
 - `assigned|in_progress -> failed`
-- `ready|assigned|in_progress|review|blocked -> cancelled`
+- `ready|assigned|in_progress|waiting_for_input|review|blocked -> cancelled`
 - `in_progress -> awaiting_retry -> ready` 目前只作为 runtime event 审计语义落账，不是持久化 `TaskStatus` 枚举值。
 
 Current rules:
@@ -72,10 +73,16 @@ Current rules:
   - if attempts are still below the default max of 2, dispatcher records `attempt_expired` and `task_redriven`, releases worker / assignment ownership, and moves the task back to `ready`
   - if attempts are exhausted, dispatcher records `attempt_expired` and moves task / assignment to `failed`
 - A late worker result that still carries an expired / terminal `attemptId` is rejected before it can mutate task, assignment, review, artifact, or worker state.
+- `POST /api/tasks/:taskId/interrupt` 会把可中断任务置为 `waiting_for_input`，释放 worker / lease，并把 active attempt 标记为 `checkpointed`。
+- `POST /api/tasks/:taskId/resume` 会写入 `resumePayload`，把任务恢复为 `ready`，供下一次 worker claim 时继续使用。
 
 ## Assignment States
 
-`pending -> assigned -> in_progress -> review|blocked|failed|merged|cancelled`
+`pending -> assigned -> in_progress -> waiting_for_input -> pending -> assigned`
+
+Terminal or review branches:
+
+`in_progress -> review|blocked|failed|merged|cancelled`
 
 Current rules:
 

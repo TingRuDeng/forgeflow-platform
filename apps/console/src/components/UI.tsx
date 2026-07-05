@@ -8,6 +8,7 @@ export const Badge: React.FC<{ status: string; children: React.ReactNode }> = ({
     pending: { colors: 'bg-white/10 text-white/60 border-white/20', dot: 'bg-white/40' },
     assigned: { colors: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30', dot: 'bg-cyan-400' },
     in_progress: { colors: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30', dot: 'bg-cyan-400' },
+    waiting_for_input: { colors: 'bg-amber-500/20 text-amber-200 border-amber-500/30', dot: 'bg-amber-300' },
     review: { colors: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30', dot: 'bg-fuchsia-400' },
     merged: { colors: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30', dot: 'bg-emerald-400' },
     failed: { colors: 'bg-rose-500/20 text-rose-300 border-rose-500/30', dot: 'bg-rose-400' },

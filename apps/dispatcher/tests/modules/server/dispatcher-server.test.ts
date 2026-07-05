@@ -3004,6 +3004,108 @@ describe("dispatcher server", () => {
     expect(worker?.currentTaskId).toBeUndefined();
   });
 
+  it("interrupts and resumes tasks via API", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "hitl-worker-1",
+        pool: "codex",
+        hostname: "test-host",
+        labels: ["test"],
+        repoDir: "/test",
+      },
+    });
+
+    const dispatchResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "TingRuDeng/forgeflow-platform",
+        defaultBranch: "main",
+        requestedBy: "codex-control",
+        tasks: [
+          {
+            id: "hitl-task-1",
+            title: "Need HITL",
+            pool: "codex",
+            branchName: "ai/codex/hitl-task-1",
+            verification: { mode: "run" },
+          },
+        ],
+        packages: [
+          {
+            taskId: "hitl-task-1",
+            assignment: {
+              taskId: "hitl-task-1",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/hitl-task-1",
+              repo: "TingRuDeng/forgeflow-platform",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+    const taskId = dispatchResponse.json.taskIds[0];
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/hitl-worker-1/claim-task",
+      body: { at: "2026-04-08T10:20:00.000Z" },
+    });
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/hitl-worker-1/start-task",
+      body: { taskId, at: "2026-04-08T10:20:01.000Z" },
+    });
+
+    const interruptResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: `/api/tasks/${encodeURIComponent(taskId)}/interrupt`,
+      body: {
+        actor: "codex-control",
+        reason: "need scope decision",
+        at: "2026-04-08T10:20:02.000Z",
+      },
+    });
+
+    expect(interruptResponse.status).toBe(200);
+    expect(interruptResponse.json.task).toMatchObject({
+      status: "waiting_for_input",
+      waitingForInput: {
+        reason: "need scope decision",
+      },
+    });
+
+    const resumeResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: `/api/tasks/${encodeURIComponent(taskId)}/resume`,
+      body: {
+        actor: "codex-control",
+        resumePayload: { decision: "continue with narrow scope" },
+        at: "2026-04-08T10:20:03.000Z",
+      },
+    });
+
+    expect(resumeResponse.status).toBe(200);
+    expect(resumeResponse.json.task).toMatchObject({
+      status: "ready",
+      resumePayload: { decision: "continue with narrow scope" },
+    });
+  });
+
   it("dashboard includes a fallback link to the standalone console app", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);
