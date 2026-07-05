@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M94 串行：收敛 Trae worker submitResult 生命周期重复结构。
 - [x] M93 串行：把 worker daemon submitResult retry policy 下沉到 beta-runtime-core。
 - [x] M92 串行：让 Release workflow 在 provider runtime 发布后运行 published smoke。
 - [x] M91 串行：新增已发布 runtime 包 registry 安装 / CLI smoke。
@@ -17,6 +18,16 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M94 Review 小结
+
+已新增 `packages/trae-beta-runtime/src/runtime/submit-result-lifecycle.ts`，把 Trae worker 成功 / 失败结果提交共同的 `submit_result_start`、`dispatcher.submit_result.start`、`dispatcherClient.submitResult`、`submit_result_done`、`dispatcher.submit_result.done`、`heartbeat.promoteToIdle()` 和 `releaseTaskSession()` 生命周期收敛到一个 helper。`packages/trae-beta-runtime/src/runtime/worker.ts` 现在只负责构造成功或失败的 request / evidence / artifactBundle，再委托 helper 统一提交与收尾。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 runtime executor / launch 去重，收敛的是 Trae worker 内部 submitResult 生命周期重复，不改变 dispatcher API、attempt lease 字段、artifactBundle 内容、phase event 名称、debug log 名称或 session release 语义。安全检查通过，未新增 secret、网络调用、shell 拼接、mock 成功路径或静默 fallback；失败时仍通过 `finally` 释放 session 并 promote idle。复杂度检查通过，新增 helper 27 行、新测试 23 行；既有 `worker.ts` 仍是历史大文件，但本轮净减少该文件 10 行并把重复生命周期移出。Document-refresh: not-needed，原因：这是 runtime 内部去重，外部 operator 命令和协议文档没有变化。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @tingrudeng/trae-beta-runtime exec vitest run tests/runtime/worker-submit-result.test.ts tests/runtime/worker.test.ts --maxWorkers=1`，2 个测试文件、30 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime typecheck`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。RED 阶段静态测试曾把类型引用 `Parameters<typeof dispatcherClient.submitResult>` 误计为运行调用点，已修为只统计 `await dispatcherClient.submitResult`。
+
+剩余风险：Trae worker 的 submitResult 生命周期已收敛为单 helper；完整“所有 provider 使用同一 executor 核心”仍需要更大范围评估 Trae automation worker 与 generic beta-runtime-core 的 task execution / worktree / submit failure 模型能否合并。
 
 ## M93 Review 小结
 
