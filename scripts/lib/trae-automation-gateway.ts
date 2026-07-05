@@ -3,6 +3,7 @@ import {
   createAutomationGatewayDebugLogger,
   handleAutomationGatewayRequest,
   isAutomationGatewayDebugEnabled,
+  resolveAutomationGatewayDriver,
   startAutomationGatewayHttpServer,
   type AutomationGatewayDriver,
   type NormalizedAutomationError,
@@ -28,7 +29,11 @@ export interface HandleTraeAutomationHttpRequestOptions {
 }
 
 export async function handleTraeAutomationHttpRequest(input: HandleTraeAutomationHttpRequestInput, options: HandleTraeAutomationHttpRequestOptions = {}): Promise<{ status: number; json: unknown }> {
-  const automationDriver = (options.automationDriver || createTraeAutomationDriver(options.automationOptions || {})) as AutomationGatewayDriver;
+  const automationDriver = resolveAutomationGatewayDriver({
+    automationDriver: options.automationDriver as AutomationGatewayDriver | undefined,
+    automationOptions: options.automationOptions,
+    createDriver: createTraeAutomationDriver as (driverOptions: Record<string, unknown>) => AutomationGatewayDriver,
+  });
   return handleAutomationGatewayRequest(input, {
     automationDriver,
     sessionStore: options.sessionStore || null,
@@ -72,14 +77,12 @@ export async function startTraeAutomationGateway(options: StartTraeAutomationGat
   const stateDir = options.stateDir ?? DEFAULT_STATE_DIR;
   const debugEnabled = isAutomationGatewayDebugEnabled(options.debug);
   const debugLog = createAutomationGatewayDebugLogger(debugEnabled, options.logger || console);
-  const automationOptions = options.automationOptions || {};
-  const driverDebug = debugEnabled
-    || automationOptions.debug === true
-    || String(automationOptions.debug || "").trim() === "1";
-  const automationDriver = (options.automationDriver || createTraeAutomationDriver({
-    ...automationOptions,
-    debug: driverDebug,
-  })) as AutomationGatewayDriver;
+  const automationDriver = resolveAutomationGatewayDriver({
+    automationDriver: options.automationDriver as AutomationGatewayDriver | undefined,
+    automationOptions: options.automationOptions,
+    createDriver: createTraeAutomationDriver as (driverOptions: Record<string, unknown>) => AutomationGatewayDriver,
+    debugEnabled,
+  });
 
   const sessionStore = options.sessionStore === null
     ? null

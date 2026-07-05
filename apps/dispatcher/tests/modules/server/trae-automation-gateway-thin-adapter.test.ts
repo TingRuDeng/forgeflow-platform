@@ -14,6 +14,7 @@ const packagedSessionStorePath = path.join(repoRoot, "packages/trae-beta-runtime
 const coreGatewayPath = path.join(repoRoot, "packages/automation-gateway-core/src/gateway-handler.ts");
 const coreHttpServerPath = path.join(repoRoot, "packages/automation-gateway-core/src/gateway-http-server.ts");
 const coreDebugLogPath = path.join(repoRoot, "packages/automation-gateway-core/src/debug-log.ts");
+const coreDriverFactoryPath = path.join(repoRoot, "packages/automation-gateway-core/src/driver-factory.ts");
 const coreSessionStorePath = path.join(repoRoot, "packages/automation-gateway-core/src/session-store.ts");
 const coreSessionStoreTypesPath = path.join(repoRoot, "packages/automation-gateway-core/src/session-store-types.ts");
 
@@ -66,6 +67,22 @@ describe("trae automation gateway thin adapters", () => {
     expect(packagedSource).not.toContain("function createDebugLogger");
     expect(scriptSource).not.toContain("function isDebugEnabled");
     expect(packagedSource).not.toContain("function isDebugEnabled");
+  });
+
+  it("keeps gateway driver creation rules in automation-gateway-core", () => {
+    const scriptSource = fs.readFileSync(scriptGatewayPath, "utf8");
+    const packagedSource = fs.readFileSync(packagedGatewayPath, "utf8");
+    const coreDriverSource = fs.readFileSync(coreDriverFactoryPath, "utf8");
+
+    expect(coreDriverSource).toContain("resolveAutomationGatewayDriver");
+    expect(coreDriverSource).toContain("createDriver");
+    expect(coreDriverSource).toContain("debugEnabled");
+    expect(scriptSource).toContain("resolveAutomationGatewayDriver");
+    expect(packagedSource).toContain("resolveAutomationGatewayDriver");
+    expect(scriptSource).not.toContain("const driverDebug");
+    expect(packagedSource).not.toContain("const driverDebug");
+    expect(scriptSource).not.toContain("debug: driverDebug");
+    expect(packagedSource).not.toContain("debug: driverDebug");
   });
 
   it("keeps persistent session-store logic in automation-gateway-core", () => {

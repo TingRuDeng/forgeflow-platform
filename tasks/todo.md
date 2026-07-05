@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M54 串行：把 Trae gateway driver 创建规则下沉到 automation-gateway-core。
+- [x] M54 串行：运行定向验证并补充 review 小结。
+
+## M54 Review 小结
+
+已在 `packages/automation-gateway-core` 新增共享 `resolveAutomationGatewayDriver`，统一处理已注入 driver 的直接复用、`automationOptions` 透传，以及 gateway `debug` / `automationOptions.debug` 到 driver debug 的归一化。`scripts/lib/trae-automation-gateway.ts` 与 `packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts` 都改为调用该 helper；两侧只注入各自的具体 `createTraeAutomationDriver`，不再各自维护 `driverDebug` 拼装规则。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 Trae gateway 去重，把 driver 创建规则从脚本侧和 packaged runtime 下沉到 `@tingrudeng/automation-gateway-core`；没有改变 DOM driver 实现、gateway route、HTTP JSON IO、debug event、session-store 或 automation error envelope。安全检查通过，helper 只处理对象合并和布尔归一化，不新增 secret、外部网络调用、命令拼接、mock 成功路径或静默 fallback；已注入 driver 会直接复用，不会额外创建 driver。复杂度检查通过，新增 `driver-factory.ts` 低于 50 行，两个 gateway wrapper 不再持有 `driverDebug` 拼装逻辑。Document-refresh: needed，原因：Trae gateway driver 创建规则权威边界变化，已同步 README、TECH_DEBT、automation-gateway-core README 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @tingrudeng/automation-gateway-core test` 先失败于缺少 `resolveAutomationGatewayDriver`；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-gateway-thin-adapter.test.ts --maxWorkers=1` 先失败于缺少 `packages/automation-gateway-core/src/driver-factory.ts`。GREEN 后 `CI=true pnpm --filter @tingrudeng/automation-gateway-core test` 通过，6 个测试文件、19 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime test` 通过，19 个测试文件、174 个测试通过；非沙箱 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-gateway-thin-adapter.test.ts tests/modules/server/trae-automation-gateway.test.ts --maxWorkers=1` 通过，2 个测试文件、34 个测试通过。
+
+剩余风险：Trae gateway route/session/chat handler、HTTP JSON IO、debug logger、driver 创建规则和持久化 session-store 已共享；剩余风险主要在发布前 dist / workspace 依赖同步，以及具体 DOM driver 本体仍分别存在于脚本侧和 packaged runtime。
+
 - [x] M53 串行：把 Trae gateway debug logger 下沉到 automation-gateway-core。
 - [x] M53 串行：运行定向验证并补充 review 小结。
 
