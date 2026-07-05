@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M27 串行：在 Console 审查队列补 waiting-for-input 筛选入口。
+- [x] M27 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M27 Review 小结
+
+已在 Console 审查队列中增加 `waiting_for_input` 任务列表，展示请求方和暂停原因，并支持点击定位到任务详情；恢复动作仍保留在任务详情页的 JSON `resumePayload` 表单中，避免队列入口误触发恢复。同步把 `ReviewQueue` 渲染职责拆为 `ReviewTaskList`、`ReviewBulkForm` 和内部状态 hook，降低继续演进审查工作台时的组件复杂度。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 waiting-for-input 队列筛选入口；安全检查通过，未新增写 API、secret、外部网络调用、mock 成功路径或静默 fallback；复杂度检查通过，`ReviewQueue.tsx` 197 行、`ReviewTaskList.tsx` 74 行、`ReviewBulkForm.tsx` 96 行，新增组件文件均低于 300 行，主入口只做状态和组件编排；Document-refresh: needed，原因：Console 审查队列可见能力变化，已同步 README、docs/README 和 TECH_DEBT。结论：通过。
+
+验证已通过：`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx src/__tests__/App.test.tsx`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
+
+剩余风险：HITL resume 仍是 JSON textarea；后续如果 worker prompt schema 稳定，应升级为 schema 驱动表单。批量 merge 仍未开放，仍需单独设计风险确认和逐项失败明细。
+
 - [x] M26 串行：接通 worker 主动 HITL interrupt 与 resume payload 消费。
 - [x] M26 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 
