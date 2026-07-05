@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -59,10 +60,19 @@ function makeStateDir(): string {
 
 function writeCutoverApproval(stateDir: string): void {
   fs.mkdirSync(stateDir, { recursive: true });
+  const evidencePath = path.join(stateDir, "shadow-cutover-drill.json");
+  const evidenceContent = `${JSON.stringify({
+    ok: true,
+    phases: [
+      { name: "cutover_preflight", ok: true, payload: { cutover: { reason: "cutover_ready" } } },
+    ],
+  })}\n`;
+  fs.writeFileSync(evidencePath, evidenceContent);
   fs.writeFileSync(path.join(stateDir, "shadow-cutover-approval.json"), JSON.stringify({
     approved: true,
     approvedAt: "2026-07-05T10:00:00.000Z",
-    evidenceSha256: "b".repeat(64),
+    evidencePath,
+    evidenceSha256: crypto.createHash("sha256").update(evidenceContent).digest("hex"),
     cutoverReason: "cutover_ready",
   }));
 }
@@ -128,6 +138,18 @@ describe("runtime-state postgres backend", () => {
     const { loadRuntimeStateAsync } = await loadRuntimeStateModule();
 
     await expect(loadRuntimeStateAsync(makeStateDir())).rejects.toThrow("shadow-cutover-approval.json");
+    expect(mocks.createPgClient).not.toHaveBeenCalled();
+  });
+
+  it("rejects primary backend when archived cutover evidence no longer matches approval", async () => {
+    process.env.RUNTIME_STATE_BACKEND = "postgres";
+    process.env.DISPATCHER_PRIMARY_POSTGRES_URL = "postgres://localhost/forgeflow";
+    const stateDir = makeStateDir();
+    writeCutoverApproval(stateDir);
+    fs.writeFileSync(path.join(stateDir, "shadow-cutover-drill.json"), "{\"ok\":false}\n");
+    const { loadRuntimeStateAsync } = await loadRuntimeStateModule();
+
+    await expect(loadRuntimeStateAsync(stateDir)).rejects.toThrow("evidenceSha256");
     expect(mocks.createPgClient).not.toHaveBeenCalled();
   });
 

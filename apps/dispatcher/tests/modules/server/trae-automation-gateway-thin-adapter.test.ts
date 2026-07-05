@@ -15,6 +15,11 @@ const coreGatewayPath = path.join(repoRoot, "packages/automation-gateway-core/sr
 const coreHttpServerPath = path.join(repoRoot, "packages/automation-gateway-core/src/gateway-http-server.ts");
 const coreDebugLogPath = path.join(repoRoot, "packages/automation-gateway-core/src/debug-log.ts");
 const coreDriverFactoryPath = path.join(repoRoot, "packages/automation-gateway-core/src/driver-factory.ts");
+const coreDomDriverPath = path.join(repoRoot, "packages/automation-gateway-core/src/trae-dom-driver.ts");
+const coreDomExpressionsPath = path.join(repoRoot, "packages/automation-gateway-core/src/trae-dom-expressions.ts");
+const coreDomResponseExtractPath = path.join(repoRoot, "packages/automation-gateway-core/src/trae-dom-response-extract.ts");
+const scriptDomDriverPath = path.join(repoRoot, "scripts/lib/trae-dom-driver.ts");
+const packagedDomDriverPath = path.join(repoRoot, "packages/trae-beta-runtime/src/runtime/trae-dom-driver.ts");
 const coreSessionStorePath = path.join(repoRoot, "packages/automation-gateway-core/src/session-store.ts");
 const coreSessionStoreTypesPath = path.join(repoRoot, "packages/automation-gateway-core/src/session-store-types.ts");
 
@@ -83,6 +88,26 @@ describe("trae automation gateway thin adapters", () => {
     expect(packagedSource).not.toContain("const driverDebug");
     expect(scriptSource).not.toContain("debug: driverDebug");
     expect(packagedSource).not.toContain("debug: driverDebug");
+  });
+
+  it("keeps Trae DOM driver implementation in automation-gateway-core", () => {
+    const scriptSource = fs.readFileSync(scriptDomDriverPath, "utf8");
+    const packagedSource = fs.readFileSync(packagedDomDriverPath, "utf8");
+    const coreSource = fs.readFileSync(coreDomDriverPath, "utf8");
+    const coreExpressionsSource = fs.readFileSync(coreDomExpressionsPath, "utf8");
+    const coreResponseExtractSource = fs.readFileSync(coreDomResponseExtractPath, "utf8");
+
+    expect(coreSource).toContain("createTraeAutomationDriver");
+    expect(coreSource).toContain("trae-dom-expressions");
+    expect(coreSource).toContain("trae-dom-response");
+    expect(coreExpressionsSource).toContain("buildReadinessExpression");
+    expect(coreResponseExtractSource).toContain("extractAutomationResponse");
+    expect(scriptSource).toContain("@tingrudeng/automation-gateway-core");
+    expect(packagedSource).toContain("@tingrudeng/automation-gateway-core");
+    expect(scriptSource).not.toContain("BROWSER_HELPERS_SOURCE");
+    expect(packagedSource).not.toContain("BROWSER_HELPERS_SOURCE");
+    expect(scriptSource.split("\n").length).toBeLessThan(80);
+    expect(packagedSource.split("\n").length).toBeLessThan(80);
   });
 
   it("keeps persistent session-store logic in automation-gateway-core", () => {

@@ -70,12 +70,14 @@ describe("artifact store", () => {
       logs: "artifact://bundle-1/session.log",
       testResults: "artifact://bundle-1/test-results.txt",
       trajectory: "artifact://bundle-1/trajectory.json",
+      traj: "artifact://bundle-1/trajectory.traj",
     });
     expect(stored.manifest.files.map((file) => file.fileName)).toEqual([
       "diff.patch",
       "session.log",
       "test-results.txt",
       "trajectory.json",
+      "trajectory.traj",
     ]);
     expect(readArtifactStoreFile(stateDir, "bundle-1", "diff.patch")).toBe("diff --git a/src/a.ts b/src/a.ts");
     expect(JSON.parse(readArtifactStoreFile(stateDir, "bundle-1", "trajectory.json"))).toMatchObject({
@@ -84,6 +86,23 @@ describe("artifact store", () => {
         {
           action: "edit",
           observation: "docs/smoke.md changed",
+        },
+      ],
+    });
+    expect(JSON.parse(readArtifactStoreFile(stateDir, "bundle-1", "trajectory.traj"))).toMatchObject({
+      schemaVersion: "artifact-traj/v1",
+      taskId: "task-1",
+      attemptId: "attempt-1",
+      steps: [
+        {
+          thought: null,
+          action: "edit",
+          observation: "docs/smoke.md changed",
+          state: {
+            phase: "action",
+            status: "succeeded",
+          },
+          query: null,
         },
       ],
     });

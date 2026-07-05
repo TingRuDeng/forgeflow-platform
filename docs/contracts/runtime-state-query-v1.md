@@ -180,7 +180,7 @@
 - `DISPATCHER_SHADOW_MODE=primary` 不会把 Postgres 切为 truth source；当前 runtime 会拒绝该 shadow 写入模式，避免把 shadow projection 误当主存储
 - `pnpm verify:shadow-cutover` 会要求 shadow 已配置且零 drift，同时要求 `RUNTIME_STATE_BACKEND=postgres` 和 `DISPATCHER_PRIMARY_POSTGRES_URL` 已配置
 - `pnpm verify:shadow-cutover:drill` 会串行执行 drift gate、显式 reconcile + alert 记录、strict cutover preflight，并输出每个 phase 的结构化结果；`pnpm verify:shadow-cutover:drill:evidence` 会把同一 payload 写入 `.forgeflow-dispatcher/shadow-cutover-drill.json`，`pnpm verify:shadow-cutover:approve` 会从该证据生成 `.forgeflow-dispatcher/shadow-cutover-approval.json`，`pnpm verify:shadow-cutover:revoke` 会归档 approval marker 并写入 `.forgeflow-dispatcher/shadow-cutover-revocation.json`
-- Postgres primary snapshot 原语提供底层表与 JSONB snapshot 读写；同步 `loadRuntimeState()` / `saveRuntimeState()` 在 `RUNTIME_STATE_BACKEND=postgres` 下会显式失败，HTTP route 主链和 `/api/query/*` 使用 async state API；async Postgres primary load/save 会在连接数据库前校验 `shadow-cutover-approval.json`，并在存在 `shadow-cutover-revocation.json` 时拒绝继续使用 primary backend
+- Postgres primary snapshot 原语提供底层表与 JSONB snapshot 读写；同步 `loadRuntimeState()` / `saveRuntimeState()` 在 `RUNTIME_STATE_BACKEND=postgres` 下会显式失败，HTTP route 主链和 `/api/query/*` 使用 async state API；async Postgres primary load/save 会在连接数据库前校验 `shadow-cutover-approval.json`、其 `evidencePath` 指向的归档 drill evidence 和 `evidenceSha256`，并在存在 `shadow-cutover-revocation.json` 时拒绝继续使用 primary backend
 - `/api/query/*` 在 SQLite backend 下仍读取 SQLite structured projection；在 Postgres backend 下读取 primary snapshot，并由 `/api/query/projection-health` 对同一 primary snapshot 输出计数一致性
 
 ## 7. Completion Signals

@@ -137,12 +137,14 @@ describe("ArtifactBundleSchema", () => {
       refs: {
         diff: "artifact://attempt-1/diff.patch",
         trajectory: "artifact://attempt-1/trajectory.json",
+        traj: "artifact://attempt-1/trajectory.traj",
       },
     });
 
     expect(bundle.schemaVersion).toBe("artifact-bundle/v1");
     expect(bundle.changedFiles[0]?.changeType).toBe("modified");
     expect(bundle.refs.trajectory).toBe("artifact://attempt-1/trajectory.json");
+    expect(bundle.refs.traj).toBe("artifact://attempt-1/trajectory.traj");
   });
 
   it("accepts structured replayable trajectory steps", () => {

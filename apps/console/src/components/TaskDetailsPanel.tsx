@@ -10,6 +10,7 @@ import {
   type ReviewDecisionInput,
 } from './TaskReviewSections';
 import { TaskHitlSection } from './TaskHitlSection';
+import { TaskTerminationPolicySection, type TerminationPolicy } from './TaskTerminationPolicySection';
 import type { ResumePayloadSchema } from './taskHitlSchema';
 
 interface Task {
@@ -24,6 +25,7 @@ interface Task {
   continueFromTaskId?: string;
   followUpOfTaskId?: string;
   lastAssignedWorkerId?: string;
+  terminationPolicy?: TerminationPolicy;
   waitingForInput?: {
     requestedBy?: string;
     reason?: string;
@@ -235,6 +237,7 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
         resumingTaskId={resumingTaskId}
         onResume={onResume ? (_hitlTask, resumePayload) => onResume(task, resumePayload) : undefined}
       />
+      <TaskTerminationPolicySection policy={task.terminationPolicy} />
       <LineageSection task={task} parentTaskId={task.continueFromTaskId || task.followUpOfTaskId || null} />
       <RiskSection review={review} />
       <ReviewSection review={review} mustFix={mustFix} canRedriveValue={canRedriveValue} />

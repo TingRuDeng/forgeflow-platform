@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 import {
   createPgClient,
@@ -33,6 +34,24 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function resolveEvidencePath(approvalPath: string, evidencePath: unknown): string {
+  if (typeof evidencePath !== "string" || !evidencePath.trim()) {
+    throw new Error(`${PRIMARY_CUTOVER_APPROVAL_FILE_ENV} must include evidencePath`);
+  }
+  return path.isAbsolute(evidencePath)
+    ? evidencePath
+    : path.resolve(path.dirname(approvalPath), evidencePath);
+}
+
+function validateCutoverEvidenceHash(approvalPath: string, approval: Record<string, unknown>): void {
+  const evidencePath = resolveEvidencePath(approvalPath, approval.evidencePath);
+  const content = fs.readFileSync(evidencePath, "utf8");
+  const actualSha256 = crypto.createHash("sha256").update(content).digest("hex");
+  if (actualSha256 !== approval.evidenceSha256) {
+    throw new Error(`${PRIMARY_CUTOVER_APPROVAL_FILE_ENV} evidenceSha256 does not match archived cutover drill evidence`);
+  }
+}
+
 function validatePrimaryCutoverApprovalFile(stateDir: string): void {
   const revocationPath = path.join(stateDir, DEFAULT_PRIMARY_CUTOVER_REVOCATION_FILE);
   if (fs.existsSync(revocationPath)) {
@@ -56,6 +75,7 @@ function validatePrimaryCutoverApprovalFile(stateDir: string): void {
   if (typeof approval.evidenceSha256 !== "string" || !SHA256_HEX_PATTERN.test(approval.evidenceSha256)) {
     throw new Error(`${PRIMARY_CUTOVER_APPROVAL_FILE_ENV} must include evidenceSha256`);
   }
+  validateCutoverEvidenceHash(approvalPath, approval);
 }
 
 export async function loadRuntimeStateFromPostgres(stateDir: string): Promise<RuntimeState> {

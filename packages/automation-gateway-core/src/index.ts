@@ -70,3 +70,7 @@ export {
   isPlaceholderTaskId,
   looksLikeTemplatePlaceholderReport,
 } from "./report.js";
+export * from "./trae-automation-errors.js";
+export * from "./trae-cdp-client.js";
+export * from "./trae-cdp-discovery.js";
+export * from "./trae-dom-driver.js";

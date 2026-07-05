@@ -66,6 +66,7 @@ export interface WorkerResult {
     findings?: unknown[];
     artifacts?: Record<string, string>;
   };
+  artifactBundle?: Record<string, unknown>;
 }
 
 export interface PullRequestInfo {

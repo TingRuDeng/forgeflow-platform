@@ -259,6 +259,37 @@ describe("runtime/worker", () => {
         attemptId: "attempt-1",
         schemaVersion: "artifact-bundle/v1",
         summary: "all good",
+        trajectory: expect.objectContaining({
+          schemaVersion: "artifact-trajectory/v1",
+          steps: expect.arrayContaining([
+            expect.objectContaining({
+              phase: "preflight",
+              action: "等待 Trae automation gateway readiness",
+              status: "succeeded",
+            }),
+            expect.objectContaining({
+              phase: "action",
+              action: "发送任务 prompt 到 Trae 会话",
+              status: "succeeded",
+              observation: expect.stringContaining("responseLength"),
+            }),
+            expect.objectContaining({
+              phase: "verification",
+              action: "校验远端分支和提交可审查",
+              status: "succeeded",
+            }),
+            expect.objectContaining({
+              phase: "result",
+              action: "提交 worker 结果到 dispatcher",
+              status: "succeeded",
+            }),
+          ]),
+        }),
+        retainedContent: expect.objectContaining({
+          logs: expect.stringContaining("sessionId=session-001"),
+          trajectory: expect.stringContaining("send_chat_done"),
+          testResults: "pnpm test",
+        }),
         changedFiles: [
           { path: "src/runtime/worker.ts", changeType: "modified" },
           { path: "src/runtime/task-worktree.ts", changeType: "modified" },
@@ -864,6 +895,7 @@ describe("runtime/worker", () => {
         status: "task",
         task: {
           task_id: "task-2-hard-cap",
+          attempt_id: "attempt-hard-cap",
           repo: "repo",
           branch: "feature/runtime-timeout-cap",
           default_branch: "main",
@@ -937,6 +969,22 @@ describe("runtime/worker", () => {
       taskId: "task-2-hard-cap",
       status: "failed",
       summary: "Hard timeout exceeded",
+      artifactBundle: expect.objectContaining({
+        trajectory: expect.objectContaining({
+          schemaVersion: "artifact-trajectory/v1",
+          steps: expect.arrayContaining([
+            expect.objectContaining({
+              phase: "result",
+              action: "提交 worker 结果到 dispatcher",
+              status: "failed",
+              observation: "Hard timeout exceeded",
+            }),
+          ]),
+        }),
+        retainedContent: expect.objectContaining({
+          logs: expect.stringContaining("sessionId=session-hard-cap"),
+        }),
+      }),
     }));
     expect(automationClient.releaseSession).toHaveBeenCalledWith("session-hard-cap");
     expect(result).toEqual({

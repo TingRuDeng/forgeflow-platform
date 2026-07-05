@@ -121,6 +121,7 @@ export const ArtifactBundleSchema = z.object({
     terminalTranscript: z.string().optional(),
     structuredReport: z.string().optional(),
     trajectory: z.string().optional(),
+    traj: z.string().optional(),
   }),
   trajectory: ArtifactTrajectorySchema.optional(),
   retainedContent: z.object({

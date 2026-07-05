@@ -5,7 +5,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  buildCodexLaunchCommand,
   buildDispatcherRuntimeLaunchCommand,
+  buildGeminiLaunchCommand,
   runWorkerAssignment,
   type AssignmentLaunchCommand,
 } from "../src/runtime/run-worker-assignment.js";
@@ -108,11 +110,85 @@ describe("shared run-worker-assignment runner", () => {
       provider: "codex",
       output: "Do the work.\n\n# Context",
       generatedAt: "2026-07-05T12:00:00.000Z",
+      artifactBundle: {
+        schemaVersion: "artifact-bundle/v1",
+        trajectory: {
+          schemaVersion: "artifact-trajectory/v1",
+          steps: [
+            expect.objectContaining({
+              sequence: 1,
+              phase: "preflight",
+              status: "succeeded",
+              action: expect.stringContaining("prepared assignment"),
+            }),
+            expect.objectContaining({
+              sequence: 2,
+              phase: "action",
+              status: "succeeded",
+              command: expect.stringContaining("node -e"),
+            }),
+            expect.objectContaining({
+              sequence: 3,
+              phase: "verification",
+              status: "succeeded",
+              action: "node -e 'console.log(\"verify ok\")'",
+              observation: "verify ok",
+              exitCode: 0,
+            }),
+            expect.objectContaining({
+              sequence: 4,
+              phase: "result",
+              status: "succeeded",
+              action: expect.stringContaining("worker result"),
+            }),
+          ],
+        },
+        retainedContent: {
+          logs: expect.stringContaining("# Context"),
+          testResults: expect.stringContaining("verify ok"),
+        },
+        testResults: [
+          expect.objectContaining({
+            name: "node -e 'console.log(\"verify ok\")'",
+            status: "passed",
+          }),
+        ],
+      },
       verification: {
         allPassed: true,
       },
     });
     expect(fs.readFileSync(path.join(outputDir, "worker-output.raw.txt"), "utf8")).toContain("# Context");
+  });
+
+  it("marks the trajectory action step failed when the launch command exits non-zero", async () => {
+    const { assignmentDir, worktreeDir, outputDir } = writeAssignmentPackage(makeTempDir());
+
+    await runWorkerAssignment({
+      assignmentDir,
+      worktreeDir,
+      outputDir,
+      buildLaunchCommand(): AssignmentLaunchCommand {
+        return {
+          provider: "codex",
+          argv: ["node", "-e", "console.error('launch failed'); process.exit(2)"],
+          cwd: worktreeDir,
+        };
+      },
+      generatedAt: () => "2026-07-05T12:00:00.000Z",
+    });
+
+    const workerResult = JSON.parse(fs.readFileSync(path.join(outputDir, "worker-result.json"), "utf8"));
+    expect(workerResult.artifactBundle.trajectory.steps[1]).toMatchObject({
+      phase: "action",
+      status: "failed",
+      exitCode: 2,
+      observation: "launch failed",
+    });
+    expect(workerResult.artifactBundle.trajectory.steps.at(-1)).toMatchObject({
+      phase: "result",
+      status: "failed",
+    });
   });
 
   it("builds codex and gemini launch commands through shared runtime factories", async () => {
@@ -202,5 +278,54 @@ describe("shared run-worker-assignment runner", () => {
       argv: ["gemini", "-m", "gemini-2.5-pro", "-p", "Do the work.\n\n# Context\n"],
     });
     expect(geminiLaunches).toHaveLength(1);
+  });
+
+  it("builds packaged codex and gemini launch commands from the shared core", () => {
+    const codexCommand = buildCodexLaunchCommand({
+      assignment: {
+        taskId: "task-1",
+        branchName: "ai/codex/task-1",
+        defaultBranch: "main",
+        pool: "codex",
+        repo: "owner/repo",
+      },
+      prompt: "Do the work.",
+      worktreeDir: "/tmp/codex-worktree",
+    }, {
+      env: {
+        FORGEFLOW_CODEX_BIN: "node",
+        FORGEFLOW_CODEX_MODEL: "gpt-5.4-codex",
+        FORGEFLOW_CODEX_SANDBOX: "read-only",
+        FORGEFLOW_CODEX_ARGS_JSON: "[\"--full-auto\"]",
+      },
+    });
+    const geminiCommand = buildGeminiLaunchCommand({
+      assignment: {
+        taskId: "task-2",
+        branchName: "ai/gemini/task-2",
+        defaultBranch: "main",
+        pool: "gemini",
+        repo: "owner/repo",
+      },
+      prompt: "Do the Gemini work.",
+      worktreeDir: "/tmp/gemini-worktree",
+    }, {
+      env: {
+        FORGEFLOW_GEMINI_BIN: "node",
+        FORGEFLOW_GEMINI_MODEL: "gemini-test",
+        FORGEFLOW_GEMINI_ARGS: "--approval-mode auto",
+      },
+    });
+
+    expect(codexCommand).toEqual({
+      provider: "codex",
+      argv: ["node", "exec", "-m", "gpt-5.4-codex", "--sandbox", "read-only", "--full-auto", "Do the work."],
+      cwd: "/tmp/codex-worktree",
+    });
+    expect(geminiCommand).toEqual({
+      provider: "gemini",
+      argv: ["node", "-m", "gemini-test", "--approval-mode", "auto", "-p", "Do the Gemini work."],
+      cwd: "/tmp/gemini-worktree",
+    });
   });
 });

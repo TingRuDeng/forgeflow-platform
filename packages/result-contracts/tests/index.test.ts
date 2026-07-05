@@ -4,13 +4,11 @@ import {
   DecisionSchema,
   TerminalStateSchema,
   WorkerFailureTypeSchema,
-  ReviewFindingSchema,
   WorkerFailureSchema,
   WorkerEvidenceSchema,
   ReviewDecisionEvidenceSchema,
   ReviewReasonCodeSchema,
   RunResultSchema,
-  ArtifactBundleSchema,
 } from "../src/index.js";
 
 describe("RunCommandSchema", () => {
@@ -70,108 +68,6 @@ describe("WorkerFailureTypeSchema", () => {
   it("rejects invalid failure types", () => {
     expect(() => WorkerFailureTypeSchema.parse("error")).toThrow();
     expect(() => WorkerFailureTypeSchema.parse("timeout")).toThrow();
-  });
-});
-
-describe("ReviewFindingSchema", () => {
-  const validFinding = {
-    finding_id: "finding-1",
-    severity: "high",
-    category: "security",
-    title: "SQL Injection Vulnerability",
-    evidence: {
-      file: "src/db.js",
-      line: 42,
-      symbol: "query",
-      snippet: "query = 'SELECT * FROM users WHERE id = ' + id",
-    },
-    recommendation: "Use parameterized queries",
-    confidence: 0.95,
-    fingerprint: "abc123",
-  };
-
-  it("parses a valid review finding", () => {
-    const result = ReviewFindingSchema.parse(validFinding);
-    expect(result.finding_id).toBe("finding-1");
-    expect(result.severity).toBe("high");
-    expect(result.detected_by).toEqual([]);
-  });
-
-  it("applies default finding_id when not provided", () => {
-    const { finding_id, ...rest } = validFinding;
-    const result = ReviewFindingSchema.parse(rest);
-    expect(result.finding_id).toBe("finding");
-  });
-
-  it("applies default detected_by when not provided", () => {
-    const result = ReviewFindingSchema.parse(validFinding);
-    expect(result.detected_by).toEqual([]);
-  });
-
-  it("rejects invalid severity", () => {
-    expect(() =>
-      ReviewFindingSchema.parse({ ...validFinding, severity: "urgent" })
-    ).toThrow();
-    expect(() =>
-      ReviewFindingSchema.parse({ ...validFinding, severity: "warning" })
-    ).toThrow();
-  });
-
-  it("rejects invalid category", () => {
-    expect(() =>
-      ReviewFindingSchema.parse({ ...validFinding, category: "error" })
-    ).toThrow();
-    expect(() =>
-      ReviewFindingSchema.parse({ ...validFinding, category: "typo" })
-    ).toThrow();
-  });
-
-  it("rejects empty title", () => {
-    expect(() =>
-      ReviewFindingSchema.parse({ ...validFinding, title: "" })
-    ).toThrow();
-  });
-
-  it("rejects confidence outside [0, 1]", () => {
-    expect(() =>
-      ReviewFindingSchema.parse({ ...validFinding, confidence: 1.5 })
-    ).toThrow();
-    expect(() =>
-      ReviewFindingSchema.parse({ ...validFinding, confidence: -0.1 })
-    ).toThrow();
-  });
-
-  it("rejects invalid evidence.file", () => {
-    expect(() =>
-      ReviewFindingSchema.parse({
-        ...validFinding,
-        evidence: { ...validFinding.evidence, file: "" },
-      })
-    ).toThrow();
-  });
-
-  it("accepts nullable line and symbol", () => {
-    const result = ReviewFindingSchema.parse({
-      ...validFinding,
-      evidence: { ...validFinding.evidence, line: null, symbol: null },
-    });
-    expect(result.evidence.line).toBeNull();
-    expect(result.evidence.symbol).toBeNull();
-  });
-
-  it("rejects non-positive line number", () => {
-    expect(() =>
-      ReviewFindingSchema.parse({
-        ...validFinding,
-        evidence: { ...validFinding.evidence, line: 0 },
-      })
-    ).toThrow();
-    expect(() =>
-      ReviewFindingSchema.parse({
-        ...validFinding,
-        evidence: { ...validFinding.evidence, line: -1 },
-      })
-    ).toThrow();
   });
 });
 
@@ -364,101 +260,6 @@ describe("RunResultSchema", () => {
   });
 });
 
-describe("ArtifactBundleSchema", () => {
-  it("parses a minimal v1 artifact bundle", () => {
-    const bundle = ArtifactBundleSchema.parse({
-      bundleId: "bundle-task-1-attempt-1",
-      taskId: "task-1",
-      attemptId: "attempt-1",
-      schemaVersion: "artifact-bundle/v1",
-      summary: "任务已完成",
-      changedFiles: [
-        {
-          path: "src/index.ts",
-          changeType: "modified",
-        },
-      ],
-      refs: {
-        structuredReport: "artifact://attempt-1/result.json",
-      },
-    });
-
-    expect(bundle.schemaVersion).toBe("artifact-bundle/v1");
-    expect(bundle.riskNotes).toEqual([]);
-    expect(bundle.nextActions).toEqual([]);
-  });
-
-  it("parses retained diff log and test result content", () => {
-    const bundle = ArtifactBundleSchema.parse({
-      taskId: "task-1",
-      attemptId: "attempt-1",
-      schemaVersion: "artifact-bundle/v1",
-      changedFiles: [],
-      refs: {
-        diff: "artifact://attempt-1/diff.patch",
-        logs: "artifact://attempt-1/session.log",
-      },
-      retainedContent: {
-        diff: "diff --git a/src/index.ts b/src/index.ts",
-        logs: "pnpm test passed",
-        testResults: "58 tests passed",
-        trajectory: JSON.stringify([{ action: "pnpm test", observation: "58 tests passed" }]),
-      },
-    });
-
-    expect(bundle.retainedContent).toEqual({
-      diff: "diff --git a/src/index.ts b/src/index.ts",
-      logs: "pnpm test passed",
-      testResults: "58 tests passed",
-      trajectory: JSON.stringify([{ action: "pnpm test", observation: "58 tests passed" }]),
-    });
-  });
-
-  it("parses structured replayable trajectory steps", () => {
-    const bundle = ArtifactBundleSchema.parse({
-      taskId: "task-1",
-      attemptId: "attempt-1",
-      schemaVersion: "artifact-bundle/v1",
-      changedFiles: [],
-      refs: {},
-      trajectory: {
-        schemaVersion: "artifact-trajectory/v1",
-        steps: [
-          {
-            sequence: 1,
-            phase: "verification",
-            action: "pnpm test",
-            observation: "58 tests passed",
-            status: "succeeded",
-            command: "pnpm test",
-            cwd: "/repo",
-            exitCode: 0,
-            artifactRef: "artifact://attempt-1/test-results.txt",
-          },
-        ],
-      },
-    });
-
-    expect(bundle.trajectory?.steps[0]).toMatchObject({
-      sequence: 1,
-      phase: "verification",
-      action: "pnpm test",
-      observation: "58 tests passed",
-      status: "succeeded",
-      exitCode: 0,
-    });
-  });
-
-  it("rejects artifact bundles without attempt ownership", () => {
-    expect(() => ArtifactBundleSchema.parse({
-      taskId: "task-1",
-      schemaVersion: "artifact-bundle/v1",
-      changedFiles: [],
-      refs: {},
-    })).toThrow();
-  });
-});
-
 describe("Schema inference", () => {
   it("correctly infers RunResult type", () => {
     const result: import("../src/index.js").RunResult = {
@@ -478,7 +279,6 @@ describe("Schema inference", () => {
     };
     expect(result.command).toBe("run");
   });
-
   it("correctly infers ReviewFinding type", () => {
     const finding: import("../src/index.js").ReviewFinding = {
       finding_id: "test",

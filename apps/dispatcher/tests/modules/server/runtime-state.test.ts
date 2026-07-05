@@ -941,19 +941,19 @@ describe("dispatcher runtime state (TypeScript)", () => {
             },
           ],
         },
+        artifactBundle: {
+          taskId,
+          attemptId: attempt.attemptId,
+          schemaVersion: "artifact-bundle/v1",
+          summary: "done",
+          changedFiles: [{ path: "src/index.ts", changeType: "modified" }],
+          refs: { structuredReport: "artifact://attempt/result.json" },
+          riskNotes: [],
+          nextActions: [],
+        },
       },
       changedFiles: ["src/index.ts"],
       pullRequest: null,
-      artifactBundle: {
-        taskId,
-        attemptId: attempt.attemptId,
-        schemaVersion: "artifact-bundle/v1",
-        summary: "done",
-        changedFiles: [{ path: "src/index.ts", changeType: "modified" }],
-        refs: { structuredReport: "artifact://attempt/result.json" },
-        riskNotes: [],
-        nextActions: [],
-      },
     });
 
     expect(state.artifactBundles).toHaveLength(1);

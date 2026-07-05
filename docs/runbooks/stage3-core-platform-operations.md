@@ -103,14 +103,16 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher` 返回 `ok=true`
 - `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --max-mismatches 0 --max-delta 0` 可输出 `alert.level`；release / rollout gate 也可通过 `DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES` 与 `DISPATCHER_SHADOW_DRIFT_MAX_DELTA` 注入同一阈值
 - 如果 drift 来自 shadow projection / queue 落后，operator 可执行 `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --reconcile` 主动重放 SQLite truth 到 shadow 后复查
-- 生产巡检或定时任务可使用 `pnpm verify:shadow-drift:reconcile`，等价于显式 `--reconcile --record-alert`；也可通过 `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1` 与 `DISPATCHER_SHADOW_DRIFT_RECORD_ALERT=1` 注入同一行为
+- 生产巡检或定时任务可使用 `pnpm verify:shadow-drift:reconcile`，等价于显式 `--reconcile --record-alert`；需要长期运行的自动对账进程时使用 `pnpm verify:shadow-drift:reconciler`，它会周期性执行同一 reconciliation + alert 记录流程；生产切换窗口使用 `pnpm verify:shadow-cutover:reconciler`，让长期进程持续执行 strict cutover 条件：shadow 已配置、primary backend 已配置、零 drift；也可通过 `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1` 与 `DISPATCHER_SHADOW_DRIFT_RECORD_ALERT=1` 注入同一行为
 - 如果需要把 drift 留作运行时告警证据，operator 可追加 `--record-alert` 写入 `shadow_drift_detected` system event
 - 生产 cutover 前必须执行 `pnpm verify:shadow-cutover`，该命令要求 shadow 已配置、`--max-mismatches 0 --max-delta 0` 通过，并且 `RUNTIME_STATE_BACKEND=postgres` 与 `DISPATCHER_PRIMARY_POSTGRES_URL` 已配置；未配置 shadow 或 primary backend 时会失败
 - 生产 cutover 演练使用 `pnpm verify:shadow-cutover:drill`；它会依次运行 drift gate、`--reconcile --record-alert` 对账、strict cutover preflight，并输出每个 phase 的 `ok/statusCode/payload`
 - 变更窗口前必须归档 cutover drill 证据时，使用 `pnpm verify:shadow-cutover:drill:evidence`，它会把同一 payload 写入 `.forgeflow-dispatcher/shadow-cutover-drill.json`；自定义归档路径可直接调用 `node scripts/verify-shadow-cutover-drill.mjs <stateDir> --output <path>`
-- 归档 drill 证据后必须执行 `pnpm verify:shadow-cutover:approve`，该命令会校验证据里的 `cutover_preflight=cutover_ready` 并生成 `.forgeflow-dispatcher/shadow-cutover-approval.json`
+- 归档 drill 证据后必须执行 `pnpm verify:shadow-cutover:approve`，该命令会校验证据里的 `cutover_preflight=cutover_ready`，记录 `evidencePath` / `evidenceSha256`，并生成 `.forgeflow-dispatcher/shadow-cutover-approval.json`
+- 切换窗口开始前必须执行 `pnpm verify:shadow-cutover:approval`，该命令会独立校验 approval marker 仍为 `cutover_ready`、归档 evidence SHA-256 未漂移，并确认不存在 `shadow-cutover-revocation.json`
+- 最终切换前必须执行 `pnpm verify:shadow-cutover:ready`，该命令会输出 `strict_cutover_preflight` 与 `approval_evidence` 两个 phase，只有 strict preflight 和 approval evidence 同时通过才返回成功
 - 回滚或撤销生产切换窗口时执行 `pnpm verify:shadow-cutover:revoke`；该命令会把 approval marker 归档为 `shadow-cutover-approval.revoked-*.json`，并写入 `.forgeflow-dispatcher/shadow-cutover-revocation.json`
-- `RUNTIME_STATE_BACKEND=postgres` 现在会在读写 primary snapshot 前校验 `shadow-cutover-approval.json`；自定义审批文件路径可设置 `DISPATCHER_PRIMARY_CUTOVER_APPROVAL_FILE`；如果存在 `shadow-cutover-revocation.json`，primary backend 会拒绝连接，直到重新完成 drill evidence 和 approval
+- `RUNTIME_STATE_BACKEND=postgres` 现在会在读写 primary snapshot 前校验 `shadow-cutover-approval.json`，并重新读取 `evidencePath` 确认当前文件 SHA-256 与 approval 里的 `evidenceSha256` 匹配；自定义审批文件路径可设置 `DISPATCHER_PRIMARY_CUTOVER_APPROVAL_FILE`；如果存在 `shadow-cutover-revocation.json`，primary backend 会拒绝连接，直到重新完成 drill evidence 和 approval
 - 当前 `DISPATCHER_SHADOW_MODE=primary` 会被明确拒绝为 `primary_store_not_implemented`；不要把它作为生产切换开关，真正 primary store 开关是 `RUNTIME_STATE_BACKEND=postgres`
 - `@forgeflow/dispatcher-store-postgres` 已有 primary snapshot 表原语，dispatcher HTTP route 主链与 `/api/query/*` 已通过 async Postgres state path 读写 primary snapshot；完整生产切换仍需外部存储运维确认和真实生产变更窗口
 - `pnpm verify:stage3` 和 release workflow 会执行 `pnpm verify:shadow-drift`，shadow 配置存在且 drifted 时必须阻断 rollout / release

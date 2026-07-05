@@ -13,6 +13,7 @@ const RETAINED_FILE_NAMES = {
   logs: "session.log",
   testResults: "test-results.txt",
   trajectory: "trajectory.json",
+  traj: "trajectory.traj",
 } as const;
 
 type RetainedContentKey = keyof typeof RETAINED_FILE_NAMES;
@@ -77,14 +78,57 @@ function readManifest(filePath: string): ArtifactStoreManifest | null {
 }
 
 function retainedEntries(bundle: ArtifactBundle): Array<[RetainedContentKey, string]> {
-  const content = bundle.retainedContent ?? {};
   return (Object.keys(RETAINED_FILE_NAMES) as RetainedContentKey[])
     .flatMap((key) => {
-      const value = key === "trajectory" && bundle.trajectory
-        ? JSON.stringify(bundle.trajectory, null, 2)
-        : content[key];
+      const value = retainedEntryContent(bundle, key);
       return typeof value === "string" && value.length > 0 ? [[key, value]] : [];
     });
+}
+
+function retainedEntryContent(bundle: ArtifactBundle, key: RetainedContentKey): string | undefined {
+  switch (key) {
+    case "trajectory":
+      return bundle.trajectory
+        ? JSON.stringify(bundle.trajectory, null, 2)
+        : bundle.retainedContent?.trajectory;
+    case "traj":
+      return bundle.trajectory ? buildReplayableTrajContent(bundle) : undefined;
+    case "diff":
+      return bundle.retainedContent?.diff;
+    case "logs":
+      return bundle.retainedContent?.logs;
+    case "testResults":
+      return bundle.retainedContent?.testResults;
+  }
+}
+
+function buildReplayableTrajContent(bundle: ArtifactBundle): string {
+  const steps = [...(bundle.trajectory?.steps ?? [])]
+    .sort((left, right) => left.sequence - right.sequence)
+    .map((step) => ({
+      stepId: step.stepId ?? `step-${step.sequence}`,
+      sequence: step.sequence,
+      thought: null,
+      action: step.action,
+      observation: step.observation ?? null,
+      state: {
+        phase: step.phase,
+        status: step.status,
+        startedAt: step.startedAt ?? null,
+        endedAt: step.endedAt ?? null,
+        exitCode: step.exitCode ?? null,
+        cwd: step.cwd ?? null,
+        artifactRef: step.artifactRef ?? null,
+      },
+      query: step.command ?? null,
+    }));
+  return `${JSON.stringify({
+    schemaVersion: "artifact-traj/v1",
+    taskId: bundle.taskId,
+    attemptId: bundle.attemptId,
+    bundleId: bundle.bundleId ?? `${bundle.attemptId}:artifact-bundle`,
+    steps,
+  }, null, 2)}\n`;
 }
 
 function writeTextFile(filePath: string, content: string): number {

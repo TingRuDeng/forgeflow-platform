@@ -283,7 +283,7 @@ describe("dispatcher server", () => {
     expect(Array.isArray(contextResponse.json.reviewBacklog)).toBe(true);
     expect(Array.isArray(contextResponse.json.blocked)).toBe(true);
     expect(contextResponse.json.stats.tasks.merged).toBe(1);
-  }, 15_000);
+  });
 
   it("enforces the server-side merge risk gate over HTTP when enabled", async () => {
     const previousMode = process.env.DISPATCHER_REVIEW_MERGE_GATE;
@@ -401,7 +401,7 @@ describe("dispatcher server", () => {
         process.env.DISPATCHER_REVIEW_MERGE_GATE = previousMode;
       }
     }
-  }, 15_000);
+  });
 
   it("exports control-plane metrics via a dedicated no-store endpoint", async () => {
     const stateDir = makeTempDir();
