@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M17 串行：补齐 shadow 自动 reconciliation cadence 入口和 production cutover 预检。
+- [x] M17 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M17 Review 小结
+
+已为 shadow drift gate 增加显式自动 reconciliation cadence 和生产 cutover 预检：`check-shadow-drift.mjs` 支持 `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1`、`DISPATCHER_SHADOW_DRIFT_RECORD_ALERT=1`、`DISPATCHER_SHADOW_DRIFT_REQUIRE_CONFIGURED=1`，并新增 `cutover` 输出；`pnpm verify:shadow-drift:reconcile` 会显式执行 `--reconcile --record-alert`，`pnpm verify:shadow-cutover` 会要求 shadow 已配置且 `--max-mismatches 0 --max-delta 0` 通过。默认 `pnpm verify:shadow-drift` 仍保持只读 gate，不自动写运行时状态。
+
+Review Gate：finished。Spec 符合度通过，补齐自动对账入口和 cutover 前置门禁；安全检查通过，默认路径无副作用，写入 runtime event 仍必须显式 `--record-alert` 或 env opt-in；复杂度检查通过，`check-shadow-drift.mjs` 191 行，新增 helper 均短函数；Document-refresh: needed，原因：operator 命令、环境变量、cutover 预检语义和技术债状态发生变化，已同步 `API_ENDPOINTS.md`、Stage 3 runbook、`README.md` 与 `TECH_DEBT.md`。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts tests/modules/execution/workflows.test.ts`、`CI=true pnpm verify:shadow-drift`、`CI=true pnpm verify:shadow-drift:reconcile`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。`pnpm verify:shadow-cutover` 在当前未配置 shadow 的本地环境中按设计会失败，该失败语义已由 `fails cutover readiness when shadow is not configured` 测试覆盖。
+
+剩余风险：本轮提供的是显式自动对账入口和 cutover 预检，不等于实际把 Postgres / queue 切为 primary；真正 primary-store 切换仍需要生产阈值演练、外部存储运维确认和回滚流程。
+
 - [x] M16 串行：补齐 Console artifact refs 复制和按需文件展开。
 - [x] M16 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 
