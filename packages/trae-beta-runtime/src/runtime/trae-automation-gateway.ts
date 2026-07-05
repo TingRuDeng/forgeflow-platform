@@ -1,10 +1,10 @@
-import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import type { Server } from "node:http";
 
 import {
-  ApiError,
   handleAutomationGatewayRequest,
-  normalizeApiError,
+  startAutomationGatewayHttpServer,
   type AutomationGatewayDriver,
+  type NormalizedAutomationError,
 } from "@tingrudeng/automation-gateway-core";
 
 import { normalizeAutomationError } from "./trae-automation-errors.js";
@@ -53,28 +53,9 @@ export interface StartedTraeAutomationGateway {
   host: string;
   port: number;
   baseUrl: string;
-  server: http.Server;
+  server: Server;
   sessionStore: SessionStore | null;
   close: () => Promise<void>;
-}
-
-function writeJson(
-  res: ServerResponse,
-  statusCode: number,
-  payload: ApiSuccessResponse<unknown> | ApiErrorResponse,
-) {
-  res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(payload));
-}
-
-function writeError(res: ServerResponse, error: unknown) {
-  const normalized = normalizeApiError(error);
-  writeJson(res, normalized.statusCode, {
-    success: false,
-    code: normalized.code,
-    message: normalized.message,
-    details: normalized.details || {},
-  });
 }
 
 function isDebugEnabled(value: unknown) {
@@ -106,36 +87,6 @@ function createDebugLogger(
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", (chunk: Buffer | string) => {
-      body += chunk.toString();
-    });
-    req.on("end", () => {
-      if (!body.trim()) {
-        resolve({});
-        return;
-      }
-      try {
-        const parsed = JSON.parse(body) as unknown;
-        resolve(isRecord(parsed) ? parsed : {});
-      } catch {
-        reject(new ApiError("INVALID_JSON", "Request body is not valid JSON", 400));
-      }
-    });
-    req.on("error", (error: Error) => {
-      reject(new ApiError("READ_BODY_FAILED", "Failed to read request body", 400, {
-        message: error.message,
-      }));
-    });
-  });
-}
-
 export async function handleTraeAutomationHttpRequest(
   input: HttpRequestInput,
   options: HandleTraeAutomationHttpRequestOptions = {},
@@ -146,18 +97,20 @@ export async function handleTraeAutomationHttpRequest(
     automationDriver,
     sessionStore: options.sessionStore || null,
     debugLog: options.debugLog,
-    normalizeAutomationError: (error, fallbackCode) => {
-      const normalized = normalizeAutomationError(error, fallbackCode) as Error & {
-        code?: string;
-        details?: Record<string, unknown>;
-      };
-      return {
-        code: normalized.code || fallbackCode,
-        message: normalized.message || "Trae automation failed",
-        details: normalized.details || {},
-      };
-    },
+    normalizeAutomationError: normalizeTraeGatewayError,
   });
+}
+
+function normalizeTraeGatewayError(error: unknown, fallbackCode: string): NormalizedAutomationError {
+  const normalized = normalizeAutomationError(error, fallbackCode) as Error & {
+    code?: string;
+    details?: Record<string, unknown>;
+  };
+  return {
+    code: normalized.code || fallbackCode,
+    message: normalized.message || "Trae automation failed",
+    details: normalized.details || {},
+  };
 }
 
 export function startTraeAutomationGateway(
@@ -194,49 +147,18 @@ export function startTraeAutomationGateway(
     }
   }
 
-  const server = http.createServer(async (req, res) => {
-    try {
-      const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
-      const body = req.method === "POST" ? await readJsonBody(req) : {};
-      const result = await handleTraeAutomationHttpRequest(
-        {
-          method: req.method,
-          pathname: url.pathname,
-          query: Object.fromEntries(url.searchParams.entries()),
-          body,
-        },
-        { automationDriver, sessionStore, debugLog },
-      );
-      writeJson(res, result.status, result.json);
-    } catch (error) {
-      debugLog("request.error", {
-        method: req.method || "UNKNOWN",
-        url: req.url || "/",
-        message: error instanceof Error ? error.message : String(error),
-      });
-      writeError(res, error);
-    }
-  });
-
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, host, () => {
-      resolve({
-        host,
-        port,
-        baseUrl: `http://${host}:${port}`,
-        server,
-        sessionStore,
-        close: () => new Promise((resolveClose, rejectClose) => {
-          server.close((error) => {
-            if (error) {
-              rejectClose(error);
-              return;
-            }
-            resolveClose();
-          });
-        }),
-      });
-    });
-  });
+  return startAutomationGatewayHttpServer({
+    host,
+    port,
+    debugLog,
+    handlerOptions: {
+      automationDriver,
+      sessionStore,
+      debugLog,
+      normalizeAutomationError: normalizeTraeGatewayError,
+    },
+  }).then((started) => ({
+    ...started,
+    sessionStore,
+  }));
 }
