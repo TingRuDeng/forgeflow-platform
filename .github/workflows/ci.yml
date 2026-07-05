@@ -50,6 +50,9 @@ jobs:
       - name: Verify runtime package readiness
         run: pnpm verify:runtime-packages
 
+      - name: Verify runtime package install smoke
+        run: pnpm verify:runtime-packages:install
+
       - name: Run typecheck
         run: pnpm typecheck
 

@@ -44,7 +44,7 @@ ai_summary:
 - 用 `pnpm test`、`pnpm typecheck` 和 `git diff --check` 做常规交付验证。
 - 对运行入口事实，核对 `scripts/start-control-plane.sh`、`scripts/run-dispatcher-server.js`、`packages/forgeflow-dispatcher/README.md` 和 `packages/trae-beta-runtime/README.md`。
 
-forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都是受支持、并列的 worker 接入方式。源码中三者均有远程运行时包；npm registry 当前公开可安装的是 `@tingrudeng/codex-beta-runtime` 与 `@tingrudeng/trae-beta-runtime`，`@tingrudeng/gemini-beta-runtime` 仍需先完成 npm 包名和 Trusted Publisher 配置。说明：Trae automation 仍是最成熟的无人值守链路；`codex/gemini` worker daemon 的主循环、worker CLI、executor、launch builder 和失败回写已收敛到 `@tingrudeng/beta-runtime-core`，dispatcher runtime-glue 和源码脚本只保留薄适配；`pnpm verify:runtime-packages` 会校验 runtime 包发布清单，生产发布窗口可用 `pnpm verify:runtime-packages:published` 强制校验 npm registry 包名、版本和已发布依赖元数据，但 Gemini 远程包发布仍依赖外部 npm 配置（见 `docs/TECH_DEBT.md`）。
+forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都是受支持、并列的 worker 接入方式。源码中三者均有远程运行时包；npm registry 当前公开可安装的是 `@tingrudeng/codex-beta-runtime` 与 `@tingrudeng/trae-beta-runtime`，`@tingrudeng/gemini-beta-runtime` 仍需先完成 npm 包名和 Trusted Publisher 配置。说明：Trae automation 仍是最成熟的无人值守链路；`codex/gemini` worker daemon 的主循环、worker CLI、executor、launch builder 和失败回写已收敛到 `@tingrudeng/beta-runtime-core`，dispatcher runtime-glue 和源码脚本只保留薄适配；`pnpm verify:runtime-packages` 会校验 runtime 包发布清单，`pnpm verify:runtime-packages:install` 会本地打包并安装验证 codex/gemini/trae runtime tarball，生产发布窗口可用 `pnpm verify:runtime-packages:published` 强制校验 npm registry 包名、版本和已发布依赖元数据，但 Gemini 远程包发布仍依赖外部 npm 配置（见 `docs/TECH_DEBT.md`）。
 
 ## 当前主线
 

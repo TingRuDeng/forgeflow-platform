@@ -25,7 +25,9 @@ describe("workflow quality gates", () => {
 
     expect(ciWorkflow).toContain("Verify runtime package readiness");
     expect(ciWorkflow).toContain("pnpm verify:runtime-packages");
-    expect(releaseWorkflow.match(/pnpm verify:runtime-packages/g)?.length).toBe(2);
+    expect(ciWorkflow).toContain("pnpm verify:runtime-packages:install");
+    expect(releaseWorkflow.match(/run: pnpm verify:runtime-packages$/gm)?.length).toBe(2);
+    expect(releaseWorkflow.match(/run: pnpm verify:runtime-packages:install$/gm)?.length).toBe(2);
   });
 
   it("publishes manual releases before recording git version history", () => {
