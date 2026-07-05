@@ -13,9 +13,17 @@ import type { RuntimeState } from "./runtime-state.js";
 
 const PRIMARY_POSTGRES_URL_ENV = "DISPATCHER_PRIMARY_POSTGRES_URL";
 const PRIMARY_CUTOVER_APPROVAL_FILE_ENV = "DISPATCHER_PRIMARY_CUTOVER_APPROVAL_FILE";
+const PRIMARY_CUTOVER_READY_FILE_ENV = "DISPATCHER_PRIMARY_CUTOVER_READY_FILE";
 const DEFAULT_PRIMARY_CUTOVER_APPROVAL_FILE = "shadow-cutover-approval.json";
+const DEFAULT_PRIMARY_CUTOVER_READY_FILE = "shadow-cutover-ready.json";
 const DEFAULT_PRIMARY_CUTOVER_REVOCATION_FILE = "shadow-cutover-revocation.json";
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/i;
+
+interface PrimaryCutoverApproval {
+  approvalPath: string;
+  evidencePath: string;
+  evidenceSha256: string;
+}
 
 function getPrimaryPostgresUrl(): string {
   const value = process.env[PRIMARY_POSTGRES_URL_ENV]?.trim();
@@ -28,6 +36,11 @@ function getPrimaryPostgresUrl(): string {
 function getPrimaryCutoverApprovalPath(stateDir: string): string {
   return process.env[PRIMARY_CUTOVER_APPROVAL_FILE_ENV]?.trim()
     || path.join(stateDir, DEFAULT_PRIMARY_CUTOVER_APPROVAL_FILE);
+}
+
+function getPrimaryCutoverReadyPath(stateDir: string): string {
+  return process.env[PRIMARY_CUTOVER_READY_FILE_ENV]?.trim()
+    || path.join(stateDir, DEFAULT_PRIMARY_CUTOVER_READY_FILE);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -43,16 +56,21 @@ function resolveEvidencePath(approvalPath: string, evidencePath: unknown): strin
     : path.resolve(path.dirname(approvalPath), evidencePath);
 }
 
-function validateCutoverEvidenceHash(approvalPath: string, approval: Record<string, unknown>): void {
+function validateCutoverEvidenceHash(approvalPath: string, approval: Record<string, unknown>): PrimaryCutoverApproval {
   const evidencePath = resolveEvidencePath(approvalPath, approval.evidencePath);
   const content = fs.readFileSync(evidencePath, "utf8");
   const actualSha256 = crypto.createHash("sha256").update(content).digest("hex");
   if (actualSha256 !== approval.evidenceSha256) {
     throw new Error(`${PRIMARY_CUTOVER_APPROVAL_FILE_ENV} evidenceSha256 does not match archived cutover drill evidence`);
   }
+  return {
+    approvalPath: path.resolve(approvalPath),
+    evidencePath: path.resolve(evidencePath),
+    evidenceSha256: actualSha256,
+  };
 }
 
-function validatePrimaryCutoverApprovalFile(stateDir: string): void {
+function validatePrimaryCutoverApprovalFile(stateDir: string): PrimaryCutoverApproval {
   const revocationPath = path.join(stateDir, DEFAULT_PRIMARY_CUTOVER_REVOCATION_FILE);
   if (fs.existsSync(revocationPath)) {
     throw new Error(`${DEFAULT_PRIMARY_CUTOVER_REVOCATION_FILE} blocks RUNTIME_STATE_BACKEND=postgres until a new cutover approval is generated`);
@@ -75,12 +93,75 @@ function validatePrimaryCutoverApprovalFile(stateDir: string): void {
   if (typeof approval.evidenceSha256 !== "string" || !SHA256_HEX_PATTERN.test(approval.evidenceSha256)) {
     throw new Error(`${PRIMARY_CUTOVER_APPROVAL_FILE_ENV} must include evidenceSha256`);
   }
-  validateCutoverEvidenceHash(approvalPath, approval);
+  return validateCutoverEvidenceHash(approvalPath, approval);
+}
+
+function readReadyEvidence(readyPath: string): Record<string, unknown> {
+  try {
+    const ready = JSON.parse(fs.readFileSync(readyPath, "utf8"));
+    if (isPlainObject(ready)) {
+      return ready;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${PRIMARY_CUTOVER_READY_FILE_ENV} is required before RUNTIME_STATE_BACKEND=postgres (${readyPath}): ${message}`);
+  }
+  throw new Error(`${PRIMARY_CUTOVER_READY_FILE_ENV} must contain a JSON object before RUNTIME_STATE_BACKEND=postgres`);
+}
+
+function findReadyPhase(ready: Record<string, unknown>, name: string): Record<string, unknown> | null {
+  const phases = Array.isArray(ready.phases) ? ready.phases : [];
+  const phase = phases.find((candidate) => isPlainObject(candidate) && candidate.name === name);
+  return isPlainObject(phase) ? phase : null;
+}
+
+function readyPhasePayload(readyPath: string, ready: Record<string, unknown>, name: string): Record<string, unknown> {
+  const phase = findReadyPhase(ready, name);
+  if (!phase || phase.ok !== true) {
+    throw new Error(`${PRIMARY_CUTOVER_READY_FILE_ENV} phase ${name} must pass (${readyPath})`);
+  }
+  return isPlainObject(phase.payload) ? phase.payload : {};
+}
+
+function assertMatchingReadyPath(label: string, actual: unknown, expected: string): void {
+  if (typeof actual !== "string" || !actual.trim()) {
+    throw new Error(`${PRIMARY_CUTOVER_READY_FILE_ENV} ${label} must be recorded`);
+  }
+  if (path.resolve(actual) !== expected) {
+    throw new Error(`${PRIMARY_CUTOVER_READY_FILE_ENV} ${label} does not match approval marker`);
+  }
+}
+
+function validateReadyApprovalEvidence(payload: Record<string, unknown>, approval: PrimaryCutoverApproval): void {
+  assertMatchingReadyPath("approvalPath", payload.approvalPath, approval.approvalPath);
+  assertMatchingReadyPath("evidencePath", payload.evidencePath, approval.evidencePath);
+  if (payload.evidenceSha256 !== approval.evidenceSha256) {
+    throw new Error(`${PRIMARY_CUTOVER_READY_FILE_ENV} ready evidenceSha256 does not match approval marker`);
+  }
+}
+
+function validatePrimaryCutoverReadyFile(stateDir: string, approval: PrimaryCutoverApproval): void {
+  const readyPath = getPrimaryCutoverReadyPath(stateDir);
+  const ready = readReadyEvidence(readyPath);
+  if (ready.ok !== true) {
+    throw new Error(`${PRIMARY_CUTOVER_READY_FILE_ENV} must contain ok=true before RUNTIME_STATE_BACKEND=postgres`);
+  }
+  const preflightPayload = readyPhasePayload(readyPath, ready, "strict_cutover_preflight");
+  const cutover = isPlainObject(preflightPayload.cutover) ? preflightPayload.cutover : {};
+  if (cutover.reason !== "cutover_ready") {
+    throw new Error(`${PRIMARY_CUTOVER_READY_FILE_ENV} strict_cutover_preflight must be cutover_ready`);
+  }
+  validateReadyApprovalEvidence(readyPhasePayload(readyPath, ready, "approval_evidence"), approval);
+}
+
+function validatePrimaryCutoverFiles(stateDir: string): void {
+  const approval = validatePrimaryCutoverApprovalFile(stateDir);
+  validatePrimaryCutoverReadyFile(stateDir, approval);
 }
 
 export async function loadRuntimeStateFromPostgres(stateDir: string): Promise<RuntimeState> {
   const postgresUrl = getPrimaryPostgresUrl();
-  validatePrimaryCutoverApprovalFile(stateDir);
+  validatePrimaryCutoverFiles(stateDir);
   const client = await createPgClient(postgresUrl);
   try {
     const snapshot = await loadPrimaryRuntimeStateSnapshot<Partial<RuntimeState>>(client);
@@ -95,7 +176,7 @@ export async function loadRuntimeStateFromPostgres(stateDir: string): Promise<Ru
 
 export async function saveRuntimeStateToPostgres(stateDir: string, state: RuntimeState): Promise<void> {
   const postgresUrl = getPrimaryPostgresUrl();
-  validatePrimaryCutoverApprovalFile(stateDir);
+  validatePrimaryCutoverFiles(stateDir);
   const client = await createPgClient(postgresUrl);
   try {
     await savePrimaryRuntimeStateSnapshot(client, state as unknown as Record<string, unknown>);

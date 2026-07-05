@@ -66,14 +66,38 @@ function makeApprovedStateDir(): string {
       { name: "cutover_preflight", ok: true, payload: { cutover: { reason: "cutover_ready" } } },
     ],
   })}\n`;
+  const approvalPath = path.join(stateDir, "shadow-cutover-approval.json");
+  const evidenceSha256 = crypto.createHash("sha256").update(evidenceContent).digest("hex");
   fs.writeFileSync(evidencePath, evidenceContent);
-  fs.writeFileSync(path.join(stateDir, "shadow-cutover-approval.json"), JSON.stringify({
+  fs.writeFileSync(approvalPath, JSON.stringify({
     approved: true,
     approvedAt: "2026-07-05T10:00:00.000Z",
     evidencePath,
-    evidenceSha256: crypto.createHash("sha256").update(evidenceContent).digest("hex"),
+    evidenceSha256,
     cutoverReason: "cutover_ready",
   }));
+  fs.writeFileSync(path.join(stateDir, "shadow-cutover-ready.json"), `${JSON.stringify({
+    ok: true,
+    stateDir,
+    phases: [
+      {
+        name: "strict_cutover_preflight",
+        ok: true,
+        payload: { cutover: { reason: "cutover_ready" } },
+      },
+      {
+        name: "approval_evidence",
+        ok: true,
+        payload: {
+          ok: true,
+          approvalPath,
+          evidencePath,
+          evidenceSha256,
+          cutoverReason: "cutover_ready",
+        },
+      },
+    ],
+  })}\n`);
   return stateDir;
 }
 

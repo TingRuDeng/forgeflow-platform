@@ -31,6 +31,7 @@ vi.mock("@forgeflow/dispatcher-store-postgres", () => ({
 const originalBackend = process.env.RUNTIME_STATE_BACKEND;
 const originalPrimaryUrl = process.env.DISPATCHER_PRIMARY_POSTGRES_URL;
 const originalApprovalFile = process.env.DISPATCHER_PRIMARY_CUTOVER_APPROVAL_FILE;
+const originalReadyFile = process.env.DISPATCHER_PRIMARY_CUTOVER_READY_FILE;
 
 async function loadRuntimeStateModule() {
   return import("../../../src/modules/server/runtime-state.js");
@@ -52,13 +53,48 @@ function restoreEnv() {
   } else {
     process.env.DISPATCHER_PRIMARY_CUTOVER_APPROVAL_FILE = originalApprovalFile;
   }
+  if (originalReadyFile === undefined) {
+    delete process.env.DISPATCHER_PRIMARY_CUTOVER_READY_FILE;
+  } else {
+    process.env.DISPATCHER_PRIMARY_CUTOVER_READY_FILE = originalReadyFile;
+  }
 }
 
 function makeStateDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-postgres-state-"));
 }
 
-function writeCutoverApproval(stateDir: string): void {
+function writeCutoverReadyEvidence(input: {
+  stateDir: string;
+  approvalPath: string;
+  evidencePath: string;
+  evidenceSha256: string;
+}): void {
+  fs.writeFileSync(path.join(input.stateDir, "shadow-cutover-ready.json"), `${JSON.stringify({
+    ok: true,
+    stateDir: input.stateDir,
+    phases: [
+      {
+        name: "strict_cutover_preflight",
+        ok: true,
+        payload: { cutover: { reason: "cutover_ready" } },
+      },
+      {
+        name: "approval_evidence",
+        ok: true,
+        payload: {
+          ok: true,
+          approvalPath: input.approvalPath,
+          evidencePath: input.evidencePath,
+          evidenceSha256: input.evidenceSha256,
+          cutoverReason: "cutover_ready",
+        },
+      },
+    ],
+  })}\n`);
+}
+
+function writeCutoverApproval(stateDir: string, options: { writeReady?: boolean } = {}): void {
   fs.mkdirSync(stateDir, { recursive: true });
   const evidencePath = path.join(stateDir, "shadow-cutover-drill.json");
   const evidenceContent = `${JSON.stringify({
@@ -67,14 +103,19 @@ function writeCutoverApproval(stateDir: string): void {
       { name: "cutover_preflight", ok: true, payload: { cutover: { reason: "cutover_ready" } } },
     ],
   })}\n`;
+  const approvalPath = path.join(stateDir, "shadow-cutover-approval.json");
+  const evidenceSha256 = crypto.createHash("sha256").update(evidenceContent).digest("hex");
   fs.writeFileSync(evidencePath, evidenceContent);
-  fs.writeFileSync(path.join(stateDir, "shadow-cutover-approval.json"), JSON.stringify({
+  fs.writeFileSync(approvalPath, JSON.stringify({
     approved: true,
     approvedAt: "2026-07-05T10:00:00.000Z",
     evidencePath,
-    evidenceSha256: crypto.createHash("sha256").update(evidenceContent).digest("hex"),
+    evidenceSha256,
     cutoverReason: "cutover_ready",
   }));
+  if (options.writeReady !== false) {
+    writeCutoverReadyEvidence({ stateDir, approvalPath, evidencePath, evidenceSha256 });
+  }
 }
 
 describe("runtime-state postgres backend", () => {
@@ -138,6 +179,47 @@ describe("runtime-state postgres backend", () => {
     const { loadRuntimeStateAsync } = await loadRuntimeStateModule();
 
     await expect(loadRuntimeStateAsync(makeStateDir())).rejects.toThrow("shadow-cutover-approval.json");
+    expect(mocks.createPgClient).not.toHaveBeenCalled();
+  });
+
+  it("requires final cutover ready evidence before using postgres as the primary backend", async () => {
+    process.env.RUNTIME_STATE_BACKEND = "postgres";
+    process.env.DISPATCHER_PRIMARY_POSTGRES_URL = "postgres://localhost/forgeflow";
+    const stateDir = makeStateDir();
+    writeCutoverApproval(stateDir, { writeReady: false });
+    const { loadRuntimeStateAsync } = await loadRuntimeStateModule();
+
+    await expect(loadRuntimeStateAsync(stateDir)).rejects.toThrow("shadow-cutover-ready.json");
+    expect(mocks.createPgClient).not.toHaveBeenCalled();
+  });
+
+  it("rejects primary backend when ready evidence no longer matches approval evidence", async () => {
+    process.env.RUNTIME_STATE_BACKEND = "postgres";
+    process.env.DISPATCHER_PRIMARY_POSTGRES_URL = "postgres://localhost/forgeflow";
+    const stateDir = makeStateDir();
+    writeCutoverApproval(stateDir);
+    const readyPath = path.join(stateDir, "shadow-cutover-ready.json");
+    const ready = JSON.parse(fs.readFileSync(readyPath, "utf8"));
+    ready.phases[1].payload.evidenceSha256 = "0".repeat(64);
+    fs.writeFileSync(readyPath, `${JSON.stringify(ready)}\n`);
+    const { loadRuntimeStateAsync } = await loadRuntimeStateModule();
+
+    await expect(loadRuntimeStateAsync(stateDir)).rejects.toThrow("ready evidenceSha256");
+    expect(mocks.createPgClient).not.toHaveBeenCalled();
+  });
+
+  it("rejects primary backend when ready evidence points at a different approval marker", async () => {
+    process.env.RUNTIME_STATE_BACKEND = "postgres";
+    process.env.DISPATCHER_PRIMARY_POSTGRES_URL = "postgres://localhost/forgeflow";
+    const stateDir = makeStateDir();
+    writeCutoverApproval(stateDir);
+    const readyPath = path.join(stateDir, "shadow-cutover-ready.json");
+    const ready = JSON.parse(fs.readFileSync(readyPath, "utf8"));
+    ready.phases[1].payload.approvalPath = path.join(stateDir, "other-approval.json");
+    fs.writeFileSync(readyPath, `${JSON.stringify(ready)}\n`);
+    const { loadRuntimeStateAsync } = await loadRuntimeStateModule();
+
+    await expect(loadRuntimeStateAsync(stateDir)).rejects.toThrow("approvalPath");
     expect(mocks.createPgClient).not.toHaveBeenCalled();
   });
 

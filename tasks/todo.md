@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M76 串行：让 Postgres primary backend 强制校验 shadow cutover ready evidence。
 - [x] M75 串行：让 runtime backup / restore 保留 shadow cutover drill / ready evidence。
 - [x] M74 串行：补齐 shadow cutover ready 最终门禁 evidence 归档入口。
 - [x] M73 串行：补齐 HITL resume payload 的 dispatcher 服务端 schema 校验。
@@ -21,6 +22,16 @@
 - [x] M56 串行：继续拆分共享 `trae-dom-driver.ts` 大文件，按 browser expressions / response collection / driver facade 收敛到 300 行以内。
 - [x] M57 串行：把 Codex/Gemini packaged runtime launch builder 下沉到 beta-runtime-core。
 - [x] M58 串行：让 generic assignment runner 产出可回放 trajectory artifact。
+
+## M76 Review 小结
+
+已让 `RUNTIME_STATE_BACKEND=postgres` 的 primary backend guard 在连接 Postgres 前同时校验 `shadow-cutover-approval.json` 与 `shadow-cutover-ready.json`。新的 guard 要求 ready evidence 存在、`ok=true`、`strict_cutover_preflight` phase 通过且 reason 为 `cutover_ready`，并要求 `approval_evidence` 中的 `approvalPath`、`evidencePath`、`evidenceSha256` 与 approval marker / drill evidence 完全一致。这样 operator 不能只生成 approval marker 后绕过最终 ready gate 直接切主库；自定义 ready 文件路径可用 `DISPATCHER_PRIMARY_CUTOVER_READY_FILE`。
+
+Review Gate：finished。Spec 符合度通过，本轮只收紧 Postgres primary backend 启动前 cutover evidence 门禁，不改变 shadow drift gate、drill / approve / ready / revoke 脚本、Postgres snapshot schema、HTTP async state path 或 `/api/query/*` 行为。安全检查通过，新增逻辑只读取本地固定 evidence JSON 并做字段 / hash / path 匹配，不新增 secret、网络调用、shell 拼接、mock 成功路径或静默 fallback；证据缺失或错配会在创建 Postgres client 前显式失败。复杂度检查通过，`runtime-state-postgres.ts` 186 行，相关测试文件 253 / 210 行，均低于 300 行。Document-refresh: needed，原因：production cutover primary backend guard 从 approval-only 扩展为 approval + ready evidence 硬门禁，已同步 README、API endpoints、runtime-state contract、docs README、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state-postgres.test.ts --maxWorkers=1` 先失败于缺少 ready evidence / ready evidence 错配仍能连接 Postgres；GREEN 后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state-postgres.test.ts tests/modules/server/dispatcher-server-postgres.test.ts --maxWorkers=1` 通过，2 个测试文件、12 个测试通过。`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。沙箱内 `env HOME=/private/tmp/forgeflow-test-home CI=true pnpm test` 因本地 HTTP server 监听 `127.0.0.1` 报 `listen EPERM` 失败；非沙箱复跑同一命令通过，24 个 workspace project 全量测试完成，dispatcher 51 个测试文件、516 个测试通过。
+
+剩余风险：仓库内 primary backend 已不能绕过 final ready evidence；真实生产 cutover 仍需要 operator 在变更窗口执行 drill / approval / ready evidence、配置 Postgres primary URL、保存 evidence，并完成外部流量切换与回滚演练。
 
 ## M75 Review 小结
 
