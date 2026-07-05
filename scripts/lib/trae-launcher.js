@@ -1,12 +1,11 @@
-import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { discoverTraeTarget, getDebuggerVersion } from "./trae-cdp-discovery.js";
 import { prepareCleanRelaunch, quitExistingMacApp, resolveMacAppName, waitForDebuggerPortToDrain, } from "./trae-launcher-clean-relaunch.js";
-import { resolveMacAppBundleExecutable, } from "@tingrudeng/automation-gateway-core";
+import { hasRemoteDebuggingPortArg, parseLaunchArgs, resolveMacAppBundleExecutable, resolveTraeLaunchTarget as resolveSharedTraeLaunchTarget, } from "@tingrudeng/automation-gateway-core";
 export const DEFAULT_START_TIMEOUT_MS = Number(process.env.TRAE_CDP_START_TIMEOUT_MS || 15000);
 export const DEFAULT_REMOTE_DEBUGGING_PORT = Number(process.env.TRAE_REMOTE_DEBUGGING_PORT || 9222);
-export { prepareCleanRelaunch, quitExistingMacApp, resolveMacAppName, resolveMacAppBundleExecutable, waitForDebuggerPortToDrain };
+export { hasRemoteDebuggingPortArg, parseLaunchArgs, prepareCleanRelaunch, quitExistingMacApp, resolveMacAppBundleExecutable, resolveMacAppName, waitForDebuggerPortToDrain, };
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -19,53 +18,11 @@ function onceChildEvent(child, eventName) {
         child.once(eventName, resolve);
     });
 }
-export function parseLaunchArgs(value) {
-    if (!value) {
-        return [];
-    }
-    return String(value)
-        .split(" ")
-        .map((item) => item.trim())
-        .filter(Boolean);
-}
-export function hasRemoteDebuggingPortArg(args = []) {
-    return args.some((arg) => /^--remote-debugging-port=/.test(arg));
-}
 export function resolveTraeLaunchTarget(options = {}) {
-    const env = options.env || process.env;
-    const fsImpl = options.fsImpl || fs;
-    const pathImpl = options.pathImpl || path;
-    const remoteDebuggingPort = Number(options.remoteDebuggingPort || env.TRAE_REMOTE_DEBUGGING_PORT || DEFAULT_REMOTE_DEBUGGING_PORT);
-    const configuredCommand = String(options.traeBin || env.TRAE_BIN || "").trim();
-    if (!configuredCommand) {
-        throw new Error("TRAE_BIN or --trae-bin is required");
-    }
-    const projectPath = String(options.projectPath || env.TRAE_PROJECT_PATH || "").trim();
-    if (!projectPath) {
-        throw new Error("TRAE_PROJECT_PATH or --project-path is required");
-    }
-    if (!fsImpl.existsSync(projectPath)) {
-        throw new Error(`project path does not exist: ${projectPath}`);
-    }
-    const command = resolveMacAppBundleExecutable(configuredCommand, {
-        fsImpl,
-        pathImpl,
-        platform: options.platform || process.platform,
+    return resolveSharedTraeLaunchTarget({
+        defaultRemoteDebuggingPort: DEFAULT_REMOTE_DEBUGGING_PORT,
+        ...options,
     });
-    const args = parseLaunchArgs(options.traeArgs || env.TRAE_ARGS || "");
-    if (!hasRemoteDebuggingPortArg(args)) {
-        args.push(`--remote-debugging-port=${remoteDebuggingPort}`);
-    }
-    if (!args.includes(projectPath)) {
-        args.push(projectPath);
-    }
-    return {
-        bundlePath: configuredCommand,
-        command,
-        args,
-        projectPath,
-        remoteDebuggingPort,
-    };
 }
 export async function waitForTraeDebugger(options = {}) {
     const discoverTargetImpl = options.discoverTarget || discoverTraeTarget;

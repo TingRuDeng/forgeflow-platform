@@ -8,7 +8,7 @@ ForgeFlow automation gateway runtime 的共享协议与 Trae 自动化基础能�
 - 校验 report task id 是否仍匹配 dispatcher 正在处理的 task
 - 提供共享 Trae automation gateway request handler、HTTP JSON IO、debug logger、driver 创建规则、持久化 session-store 原语、Trae CDP / DOM driver helper
 - 提供共享 Trae clean relaunch 原语，包括 macOS `.app` 名称解析、退出既有 Trae app、等待旧 CDP 端口释放
-- 提供共享 Trae launch target helper，包括 macOS `.app` 到 `Contents/MacOS/*` 可执行文件的解析规则
+- 提供共享 Trae launch target helper，包括 launch 参数解析、remote debugging port 注入、project path 注入，以及 macOS `.app` 到 `Contents/MacOS/*` 可执行文件的解析规则
 
 这个包刻意保持小范围：
 - 只包含解析、校验、gateway protocol、本地 JSON session-store helper、Trae browser automation driver helper、clean relaunch 原语和 launch target helper
@@ -23,9 +23,12 @@ import {
   createAutomationGatewayDebugLogger,
   createPersistentAutomationSessionStore,
   createTraeAutomationDriver,
+  hasRemoteDebuggingPortArg,
+  parseLaunchArgs,
   prepareCleanRelaunch,
   resolveMacAppBundleExecutable,
   resolveAutomationGatewayDriver,
+  resolveTraeLaunchTarget,
   isEquivalentReportedTaskId,
   isPlaceholderTaskId,
   looksLikeTemplatePlaceholderReport,
