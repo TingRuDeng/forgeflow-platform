@@ -782,83 +782,45 @@ function readStateDirResponseJson(response: { status: number; json: unknown }): 
   return response.json;
 }
 
+async function callStateDirDispatcher(
+  stateDir: string,
+  method: string,
+  pathname: string,
+  body?: unknown,
+): Promise<unknown> {
+  const response = await handleDispatcherHttpRequest({
+    stateDir,
+    method,
+    pathname,
+    body,
+    clientAddress: "127.0.0.1",
+    internalCall: true,
+  });
+  return readStateDirResponseJson(response);
+}
+
 export function createStateDirDispatcherClient(stateDir: string): DispatcherClient {
   return {
     registerWorker(worker) {
-      const response = handleDispatcherHttpRequest({
-        stateDir,
-        method: "POST",
-        pathname: "/api/workers/register",
-        body: worker,
-        clientAddress: "127.0.0.1",
-        internalCall: true,
-      });
-      return Promise.resolve(readStateDirResponseJson(response));
+      return callStateDirDispatcher(stateDir, "POST", "/api/workers/register", worker);
     },
     heartbeat(workerId, payload) {
-      const response = handleDispatcherHttpRequest({
-        stateDir,
-        method: "POST",
-        pathname: `/api/workers/${encodeURIComponent(workerId)}/heartbeat`,
-        body: payload,
-        clientAddress: "127.0.0.1",
-        internalCall: true,
-      });
-      return Promise.resolve(readStateDirResponseJson(response));
+      return callStateDirDispatcher(stateDir, "POST", `/api/workers/${encodeURIComponent(workerId)}/heartbeat`, payload);
     },
     getAssignedTask(workerId) {
-      const response = handleDispatcherHttpRequest({
-        stateDir,
-        method: "GET",
-        pathname: `/api/workers/${encodeURIComponent(workerId)}/assigned-task`,
-        clientAddress: "127.0.0.1",
-        internalCall: true,
-      });
-      return Promise.resolve(readStateDirResponseJson(response)) as Promise<TaskPayload | null>;
+      return callStateDirDispatcher(stateDir, "GET", `/api/workers/${encodeURIComponent(workerId)}/assigned-task`) as Promise<TaskPayload | null>;
     },
     claimTask(workerId, payload = {}) {
-      const response = handleDispatcherHttpRequest({
-        stateDir,
-        method: "POST",
-        pathname: `/api/workers/${encodeURIComponent(workerId)}/claim-task`,
-        body: payload,
-        clientAddress: "127.0.0.1",
-        internalCall: true,
-      });
-      return Promise.resolve(readStateDirResponseJson(response)) as Promise<TaskPayload | null>;
+      return callStateDirDispatcher(stateDir, "POST", `/api/workers/${encodeURIComponent(workerId)}/claim-task`, payload) as Promise<TaskPayload | null>;
     },
     startTask(workerId, payload) {
-      const response = handleDispatcherHttpRequest({
-        stateDir,
-        method: "POST",
-        pathname: `/api/workers/${encodeURIComponent(workerId)}/start-task`,
-        body: payload,
-        clientAddress: "127.0.0.1",
-        internalCall: true,
-      });
-      return Promise.resolve(readStateDirResponseJson(response));
+      return callStateDirDispatcher(stateDir, "POST", `/api/workers/${encodeURIComponent(workerId)}/start-task`, payload);
     },
     submitResult(workerId, payload) {
-      const response = handleDispatcherHttpRequest({
-        stateDir,
-        method: "POST",
-        pathname: `/api/workers/${encodeURIComponent(workerId)}/result`,
-        body: payload,
-        clientAddress: "127.0.0.1",
-        internalCall: true,
-      });
-      return Promise.resolve(readStateDirResponseJson(response));
+      return callStateDirDispatcher(stateDir, "POST", `/api/workers/${encodeURIComponent(workerId)}/result`, payload);
     },
     reportEvent(workerId, payload) {
-      const response = handleDispatcherHttpRequest({
-        stateDir,
-        method: "POST",
-        pathname: `/api/workers/${encodeURIComponent(workerId)}/events`,
-        body: payload,
-        clientAddress: "127.0.0.1",
-        internalCall: true,
-      });
-      return Promise.resolve(readStateDirResponseJson(response));
+      return callStateDirDispatcher(stateDir, "POST", `/api/workers/${encodeURIComponent(workerId)}/events`, payload);
     },
   };
 }
