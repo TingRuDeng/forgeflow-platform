@@ -3,7 +3,6 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { handleDispatcherHttpRequest } from "./dispatcher-server.js";
-import { safeTaskDirName } from "./task-worktree.js";
 import { formatLocalTimestamp } from "./time.js";
 import { logger, logTaskCompleted, logTaskFailed, } from "./logger.js";
 import { recordTaskMetric } from "./metrics.js";
@@ -81,66 +80,6 @@ async function reportWorkerEventBestEffort(client, workerId, event) {
             event: "worker_event_report_failed",
         });
     }
-}
-function writeJson(filePath, value) {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
-}
-function buildWorkerFailureBlocker(kind, code, message, details) {
-    return {
-        kind,
-        code,
-        message,
-        ...(details && Object.keys(details).length > 0 ? { details } : {}),
-    };
-}
-function classifyWorkerDaemonFailure(error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const lowerMessage = message.toLowerCase();
-    if (/refusing to push to default branch|branchname not allowed by forgeflow_allowed_push_prefixes/.test(lowerMessage)) {
-        return {
-            failureType: "preflight",
-            blocker: buildWorkerFailureBlocker("preflight", "branch_protection_hit", message),
-        };
-    }
-    if (/existing worktree already present|already checked out|failed to create worktree|failed to fetch origin|default branch ref|invalid git branch ref|invalid branchname/.test(lowerMessage)) {
-        return {
-            failureType: "preflight",
-            blocker: buildWorkerFailureBlocker("preflight", "workspace_prepare_failed", message),
-        };
-    }
-    if (/operation not permitted|permission denied|sandbox|forbidden|not allowed|blocked by environment/.test(lowerMessage)) {
-        return {
-            failureType: "preflight",
-            blocker: buildWorkerFailureBlocker("preflight", "environment_blocked", message),
-        };
-    }
-    if (/vitest|jest|pnpm test|typecheck|verification/.test(lowerMessage)) {
-        return {
-            failureType: "verification",
-            blocker: buildWorkerFailureBlocker("verification", "verification_failed", message),
-        };
-    }
-    if (/submitresult failed after|failed to push changes|push failed|push failure|failed to create pull request|pr create failed|dispatcher unavailable/.test(lowerMessage)) {
-        return {
-            failureType: "execution",
-            blocker: buildWorkerFailureBlocker("execution", "delivery_failed", message),
-        };
-    }
-    return {
-        failureType: "execution",
-        blocker: buildWorkerFailureBlocker("execution", "execution_failed", message),
-    };
-}
-function buildWorkerFailureEvidence(error) {
-    const classified = classifyWorkerDaemonFailure(error);
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-        failureType: classified.failureType,
-        failureSummary: message,
-        blockers: [classified.blocker],
-        findings: [],
-    };
 }
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const HEARTBEAT_TIMEOUT_MS = 5_000;
@@ -244,72 +183,42 @@ async function executeClaimedTask(input) {
 }
 async function submitFailedClaimedTaskResult(input, errorMessage) {
     const taskId = input.payload.task.id;
-    try {
-        const failedResult = {
-            taskId,
-            workerId: input.workerId,
-            provider: input.payload.assignment.pool,
-            pool: input.payload.assignment.pool,
-            branchName: input.payload.assignment.branchName,
-            repo: input.payload.assignment.repo,
-            defaultBranch: input.payload.assignment.defaultBranch,
-            mode: "run",
-            output: `ERROR: ${errorMessage}`,
-            generatedAt: nowIso(),
-            verification: {
-                allPassed: false,
-                commands: [],
-            },
-            evidence: buildWorkerFailureEvidence(errorMessage),
-        };
-        const failedOutputDir = path.join(input.repoDir, ".worktrees", "failed", safeTaskDirName(taskId));
-        fs.mkdirSync(failedOutputDir, { recursive: true });
-        writeJson(path.join(failedOutputDir, "worker-result.json"), failedResult);
-        writeJson(path.join(failedOutputDir, "worker-verification.json"), failedResult.verification);
-        fs.writeFileSync(path.join(failedOutputDir, "worker-output.raw.txt"), `ERROR: ${errorMessage}\n`);
-        const submitResultMaxRetries = getSubmitResultMaxRetries();
-        const submitResultRetryDelayMs = getSubmitResultRetryDelayMs();
-        for (let attempt = 1; attempt <= submitResultMaxRetries; attempt++) {
-            try {
-                await input.client.submitResult(input.workerId, {
-                    ...buildWorkerProtocolEnvelope(input.payload),
-                    result: failedResult,
-                    changedFiles: [],
-                    pullRequest: null,
-                });
-                logger.warn({ operation: "submitResult", taskId, event: "failed_result_submitted" });
-                return;
-            }
-            catch (submitError) {
-                logger.error({ operation: "submitResult", taskId, attempt, error: submitError instanceof Error ? submitError.message : String(submitError), event: "submitResult_catch_failed" });
-                await reportWorkerEventBestEffort(input.client, input.workerId, {
-                    type: "submit_result_retry_failed",
-                    taskId,
-                    payload: {
-                        attempt,
-                        maxRetries: submitResultMaxRetries,
-                        error: submitError instanceof Error ? submitError.message : String(submitError),
-                        fallback: true,
-                    },
-                });
-                if (attempt < submitResultMaxRetries) {
-                    await sleep(submitResultRetryDelayMs);
-                }
-            }
-        }
-    }
-    catch (fallbackError) {
-        logger.error({ operation: "submitResult", taskId, error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError), event: "submitResult_fallback_failed" });
-        await reportWorkerEventBestEffort(input.client, input.workerId, {
-            type: "delivery_failed",
-            taskId,
-            payload: {
-                stage: "failed_result_fallback",
-                error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
-                failureCode: "delivery_failed",
-            },
-        });
-    }
+    const betaRuntime = await bootstrapBetaRuntimeCore();
+    await betaRuntime.submitFailedWorkerResult({
+        input,
+        taskId,
+        error: errorMessage,
+        maxRetries: getSubmitResultMaxRetries(),
+        retryDelayMs: getSubmitResultRetryDelayMs(),
+        onSubmitted: () => {
+            logger.warn({ operation: "submitResult", taskId, event: "failed_result_submitted" });
+        },
+        onSubmitAttemptFailed: async (event) => {
+            logger.error({ operation: "submitResult", taskId, attempt: event.attempt, error: event.error, event: "submitResult_catch_failed" });
+            await reportWorkerEventBestEffort(input.client, input.workerId, {
+                type: "submit_result_retry_failed",
+                taskId,
+                payload: {
+                    attempt: event.attempt,
+                    maxRetries: event.maxRetries,
+                    error: event.error,
+                    fallback: true,
+                },
+            });
+        },
+        onFallbackFailed: async (event) => {
+            logger.error({ operation: "submitResult", taskId, error: event.error, event: "submitResult_fallback_failed" });
+            await reportWorkerEventBestEffort(input.client, input.workerId, {
+                type: "delivery_failed",
+                taskId,
+                payload: {
+                    stage: "failed_result_fallback",
+                    error: event.error,
+                    failureCode: "delivery_failed",
+                },
+            });
+        },
+    });
 }
 export function createDispatcherClient(dispatcherUrl) {
     const baseUrl = dispatcherUrl.replace(/\/$/, "");
