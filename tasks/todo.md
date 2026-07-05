@@ -1,7 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M79 Review 小结
+
+已让 `/api/dr/status.primaryCutover.completed` 不再只相信 `shadow-cutover-complete.json` 自身，而是同时校验 completion evidence 内嵌的 `ready_evidence.approval_evidence` 与当前 `shadow-cutover-approval.json` / archived drill evidence SHA-256 完全一致。旧 completion 文件若来自另一轮 approval，会返回 `failed`，避免新审批链复用旧完成证据。
+
+Review Gate：finished。Spec 符合度通过，本轮只收紧 completed 状态判定，不改变 completion 脚本、pre-switch ready gate、Postgres primary backend guard 或 Console 展示结构。安全检查通过，只比较本地 evidence 路径和 SHA-256，不新增 secret、网络调用、shell 拼接、mock 成功路径或静默 fallback。Document-refresh: needed，原因：completed 状态语义从“completion 文件通过”收紧为“completion 文件绑定当前 approval marker”，已同步 API、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state-primary-cutover.test.ts tests/modules/server/dispatcher-server-dr-status.test.ts --maxWorkers=1`，2 个测试文件、6 个测试通过；`CI=true pnpm --filter console exec vitest run src/components/__tests__/DrStatusPanel.test.tsx --maxWorkers=1`，1 个测试文件、2 个测试通过。
+
+剩余风险：completion evidence 已与当前 approval marker 绑定；真实生产 cutover 仍需要 operator 完成进程 / 流量切换、外部 Postgres 运维、备份保留和回滚演练。
 
 ## M78 Review 小结
 
