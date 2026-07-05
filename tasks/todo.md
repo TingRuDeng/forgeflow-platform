@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M51 串行：把 Trae gateway HTTP JSON IO / server wiring 下沉到 automation-gateway-core。
+- [x] M51 串行：运行最终验证并补充 review 小结。
+
+## M51 Review 小结
+
+已新增 `packages/automation-gateway-core/src/gateway-http-server.ts`，统一处理 Node HTTP server、JSON body 读取、错误响应、`handleAutomationGatewayRequest` 调用和 server close。`scripts/lib/trae-automation-gateway.ts` 与 `packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts` 都改为调用 `startAutomationGatewayHttpServer`，两侧不再各自维护 `readJsonBody` / `writeJson` / `writeError` / `http.createServer`。脚本侧和 packaged runtime 仍分别保留 driver 创建、debug logger 和 session-store adapter。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 Trae gateway 去重，把 HTTP JSON IO / server wiring 从脚本侧和 packaged runtime 下沉到 `@tingrudeng/automation-gateway-core`；没有改变 gateway route、session 状态语义、automation error envelope、debug event 名称、driver 行为或 session-store 文件格式。安全检查通过，共享 helper 仍只处理本地 HTTP 请求体解析和 JSON 响应，未新增 secret、外部网络调用、命令拼接、mock 成功路径或静默 fallback；非法 JSON 继续显式返回 `INVALID_JSON`。复杂度检查通过，新增 `gateway-http-server.ts` 保持单一职责，两侧 Trae gateway adapter 删除重复 `readJsonBody` / `writeJson` / `writeError` / `http.createServer`。Document-refresh: needed，原因：Trae gateway adapter 边界变化，已同步 README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-gateway-thin-adapter.test.ts --maxWorkers=1` 先失败于缺少 `packages/automation-gateway-core/src/gateway-http-server.ts`。GREEN 后 `CI=true pnpm --filter @tingrudeng/automation-gateway-core test` 通过，3 个测试文件、11 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime test` 通过，19 个测试文件、174 个测试通过；非沙箱 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-gateway-thin-adapter.test.ts tests/modules/server/trae-automation-gateway.test.ts --maxWorkers=1` 通过，2 个测试文件、31 个测试通过；`CI=true pnpm --filter @tingrudeng/automation-gateway-core typecheck`、`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json`、`CI=true pnpm --filter @tingrudeng/trae-beta-runtime typecheck`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过；非沙箱 `CI=true pnpm test` 通过，dispatcher 48 个测试文件、497 个测试通过。
+
+剩余风险：Trae gateway route/session/chat handler 和 HTTP JSON IO 已共享；剩余 adapter 漂移主要在 debug logger、driver 创建、session-store adapter 和发布前 dist / workspace 依赖同步。
+
 - [x] M50 串行：补齐 shadow cutover rollback revocation marker。
 - [x] M50 串行：运行最小充分验证并补充 review 小结。
 

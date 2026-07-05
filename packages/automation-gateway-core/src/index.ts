@@ -9,6 +9,10 @@ export {
   parseDiscoveryFromQuery,
 } from "./gateway-handler.js";
 
+export {
+  startAutomationGatewayHttpServer,
+} from "./gateway-http-server.js";
+
 export type {
   AutomationGatewayDriver,
   AutomationGatewayRequest,
@@ -19,6 +23,11 @@ export type {
   HandleAutomationGatewayRequestOptions,
   NormalizedAutomationError,
 } from "./gateway-types.js";
+
+export type {
+  StartedAutomationGatewayHttpServer,
+  StartAutomationGatewayHttpServerOptions,
+} from "./gateway-http-server.js";
 
 export {
   getLastReportFieldValue,

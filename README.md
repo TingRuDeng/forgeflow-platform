@@ -57,6 +57,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - `.orchestrator` assignment package、本地执行脚本、结果回写与 review 决策链路仍然可用。
 - review memory 已有文件存储契约，并会在 dispatcher 创建 dispatch 时按 repo/scope/worker 条件注入上下文。
 - Trae 的首选无人值守路径是 `Trae automation gateway` + `Trae automation worker`。
+- Trae automation gateway 的 route/session/chat handler 与 HTTP JSON IO 已下沉到 `@tingrudeng/automation-gateway-core`；源码脚本和 packaged runtime 只保留 driver、debug logger 和 session-store adapter。
 - `worker daemon` 与 `Trae automation worker` 现在都会先基于最新抓取的默认分支物化每任务独立 worktree，避免跨任务串味。
 - `forgeflow-review-orchestrator dispatch-task` 在 `pool=trae` 时会默认按结构化任务规范自动渲染 worker prompt，并把最终 prompt 连同 `workerPromptMode/reportSchemaVersion` 一起持久化到 dispatcher assignment；自定义 Trae prompt 若缺少 `任务完成/结果/任务ID` 会在 dispatch 前被拒绝。
 - follow-up / rework 任务只有在源任务已经交付过可验证的远端分支产物、且 worker 不变时才允许复用原分支；否则控制层应改用新的 `-rN` 分支继续修复。
