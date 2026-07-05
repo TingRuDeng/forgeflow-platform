@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -58,10 +59,19 @@ async function loadServerModule() {
 function makeApprovedStateDir(): string {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-dispatcher-postgres-"));
   tmpRoots.push(stateDir);
+  const evidencePath = path.join(stateDir, "shadow-cutover-drill.json");
+  const evidenceContent = `${JSON.stringify({
+    ok: true,
+    phases: [
+      { name: "cutover_preflight", ok: true, payload: { cutover: { reason: "cutover_ready" } } },
+    ],
+  })}\n`;
+  fs.writeFileSync(evidencePath, evidenceContent);
   fs.writeFileSync(path.join(stateDir, "shadow-cutover-approval.json"), JSON.stringify({
     approved: true,
     approvedAt: "2026-07-05T10:00:00.000Z",
-    evidenceSha256: "c".repeat(64),
+    evidencePath,
+    evidenceSha256: crypto.createHash("sha256").update(evidenceContent).digest("hex"),
     cutoverReason: "cutover_ready",
   }));
   return stateDir;

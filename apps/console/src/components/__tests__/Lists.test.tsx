@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import React from 'react';
 import { TaskDetailsPanel, TaskList } from '../Lists';
 import { ArtifactWorkbench } from '../ArtifactWorkbench';
@@ -478,8 +478,18 @@ describe('Task drill-down', () => {
 });
 
 describe('ArtifactWorkbench', () => {
-  it('filters artifacts across tasks and selects the owning task', () => {
+  it('filters artifacts across tasks and selects the owning task', async () => {
     const onSelectTask = vi.fn();
+    const writeText = vi.fn();
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => JSON.stringify({ fileName: 'diff.patch', content: 'workbench diff body' }),
+    }));
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      clipboard: { writeText },
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     renderWithProviders(
       <ArtifactWorkbench
@@ -544,6 +554,13 @@ describe('ArtifactWorkbench', () => {
     expect(screen.getByText(/并排详情|side-by-side details/i)).toBeInTheDocument();
     expect(screen.getByText(/Fix auth gate.*test_gap.*needs_human_attention/i)).toBeInTheDocument();
     expect(screen.getByText(/Update docs.*docs_ready.*low/i)).toBeInTheDocument();
+    expect(screen.getByText(/artifact:\/\/bundle-auth\/diff.patch/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /复制引用 diff|copy ref diff/i }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('artifact://bundle-auth/diff.patch'));
+    fireEvent.click(screen.getByRole('button', { name: /展开文件 diff|open file diff/i }));
+    expect(await screen.findByText(/workbench diff body/i)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/artifacts/bundle-auth/files/diff.patch');
 
     fireEvent.change(screen.getByPlaceholderText(/筛选|filter/i), {
       target: { value: 'test_gap' },

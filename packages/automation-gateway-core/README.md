@@ -6,11 +6,11 @@ Current scope:
 - parse final report fields emitted by Trae automation tasks
 - detect template-marker reports before they are accepted as real output
 - validate whether a reported task id still matches the dispatcher task being processed
-- provide shared Trae automation gateway request handling, HTTP JSON IO, debug logging, driver creation rules, and persistent session-store primitives
+- provide shared Trae automation gateway request handling, HTTP JSON IO, debug logging, driver creation rules, persistent session-store primitives, and Trae CDP / DOM driver helpers
 
 This package is intentionally small:
-- parsing, validation, gateway protocol, and local JSON session-store helpers only
-- no network client, DOM driver, or worker lifecycle logic
+- parsing, validation, gateway protocol, local JSON session-store helpers, and Trae browser automation driver helpers only
+- no worker lifecycle logic
 - suitable for reuse by both the packaged Trae runtime and any future gateway-side validation paths
 
 ## Exports
@@ -20,6 +20,7 @@ import {
   getLastReportFieldValue,
   createAutomationGatewayDebugLogger,
   createPersistentAutomationSessionStore,
+  createTraeAutomationDriver,
   resolveAutomationGatewayDriver,
   isEquivalentReportedTaskId,
   isPlaceholderTaskId,

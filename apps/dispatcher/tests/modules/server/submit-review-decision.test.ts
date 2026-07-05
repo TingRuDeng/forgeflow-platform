@@ -182,7 +182,7 @@ describe("submit review decision", () => {
     expect(snapshot.pullRequests[0]).toMatchObject({
       status: "changes_requested",
     });
-  }, 15_000);
+  });
 
   it("persists structured review decision evidence through the review bridge", async () => {
     const stateDir = makeTempDir();
@@ -214,7 +214,7 @@ describe("submit review decision", () => {
         redriveStrategy: "same_worker_continue",
       },
     });
-  }, 15_000);
+  });
 
   it("normalizes top-level review reason fields into evidence through the HTTP API", async () => {
     const stateDir = makeTempDir();
@@ -248,7 +248,7 @@ describe("submit review decision", () => {
         redriveStrategy: "same_worker_continue",
       },
     });
-  }, 15_000);
+  });
 
   it("supports the CLI --state-dir mode without a dispatcher URL", async () => {
     const stateDir = makeTempDir();
@@ -288,5 +288,5 @@ describe("submit review decision", () => {
     expect(snapshot.pullRequests[0]).toMatchObject({
       status: "merged",
     });
-  }, 15_000);
+  });
 });

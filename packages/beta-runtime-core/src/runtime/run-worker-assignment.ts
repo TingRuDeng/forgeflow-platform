@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 
 import { readJson } from "./utils.js";
+import { buildAssignmentArtifactBundle } from "./assignment-artifacts.js";
 import type { TaskAssignment, WorkerResult } from "./types.js";
 import type {
   AssignmentLaunchCommand,
@@ -21,6 +22,7 @@ export type {
   RunWorkerAssignmentInput,
   RunWorkerAssignmentSummary,
 } from "./run-worker-assignment-types.js";
+export { buildCodexLaunchCommand, buildGeminiLaunchCommand } from "./provider-launch.js";
 
 const DEFAULT_EXEC_TIMEOUT_MS = 300_000;
 const DEFAULT_VERIFICATION_TIMEOUT_MS = 60_000;
@@ -123,8 +125,12 @@ export async function runWorkerAssignment(input: RunWorkerAssignmentInput): Prom
     : launchResult.output;
   const workerResult = buildWorkerResult({
     assignment,
+    launch,
+    launchExitCode: launchResult.exitCode,
+    launchTimedOut: Boolean(launchResult.timedOut),
     provider: launch.provider,
     output: finalOutput,
+    launchOutput: launchResult.output,
     verification,
     generatedAt: input.generatedAt?.() ?? new Date().toISOString(),
   });
@@ -240,8 +246,12 @@ function runCommandWithTimeout(
 
 function buildWorkerResult(input: {
   assignment: TaskAssignment;
+  launch: AssignmentLaunchCommand;
+  launchExitCode: number;
+  launchTimedOut: boolean;
   provider: string;
   output: string;
+  launchOutput: string;
   verification: Array<{ command: string; exitCode: number; output: string; timedOut?: boolean }>;
   generatedAt: string;
 }): WorkerResult {
@@ -260,6 +270,16 @@ function buildWorkerResult(input: {
       allPassed: input.verification.every((item) => item.exitCode === 0),
       commands: input.verification,
     },
+    artifactBundle: buildAssignmentArtifactBundle({
+      assignment: input.assignment,
+      launch: input.launch,
+      launchOutput: input.launchOutput,
+      launchExitCode: input.launchExitCode,
+      launchTimedOut: input.launchTimedOut,
+      verification: input.verification,
+      finalOutput: input.output,
+      generatedAt: input.generatedAt,
+    }),
   };
 }
 

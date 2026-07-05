@@ -2,6 +2,7 @@ import * as http from "node:http";
 import * as https from "node:https";
 
 import { readDispatcherTokenFromConfig } from "../config.js";
+import type { TraeWorkerArtifactBundle } from "./trae-worker-artifacts.js";
 
 interface WorkerFailure {
   kind: "preflight" | "execution" | "verification" | "unknown";
@@ -16,30 +17,6 @@ interface WorkerEvidence {
   blockers?: WorkerFailure[];
   findings?: unknown[];
   artifacts?: Record<string, string>;
-}
-
-interface ArtifactBundle {
-  bundleId?: string;
-  taskId: string;
-  attemptId: string;
-  schemaVersion: "artifact-bundle/v1";
-  summary?: string;
-  branch?: string;
-  commit?: string;
-  pullRequestUrl?: string;
-  changedFiles: Array<{
-    path: string;
-    changeType: "added" | "modified" | "deleted" | "renamed";
-  }>;
-  refs: Record<string, unknown>;
-  testResults?: Array<{
-    name: string;
-    status: "passed" | "failed" | "skipped" | "unknown";
-    outputRef?: string;
-  }>;
-  riskNotes?: string[];
-  nextActions?: string[];
-  createdAt?: string;
 }
 
 interface WorkerProtocolEnvelopeInput {
@@ -289,7 +266,7 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
         prUrl?: string | null;
       };
       evidence?: WorkerEvidence;
-      artifactBundle?: ArtifactBundle;
+      artifactBundle?: TraeWorkerArtifactBundle;
     }) {
       return http.request("/api/trae/submit-result", {
         method: "POST",

@@ -44,7 +44,7 @@ ai_summary:
 - 用 `pnpm test`、`pnpm typecheck` 和 `git diff --check` 做常规交付验证。
 - 对运行入口事实，核对 `scripts/start-control-plane.sh`、`scripts/run-dispatcher-server.js`、`packages/forgeflow-dispatcher/README.md` 和 `packages/trae-beta-runtime/README.md`。
 
-forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都是受支持、并列的 worker 接入方式。源码中三者均有远程运行时包；npm registry 当前公开可安装的是 `@tingrudeng/codex-beta-runtime` 与 `@tingrudeng/trae-beta-runtime`，`@tingrudeng/gemini-beta-runtime` 仍需先完成 npm 包名和 Trusted Publisher 配置。说明：Trae automation 仍是最成熟的无人值守链路；`codex/gemini` worker daemon 在源码可维护性上仍有收敛债务（见 `docs/TECH_DEBT.md`），但已是受支持运行路径。
+forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都是受支持、并列的 worker 接入方式。源码中三者均有远程运行时包；npm registry 当前公开可安装的是 `@tingrudeng/codex-beta-runtime` 与 `@tingrudeng/trae-beta-runtime`，`@tingrudeng/gemini-beta-runtime` 仍需先完成 npm 包名和 Trusted Publisher 配置。说明：Trae automation 仍是最成熟的无人值守链路；`codex/gemini` worker daemon 的主循环、executor、launch builder 和失败回写已收敛到共享 runtime core，但 Gemini 远程包发布仍依赖外部 npm 配置（见 `docs/TECH_DEBT.md`）。
 
 ## 当前主线
 
@@ -57,7 +57,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - `.orchestrator` assignment package、本地执行脚本、结果回写与 review 决策链路仍然可用。
 - review memory 已有文件存储契约，并会在 dispatcher 创建 dispatch 时按 repo/scope/worker 条件注入上下文。
 - Trae 的首选无人值守路径是 `Trae automation gateway` + `Trae automation worker`。
-- Trae automation gateway 的 route/session/chat handler、HTTP JSON IO、debug logger、driver 创建规则和持久化 session-store 已下沉到 `@tingrudeng/automation-gateway-core`；源码脚本和 packaged runtime 只保留具体 DOM driver factory 与时间格式 / 默认目录薄适配。
+- Trae automation gateway 的 route/session/chat handler、HTTP JSON IO、debug logger、driver 创建规则、持久化 session-store 和 Trae CDP / DOM driver 已下沉到 `@tingrudeng/automation-gateway-core`；源码脚本和 packaged runtime 只保留默认值、时间格式 / 默认目录等薄适配。
 - `worker daemon` 与 `Trae automation worker` 现在都会先基于最新抓取的默认分支物化每任务独立 worktree，避免跨任务串味。
 - `forgeflow-review-orchestrator dispatch-task` 在 `pool=trae` 时会默认按结构化任务规范自动渲染 worker prompt，并把最终 prompt 连同 `workerPromptMode/reportSchemaVersion` 一起持久化到 dispatcher assignment；自定义 Trae prompt 若缺少 `任务完成/结果/任务ID` 会在 dispatch 前被拒绝。
 - follow-up / rework 任务只有在源任务已经交付过可验证的远端分支产物、且 worker 不变时才允许复用原分支；否则控制层应改用新的 `-rN` 分支继续修复。
@@ -73,7 +73,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - dispatch 创建任务时现在有服务端确定性质量门：默认 `warn` 模式下缺验收 / 缺 `allowedPaths` 边界，或命中受保护路径的 sensitive 任务会落 `dispatch_quality_flagged` 事件；`DISPATCHER_DISPATCH_QUALITY_MODE=enforce` 时会直接拒绝不合规任务创建。sensitive 任务即使全局关闭也强制要求验收，且不允许只用 catch-all 范围。
 - dispatcher 现在额外暴露只读 `GET /api/context`：一次性聚合控制层关心的 active 任务、review backlog（含确定性风险分级）、可 redrive 的 blocked 任务和带 traceId 的 recent events，支持 `since` / `eventLimit` 过滤，减少控制层多次拉取 snapshot/query。
 - dispatcher 现在会 canonicalize worker result 的 `taskId/workerId/pool/repo/defaultBranch/branchName/mode`，worker 只能上送 `output/verification/evidence` 等执行证据；不合法元数据会被拒绝。
-- dispatcher 任务状态机现在接上了 `cancelled` 和 `waiting_for_input`：控制面可通过 `POST /api/tasks/:taskId/cancel` 手动作废非终态任务；worker result 可携带 `waitingForInput` 主动请求 HITL 暂停，dispatcher 会 checkpoint active attempt 并释放 worker / lease；Console 详情页会按 `resumePayloadSchema` 渲染恢复表单，支持 `string` / `number` / `integer` / `boolean` / `array` 字段、textarea、范围和数组数量校验，未提供 schema 时保留 JSON `resumePayload` fallback。
+- dispatcher 任务状态机现在接上了 `cancelled` 和 `waiting_for_input`：控制面可通过 `POST /api/tasks/:taskId/cancel` 手动作废非终态任务；worker result 可携带 `waitingForInput` 主动请求 HITL 暂停，dispatcher 会 checkpoint active attempt 并释放 worker / lease；Console 详情页会按 `resumePayloadSchema` 渲染恢复表单，支持 `string` / `number` / `integer` / `boolean` / `array` 字段、textarea、范围和数组数量校验，未提供 schema 时保留 JSON `resumePayload` fallback；同一详情页也会展示任务级 `terminationPolicy`，用于审查 maxAttempts、attempt lease、heartbeat 和 assignment timeout 边界。
 - `worker-daemon` 不再把 `submitResult` 重试耗尽、`git push` 失败或自动 PR 创建失败记成“completed”；这些路径现在都会保留在显式 failed 语义里。
 - `worker-daemon` 子进程现在使用 env allowlist，而不是继承完整 `process.env`；自动 PR 创建也改成显式 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - `forgeflow-review-orchestrator` 现在补齐了阶段二控制层闭环：`dispatch/dispatch-task/watch/inspect/decide` 都支持 `--state-dir` 本地 dispatcher fallback；`watch --summary` 与 `inspect --summary` 统一输出 review/failure/redrive/progress/trace 摘要，并会附带结构化 `failureCode`。
@@ -81,17 +81,17 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - dispatcher 现在还提供服务端 merge 风险门禁（`DISPATCHER_REVIEW_MERGE_GATE`，默认 `off`）：`enforce` 时对风险非 `low` 的 `merge` 在 `/api/reviews/:taskId/decision` 直接返回 `409`，需 `acknowledgeRisk`/`acknowledge_risk` 覆盖；`warn` 放行但落 `review_merge_risk_acknowledged` 事件。该门禁是权威层，覆盖 Console / CLI / 直连 HTTP，CLI `--acknowledge-risk` 会透传给服务端。
 - dispatcher 现在会为每个任务生成稳定 `traceId`；dashboard snapshot、CLI 摘要、console drill-down 和 Trae worker evidence 都会携带该关联键，便于跨 dispatcher / worker / session 做最小闭环排障。
 - dashboard snapshot 现在附带阶段二控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`、`retryRatePct`、`branchProtectionHitCount`、`repoConcurrencySaturation`、`failureCodes`、`reviewReasonCodes`。
-- Console Artifact Workbench 支持跨任务筛选 artifact、review reasonCode、risk 和 mustFix 证据，并展示 reasonCode / risk 计数对比摘要、差异高亮和跨任务并排详情，便于在进入批量审查前先按风险和修复要求定位产物。
+- Console Artifact Workbench 支持跨任务筛选 artifact、review reasonCode、risk、mustFix 和 artifact ref 证据，并展示 reasonCode / risk 计数对比摘要、差异高亮和跨任务并排详情；工作台卡片可直接复制、展开和下载 `artifact://...` 引用文件，便于在进入批量审查前按风险、修复要求和产物证据定位任务。
 - dispatcher 现在额外暴露只读 `/api/metrics`，便于控制层和告警脚本直接读取阶段二最小指标，而不必解析完整 dashboard snapshot。
 - `/api/metrics` 现在还会汇总关键失败信号：`submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，并输出 `retryRatePct`、`failureCodes`、`reviewReasonCodes` 这组阶段二收口指标。
 - 脚本侧 pino logger 现在默认对 `Authorization`、`DISPATCHER_API_TOKEN`、`GITHUB_TOKEN` 等敏感字段做 redact，减少 worker / dispatcher 日志泄露风险。
-- Trae runtime 现在会通过 `POST /api/workers/:workerId/events` 回写结构化 phase events 与 failure blocker codes；generic worker daemon 的 failed result 也会带 blocker code，控制层不必再只靠 regex 猜测失败类型。
+- Trae runtime 现在会通过 `POST /api/workers/:workerId/events` 回写结构化 phase events 与 failure blocker codes；Trae automation worker 会把同一批 phase events 写入结构化 trajectory artifact 和受限 retained content，generic Codex/Gemini assignment runner 也会在结果里附带 trajectory artifact；dispatcher artifact store 会同时落盘 `trajectory.json` 和可下载的 `trajectory.traj` 回放文件，控制层不必再只靠 regex 猜测失败类型。
 - 阶段三核心底座现在已进入主线：dispatcher 运行时状态引入显式 `leases[]`，task claim 生命周期会获取 `assignment` / `repo` / `branch` lease；continuation 或 follow-up 任务还会基于会话锚点获取 `session` lease。该强约束只覆盖 dispatcher 管理的 task 生命周期，不覆盖绕过 dispatcher HTTP 或直接操作 repo、branch、Trae session store 的外部脚本。
 - dispatcher SQLite 真相源现在同时维护 query-first 结构化投影；可用 `DISPATCHER_STRUCTURED_READS=1` 切换只读查询到 projection 路径，并通过 `/api/query/*` 与 `/api/query/projection-health` 做一致性核对。
 - dispatcher 现在支持可回滚的 Postgres / queue shadow path：`DISPATCHER_SHADOW_MODE=shadow-write` 与 `DISPATCHER_POSTGRES_URL` 打开后，SQLite 仍是真相源，外部库只承接 best-effort shadow projection；shadow 写失败会进入 durable health record、runtime event、metrics 和 SLO。
 - dispatcher 现在额外暴露 `GET /api/slo` 和 `GET /api/dr/status`，用于读取 burn-rate、只读状态、projection 健康度和备份清单。
 - `DISPATCHER_READ_ONLY_MODE=1` 是当前只读降级开关；`dispatcher-server.ts:isMutationRequest` 默认冻结 `/api/` 下的 `POST` / `PUT` / `PATCH` / `DELETE` 写方法，当前 HTTP mutation 路由已被覆盖。它仍不是独立路由注册系统，直接改运行时文件、外部数据库或绕过 dispatcher HTTP 的写入需要由运维流程单独管控。
-- 仓库现在内置阶段三参考部署和演练入口：`pnpm verify:stage3`、`pnpm verify:stage3:live`、`pnpm verify:shadow-cutover:drill`、`pnpm verify:shadow-cutover:drill:evidence`、`pnpm verify:shadow-cutover:approve`、`pnpm verify:shadow-cutover:revoke`、`scripts/backup-runtime-state.mjs`、`scripts/restore-runtime-state.mjs`、`scripts/verify-stage3-dr.mjs`、`scripts/verify-live-dispatcher-dr.mjs`、`deploy/compose/*`、`deploy/helm/forgeflow/*`；源码备份/恢复脚本使用位置参数，打包 runtime CLI 才使用 `--backup-dir` 形式。
+- 仓库现在内置阶段三参考部署和演练入口：`pnpm verify:stage3`、`pnpm verify:stage3:live`、`pnpm verify:shadow-drift:reconciler`、`pnpm verify:shadow-cutover:reconciler`、`pnpm verify:shadow-cutover:drill`、`pnpm verify:shadow-cutover:drill:evidence`、`pnpm verify:shadow-cutover:approve`、`pnpm verify:shadow-cutover:approval`、`pnpm verify:shadow-cutover:ready`、`pnpm verify:shadow-cutover:revoke`、`scripts/backup-runtime-state.mjs`、`scripts/restore-runtime-state.mjs`、`scripts/verify-stage3-dr.mjs`、`scripts/verify-live-dispatcher-dr.mjs`、`deploy/compose/*`、`deploy/helm/forgeflow/*`；`verify:shadow-cutover:reconciler` 会以 strict cutover 条件长期巡检 shadow 配置、primary backend 配置和零 drift，`verify:shadow-cutover:approval` 会独立校验 approval marker、drill evidence SHA-256 和 revocation marker，`verify:shadow-cutover:ready` 会把 strict preflight 与 approval evidence 校验合成最终切换前门禁；源码备份/恢复脚本使用位置参数，打包 runtime CLI 才使用 `--backup-dir` 形式。
 - `packages/provider-registry` 现在把 `trae` 作为正式 provider capability 记录在 registry 中，并提供默认拒绝、白名单放行的第三方 provider admission gate；`packages/worker-protocol` 提供 start/result payload helper 作为内部 Worker SDK 契约。公网 API / SDK 稳定性承诺仍后置。
 - Trae MCP worker 仍保留，但现在只应视为交互式、人工值守或兼容性 fallback，不是首选未来路径。
 
@@ -149,7 +149,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - `scripts/` 根目录现在只保留当前主线入口和少量 legacy 演练脚本。
 - 未被主线文档或运行时引用的 `start-staging-*.sh` 包装脚本、`trigger-ai-dispatch.*`，以及未消费的 checked-in `.d.ts` 产物已清理。
 - 旧的本地 codex drill 脚本 `run-codex-control-flow.*`、`create-two-codex-drill-planner.*`、`run-dispatch-assignments.*`、`process-worker-result.*` 已退役；`codex/gemini` 多机执行保留 `run-worker-daemon.js` 和其执行依赖。
-- `scripts/lib/*.js` 仍是 live adapter / bootstrap 层；dispatcher 的 server/state/review-memory/task-worktree 权威实现已下沉到 `apps/dispatcher`，Trae gateway 的 route/session/chat handler、HTTP server、debug logger、driver 创建规则和持久化 session-store 已委托 `@tingrudeng/automation-gateway-core`，脚本层只保留具体 DOM driver factory、time adapter 和 worker / daemon glue。
+- `scripts/lib/*.js` 仍是 live adapter / bootstrap 层；dispatcher 的 server/state/review-memory/task-worktree 权威实现已下沉到 `apps/dispatcher`，Trae gateway 的 route/session/chat handler、HTTP server、debug logger、driver 创建规则、持久化 session-store 和 Trae CDP / DOM driver 已委托 `@tingrudeng/automation-gateway-core`，脚本层只保留兼容默认值、time adapter 和 worker / daemon glue。
 
 ## 当前使用方式
 

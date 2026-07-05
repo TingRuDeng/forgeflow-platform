@@ -11,6 +11,7 @@ const repoRoot = path.resolve(
 );
 const checkShadowDriftScriptPath = path.join(repoRoot, "scripts/check-shadow-drift.mjs");
 const cutoverDrillScriptPath = path.join(repoRoot, "scripts/verify-shadow-cutover-drill.mjs");
+const shadowReconcilerScriptPath = path.join(repoRoot, "scripts/run-shadow-reconciler.mjs");
 
 describe("shadow drift verification", () => {
   it("reports not_configured when shadow Postgres is disabled", () => {
@@ -277,5 +278,84 @@ describe("shadow drift verification", () => {
       "cutover_preflight",
     ]);
   }, 90_000);
+
+  it("runs the shadow reconciler once as an automation-friendly cadence entrypoint", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-reconciler-"));
+    const result = spawnSync("node", [
+      shadowReconcilerScriptPath,
+      stateDir,
+      "--once",
+      "--interval-ms",
+      "1000",
+    ], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "disabled",
+        DISPATCHER_QUEUE_SHADOW_MODE: "disabled",
+        DISPATCHER_POSTGRES_URL: "",
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const payload = JSON.parse(result.stdout);
+    expect(payload).toMatchObject({
+      ok: true,
+      mode: "once",
+      stateDir,
+      intervalMs: 1000,
+    });
+    expect(payload.runs).toHaveLength(1);
+    expect(payload.runs[0].payload.reconciliation).toEqual({
+      requested: true,
+      attempted: false,
+      reason: "shadow_not_configured",
+    });
+  }, 30_000);
+
+  it("passes strict cutover requirements through the shadow reconciler", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-reconciler-strict-"));
+    const result = spawnSync("node", [
+      shadowReconcilerScriptPath,
+      stateDir,
+      "--once",
+      "--interval-ms",
+      "1000",
+      "--require-configured",
+      "--require-primary-backend",
+      "--max-mismatches",
+      "0",
+      "--max-delta",
+      "0",
+    ], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "disabled",
+        DISPATCHER_QUEUE_SHADOW_MODE: "disabled",
+        DISPATCHER_POSTGRES_URL: "",
+        RUNTIME_STATE_BACKEND: "",
+        DISPATCHER_PRIMARY_POSTGRES_URL: "",
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(2);
+    const payload = JSON.parse(result.stdout);
+    expect(payload.runs).toHaveLength(1);
+    expect(payload.runs[0].payload.cutover).toMatchObject({
+      required: true,
+      ready: false,
+      reason: "shadow_not_configured",
+    });
+    expect(payload.runs[0].payload.primaryBackend).toMatchObject({
+      required: true,
+      ready: false,
+      reason: "primary_backend_not_selected",
+    });
+  }, 30_000);
 
 });

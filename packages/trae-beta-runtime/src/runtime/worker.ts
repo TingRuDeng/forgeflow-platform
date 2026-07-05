@@ -22,30 +22,6 @@ interface WorkerEvidence {
   artifacts?: Record<string, string>;
 }
 
-interface ArtifactBundle {
-  bundleId?: string;
-  taskId: string;
-  attemptId: string;
-  schemaVersion: "artifact-bundle/v1";
-  summary?: string;
-  branch?: string;
-  commit?: string;
-  pullRequestUrl?: string;
-  changedFiles: Array<{
-    path: string;
-    changeType: "added" | "modified" | "deleted" | "renamed";
-  }>;
-  refs: Record<string, unknown>;
-  testResults?: Array<{
-    name: string;
-    status: "passed" | "failed" | "skipped" | "unknown";
-    outputRef?: string;
-  }>;
-  riskNotes?: string[];
-  nextActions?: string[];
-  createdAt?: string;
-}
-
 type WorkerFailureKind = WorkerFailure["kind"];
 
 interface ClassifiedWorkerFailure {
@@ -57,6 +33,11 @@ import {
   createAutomationGatewayClient,
   createDispatcherClient,
 } from "./clients.js";
+import {
+  buildTraeWorkerArtifactBundle,
+  type TraeWorkerArtifactBundle,
+  type TraeWorkerPhaseEvent,
+} from "./trae-worker-artifacts.js";
 import { checkArtifactReviewability } from "./trae-automation-artifact-checks.js";
 import { launchTraeForAutomation } from "./trae-launcher.js";
 import {
@@ -568,40 +549,11 @@ function buildArtifactBundle(input: {
   notes?: string;
   github?: WorkerRuntimeReport["github"];
   sessionId?: string | null;
-}): ArtifactBundle | undefined {
-  const attemptId = String(input.task.attempt_id || "").trim();
-  if (!attemptId) {
-    return undefined;
-  }
-
-  return {
-    bundleId: `${attemptId}:artifact-bundle`,
-    taskId: input.task.task_id,
-    attemptId,
-    schemaVersion: "artifact-bundle/v1",
-    summary: input.summary,
-    branch: input.github?.branchName || input.task.branch,
-    commit: input.github?.commitSha || undefined,
-    pullRequestUrl: input.github?.prUrl || undefined,
-    changedFiles: input.filesChanged.map((filePath) => ({
-      path: filePath,
-      changeType: "modified",
-    })),
-    refs: {
-      structuredReport: `artifact://${attemptId}/result.json`,
-      ...(input.sessionId ? { terminalTranscript: `artifact://${attemptId}/session-${input.sessionId}.log` } : {}),
-    },
-    testResults: input.testOutput
-      ? [{
-          name: "trae:test_output",
-          status: input.status === "review_ready" ? "passed" : "failed",
-          outputRef: `artifact://${attemptId}/tests.txt`,
-        }]
-      : undefined,
-    riskNotes: input.risks ?? [],
-    nextActions: input.notes ? [input.notes] : [],
-    createdAt: new Date().toISOString(),
-  };
+  remoteVerified?: boolean;
+  failurePhase?: string;
+  phaseEvents?: TraeWorkerPhaseEvent[];
+}): TraeWorkerArtifactBundle | undefined {
+  return buildTraeWorkerArtifactBundle(input);
 }
 
 function buildWorkerFailure(
@@ -961,6 +913,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     preferExisting: false,
   }));
   const debugLog = makeDebugLogger(logger, isDebugEnabled(options.debug));
+  const phaseEvents: TraeWorkerPhaseEvent[] = [];
 
   if (!dispatcherClient || !automationClient || !workerId || !repoDir) {
     throw new Error("dispatcherClient, automationClient, workerId, and repoDir are required");
@@ -971,6 +924,13 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     payload: Record<string, unknown> = {},
     taskId?: string | null,
   ) {
+    const at = new Date().toISOString();
+    phaseEvents.push({
+      type,
+      taskId: taskId || null,
+      at,
+      payload,
+    });
     if (typeof dispatcherClient.reportEvent !== "function") {
       return;
     }
@@ -979,7 +939,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       await dispatcherClient.reportEvent(workerId, {
         type,
         taskId: taskId || undefined,
-        at: new Date().toISOString(),
+        at,
         payload,
       });
     } catch (error) {
@@ -989,6 +949,10 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         message: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  function phaseEventsForTask(taskId: string): TraeWorkerPhaseEvent[] {
+    return phaseEvents.filter((event) => event.taskId === taskId);
   }
 
   async function releaseTaskSession(sessionId: string | null) {
@@ -1092,6 +1056,8 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       notes: parsed.notes,
       github: parsed.github,
       sessionId,
+      remoteVerified: artifactCheck?.evidence.remoteVerified,
+      phaseEvents: phaseEventsForTask(task.task_id),
     });
 
     await emitPhaseEvent("submit_result_start", {
@@ -1162,6 +1128,8 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       testOutput: rawOutput,
       risks: [],
       sessionId,
+      failurePhase: phase,
+      phaseEvents: phaseEventsForTask(task.task_id),
     });
 
     await emitPhaseEvent("submit_result_start", {

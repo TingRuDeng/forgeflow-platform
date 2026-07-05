@@ -1,5 +1,195 @@
 # 当前项目审查修复任务
 
+- [x] M71 串行：为结构化 trajectory 生成 `.traj` 回放文件。
+- [x] M70 串行：在 Console 任务详情展示 task-level termination policy。
+- [x] M69 串行：新增 shadow cutover ready 综合门禁。
+- [x] M68 串行：新增 shadow cutover approval 独立校验入口。
+- [x] M67 串行：新增 strict shadow cutover reconciler package script。
+- [x] M66 串行：修正 runtime daemon 去重完成后的 TECH_DEBT / README 分类漂移。
+- [x] M65 串行：让 shadow reconciler 支持 strict cutover 参数透传。
+- [x] M64 串行：补齐 Console Artifact Workbench 卡片级 artifact 文件展开 / 下载入口。
+- [x] M63 串行：补齐 Console Artifact Workbench 卡片级 artifact ref 复制入口。
+- [x] M62 串行：新增 shadow drift 自动 reconciliation 长期运行入口。
+- [x] M61 串行：补强 Postgres primary cutover approval 证据校验。
+- [x] M60 串行：把 Trae worker phase events 纳入 artifact trajectory。
+- [x] M59 串行：补齐 Trae automation worker 的 trajectory artifact parity。
+- [x] M55 串行：把 Trae CDP / DOM driver 本体下沉到 automation-gateway-core。
+- [x] M56 串行：继续拆分共享 `trae-dom-driver.ts` 大文件，按 browser expressions / response collection / driver facade 收敛到 300 行以内。
+- [x] M57 串行：把 Codex/Gemini packaged runtime launch builder 下沉到 beta-runtime-core。
+- [x] M58 串行：让 generic assignment runner 产出可回放 trajectory artifact。
+
+## M71 Review 小结
+
+已让 dispatcher artifact store 在已有 `artifact-trajectory/v1` 的基础上额外生成 `trajectory.traj`。该文件使用 `artifact-traj/v1` 包装 taskId、attemptId、bundleId 和按 sequence 排序的 step，并显式提供 `thought`、`action`、`observation`、`state`、`query` 字段，便于审查工具按 `.traj` 风格读取行动 / 观察 / 状态过程。ArtifactBundle refs schema 也新增 `traj` 引用，Console refs / Workbench 会通过现有 artifact ref 展开 / 下载能力自然暴露该文件。
+
+收尾时同步拆分 `packages/worker-protocol/src/index.ts` 的 ArtifactBundle / RuntimeEvent schema 到独立文件，避免继续扩大 worker protocol 单文件；`packages/result-contracts/tests/index.test.ts` 也拆出 artifact bundle 与 review finding 测试，触碰后的测试文件行数分别收敛为 300 / 103 / 104 行。全量测试过程中发现 dispatcher 两个集成测试仍局部覆盖 15 秒超时，低于项目 60 秒硬超时约束，已移除该局部覆盖并复跑通过。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 `.traj` 回放文件、ArtifactBundle `refs.traj` 契约、worker-protocol schema 拆分和 result-contracts 测试拆分，没有改变 worker result mutation、Console artifact 文件 API 或 dispatcher review decision 语义。安全检查通过，新增内容只结构化既有 trajectory step 元数据，不新增 secret、外部网络、命令拼接、mock 成功路径或静默 fallback。复杂度检查通过，`artifact-store.ts` 219 行，`worker-protocol/src/index.ts` 257 行，`worker-protocol/src/artifact-bundle.ts` 67 行，`worker-protocol/src/runtime-events.ts` 74 行，`result-contracts/tests/index.test.ts` 300 行。Document-refresh: needed，原因：ArtifactBundle 落盘文件与审查证据能力变化，已同步 README、docs/README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `artifact-store.test.ts`、`@forgeflow/result-contracts`、`@forgeflow/worker-protocol` 定向测试先失败于缺少 `traj` ref / `trajectory.traj`；GREEN 后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/artifact-store.test.ts --maxWorkers=1`、`CI=true pnpm --filter @forgeflow/result-contracts exec vitest run tests/index.test.ts tests/artifact-bundle.test.ts tests/review-finding.test.ts --maxWorkers=1`、`CI=true pnpm --filter @forgeflow/worker-protocol exec vitest run tests/index.test.ts --maxWorkers=1` 均通过。最终验证：`env HOME=/private/tmp/forgeflow-test-home CI=true pnpm test` 非沙箱通过；`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。默认沙箱下全量测试会因本地 HTTP server 测试监听 `127.0.0.1` 报 `listen EPERM`，已在非沙箱复跑确认通过。
+
+剩余风险：`.traj` 文件现在提供 thought/action/observation/state/query 形状的回放证据；更细粒度 token / DOM / shell observation 仍取决于 worker 和 gateway 是否产出足够细的 trajectory steps。
+
+## M70 Review 小结
+
+已新增 `TaskTerminationPolicySection`，并在 Console `TaskDetailsPanel` 中展示任务级 `terminationPolicy`：`maxAttempts`、`attemptLeaseTimeoutMs`、`heartbeatTimeoutMs`、`assignmentTimeoutMs` 会以紧凑卡片显示，缺省 policy 不渲染该区块。这样 reviewer 在同一详情页可以同时看到 HITL resume payload 和终止 / 重试边界，不必只从 dispatcher 状态或 raw JSON 推断。
+
+Review Gate：finished。Spec 符合度通过，本轮推进统一 HITL / termination policy 的 Console 可见性，只新增 task-level termination policy 展示，不改变 dispatcher retry、lease、HITL resume、review decision 或 artifact 展示语义。安全检查通过，组件只渲染已存在的 task 字段，不新增 secret、外部命令、网络调用、mock 成功路径或静默 fallback。复杂度检查通过，`TaskTerminationPolicySection.tsx` 44 行，`TaskDetailsPanel.tsx` 252 行，均低于 300 行；新测试拆到独立文件，避免继续扩大综合列表测试。Document-refresh: needed，原因：Console 任务详情能力变化，已同步 README、docs/README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx --maxWorkers=1` 先失败于 Console 找不到 `终止策略 / termination policy`；GREEN 后 `CI=true pnpm --filter console exec vitest run src/components/__tests__/TaskDetailsPanelTerminationPolicy.test.tsx src/components/__tests__/Lists.test.tsx --maxWorkers=1` 通过，2 个测试文件、17 个测试通过。最终验证 `CI=true pnpm --filter console lint`、`CI=true pnpm --filter console build`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：Console 已展示 task-level termination policy；更进一步的可编辑 policy 或全局 policy diff 不是本轮范围。
+
+## M69 Review 小结
+
+已新增 `scripts/verify-shadow-cutover-ready.mjs` 和 `pnpm verify:shadow-cutover:ready`。该入口会串行运行两个 phase：`strict_cutover_preflight` 调用既有 strict shadow cutover preflight，要求 shadow 配置、primary backend 配置和零 drift；`approval_evidence` 调用 `verify-shadow-cutover-approval.mjs`，要求 approval marker、归档 evidence SHA-256 和 revocation 状态同时有效。最终只有两个 phase 都通过才返回成功，并输出结构化 phase payload，便于 CI / operator 作为真正切换前最后门禁使用。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 shadow 自动 reconciliation / production cutover 收口，新增的是 strict preflight + approval evidence 组合门禁，不改变底层 drift gate、approval verifier、runtime primary backend guard 或 Postgres snapshot 语义。安全检查通过，脚本只调用仓库内固定 `check-shadow-drift.mjs` 和 `verify-shadow-cutover-approval.mjs`，通过 `spawnSync(process.execPath, argvArray)` 传参，不拼接 shell 字符串，不新增 secret、网络调用、mock 成功路径或静默 fallback；任何 phase 失败都会保留 statusCode / stderr / payload 并让 ready 命令非 0 退出。复杂度检查通过，`verify-shadow-cutover-ready.mjs` 84 行，测试文件 224 行，均低于 300 行。Document-refresh: needed，原因：新增切换前最终组合门禁，已同步 README、docs/README、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-cutover-approval.test.ts tests/modules/execution/workflows.test.ts --maxWorkers=1` 先失败于 `scripts/verify-shadow-cutover-ready.mjs` / package script 缺失；GREEN 后同命令通过，2 个测试文件、13 个测试通过。最终验证 `node --check scripts/verify-shadow-cutover-ready.mjs`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：ready 门禁能把本仓库 strict preflight 和 approval evidence 组合成最终切换前验证；真实 primary-store 切换仍依赖外部 Postgres、queue、进程切流和生产变更窗口执行。
+
+## M68 Review 小结
+
+已新增 `scripts/verify-shadow-cutover-approval.mjs` 和 `pnpm verify:shadow-cutover:approval`。该入口会在生产切换窗口开始前独立校验 `.forgeflow-dispatcher/shadow-cutover-approval.json`：要求 `approved=true`、`cutoverReason=cutover_ready`、`evidenceSha256` 格式有效，重新读取 `evidencePath` 计算 SHA-256，并在存在 `.forgeflow-dispatcher/shadow-cutover-revocation.json` 时直接失败。这样 operator / CI 可以在启动 Postgres primary backend 之前先验证审批证据链，而不是只依赖 dispatcher 启动时的被动 guard。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 shadow 自动 reconciliation / production cutover 收口，新增的是 approval marker 的独立 operator 校验入口，不改变 drill、approve、revoke、runtime primary backend guard 或 Postgres snapshot 语义。安全检查通过，脚本只读取本地 approval / revocation / evidence 文件并计算 SHA-256，不新增 secret、外部命令拼接、网络调用、mock 成功路径或静默 fallback；evidence 漂移和 revocation marker 会显式失败。复杂度检查通过，`verify-shadow-cutover-approval.mjs` 113 行，测试文件 188 行，均低于 300 行。Document-refresh: needed，原因：新增 cutover approval operator 命令，已同步 README、docs/README、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-cutover-approval.test.ts --maxWorkers=1` 先失败于 `scripts/verify-shadow-cutover-approval.mjs` 缺失；GREEN 后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-cutover-approval.test.ts tests/modules/execution/workflows.test.ts --maxWorkers=1` 通过，2 个测试文件、12 个测试通过。最终验证 `node --check scripts/verify-shadow-cutover-approval.mjs`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：approval verifier 能证明本仓库归档证据链未漂移且未撤销；真实 primary-store 切换仍依赖外部 Postgres、queue、进程切流和生产变更窗口执行。
+
+## M67 Review 小结
+
+已新增 `pnpm verify:shadow-cutover:reconciler`，等价于 `node scripts/run-shadow-reconciler.mjs .forgeflow-dispatcher --require-configured --require-primary-backend --max-mismatches 0 --max-delta 0`。生产 cutover 窗口现在有稳定 package script 可直接交给 cron/systemd/容器健康任务使用，不需要 operator 复制长 node 命令。
+
+Review Gate：finished。Spec 符合度通过，本轮推进 shadow 自动 reconciliation / production cutover 收口，只新增 strict reconciler package script 和文档入口，没有改变底层 drift gate、reconcile、approval、revoke 或 primary backend guard 语义。安全检查通过，脚本入口仍调用固定仓库脚本和固定参数，不新增 secret、外部命令拼接、mock 成功路径或静默 fallback。复杂度检查不涉及业务代码。Document-refresh: needed，原因：新增 package script 和 operator 入口，已同步 README、docs/README、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/workflows.test.ts --maxWorkers=1` 先失败于 `verify:shadow-cutover:reconciler` 不存在；GREEN 后同命令通过，5 个测试通过。最终验证 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/workflows.test.ts tests/modules/execution/shadow-drift.test.ts --maxWorkers=1`、`node --check scripts/run-shadow-reconciler.mjs`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：strict reconciler package script 能持续验证切换条件；真正 primary-store 切换仍依赖外部 Postgres、queue、进程切流和生产变更窗口执行。
+
+## M66 Review 小结
+
+已修正 runtime executor / launch 去重完成后的文档分类漂移：`docs/TECH_DEBT.md` 第 13 节不再把 daemon 去重写成“仍待迁移”，而是拆成“已完成的收口”和真实剩余边界；`README.md` 与 `docs/README.md` 也同步说明 codex/gemini worker daemon 的主循环、executor、launch builder 和失败回写已收敛到共享 runtime core，剩余边界是 Gemini / beta-runtime-core npm 包名和 Trusted Publisher 外部配置。
+
+Review Gate：finished。Spec 符合度通过，本轮只修正 runtime 去重事实的权威文档分类，没有修改业务代码、运行时逻辑、测试夹具或发布脚本。安全检查通过，未新增 secret、外部命令、mock 成功路径或静默 fallback。复杂度检查不涉及代码。Document-refresh: needed，原因：文档本身是本轮修复对象，已同步 README、docs/README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：runtime 去重的代码侧已完成；未发布 npm 包的外部配置仍不是仓库内代码能单独完成的事项。
+
+## M65 Review 小结
+
+已让 `scripts/run-shadow-reconciler.mjs` 支持 `--require-configured`、`--require-primary-backend`、`--max-mismatches` 和 `--max-delta` 组合透传到底层 `check-shadow-drift.mjs`。生产变更窗口现在可以用 reconciler 长期运行严格 cutover 条件：shadow 必须已配置、primary backend 必须选择 Postgres 且配置 `DISPATCHER_PRIMARY_POSTGRES_URL`，并可要求零 drift。
+
+Review Gate：finished。Spec 符合度通过，本轮推进 shadow 自动 reconciliation / production cutover 收口，补齐的是长期 reconciler 在生产切换窗口的 strict preflight 能力，不改变默认 `pnpm verify:shadow-drift:reconciler` 的宽松巡检行为，也不改变 approval / revoke marker 语义。安全检查通过，参数解析仍只接受已知开关和非负整数阈值，子进程通过 `spawnSync(process.execPath, argvArray)` 调用固定仓库脚本，不拼接 shell 字符串，不新增 secret、mock 成功路径或静默 fallback。复杂度检查通过，脚本仍保持单一职责。Document-refresh: needed，原因：reconciler CLI 能力变化，已同步 README、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts --maxWorkers=1` 先失败于 `run-shadow-reconciler.mjs` 不认识 `--require-configured`；GREEN 后同命令通过，12 个测试通过。最终验证 `node --check scripts/run-shadow-reconciler.mjs`、`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts tests/modules/execution/workflows.test.ts tests/modules/execution/shadow-cutover-approval.test.ts --maxWorkers=1`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：strict reconciler 能持续验证本仓库 shadow/cutover 条件，但真实 primary-store 切换仍依赖外部 Postgres、queue、进程切流和变更窗口执行。
+
+## M64 Review 小结
+
+已把 Console Artifact Workbench 的 artifact ref 操作抽成 `ArtifactWorkbenchRefs.tsx`，卡片内现在可直接复制、展开和下载 manifest 登记的 `artifact://...` 文件。Workbench 主组件继续只负责跨任务筛选、证据对比、任务选择和卡片布局，搜索索引仍包含 ref 完整值。
+
+Review Gate：finished。Spec 符合度通过，本轮补齐 Console 审查工作台的卡片级 artifact 文件读取入口，没有改变 dispatcher ArtifactBundle schema、artifact store manifest、artifact 文件 API 或 review decision payload。安全检查通过，文件读取仍复用既有 `/api/artifacts/:bundleId/files/:fileName` helper，路径解析和 URL 编码沿用 `artifactFileAccess.ts`；未新增 secret、外部命令、mock 成功路径或静默 fallback。复杂度检查通过，`ArtifactWorkbench.tsx` 228 行，`ArtifactWorkbenchRefs.tsx` 106 行，均低于 300 行。Document-refresh: needed，原因：Console Artifact Workbench 操作能力变化，已同步 README、docs/README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx --maxWorkers=1` 先失败于 Workbench 找不到“展开文件 diff”按钮；GREEN 后同命令通过，16 个测试通过。最终验证 `CI=true pnpm --filter console test`、`CI=true pnpm --filter console lint`、`CI=true pnpm --filter console build`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：跨任务 Workbench 已能复制、展开和下载单个 artifact ref；更复杂的多文件并排 diff 视图仍不是本轮范围。
+
+## M63 Review 小结
+
+已把 Console Artifact Workbench 的跨任务卡片从“只显示 artifact 引用数量”推进到可直接查看并复制每个 `artifact://...` ref。Workbench 搜索索引也同步纳入 ref 完整值，审查者可以按 artifact ref 精确定位产物，并在列表里复制 diff / log / report 引用，不必先跳回单任务详情页。
+
+Review Gate：finished。Spec 符合度通过，本轮只推进 Console 审查工作台的卡片级 artifact ref 操作入口，没有改变 dispatcher ArtifactBundle schema、artifact store、artifact 文件 API 或 review decision payload。安全检查通过，复制操作只调用浏览器 clipboard，不读取文件、不新增 secret、网络调用、命令拼接、mock 成功路径或静默 fallback。复杂度检查通过，`ArtifactWorkbench.tsx` 276 行，低于 300 行；新增 helper 均保持单一职责。Document-refresh: needed，原因：Console Artifact Workbench 操作能力变化，已同步 README、docs/README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx --maxWorkers=1` 先失败于 Workbench 找不到 `artifact://bundle-auth/diff.patch`；GREEN 后同命令通过，16 个测试通过。最终验证 `CI=true pnpm --filter console test`、`CI=true pnpm --filter console lint`、`CI=true pnpm --filter console build`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：Workbench 现在支持跨任务筛选、证据对比、跳转和 artifact ref 复制；按需展开文件正文仍在单任务详情的 artifact refs / trajectory tabs 中完成，尚未把文件正文预览复制到跨任务 Workbench。
+
+## M62 Review 小结
+
+已新增 `scripts/run-shadow-reconciler.mjs` 和 `pnpm verify:shadow-drift:reconciler`。该入口会周期性调用 `check-shadow-drift.mjs <stateDir> --reconcile --record-alert`，默认 5 分钟一次，并支持 `--once`、`--interval-ms`、`--max-runs`、`--max-mismatches`、`--max-delta`，可被 cron/systemd/容器健康任务直接托管。`--once` 会输出结构化 run summary，便于 CI 和 operator 验证自动 reconciliation cadence。
+
+Review Gate：finished。Spec 符合度通过，本轮推进 shadow 自动 reconciliation，从一次性 `verify:shadow-drift:reconcile` 扩展为可长期运行的 reconciler 入口，不改变默认只读 `verify:shadow-drift` release gate，也不改变 cutover drill / approval / revoke 语义。安全检查通过，脚本只调用仓库内固定 `check-shadow-drift.mjs`，参数解析限制为数值和已知开关，不拼接 shell 字符串，不新增 secret、外部网络调用、mock 成功路径或静默 fallback；子命令失败会保留 statusCode / stderr 并让 reconciler 退出非 0。复杂度检查通过，新增脚本保持单一职责。Document-refresh: needed，原因：新增自动 reconciliation operator 入口，已同步 README、API、docs README、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts --maxWorkers=1` 先失败于缺少 `scripts/run-shadow-reconciler.mjs`；GREEN 后同命令通过，11 个测试通过。`workflows.test.ts` 已锁定 `verify:shadow-drift:reconciler` package script。
+
+剩余风险：reconciler 入口负责自动执行本仓库 shadow replay 和 alert 记录；是否作为 systemd service、cronjob 或容器 sidecar 部署，仍由生产环境编排负责。
+
+## M61 Review 小结
+
+已补强 Postgres primary backend 的 cutover guard。`RUNTIME_STATE_BACKEND=postgres` 在连接 Postgres 前不再只检查 `shadow-cutover-approval.json` 的字段形状，还会读取 approval 里的 `evidencePath`，重新计算归档 `shadow-cutover-drill.json` 的 SHA-256，并要求它与 `evidenceSha256` 完全一致；如果 evidence 被篡改、删除或 marker 指向无效路径，会在创建 Postgres client 前失败。相关 Postgres primary 测试夹具改为生成真实 drill evidence 和 hash。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 shadow production cutover 收口，补强的是 primary-mode 启动前的证据完整性 guard，没有改变 drift gate、reconcile、cutover drill、approval/revoke 脚本、Postgres snapshot 表结构或 HTTP async state path。安全检查通过，只读取本地归档 evidence 并计算 SHA-256，不新增 secret、网络调用、mock 成功路径或静默 fallback；hash mismatch 会显式失败且不会连接 Postgres。复杂度检查通过，新增 helper 均低于 50 行。Document-refresh: needed，原因：primary cutover guard 从 marker shape 校验升级为 marker + evidence hash 校验，已同步 TECH_DEBT、API、runtime-state contract、Stage 3 runbook、docs README 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state-postgres.test.ts --maxWorkers=1` 先失败于 evidence 被篡改后仍成功连接 primary backend；GREEN 后同命令通过，7 个测试通过；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-cutover-approval.test.ts tests/modules/server/runtime-state-postgres.test.ts tests/modules/server/dispatcher-server-postgres.test.ts --maxWorkers=1` 通过，3 个测试文件、13 个测试通过。
+
+剩余风险：该 guard 能阻止本仓库 dispatcher 在 evidence 不匹配时进入 Postgres primary；真实生产 cutover 仍需要外部 Postgres / queue 运维、进程切流和变更窗口执行。
+
+## M60 Review 小结
+
+已把 Trae automation worker 的本地 `emitPhaseEvent` 同步采集为当前 task 的 artifact trajectory 输入。`buildTraeWorkerArtifactBundle` 现在会把 `readiness_wait_*`、`prepare_session_*`、`send_chat_*`、`session_recovery_*`、`artifact_check_*`、`workspace_prepare_*`、`start_task_*` 映射为 `artifact-trajectory/v1` step，并把 phase event 日志写入 `retainedContent.logs` / `retainedContent.trajectory`；即使 dispatcher `reportEvent` 不可用，本地 artifact 仍保留同一批 phase events。静态 result、verification、cleanup step 仍保留，用于覆盖 submitResult 构建后才发生的动作。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进可回放 trajectory，从 M59 的 provider 级阶段提升到真实 phase event 驱动，不改变 dispatcher ArtifactBundle schema、event API、submitResult mutation 或 session recovery 语义。安全检查通过，采集内容只来自既有 phase event 类型、taskId、时间戳和已有 payload，不新增 secret、外部命令拼接、网络调用、mock 成功路径或静默 fallback。复杂度检查通过，`trae-worker-artifacts.ts` 262 行，低于 300 行；`worker.ts` 仍是既有大文件，本轮只增加 phase event 本地采集和按 taskId 过滤。Document-refresh: needed，原因：Trae trajectory 证据来源从静态阶段变为 phase event 驱动，已同步 README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @tingrudeng/trae-beta-runtime exec vitest run tests/runtime/worker.test.ts --maxWorkers=1` 先失败于 trajectory action step 缺少 `responseLength` observation 且 retained trajectory 缺少 `send_chat_done`；GREEN 后同命令通过，29 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime test` 通过，19 个测试文件、174 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime typecheck` 通过。
+
+剩余风险：Trae artifact trajectory 已包含真实 phase event，但还不是完整 token/DOM/action 级 `.traj`；如需更细 replay，需要 gateway driver 继续产出更细粒度 observation artifactRef。
+
+## M59 Review 小结
+
+已在 `packages/trae-beta-runtime/src/runtime/trae-worker-artifacts.ts` 新增 Trae worker artifact helper。Trae automation worker 的成功 submitResult 和失败 submitResult 现在都会在现有 `artifactBundle` 内附带结构化 `artifact-trajectory/v1`：覆盖 gateway readiness、session prepare、prompt action、verification、result 和 cleanup；同时写入受限 `retainedContent.logs`，并在存在测试输出时保留 `retainedContent.testResults`。`worker.ts` 只保留薄委托，避免继续扩大主运行时文件；`clients.ts` 的 submitResult 类型边界也改为复用同一 bundle 类型，避免 trajectory / retainedContent 在 client 层继续不可见。
+
+Review Gate：finished。Spec 符合度通过，本轮补齐 M58 留下的 Trae provider parity，没有改变 dispatcher ArtifactBundle schema、artifact store、worker result mutation、session recovery 或远端 artifact verification 判定。安全检查通过，helper 只结构化既有 taskId、sessionId、summary、testOutput 和 verification 结果，不新增 secret、外部命令拼接、网络调用、mock 成功路径或静默 fallback。复杂度检查局部通过，新增 `trae-worker-artifacts.ts` 181 行；既有 `worker.ts` 仍超过 300 行但本轮删除本地 bundle 类型和旧构造体，只增加薄委托。Document-refresh: needed，原因：Trae automation worker 现在也会主动产出 trajectory artifact，已同步 README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @tingrudeng/trae-beta-runtime exec vitest run tests/runtime/worker.test.ts --maxWorkers=1` 先失败于成功 / hard-cap 失败路径缺少 `artifactBundle.trajectory` 和 `retainedContent`；GREEN 后同命令通过，29 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime exec vitest run tests/runtime/worker.test.ts tests/runtime/clients.test.ts --maxWorkers=1` 通过，2 个测试文件、43 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime test` 通过，19 个测试文件、174 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime typecheck` 通过。
+
+剩余风险：M60 已把 Trae phase events 接入 artifact trajectory；更细粒度的 thought/action/observation 全量流仍依赖未来 gateway driver 继续产出细粒度 observation artifactRef。
+
+## M58 Review 小结
+
+已在 `packages/beta-runtime-core/src/runtime/assignment-artifacts.ts` 新增 assignment artifact helper。generic `runWorkerAssignment` 现在会在 `worker-result.json` 内写入 `artifactBundle`：包含 preflight、worker action、每条 verification、result 四类 trajectory step；保留 `retainedContent.logs` 和 `retainedContent.testResults`，由 dispatcher artifact store 生成最终 manifest refs。失败路径会把 worker launch 的非 0 exitCode 写入 action step，避免把执行失败误标为成功。dispatcher runtime-state 测试已改为验证 `result.artifactBundle` 入口会被记录并绑定 active attempt。
+
+Review Gate：finished。Spec 符合度通过，本轮推进可回放 trajectory 的 worker 产出侧，而不改变 ArtifactBundle schema、dispatcher artifact store、Console 展示或 worker result metadata canonicalization。安全检查通过，artifact helper 只结构化既有本地执行输出和 verification 结果，不新增 secret、网络调用、命令拼接、mock 成功路径或静默 fallback；未伪造最终 `artifact://<bundleId>/...` refs，最终 refs 仍由 dispatcher artifact store 生成。复杂度检查通过，新增 `assignment-artifacts.ts` 低于 300 行，`run-worker-assignment.ts` 只增加调用点。Document-refresh: needed，原因：generic assignment runner 现在会主动产出结构化 trajectory artifact，已同步 TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @tingrudeng/beta-runtime-core exec vitest run tests/run-worker-assignment.test.ts --maxWorkers=1` 先失败于缺少 `artifactBundle`；补失败路径后同命令先失败于 launch 非 0 exitCode 被误标 `succeeded`。GREEN 后同命令通过，1 个测试文件、5 个测试通过；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state.test.ts --maxWorkers=1` 通过，1 个测试文件、67 个测试通过。
+
+剩余风险：generic Codex/Gemini runner 已能产出 replayable trajectory；M59 已补齐 Trae automation worker 的 provider 级 trajectory parity。若后续要达到 SWE-agent `.traj` 级别的逐条 thought/action/observation，需要继续把更细粒度 session progress 事件结构化。
+
+## M57 Review 小结
+
+已在 `packages/beta-runtime-core/src/runtime/provider-launch.ts` 新增共享 Codex/Gemini launch builder，统一 provider pool 校验、binary 解析、`FORGEFLOW_*_ARGS_JSON` / `FORGEFLOW_*_ARGS` 解析、Codex sandbox / model 和 Gemini model 参数构造。`packages/codex-beta-runtime/src/runtime/run-worker-assignment.ts` 与 `packages/gemini-beta-runtime/src/runtime/run-worker-assignment.ts` 改为薄 wrapper，只保留 CLI 入口和 `runWorkerAssignmentCli` 调用。两个 packaged runtime 的 `test` script 先构建 `@tingrudeng/beta-runtime-core`，避免 wrapper 测试读取过期 dist。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 runtime executor / launch 去重，收敛的是 Codex/Gemini provider launch builder，不改变 dispatcher runtime factories、assignment runner、verification runner 或 Trae runtime。安全检查通过，binary 探测仍只执行 `--version`，extra args JSON 校验失败会显式抛错；未新增 secret、网络调用、mock 成功路径或静默 fallback。复杂度检查通过，新增 `provider-launch.ts` 低于 300 行，两个 packaged runtime wrapper 删除重复解析逻辑后均低于 50 行。Document-refresh: needed，原因：Codex/Gemini packaged launch builder 权威边界从各 runtime 包迁移到 beta-runtime-core，已同步 TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @tingrudeng/beta-runtime-core exec vitest run tests/run-worker-assignment.test.ts --maxWorkers=1` 先失败于缺少 `buildCodexLaunchCommand`。GREEN 后 `CI=true pnpm --filter @tingrudeng/beta-runtime-core exec vitest run tests/run-worker-assignment.test.ts --maxWorkers=1` 通过，1 个测试文件、4 个测试通过；`CI=true pnpm --filter @tingrudeng/codex-beta-runtime test` 通过，2 个测试文件、4 个测试通过；`CI=true pnpm --filter @tingrudeng/gemini-beta-runtime test` 通过，2 个测试文件、5 个测试通过。
+
+剩余风险：`beta-runtime-core` 仍保留 task processor、managed executor、live executor 和 `run-worker-assignment` runner 的组合路径；本轮只消除了 Codex/Gemini packaged runtime 的 launch builder 重复实现，没有重新设计 executor 生命周期。
+
+## M56 Review 小结
+
+已把共享 Trae DOM driver 拆为职责更窄的 core 模块：`trae-dom-driver-config.ts` 负责默认值、等待与运行时依赖注入；`trae-dom-browser-helpers.ts` / `trae-dom-expressions.ts` 负责浏览器端 helper 和表达式构造；`trae-dom-response-*` 负责响应提取、activity snapshot 与 completion 判断；`trae-dom-driver.ts` 只保留 driver facade、CDP target 连接和主执行流程。`scripts/lib/trae-dom-driver.ts` 与 `packages/trae-beta-runtime/src/runtime/trae-dom-driver.ts` 继续保持薄适配，不重新持有 DOM driver 本体。
+
+Review Gate：finished。Spec 符合度通过，本轮只处理 M55 遗留的共享 core 文件过大问题，没有扩大 gateway route、session-store、HTTP JSON IO、debug logger 或 worker runtime 范围。安全检查通过，拆分仅移动既有表达式、选择器、响应提取和 CDP 调用逻辑，未新增 secret、外部命令拼接、mock 成功路径或静默 fallback；脚本侧兼容默认值仍显式保留。复杂度检查通过，`packages/automation-gateway-core/src/trae-dom-*.ts` 当前分别为 4 到 277 行，均低于 300 行；driver facade 和 response collection 长流程已拆成 runtime / collector helper。Document-refresh: needed，原因：Trae CDP / DOM driver 的共享 core 职责已从单文件拆成多个权威模块，已同步 README、TECH_DEBT、automation-gateway-core README 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @tingrudeng/automation-gateway-core build`、`CI=true pnpm --filter @tingrudeng/automation-gateway-core typecheck`、`CI=true pnpm --filter @tingrudeng/automation-gateway-core exec vitest run tests/report.test.ts tests/driver-factory.test.ts tests/gateway-handler.test.ts tests/session-store.test.ts tests/debug-log.test.ts --maxWorkers=1`、非沙箱 `CI=true pnpm --filter @tingrudeng/automation-gateway-core exec vitest run tests/gateway-http-server.test.ts --maxWorkers=1`、`CI=true pnpm --filter @tingrudeng/trae-beta-runtime test`、`CI=true pnpm --filter @tingrudeng/trae-beta-runtime typecheck`、`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json`、`CI=true pnpm exec tsc -p scripts/tsconfig.json`、`env HOME=/private/tmp/forgeflow-trae-gateway-test-home CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-gateway-thin-adapter.test.ts tests/modules/server/trae-automation-gateway.test.ts --maxWorkers=1`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。`CI=true pnpm --filter @tingrudeng/automation-gateway-core exec vitest run --maxWorkers=1` 在默认沙箱仅因 `tests/gateway-http-server.test.ts` 监听 `127.0.0.1` 被系统拒绝失败，非沙箱同测试已通过。一次全量 `HOME=/private/tmp/forgeflow-trae-gateway-test-home CI=true pnpm test` 的输出被截断，本轮不把该次作为通过证据。
+
+剩余风险：Trae gateway route/session/chat handler、HTTP JSON IO、debug logger、driver 创建规则、持久化 session-store 和 DOM driver 本体已共享；后续仍需继续收敛 `packages/beta-runtime-core` 的独立 task processor / launch 路径，并补齐生产环境级 shadow cutover 外部演练证据。
+
+## M55 Review 小结
+
+已把 packaged runtime 中更完整的 Trae CDP / DOM driver、CDP discovery、CDP client 和 automation error 实现下沉到 `packages/automation-gateway-core`。`packages/trae-beta-runtime/src/runtime/trae-dom-driver.ts` 改为薄 re-export；`scripts/lib/trae-dom-driver.ts` 改为薄 wrapper，继续复用共享 core，同时显式保留脚本侧旧行为：默认 `activitySelectors=[]`，并允许 plain-text response 稳定后返回。新增 thin-adapter 测试锁定脚本侧和 packaged runtime 不再各自持有 `BROWSER_HELPERS_SOURCE` 大段实现。
+
+Review Gate：needs-follow-up。Spec 符合度局部通过，本轮确实消除了脚本侧和 packaged runtime 的 Trae DOM driver 双实现；安全检查通过，未新增 secret、外部命令拼接、mock 成功路径或静默 fallback；测试与验证已覆盖共享 core、packaged runtime 和脚本侧 gateway 行为。复杂度检查不通过：新增共享 `packages/automation-gateway-core/src/trae-dom-driver.ts` 仍为 1292 行，虽然比双实现总量更少，但不符合单文件 300 行约束。Document-refresh: needed，原因：Trae DOM driver 权威边界从两侧实现迁移到 automation-gateway-core，已同步 README、TECH_DEBT、automation-gateway-core README 和 tasks。结论：不作为最终收尾，下一步必须继续拆分共享 core 文件。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-gateway-thin-adapter.test.ts --maxWorkers=1` 先失败于缺少 `packages/automation-gateway-core/src/trae-dom-driver.ts`。GREEN 后 `CI=true pnpm --filter @tingrudeng/automation-gateway-core test` 通过，6 个测试文件、19 个测试通过；`CI=true pnpm --filter @tingrudeng/automation-gateway-core typecheck` 通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime test` 通过，19 个测试文件、174 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime typecheck` 通过；`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json` 和 `CI=true pnpm exec tsc -p scripts/tsconfig.json` 通过；隔离 HOME 后 `env HOME=/private/tmp/forgeflow-trae-gateway-test-home CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-gateway-thin-adapter.test.ts tests/modules/server/trae-automation-gateway.test.ts --maxWorkers=1` 通过，2 个测试文件、35 个测试通过；`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。一次非沙箱重跑申请因当前 Codex 使用额度限制被拒，随后改用 `/private/tmp` 隔离 HOME 完成同等行为验证。全量 `env HOME=/private/tmp/forgeflow-trae-gateway-test-home CI=true pnpm test` 只在并发下出现 `submit-review-decision.test.ts` 首个用例 15 秒超时；隔离复跑 `env HOME=/private/tmp/forgeflow-trae-gateway-test-home CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/submit-review-decision.test.ts --maxWorkers=1` 通过，4 个测试通过。
+
+剩余风险：本轮只完成 DOM driver 双实现收敛；共享 core 文件拆分已在 M56 完成，后续仍需继续收敛 `packages/beta-runtime-core` 的独立 task processor / launch 路径，并补齐 production cutover 外部演练证据。
+
 - [x] M54 串行：把 Trae gateway driver 创建规则下沉到 automation-gateway-core。
 - [x] M54 串行：运行定向验证并补充 review 小结。
 

@@ -2,6 +2,8 @@ import React from 'react';
 import { Search } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import type { ArtifactBundle } from './TaskTimeline';
+import { ArtifactWorkbenchRefs } from './ArtifactWorkbenchRefs';
+import { flattenArtifactRefs } from './artifactWorkbenchRefsModel';
 
 interface TaskSummary {
   id: string;
@@ -35,10 +37,7 @@ function normalize(value: unknown): string {
 }
 
 function countRefs(bundle: ArtifactBundle): number {
-  return Object.values(bundle.refs ?? {}).reduce((total, value) => {
-    if (Array.isArray(value)) return total + value.length;
-    return value ? total + 1 : total;
-  }, 0);
+  return flattenArtifactRefs(bundle).length;
 }
 
 function latestReview(reviews: ReviewSummary[], taskId: string): ReviewSummary | undefined {
@@ -61,6 +60,7 @@ function bundleMatches(bundle: ArtifactBundle, task: TaskSummary | undefined, re
     ...(review?.riskAssessment?.reasons ?? []),
     ...(bundle.changedFiles ?? []).map((file) => file.path),
     ...Object.keys(bundle.refs ?? {}),
+    ...flattenArtifactRefs(bundle).map((entry) => entry.ref),
   ].map(normalize).join(' ');
   return searchable.includes(query);
 }
@@ -188,29 +188,34 @@ export const ArtifactWorkbench: React.FC<ArtifactWorkbenchProps> = ({
             const review = reviewByTask.get(bundle.taskId);
             const active = selectedTaskId === bundle.taskId;
             return (
-              <button
+              <div
                 key={`${bundle.bundleId || bundle.taskId}-${bundle.attemptId || 'attempt'}`}
-                type="button"
-                onClick={() => onSelectTask?.(bundle.taskId)}
                 className={`rounded-lg border p-3 text-left transition-colors ${active ? 'border-cyan-300/55 bg-cyan-300/10' : 'border-white/10 bg-black/15 hover:border-white/25 hover:bg-white/5'}`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-white/85 break-all">{task?.title || bundle.taskId}</div>
-                    <div className="mt-1 text-xs font-mono text-white/45 break-all">{bundle.bundleId || bundle.attemptId || bundle.taskId}</div>
+                <button
+                  type="button"
+                  onClick={() => onSelectTask?.(bundle.taskId)}
+                  className="w-full text-left"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white/85 break-all">{task?.title || bundle.taskId}</div>
+                      <div className="mt-1 text-xs font-mono text-white/45 break-all">{bundle.bundleId || bundle.attemptId || bundle.taskId}</div>
+                    </div>
+                    <div className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[11px] uppercase tracking-wide text-white/55">
+                      {task?.status || '--'}
+                    </div>
                   </div>
-                  <div className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[11px] uppercase tracking-wide text-white/55">
-                    {task?.status || '--'}
+                  <div className="mt-2 text-xs text-white/60 break-all">{bundle.summary || t('noSummary')}</div>
+                  <ReviewEvidenceBadges review={review} />
+                  <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-white/45">
+                    <span>{t('changedFiles')}: {(bundle.changedFiles ?? []).length}</span>
+                    <span>{t('artifactRefs')}: {countRefs(bundle)}</span>
+                    {task?.repo && <span>{t('repo')}: {task.repo}</span>}
                   </div>
-                </div>
-                <div className="mt-2 text-xs text-white/60 break-all">{bundle.summary || t('noSummary')}</div>
-                <ReviewEvidenceBadges review={review} />
-                <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-white/45">
-                  <span>{t('changedFiles')}: {(bundle.changedFiles ?? []).length}</span>
-                  <span>{t('artifactRefs')}: {countRefs(bundle)}</span>
-                  {task?.repo && <span>{t('repo')}: {task.repo}</span>}
-                </div>
-              </button>
+                </button>
+                <ArtifactWorkbenchRefs bundle={bundle} />
+              </div>
             );
           })}
         </div>
