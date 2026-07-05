@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M37 串行：补齐 Console Artifact Workbench 跨任务 artifact / review 并排详情。
+- [x] M37 串行：运行最小充分验证并补充 review 小结。
+
+## M37 Review 小结
+
+已在 Artifact Workbench 的证据对比区域增加跨任务并排详情：筛选结果里的每个 bundle 都会展示任务标题、review reasonCode 和 risk level，帮助审查者在批量操作前直接对照 artifact 与 review 证据，不必逐个打开任务详情侧栏。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 Artifact Workbench 跨任务 artifact / review 并排详情，未改变 artifact / review 数据来源、任务选择、筛选或批量审查语义；安全检查通过，仅基于前端已有 dashboard snapshot 数据展示任务标题、reasonCode 和风险等级，未新增后端写路径、secret、外部网络调用、mock 成功路径或静默 fallback；复杂度检查通过，`ArtifactWorkbench.tsx` 224 行，新增渲染块保持在既有组件边界内，既有 `Lists.test.tsx` 和 `i18n.tsx` 已超过 300 行但本轮只做集中式测试与文案表的最小增量；Document-refresh: needed，原因：Console 审查工作台并排详情能力发生变化，已同步 README、docs/README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx` 先失败于缺少 `并排详情`；GREEN 后同命令通过，15 个测试通过；`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx src/__tests__/App.test.tsx` 通过，20 个测试通过；`CI=true pnpm --filter console test` 通过，29 个测试通过；`CI=true pnpm --filter console build`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：当前并排详情展示的是 artifact bundle 与 review evidence 的摘要级对照，不是完整 diff/log/test 文件的逐行并排比对。
+
 - [x] M36 串行：补齐 Console Artifact Workbench 证据差异高亮。
 - [x] M36 串行：运行最小充分验证并补充 review 小结。
 
