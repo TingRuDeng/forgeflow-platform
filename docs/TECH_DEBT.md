@@ -193,9 +193,9 @@ Desired direction:
 
 期望方向：
 
-- Console refs tab 已支持 artifact 引用复制和 manifest 文件按需展开；后续继续补下载、跨任务筛选和批量审查体验
+- Console refs tab 已支持 artifact 引用复制、manifest 文件按需展开和下载；Artifact Review Workbench 已支持跨任务 artifact 筛选并可跳转到对应任务；后续继续补批量审查体验
 - 继续把 worker runtime 的主动 interrupt、resume payload 消费和 Console 表单化输入接入 `waiting_for_input` 主链
-- 继续补齐审查结果的批量筛选、复制链接和跨任务对比体验
+- 继续补齐审查结果的批量筛选、复制链接、跨任务对比和批量处理体验
 
 ## 9. Shadow path has drift gate and reconciliation entry, but production cutover still needs an ops drill
 
