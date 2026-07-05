@@ -272,7 +272,7 @@ Current endpoint families:
     - `artifacts`
     - `waitingForInput`
   - `result.waitingForInput` may include `requestedBy`, `reason`, `prompt`, and `resumePayloadSchema`; dispatcher treats it as a worker-initiated HITL interrupt, checkpoints the active attempt, releases worker / leases, and moves the task to `waiting_for_input` instead of `review` or `failed`.
-  - `resumePayloadSchema` supports object `properties` with `string` / `number` / `boolean` fields, optional string `enum`, `title`, `description`, `default`, and a top-level `required[]` list for Console form rendering.
+  - `resumePayloadSchema` supports object `properties` with `string` / `number` / `integer` / `boolean` / `array` fields, optional string `enum`, `title`, `description`, `default`, `format: "textarea"`, `placeholder`, numeric `minimum` / `maximum`, array `minItems` / `maxItems`, string `items.enum`, and a top-level `required[]` list for Console form rendering and validation.
   - `artifactBundle` may be provided as a top-level field; dispatcher validates ownership against the active attempt and stores the bundle summary, refs, and optional retained content.
 - `POST /api/workers/:workerId/events`
   - Best-effort worker telemetry path for control-plane metrics and audit hints.

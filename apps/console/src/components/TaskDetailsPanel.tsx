@@ -10,14 +10,7 @@ import {
   type ReviewDecisionInput,
 } from './TaskReviewSections';
 import { TaskHitlSection } from './TaskHitlSection';
-
-interface ResumePayloadFieldSchema {
-  type?: 'string' | 'number' | 'boolean';
-  title?: string;
-  description?: string;
-  enum?: string[];
-  default?: unknown;
-}
+import type { ResumePayloadSchema } from './taskHitlSchema';
 
 interface Task {
   id: string;
@@ -35,10 +28,7 @@ interface Task {
     requestedBy?: string;
     reason?: string;
     requestedAt?: string;
-    resumePayloadSchema?: {
-      properties?: Record<string, ResumePayloadFieldSchema>;
-      required?: string[];
-    };
+    resumePayloadSchema?: ResumePayloadSchema;
   } | null;
 }
 

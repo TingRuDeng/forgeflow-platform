@@ -163,11 +163,21 @@ export interface Task {
 }
 
 export interface ResumePayloadFieldSchema {
-  type?: "string" | "number" | "boolean";
+  type?: "string" | "number" | "integer" | "boolean" | "array";
   title?: string;
   description?: string;
   enum?: string[];
   default?: unknown;
+  format?: "text" | "textarea";
+  placeholder?: string;
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+  items?: {
+    type?: "string";
+    enum?: string[];
+  };
 }
 
 export interface ResumePayloadSchema {
@@ -873,7 +883,7 @@ function normalizeResumePayloadField(value: unknown): ResumePayloadFieldSchema |
     return undefined;
   }
   const field: ResumePayloadFieldSchema = {};
-  if (["string", "number", "boolean"].includes(String(value.type))) {
+  if (["string", "number", "integer", "boolean", "array"].includes(String(value.type))) {
     field.type = value.type as ResumePayloadFieldSchema["type"];
   }
   if (typeof value.title === "string") field.title = value.title;
@@ -883,6 +893,21 @@ function normalizeResumePayloadField(value: unknown): ResumePayloadFieldSchema |
     if (enumValues.length > 0) field.enum = enumValues;
   }
   if (value.default !== undefined) field.default = value.default;
+  if (value.format === "text" || value.format === "textarea") field.format = value.format;
+  if (typeof value.placeholder === "string") field.placeholder = value.placeholder;
+  if (typeof value.minimum === "number" && Number.isFinite(value.minimum)) field.minimum = value.minimum;
+  if (typeof value.maximum === "number" && Number.isFinite(value.maximum)) field.maximum = value.maximum;
+  if (typeof value.minItems === "number" && Number.isInteger(value.minItems) && value.minItems >= 0) field.minItems = value.minItems;
+  if (typeof value.maxItems === "number" && Number.isInteger(value.maxItems) && value.maxItems >= 0) field.maxItems = value.maxItems;
+  if (isRecord(value.items)) {
+    const items: ResumePayloadFieldSchema["items"] = {};
+    if (value.items.type === "string") items.type = "string";
+    if (Array.isArray(value.items.enum)) {
+      const enumValues = value.items.enum.filter((item): item is string => typeof item === "string");
+      if (enumValues.length > 0) items.enum = enumValues;
+    }
+    if (Object.keys(items).length > 0) field.items = items;
+  }
   return Object.keys(field).length ? field : undefined;
 }
 

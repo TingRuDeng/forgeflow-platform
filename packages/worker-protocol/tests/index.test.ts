@@ -78,8 +78,11 @@ describe("worker SDK payload helpers", () => {
             properties: {
               decision: { type: "string", title: "Decision" },
               rollout: { type: "string", enum: ["narrow", "full"] },
+              retryLimit: { type: "integer", title: "Retry Limit", minimum: 1, maximum: 3 },
+              reviewers: { type: "array", title: "Reviewers", items: { type: "string" }, minItems: 1 },
+              notes: { type: "string", title: "Notes", format: "textarea", placeholder: "补充恢复说明" },
             },
-            required: ["decision", "rollout"],
+            required: ["decision", "rollout", "reviewers"],
           },
         },
       },
@@ -99,6 +102,9 @@ describe("worker SDK payload helpers", () => {
           resumePayloadSchema: {
             properties: {
               rollout: { type: "string", enum: ["narrow", "full"] },
+              retryLimit: { type: "integer", minimum: 1, maximum: 3 },
+              reviewers: { type: "array", items: { type: "string" }, minItems: 1 },
+              notes: { type: "string", format: "textarea", placeholder: "补充恢复说明" },
             },
           },
         },

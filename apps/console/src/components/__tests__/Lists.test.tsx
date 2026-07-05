@@ -393,6 +393,70 @@ describe('Task drill-down', () => {
       acknowledgeRisk: true,
     });
   });
+
+  it('submits richer schema fields and shows validation copy for invalid values', () => {
+    const onResume = vi.fn();
+
+    renderWithProviders(
+      <TaskDetailsPanel
+        task={{
+          id: 'dispatch-1:richer-schema-hitl',
+          title: 'Need richer deploy input',
+          status: 'waiting_for_input',
+          branchName: 'codex/hitl-richer-schema',
+          repo: 'owner/repo',
+          pool: 'codex',
+          waitingForInput: {
+            requestedBy: 'codex-worker',
+            reason: 'choose detailed rollout options',
+            requestedAt: '2026-07-05T10:00:00Z',
+            resumePayloadSchema: {
+              properties: {
+                notes: { type: 'string', format: 'textarea', title: 'Notes' },
+                retryLimit: { type: 'integer', title: 'Retry Limit', minimum: 1, maximum: 3, default: 2 },
+                reviewers: { type: 'array', title: 'Reviewers', items: { type: 'string' }, minItems: 1 },
+              },
+              required: ['notes', 'reviewers'],
+            },
+          },
+        }}
+        assignment={{
+          taskId: 'dispatch-1:richer-schema-hitl',
+          repo: 'owner/repo',
+          pool: 'codex',
+        }}
+        onResume={onResume}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText(/Notes/i), {
+      target: { value: 'ship narrow scope after review' },
+    });
+    fireEvent.change(screen.getByLabelText(/Retry Limit/i), {
+      target: { value: '4' },
+    });
+    fireEvent.change(screen.getByLabelText(/Reviewers/i), {
+      target: { value: 'alice\nbob' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /恢复任务|resume task/i }));
+
+    expect(onResume).not.toHaveBeenCalled();
+    expect(screen.getByText(/恢复输入校验失败|resume payload validation failed/i)).toBeInTheDocument();
+    expect(screen.getByText(/Retry Limit must be <= 3/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/Retry Limit/i), {
+      target: { value: '3' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /恢复任务|resume task/i }));
+
+    expect(onResume).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'dispatch-1:richer-schema-hitl',
+    }), {
+      notes: 'ship narrow scope after review',
+      retryLimit: 3,
+      reviewers: ['alice', 'bob'],
+    });
+  });
 });
 
 describe('ArtifactWorkbench', () => {

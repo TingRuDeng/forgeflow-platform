@@ -1,5 +1,16 @@
 import React from 'react';
 import { useTranslation } from '@/lib/i18n';
+import {
+  buildSchemaFields,
+  buildStructuredPayload,
+  initialStructuredValues,
+  parseResumePayload,
+} from './taskHitlSchema';
+import type {
+  ResumeFieldValue,
+  ResumePayloadSchema,
+  SchemaField,
+} from './taskHitlSchema';
 
 interface WaitingForInput {
   requestedBy?: string;
@@ -18,89 +29,6 @@ interface TaskHitlSectionProps {
   task: Task;
   resumingTaskId?: string | null;
   onResume?: (task: Task, resumePayload: Record<string, unknown>) => void;
-}
-
-type ResumeFieldType = 'string' | 'number' | 'boolean';
-type ResumeFieldValue = string | boolean;
-
-interface ResumePayloadFieldSchema {
-  type?: ResumeFieldType;
-  title?: string;
-  description?: string;
-  enum?: string[];
-  default?: unknown;
-}
-
-interface ResumePayloadSchema {
-  properties?: Record<string, ResumePayloadFieldSchema>;
-  required?: string[];
-}
-
-interface SchemaField {
-  name: string;
-  label: string;
-  type: ResumeFieldType;
-  options?: string[];
-  required: boolean;
-  description?: string;
-  defaultValue?: unknown;
-}
-
-function parseResumePayload(value: string): Record<string, unknown> {
-  const parsed = JSON.parse(value || '{}');
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('resume payload must be a JSON object');
-  }
-  return parsed as Record<string, unknown>;
-}
-
-function buildSchemaFields(schema?: ResumePayloadSchema): SchemaField[] {
-  const properties = schema?.properties ?? {};
-  const required = new Set(schema?.required ?? []);
-  return Object.entries(properties).map(([name, field]) => ({
-    name,
-    label: field.title || name,
-    type: field.type || 'string',
-    options: field.enum,
-    required: required.has(name),
-    description: field.description,
-    defaultValue: field.default,
-  }));
-}
-
-function initialStructuredValues(fields: SchemaField[]): Record<string, ResumeFieldValue> {
-  return Object.fromEntries(fields.map((field) => [field.name, initialFieldValue(field)]));
-}
-
-function initialFieldValue(field: SchemaField): ResumeFieldValue {
-  if (field.type === 'boolean') {
-    return typeof field.defaultValue === 'boolean' ? field.defaultValue : false;
-  }
-  if (typeof field.defaultValue === 'string') {
-    return field.defaultValue;
-  }
-  return field.options?.[0] ?? '';
-}
-
-function buildStructuredPayload(fields: SchemaField[], values: Record<string, ResumeFieldValue>) {
-  return fields.reduce<Record<string, unknown>>((payload, field) => {
-    const value = coerceFieldValue(field, values[field.name]);
-    if (value !== undefined) payload[field.name] = value;
-    return payload;
-  }, {});
-}
-
-function coerceFieldValue(field: SchemaField, value: ResumeFieldValue | undefined): unknown {
-  if (field.type === 'boolean') {
-    return Boolean(value);
-  }
-  const text = String(value ?? '').trim();
-  if (!text && field.required) throw new Error('required field is empty');
-  if (!text) return undefined;
-  if (field.type !== 'number') return text;
-  const parsed = Number(text);
-  if (!Number.isFinite(parsed)) throw new Error('number field is invalid');
-  return parsed;
 }
 
 const StructuredResumePayload: React.FC<{
@@ -149,16 +77,37 @@ const SchemaFieldInput: React.FC<{
       </label>
     );
   }
+  if (field.type === 'array' || field.format === 'textarea') {
+    return (
+      <label className="block text-xs font-semibold text-white/70">
+        {label}
+        <textarea
+          aria-label={field.label}
+          value={String(value ?? '')}
+          placeholder={field.placeholder}
+          rows={field.type === 'array' ? 3 : 4}
+          onChange={(event) => onChange(field.name, event.target.value)}
+          className="mt-1 w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-cyan-400/60"
+        />
+        {field.description && <span className="mt-1 block text-[11px] font-normal text-white/45">{field.description}</span>}
+      </label>
+    );
+  }
   return (
     <label className="block text-xs font-semibold text-white/70">
       {label}
       <input
         aria-label={field.label}
-        type={field.type === 'number' ? 'number' : 'text'}
+        type={field.type === 'number' || field.type === 'integer' ? 'number' : 'text'}
         value={String(value ?? '')}
+        placeholder={field.placeholder}
+        min={field.minimum}
+        max={field.maximum}
+        step={field.type === 'integer' ? 1 : undefined}
         onChange={(event) => onChange(field.name, event.target.value)}
         className="mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-cyan-400/60"
       />
+      {field.description && <span className="mt-1 block text-[11px] font-normal text-white/45">{field.description}</span>}
     </label>
   );
 };
@@ -166,6 +115,7 @@ const SchemaFieldInput: React.FC<{
 export const TaskHitlSection: React.FC<TaskHitlSectionProps> = ({ task, resumingTaskId, onResume }) => {
   const { t } = useTranslation();
   const [payloadText, setPayloadText] = React.useState('{\n  "decision": ""\n}');
+  const [validationError, setValidationError] = React.useState<string | null>(null);
   const schemaFields = React.useMemo(
     () => buildSchemaFields(task.waitingForInput?.resumePayloadSchema),
     [task.waitingForInput?.resumePayloadSchema]
@@ -186,9 +136,11 @@ export const TaskHitlSection: React.FC<TaskHitlSectionProps> = ({ task, resuming
       const payload = schemaFields.length
         ? buildStructuredPayload(schemaFields, fieldValues)
         : parseResumePayload(payloadText);
+      setValidationError(null);
       onResume?.(task, payload);
-    } catch {
-      alert(t('invalidResumePayload'));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('invalidResumePayload');
+      setValidationError(message);
     }
   };
 
@@ -217,6 +169,11 @@ export const TaskHitlSection: React.FC<TaskHitlSectionProps> = ({ task, resuming
             className="mt-1 w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 font-mono text-xs text-white outline-none focus:border-cyan-400/60"
           />
         </label>
+      )}
+      {validationError && (
+        <div className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
+          {t('resumePayloadValidationFailed')}: {validationError}
+        </div>
       )}
       <button
         type="button"

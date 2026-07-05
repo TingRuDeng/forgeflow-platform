@@ -40,11 +40,21 @@ const WorkerResultVerificationCommandSchema = z.object({
 });
 
 const ResumePayloadFieldSchema = z.object({
-  type: z.enum(["string", "number", "boolean"]).optional(),
+  type: z.enum(["string", "number", "integer", "boolean", "array"]).optional(),
   title: z.string().optional(),
   description: z.string().optional(),
   enum: z.array(z.string()).optional(),
   default: z.unknown().optional(),
+  format: z.enum(["text", "textarea"]).optional(),
+  placeholder: z.string().optional(),
+  minimum: z.number().optional(),
+  maximum: z.number().optional(),
+  minItems: z.number().int().nonnegative().optional(),
+  maxItems: z.number().int().nonnegative().optional(),
+  items: z.object({
+    type: z.literal("string").optional(),
+    enum: z.array(z.string()).optional(),
+  }).optional(),
 });
 
 const ResumePayloadSchema = z.object({
