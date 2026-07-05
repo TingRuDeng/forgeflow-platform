@@ -70,6 +70,54 @@ describe("shadow drift verification", () => {
     });
   }, 30_000);
 
+  it("supports environment-driven automatic reconciliation", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-drift-"));
+    const result = spawnSync("node", [checkShadowDriftScriptPath, stateDir], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "disabled",
+        DISPATCHER_QUEUE_SHADOW_MODE: "disabled",
+        DISPATCHER_POSTGRES_URL: "",
+        DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE: "1",
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const payload = JSON.parse(result.stdout);
+    expect(payload.reconciliation).toEqual({
+      requested: true,
+      attempted: false,
+      reason: "shadow_not_configured",
+    });
+  }, 30_000);
+
+  it("fails cutover readiness when shadow is not configured", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-drift-"));
+    const result = spawnSync("node", [checkShadowDriftScriptPath, stateDir, "--require-configured"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "disabled",
+        DISPATCHER_QUEUE_SHADOW_MODE: "disabled",
+        DISPATCHER_POSTGRES_URL: "",
+      },
+    });
+
+    expect(result.status).toBe(2);
+    const payload = JSON.parse(result.stdout);
+    expect(payload.ok).toBe(false);
+    expect(payload.cutover).toEqual({
+      required: true,
+      ready: false,
+      reason: "shadow_not_configured",
+    });
+  }, 30_000);
+
   it("rejects invalid environment threshold values", () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-drift-"));
     const result = spawnSync("node", [checkShadowDriftScriptPath, stateDir], {

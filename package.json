@@ -15,6 +15,8 @@
     "verify:stage3": "pnpm --filter @forgeflow/dispatcher test tests/modules/server/runtime-state.test.ts tests/modules/server/runtime-state-sqlite.test.ts tests/modules/server/dispatcher-server.test.ts && pnpm --filter @forgeflow/dispatcher-store-core test && pnpm --filter @forgeflow/dispatcher-store-postgres test && pnpm --filter @forgeflow/dispatcher-queue-postgres test && pnpm --filter @forgeflow/provider-registry test && pnpm verify:shadow-drift && node scripts/verify-stage3-dr.mjs && pnpm typecheck",
     "verify:stage3:live": "node scripts/verify-live-dispatcher-dr.mjs",
     "verify:shadow-drift": "node scripts/check-shadow-drift.mjs .forgeflow-dispatcher",
+    "verify:shadow-drift:reconcile": "node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --reconcile --record-alert",
+    "verify:shadow-cutover": "node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --require-configured --max-mismatches 0 --max-delta 0",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   },

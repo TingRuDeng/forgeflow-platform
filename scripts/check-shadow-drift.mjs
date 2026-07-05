@@ -7,6 +7,9 @@ const repoRoot = path.resolve(path.dirname(__filename), "..");
 const shadowDistPath = path.join(repoRoot, "apps", "dispatcher", "dist", "modules", "server", "runtime-state-shadow.js");
 const MAX_MISMATCHES_ENV = "DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES";
 const MAX_DELTA_ENV = "DISPATCHER_SHADOW_DRIFT_MAX_DELTA";
+const AUTO_RECONCILE_ENV = "DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE";
+const RECORD_ALERT_ENV = "DISPATCHER_SHADOW_DRIFT_RECORD_ALERT";
+const REQUIRE_CONFIGURED_ENV = "DISPATCHER_SHADOW_DRIFT_REQUIRE_CONFIGURED";
 
 function parseNonNegativeInteger(value, label) {
   const parsed = Number(value);
@@ -16,15 +19,20 @@ function parseNonNegativeInteger(value, label) {
   return Math.floor(parsed);
 }
 
+function parseBooleanEnv(value) {
+  return value === "1" || value === "true" || value === "yes";
+}
+
 function parseArgs(argv) {
   const stateDir = argv[0];
   if (!stateDir) {
-    throw new Error("usage: node scripts/check-shadow-drift.mjs <stateDir> [--reconcile] [--record-alert] [--max-mismatches n] [--max-delta n]");
+    throw new Error("usage: node scripts/check-shadow-drift.mjs <stateDir> [--reconcile] [--record-alert] [--require-configured] [--max-mismatches n] [--max-delta n]");
   }
   const options = {
     stateDir,
     reconcile: false,
     recordAlert: false,
+    requireConfigured: false,
     maxMismatchCount: undefined,
     maxAbsoluteDelta: undefined,
   };
@@ -36,6 +44,10 @@ function parseArgs(argv) {
     }
     if (arg === "--record-alert") {
       options.recordAlert = true;
+      continue;
+    }
+    if (arg === "--require-configured") {
+      options.requireConfigured = true;
       continue;
     }
     if (arg === "--max-mismatches" || arg === "--max-delta") {
@@ -53,6 +65,9 @@ function parseArgs(argv) {
   }
   return {
     ...options,
+    reconcile: options.reconcile || parseBooleanEnv(process.env[AUTO_RECONCILE_ENV]),
+    recordAlert: options.recordAlert || parseBooleanEnv(process.env[RECORD_ALERT_ENV]),
+    requireConfigured: options.requireConfigured || parseBooleanEnv(process.env[REQUIRE_CONFIGURED_ENV]),
     maxMismatchCount: options.maxMismatchCount ?? (
       process.env[MAX_MISMATCHES_ENV] ? parseNonNegativeInteger(process.env[MAX_MISMATCHES_ENV], MAX_MISMATCHES_ENV) : undefined
     ),
@@ -73,6 +88,19 @@ async function loadDispatcherModules() {
 
 function buildReconciliationStatus(requested, attempted, reason) {
   return { requested, attempted, reason };
+}
+
+function buildCutoverStatus(requireConfigured, health, drift) {
+  if (!requireConfigured) {
+    return { required: false, ready: drift.status !== "drifted", reason: "not_required" };
+  }
+  if (!health.configured) {
+    return { required: true, ready: false, reason: "shadow_not_configured" };
+  }
+  if (drift.status === "drifted") {
+    return { required: true, ready: false, reason: "shadow_drifted" };
+  }
+  return { required: true, ready: true, reason: "shadow_matched" };
 }
 
 // 告警事件默认不写入，只有 operator 显式传入 --record-alert 才会修改 runtime-state。
@@ -131,12 +159,14 @@ async function checkShadowDrift(options) {
   if (options.recordAlert) {
     recordShadowDriftAlert(stateModule, options.stateDir, result.state, result.alert, result.drift);
   }
+  const cutover = buildCutoverStatus(options.requireConfigured, result.health, result.drift);
   return {
-    ok: result.drift.status !== "drifted",
+    ok: result.drift.status !== "drifted" && cutover.ready,
     stateDir: options.stateDir,
     drift: result.drift,
     alert: result.alert,
     reconciliation,
+    cutover,
     health: result.health,
   };
 }
