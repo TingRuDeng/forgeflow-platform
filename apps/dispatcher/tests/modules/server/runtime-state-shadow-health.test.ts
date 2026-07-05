@@ -152,12 +152,12 @@ describe("runtime-state-shadow-health", () => {
     });
   });
 
-  it("marks primary mode as unsupported until a primary store exists", () => {
+  it("marks primary mode as matched when the primary store is active", () => {
     const drift = summarizeRuntimeStateShadowDrift({
       mode: "primary",
       queueMode: "primary",
       configured: true,
-      primarySupported: false,
+      primarySupported: true,
       projectionCounts: { dispatcher_tasks: 1 },
       queueCounts: { assignment_delivery: 1 },
       expectedCounts: { dispatcher_tasks: 1 },
@@ -165,16 +165,16 @@ describe("runtime-state-shadow-health", () => {
     });
 
     expect(drift).toMatchObject({
-      status: "primary_unsupported",
-      projectionMatches: false,
+      status: "matched",
+      projectionMatches: true,
     });
   });
 
-  it("rejects primary mode writes instead of silently shadow-writing", async () => {
+  it("rejects primary mode writes while the postgres primary backend is not selected", async () => {
     process.env.DISPATCHER_SHADOW_MODE = "primary";
     process.env.DISPATCHER_QUEUE_SHADOW_MODE = "primary";
     process.env.DISPATCHER_POSTGRES_URL = "postgres://example.invalid/forgeflow";
 
-    await expect(syncRuntimeStateShadow(createEmptyRuntimeState())).rejects.toThrow("primary_store_not_implemented");
+    await expect(syncRuntimeStateShadow(createEmptyRuntimeState())).rejects.toThrow("primary_backend_not_selected");
   });
 });

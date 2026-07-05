@@ -203,7 +203,7 @@ Desired direction:
 
 - Console refs tab 和 trajectory step artifactRef 已支持 manifest 文件按需展开和下载，trajectory tab 已支持当前 bundle 内的 step 前后回放；Artifact Review Workbench 已支持跨任务 artifact 筛选、review reasonCode / risk / mustFix / artifact ref 证据联动、reasonCode / risk 计数对比摘要、差异高亮、跨任务并排详情和卡片级 `artifact://...` 引用复制 / 展开 / 下载，并可跳转到对应任务；审查队列已支持批量 `merge` / `rework` / `block`
 
-## 9. Shadow path has drift gate, reconciliation, cutover drill, and approval gate, but external primary ops remain deferred
+## 9. Shadow path has drift gate, reconciliation, cutover drill, approval gate, and guarded primary cutover
 
 Current situation:
 
@@ -227,14 +227,14 @@ Current situation:
 - `pnpm verify:shadow-cutover:ready` combines strict cutover preflight and approval evidence verification into the final pre-switch gate
 - `pnpm verify:shadow-cutover:revoke` archives the approval marker and writes `.forgeflow-dispatcher/shadow-cutover-revocation.json` for rollback / aborted change windows
 - `RUNTIME_STATE_BACKEND=postgres` refuses primary snapshot load/save until `shadow-cutover-approval.json` exists, has `approved=true`, records `cutoverReason=cutover_ready`, points to archived drill evidence through `evidencePath`, and the current evidence file SHA-256 matches `evidenceSha256`; it also refuses primary snapshot load/save when `shadow-cutover-revocation.json` exists
-- `DISPATCHER_SHADOW_MODE=primary` is still explicitly rejected as `primary_store_not_implemented`; it is not the primary-store switch
+- `DISPATCHER_SHADOW_MODE=primary` is accepted only as a post-cutover compatibility state when `RUNTIME_STATE_BACKEND=postgres` and `DISPATCHER_PRIMARY_POSTGRES_URL` are configured; without that primary backend it fails as `primary_backend_not_selected`
 - `@forgeflow/dispatcher-store-postgres` now has primary snapshot primitives (`dispatcher_runtime_state`, JSONB load/save), and dispatcher HTTP routes plus `/api/query/*` use the async runtime-state path for state mutations / reads
 - `pnpm verify:stage3` 和 release workflow 都会执行 `pnpm verify:shadow-drift` 作为 rollout / release gate
 
 Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
-- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、长期 reconciler 入口、strict cutover reconciler 模式、strict cutover preflight、production cutover drill、cutover evidence file、primary approval marker、approval marker 独立校验、最终 ready 组合门禁、rollback revocation marker、primary-mode 硬拒绝、Postgres primary snapshot 原语、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真正 primary-store 切换仍需要外部存储运维确认和真实生产变更窗口
+- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、长期 reconciler 入口、strict cutover reconciler 模式、strict cutover preflight、production cutover drill、cutover evidence file、primary approval marker、approval marker 独立校验、最终 ready 组合门禁、rollback revocation marker、Postgres primary snapshot 原语、primary-mode 兼容状态、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真实生产执行仍需要 operator 在变更窗口切换 `RUNTIME_STATE_BACKEND=postgres` / `DISPATCHER_PRIMARY_POSTGRES_URL` 并保留 evidence
 
 Desired direction:
 

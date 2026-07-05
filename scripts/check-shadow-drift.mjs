@@ -120,7 +120,7 @@ function buildCutoverStatus(requireConfigured, health, drift, primaryBackend) {
     return { required: true, ready: false, reason: "shadow_not_configured" };
   }
   if (requireConfigured && drift.status === "primary_unsupported") {
-    return { required: true, ready: false, reason: "primary_store_not_implemented" };
+    return { required: true, ready: false, reason: "primary_backend_not_selected" };
   }
   if (requireConfigured && drift.status === "drifted") {
     return { required: true, ready: false, reason: "shadow_drifted" };

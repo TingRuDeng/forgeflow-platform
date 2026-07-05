@@ -25,6 +25,8 @@ export type {
 const SHADOW_MODE_ENV = "DISPATCHER_SHADOW_MODE";
 const SHADOW_POSTGRES_URL_ENV = "DISPATCHER_POSTGRES_URL";
 const SHADOW_QUEUE_MODE_ENV = "DISPATCHER_QUEUE_SHADOW_MODE";
+const RUNTIME_STATE_BACKEND_ENV = "RUNTIME_STATE_BACKEND";
+const PRIMARY_POSTGRES_URL_ENV = "DISPATCHER_PRIMARY_POSTGRES_URL";
 
 export type RuntimeStateShadowWriteStatus = {
   status: "idle" | "skipped" | "running" | "ok" | "failed";
@@ -61,6 +63,11 @@ function getPostgresUrl(): string | null {
   return typeof url === "string" && url.trim().length > 0 ? url.trim() : null;
 }
 
+function isPostgresPrimaryBackendConfigured(): boolean {
+  return process.env[RUNTIME_STATE_BACKEND_ENV] === "postgres"
+    && Boolean(process.env[PRIMARY_POSTGRES_URL_ENV]?.trim());
+}
+
 function formatShadowError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -77,11 +84,14 @@ export function readRuntimeStateShadowWriteStatus(stateDir?: string): RuntimeSta
   const queueMode = getQueueShadowMode();
   const persistedStatus = stateDir ? readPersistedRuntimeStateShadowWriteStatus(stateDir) : null;
   const selectedStatus = selectRuntimeStateShadowWriteStatus(shadowWriteStatus, persistedStatus);
+  const configured = mode === "primary"
+    ? isPostgresPrimaryBackendConfigured()
+    : mode !== "disabled" && Boolean(getPostgresUrl());
   return {
     ...selectedStatus,
     mode,
     queueMode,
-    configured: mode !== "disabled" && Boolean(getPostgresUrl()),
+    configured,
   };
 }
 
@@ -90,6 +100,30 @@ export async function syncRuntimeStateShadow(state: RuntimeState): Promise<void>
   const queueMode = getQueueShadowMode();
   const postgresUrl = getPostgresUrl();
   const lastAttemptAt = new Date().toISOString();
+  if (mode === "primary") {
+    if (!isPostgresPrimaryBackendConfigured()) {
+      updateShadowWriteStatus({
+        status: "failed",
+        mode,
+        queueMode,
+        configured: true,
+        lastAttemptAt,
+        lastFailureAt: lastAttemptAt,
+        lastError: "primary_backend_not_selected",
+      });
+      throw new Error("primary_backend_not_selected");
+    }
+    updateShadowWriteStatus({
+      status: "ok",
+      mode,
+      queueMode,
+      configured: true,
+      lastAttemptAt,
+      lastSuccessAt: lastAttemptAt,
+      lastError: null,
+    });
+    return;
+  }
   if (mode === "disabled" || !postgresUrl) {
     updateShadowWriteStatus({
       status: "skipped",
@@ -101,19 +135,6 @@ export async function syncRuntimeStateShadow(state: RuntimeState): Promise<void>
     });
     return;
   }
-  if (mode === "primary") {
-    updateShadowWriteStatus({
-      status: "failed",
-      mode,
-      queueMode,
-      configured: true,
-      lastAttemptAt,
-      lastFailureAt: lastAttemptAt,
-      lastError: "primary_store_not_implemented",
-    });
-    throw new Error("primary_store_not_implemented");
-  }
-
   updateShadowWriteStatus({
     status: "running",
     mode,
@@ -167,6 +188,21 @@ export async function readRuntimeStateShadowHealth(snapshotState: RuntimeState):
   const postgresUrl = getPostgresUrl();
   const mode = getRuntimeStateShadowMode();
   const queueMode = getQueueShadowMode();
+  const expectedCounts = buildRuntimeStateProjectionSnapshot(snapshotState).counts;
+  const expectedQueueCounts = queueMode === "disabled" ? {} : buildAssignmentQueueExpectedCounts(snapshotState);
+  if (mode === "primary") {
+    const primarySupported = isPostgresPrimaryBackendConfigured();
+    return {
+      mode,
+      queueMode,
+      configured: true,
+      primarySupported,
+      projectionCounts: primarySupported ? expectedCounts : {},
+      queueCounts: primarySupported ? expectedQueueCounts : {},
+      expectedCounts,
+      expectedQueueCounts,
+    };
+  }
   if (!postgresUrl || mode === "disabled") {
     return {
       mode,
@@ -179,19 +215,6 @@ export async function readRuntimeStateShadowHealth(snapshotState: RuntimeState):
       expectedQueueCounts: {},
     };
   }
-  if (mode === "primary") {
-    return {
-      mode,
-      queueMode,
-      configured: true,
-      primarySupported: false,
-      projectionCounts: {},
-      queueCounts: {},
-      expectedCounts: buildRuntimeStateProjectionSnapshot(snapshotState).counts,
-      expectedQueueCounts: queueMode === "disabled" ? {} : buildAssignmentQueueExpectedCounts(snapshotState),
-    };
-  }
-
   const client = await createPgClient(postgresUrl);
   try {
     await ensureRuntimeStateProjectionTables(client);

@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M72 串行：收口 `DISPATCHER_SHADOW_MODE=primary` 的生产 cutover 兼容语义。
 - [x] M71 串行：为结构化 trajectory 生成 `.traj` 回放文件。
 - [x] M70 串行：在 Console 任务详情展示 task-level termination policy。
 - [x] M69 串行：新增 shadow cutover ready 综合门禁。
@@ -17,6 +18,18 @@
 - [x] M56 串行：继续拆分共享 `trae-dom-driver.ts` 大文件，按 browser expressions / response collection / driver facade 收敛到 300 行以内。
 - [x] M57 串行：把 Codex/Gemini packaged runtime launch builder 下沉到 beta-runtime-core。
 - [x] M58 串行：让 generic assignment runner 产出可回放 trajectory artifact。
+
+## M72 Review 小结
+
+已把 `DISPATCHER_SHADOW_MODE=primary` 从旧的 `primary_store_not_implemented` 硬拒绝，收敛为生产 cutover 后的兼容状态：只有 `RUNTIME_STATE_BACKEND=postgres` 且 `DISPATCHER_PRIMARY_POSTGRES_URL` 已配置时，shadow health / drift / cutover 检查才把 primary mode 视为 supported + matched；否则仍显式失败为 `primary_backend_not_selected`。这样 primary store 真正开关仍由 `RUNTIME_STATE_BACKEND=postgres`、approval marker、ready gate 和 Postgres primary backend guard 控制，同时不再让旧 shadow-mode 哨兵阻断已完成门禁的切换后状态检查。
+
+同步拆分 `shadow-drift.test.ts`，把 drill evidence 与 reconciler cadence 用例移动到 `shadow-cutover-automation.test.ts`，触碰后的测试文件行数分别为 258 / 150，`runtime-state-shadow.ts` 为 236 行，`check-shadow-drift.mjs` 为 221 行，均低于 300 行。
+
+Review Gate：finished。Spec 符合度通过，本轮只收口 production cutover 的 primary shadow mode 兼容语义，不改变 `RUNTIME_STATE_BACKEND=postgres` 作为真实 primary store 开关、不降低 approval marker / ready gate / revocation guard。安全检查通过，未新增 secret、网络调用、shell 字符串拼接、mock 成功路径或静默 fallback；primary backend 未选择时仍显式失败为 `primary_backend_not_selected`。复杂度检查通过，所有触碰代码 / 测试文件均低于 300 行。Document-refresh: needed，原因：primary mode cutover 语义从“硬拒绝”变成“有门禁兼容状态”，已同步 API、runtime-state contract、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts tests/modules/server/runtime-state-shadow-health.test.ts --maxWorkers=1` 先失败于 primary mode 仍返回旧 `primary_store_not_implemented` 语义；GREEN 后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts tests/modules/execution/shadow-cutover-automation.test.ts tests/modules/server/runtime-state-shadow-health.test.ts --maxWorkers=1` 通过，3 个测试文件、21 个测试通过。
+
+剩余风险：仓库内 primary cutover 语义、ready gate 和兼容状态已收口；真实生产执行仍需要 operator 在变更窗口切换环境变量并保留 approval / drill evidence。
 
 ## M71 Review 小结
 
