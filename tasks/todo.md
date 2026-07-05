@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M39 串行：把 worker daemon dist bootstrap 收敛到显式 runtime-bootstrap adapter。
+- [x] M39 串行：运行最小充分验证并补充 review 小结。
+
+## M39 Review 小结
+
+已新增 `scripts/lib/runtime-bootstrap.ts`，统一负责 dispatcher runtime bridge 和 beta runtime core dist 的构建检测与动态导入；`scripts/lib/worker-daemon.ts` 不再直接持有 `execSync`、`pathToFileURL` 或 beta runtime build 命令，`scripts/run-worker-daemon.ts` 也改为复用同一个 bootstrap adapter。同步生成 `runtime-bootstrap.js`、`worker-daemon.js` 和 `run-worker-daemon.js`，并用 thin-adapter 测试锁定 bootstrap 逻辑不回流。
+
+Review Gate：finished。Spec 符合度通过，本轮只把 dist build/import 职责移入 `scripts/lib/runtime-bootstrap.ts`，没有改变 dispatcher client、worker claim、task execution、失败回写或本地 hook 行为；安全检查通过，未新增 secret、外部网络调用、命令拼接输入、mock 成功路径或静默 fallback，build 命令仍是固定仓库内命令；复杂度检查基本通过，新增 `runtime-bootstrap.ts` 45 行，新增 helper 均低于 50 行，`worker-daemon.ts` 从 586 行降至 544 行但仍超过 300 行，剩余主要是本地 logger / metrics hook 与兼容类型；Document-refresh: needed，原因：worker daemon bootstrap 边界变化，已同步 README、docs/README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/worker-daemon-thin-adapter.test.ts tests/modules/server/run-worker-daemon.test.ts tests/modules/server/runtime-glue.test.ts` 通过，29 个测试通过；`CI=true pnpm --filter @tingrudeng/beta-runtime-core test` 通过，16 个测试通过；`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json`、`CI=true pnpm exec tsc -p scripts/tsconfig.json`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：脚本侧仍保留本地 logger / metrics hook 组装和兼容类型，`worker-daemon.ts` 仍超过 300 行；后续如果继续收敛，应拆 hook adapter，而不是再搬 runtime core 逻辑。
+
 - [x] M38 串行：补齐 HITL resume schema 丰富字段、跨 worker prompt 约束和 Console 校验文案。
 - [x] M38 串行：运行最小充分验证并补充 review 小结。
 

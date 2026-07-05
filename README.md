@@ -53,7 +53,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - Phase 1 运行时合并到 TypeScript 已完成：`worker-daemon`、`review-decision`、`dispatcher-state`、`dispatcher-server` 主链现在都通过 `scripts/*.js` 入口桥接到 `apps/dispatcher/dist` 下的 TypeScript foundation；`review-memory` 和 `task-worktree` 也已下沉到 `apps/dispatcher`，`scripts/lib/*` 仅保留薄 bootstrap wrapper。
 - Phase 2 持久化切换主线已完成：dispatcher 默认真相源现在是 `.forgeflow-dispatcher/runtime-state.db`，基于 `node:sqlite` 落盘；只有显式传 `--persistence-backend json`（或设置 `RUNTIME_STATE_BACKEND=json`）时才回退到 JSON。
 - `scripts/*.js` 仍然是当前 live 入口与本地启动方式；它们现在主要承担 CLI、bootstrap、薄适配层与剩余脚本 glue，而不再单独承载整条 dispatcher 主链实现。
-- `dispatcher server` + `worker daemon` 的 `codex` / `gemini` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。源码层 worker-daemon 主循环、dispatcher client、assignment runner、managed executor、live executor 与失败回写已收敛到共享 runtime core，脚本侧只保留本地 hook 组装和 dist bootstrap 债务（见 `docs/TECH_DEBT.md`）。
+- `dispatcher server` + `worker daemon` 的 `codex` / `gemini` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。源码层 worker-daemon 主循环、dispatcher client、assignment runner、managed executor、live executor 与失败回写已收敛到共享 runtime core；脚本侧 dist bootstrap 已收敛到 `scripts/lib/runtime-bootstrap.ts`，`worker-daemon` 只保留本地 hook 组装和兼容入口。
 - `.orchestrator` assignment package、本地执行脚本、结果回写与 review 决策链路仍然可用。
 - review memory 已有文件存储契约，并会在 dispatcher 创建 dispatch 时按 repo/scope/worker 条件注入上下文。
 - Trae 的首选无人值守路径是 `Trae automation gateway` + `Trae automation worker`。
