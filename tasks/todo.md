@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M96 串行：让 Console DR 面板展示 shadow reconciler 最近一轮对账证据。
 - [x] M95 串行：让 release preflight 发布前校验 workspace 依赖已发布。
 - [x] M94 串行：收敛 Trae worker submitResult 生命周期重复结构。
 - [x] M93 串行：把 worker daemon submitResult retry policy 下沉到 beta-runtime-core。
@@ -19,6 +20,16 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M96 Review 小结
+
+已让 Console DR 状态面板读取 `/api/dr/status.shadowReconciler.lastRun.payload.reconciliation`，在自动对账卡片中展示 `updatedAt`、最近一轮是否 requested、是否 attempted 以及 reason。这样 reviewer 在 cutover / shadow 巡检时可以直接看到 durable reconciler status 的最近对账证据，不再只看到运行次数和失败次数。同步更新 README、docs README 和 TECH_DEBT，明确 Console DR 面板已展示最近一轮 reconciliation request / attempt / reason 证据。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 shadow 自动 reconciliation / Console 审查工作台产品化，只增强已有 `/api/dr/status` 前端展示，不改变 dispatcher DR payload、shadow reconciler 脚本、cutover gate 或 primary backend guard。安全检查通过，新增逻辑只读取前端已加载的 `lastRun` 对象并做类型守卫，不新增 secret、网络写入、shell 拼接、mock 成功路径或静默 fallback。复杂度检查基本通过，`DrStatusPanel.tsx` 194 行、测试 106 行；`i18n.tsx` 是既有集中式文案表且已超过 300 行，本轮只做必要 key 增量，不扩大职责。Document-refresh: needed，原因：Console DR 面板审查证据能力变化，已同步 README、docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter console exec vitest run src/components/__tests__/DrStatusPanel.test.tsx --maxWorkers=1`，1 个测试文件、2 个测试通过；`CI=true pnpm --filter console lint`；`CI=true pnpm --filter console build`；`CI=true pnpm typecheck`；`CI=true pnpm lint`；`CI=true pnpm docs:validate`；`python3 scripts/validate_docs.py . --profile generic`；`git diff --check`。
+
+剩余风险：Console 已展示最近一轮自动对账证据；真实生产 cutover 仍需要 operator 在变更窗口执行 drill / approve / ready / complete evidence 流程并切换 Postgres primary backend。
 
 ## M95 Review 小结
 
