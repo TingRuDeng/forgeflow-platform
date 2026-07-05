@@ -242,7 +242,7 @@ Impact:
 
 Desired direction:
 
-- require `pnpm verify:shadow-cutover:drill:evidence`, `pnpm verify:shadow-cutover:approve`, `pnpm verify:shadow-cutover:approval`, and `pnpm verify:shadow-cutover:ready` before any primary-store switch, then retain `.forgeflow-dispatcher/shadow-cutover-drill.json` and `.forgeflow-dispatcher/shadow-cutover-approval.json` as change evidence; use `pnpm verify:shadow-cutover:revoke` to retain rollback evidence when aborting or reverting a cutover window
+- require `pnpm verify:shadow-cutover:drill:evidence`, `pnpm verify:shadow-cutover:approve`, `pnpm verify:shadow-cutover:approval`, and `pnpm verify:shadow-cutover:ready:evidence` before any primary-store switch, then retain `.forgeflow-dispatcher/shadow-cutover-drill.json`, `.forgeflow-dispatcher/shadow-cutover-approval.json`, and `.forgeflow-dispatcher/shadow-cutover-ready.json` as change evidence; use `pnpm verify:shadow-cutover:revoke` to retain rollback evidence when aborting or reverting a cutover window
 - keep the event / metric / SLO contract stable while shadow remains best-effort
 
 ## 10. Live dispatcher DR drill covers local failure scenarios, but production cutover is still deferred
