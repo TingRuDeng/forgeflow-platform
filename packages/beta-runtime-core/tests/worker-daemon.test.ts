@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createDispatcherClient,
+  executeLiveWorkerTask,
   runWorkerDaemonCycle,
   type DispatcherClient,
 } from "../src/runtime/worker-daemon.js";
@@ -239,6 +240,7 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
 
       it("fails the task when pull request creation is rejected", async () => {
         process.env.GITHUB_TOKEN = "github-token";
+        process.env.FORGEFLOW_WORKER_CREATE_PR = "1";
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
           JSON.stringify({ message: "validation failed" }),
           { status: 422 },
@@ -303,6 +305,29 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
         expect(capturedEnv.GITHUB_TOKEN).toBeNull();
         expect(capturedEnv.HOME).toBeTruthy();
         expect(capturedEnv.PATH).toBeTruthy();
+      });
+
+      it("executes the live task without dispatcher start/result side effects", async () => {
+        const tempDir = makeTempDir(testCase.tempPrefix);
+        const repoDir = createRepoWithOrigin(tempDir);
+        const packageRoot = createFakePackageRoot(tempDir);
+        const payload = buildPayload(testCase, "task-live-executor");
+        const client = createClient(payload);
+
+        const result = await executeLiveWorkerTask({
+          client,
+          packageRoot,
+          workerId: testCase.workerId,
+          repoDir,
+          payload,
+          dryRunExecution: false,
+          at: "2026-07-03T00:00:00.000Z",
+        });
+
+        expect(result.result.output).toBe("worker ok");
+        expect(result.changedFiles).toContain("docs/");
+        expect(client.startTask).not.toHaveBeenCalled();
+        expect(client.submitResult).not.toHaveBeenCalled();
       });
     });
   }

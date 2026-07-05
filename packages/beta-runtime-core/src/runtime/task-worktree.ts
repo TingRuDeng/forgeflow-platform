@@ -19,6 +19,7 @@ interface TaskInfo {
 
 interface PrepareOptions {
   allowReuse?: boolean;
+  resetOnReuse?: boolean;
 }
 
 function ensureSuccess(result: GitResult, message: string): void {
@@ -73,6 +74,10 @@ export function prepareTaskWorktree(repoDir: string, task: TaskInfo, options: Pr
 
   if (fs.existsSync(worktreeDir)) {
     if (options.allowReuse) {
+      if (options.resetOnReuse) {
+        ensureSuccess(runGit(["reset", "--hard"], worktreeDir), `failed to reset existing worktree for ${taskId}`);
+        ensureSuccess(runGit(["clean", "-fd"], worktreeDir), `failed to clean existing worktree for ${taskId}`);
+      }
       return worktreeDir;
     }
     throw new Error(`existing worktree already present for ${taskId}`);
@@ -92,4 +97,15 @@ export function prepareTaskWorktree(repoDir: string, task: TaskInfo, options: Pr
   ], repoDir);
   ensureSuccess(addResult, `failed to create worktree for ${taskId}`);
   return worktreeDir;
+}
+
+export function removeTaskWorktree(repoDir: string, taskId: unknown): void {
+  const worktreeDir = path.join(repoDir, ".worktrees", safeTaskDirName(taskId));
+  if (!fs.existsSync(worktreeDir)) {
+    return;
+  }
+  const result = runGit(["worktree", "remove", "--force", worktreeDir], repoDir);
+  if ((result.status ?? 1) !== 0) {
+    fs.rmSync(worktreeDir, { recursive: true, force: true });
+  }
 }

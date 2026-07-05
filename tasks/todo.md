@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M25 串行：下沉 worker-daemon live executor 到 beta-runtime-core。
+- [x] M25 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M25 Review 小结
+
+已新增 `packages/beta-runtime-core/src/runtime/task-processor.ts:executeLiveWorkerTask`，把 worktree prepare/reset、assignment package materialize、child worker execution、changed files collection、commit/push、显式 opt-in PR 创建和 cleanup lifecycle 收敛到共享 runtime core；`scripts/lib/worker-daemon.ts` 改为动态加载 beta-runtime-core dist 并委托该 executor，脚本侧保留日志 / metrics、dispatcher failure fallback result 和本地 bootstrap。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 worker-daemon live executor 主体下沉，脚本侧不再保留 worktree / child worker / commit / push / PR / cleanup 重型实现；安全检查通过，未新增 secret、mock 成功路径或静默降级，PR 创建仍需显式 opt-in，分支安全校验迁移到共享 runtime core；复杂度检查通过，新增 runtime core 文件均低于 300 行，`executeLiveWorkerTask` 已拆分为 prepare / run / report / finalize / cleanup helper，脚本历史大文件从 1072 行降到 731 行但仍作为后续债务保留；Document-refresh: needed，原因：worker-daemon live executor 权威边界变化，已同步 README、docs/README 和 TECH_DEBT。结论：通过。
+
+验证已通过：RED 阶段确认 `executeLiveWorkerTask` 缺失；GREEN 后通过 `CI=true pnpm --filter @tingrudeng/beta-runtime-core exec vitest run tests/worker-daemon.test.ts`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core test`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core typecheck`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core build`、`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/run-worker-daemon.test.ts tests/modules/server/worker-daemon-helpers.test.ts`、`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check`、非沙箱 `CI=true pnpm test`。
+
+剩余风险：脚本侧仍保留失败 fallback result、日志 / metrics 和 beta-runtime-core dist bootstrap；这部分需要后续收敛为显式 adapter，避免脚本长期承担 runtime-core 发布包外的兼容入口。
+
 - [x] M24 串行：补齐 Console 审查队列批量 rework / block。
 - [x] M24 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 
