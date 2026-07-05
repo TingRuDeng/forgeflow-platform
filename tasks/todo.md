@@ -1,9 +1,20 @@
 # 当前项目审查修复任务
 
+- [x] M81 串行：让 Console 任务详情 runtime events 支持完整展开。
 - [x] M80 串行：把 Codex/Gemini packaged worker CLI 下沉到 beta-runtime-core。
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M81 Review 小结
+
+已让 Console 任务详情的运行时事件区从固定 `slice(0, 10)` 提升为可审查的摘要 / 完整列表切换。默认仍展示 10 条，避免详情面板过长；当事件数超过 10 条时显示 `10 / N` 计数和“显示全部 / 收起”操作，reviewer 可在同一详情页展开完整 runtime events，不需要跳到终端面板或后端原始数据核对。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 Console 审查工作台产品化，只增强运行时事件的可读证据，不改变 dashboard snapshot、事件排序、dispatcher API、review decision 或 artifact 行为。安全检查通过，新增状态只控制前端展示数量，不新增 secret、网络调用、后端写路径、mock 成功路径或静默 fallback。复杂度检查通过，`TaskTimeline.tsx` 保持低于 300 行，新测试拆到独立文件。Document-refresh: needed，原因：Console 任务详情 runtime events 审查体验变化，已同步 docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/TaskTimelineRuntimeEvents.test.tsx --maxWorkers=1` 先失败于缺少事件计数和展开按钮；GREEN 后 `CI=true pnpm --filter console exec vitest run src/components/__tests__/TaskTimelineRuntimeEvents.test.tsx src/components/__tests__/Lists.test.tsx src/components/__tests__/TaskDetailsPanelTerminationPolicy.test.tsx --maxWorkers=1` 通过，3 个测试文件、18 个测试通过；`CI=true pnpm --filter console lint`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：Console 任务详情已可展开完整 runtime events；更大范围的审查工作台能力仍取决于后续是否继续做跨任务事件筛选、按 event type 聚合和专门的事件搜索。
 
 ## M80 Review 小结
 

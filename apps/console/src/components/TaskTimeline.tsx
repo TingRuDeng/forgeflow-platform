@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { ChevronsDown, ChevronsUp } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 export { ArtifactSummary, type ArtifactBundle } from './ArtifactSummary';
 
@@ -49,6 +50,8 @@ function extractEventSummary(event: EventRecord) {
     || '--';
 }
 
+const RUNTIME_EVENT_PREVIEW_LIMIT = 10;
+
 export const AttemptTimeline: React.FC<{ attempts: TaskAttempt[] }> = ({ attempts }) => {
   const { t } = useTranslation();
   const sortedAttempts = [...attempts].sort((a, b) => (a.attemptNo ?? 0) - (b.attemptNo ?? 0));
@@ -85,12 +88,34 @@ export const AttemptTimeline: React.FC<{ attempts: TaskAttempt[] }> = ({ attempt
 
 export const RuntimeEventList: React.FC<{ events: EventRecord[] }> = ({ events }) => {
   const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const hasOverflow = events.length > RUNTIME_EVENT_PREVIEW_LIMIT;
+  const visibleEvents = expanded ? events : events.slice(0, RUNTIME_EVENT_PREVIEW_LIMIT);
 
   return (
     <section className="glass-card rounded-xl p-4">
-      <div className="text-[11px] uppercase tracking-wide text-white/45 mb-3">{t('runtimeEvents')}</div>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-white/45">{t('runtimeEvents')}</div>
+          {events.length > 0 && (
+            <div className="mt-1 text-xs text-white/45">
+              {t('runtimeEventCount')}: <span className="font-mono">{visibleEvents.length} / {events.length}</span>
+            </div>
+          )}
+        </div>
+        {hasOverflow && (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-2.5 py-1.5 text-xs font-semibold text-cyan-100 transition-colors hover:bg-cyan-400/20"
+          >
+            {expanded ? <ChevronsUp size={14} aria-hidden="true" /> : <ChevronsDown size={14} aria-hidden="true" />}
+            {expanded ? t('collapseRuntimeEvents') : t('showAllRuntimeEvents')}
+          </button>
+        )}
+      </div>
       <div className="space-y-3">
-        {events.length > 0 ? events.slice(0, 10).map((event) => (
+        {visibleEvents.length > 0 ? visibleEvents.map((event) => (
           <div key={`${event.type}-${event.at || 'unknown'}`} className="border-l border-cyan-400/30 pl-3">
             <div className="text-xs font-mono text-white/45">{formatTime(event.at)}</div>
             <div className="text-sm text-white/85">{event.type}</div>
