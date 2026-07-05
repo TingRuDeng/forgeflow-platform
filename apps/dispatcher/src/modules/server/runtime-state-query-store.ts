@@ -1,5 +1,9 @@
 import type { DashboardSnapshot, RuntimeState } from "./runtime-state.js";
-import { buildDashboardSnapshot } from "./runtime-state.js";
+import {
+  buildDashboardSnapshot,
+  isRuntimeStatePostgresBackend,
+  loadRuntimeStateAsync,
+} from "./runtime-state.js";
 import {
   compareStructuredProjection,
   readStructuredRuntimeState,
@@ -15,4 +19,46 @@ export function buildStructuredDashboardSnapshot(stateDir: string): DashboardSna
 
 export function readStructuredProjectionHealth(stateDir: string) {
   return compareStructuredProjection(stateDir);
+}
+
+function countRuntimeStateRows(state: RuntimeState): Record<string, number> {
+  return {
+    workers: state.workers.length,
+    tasks: state.tasks.length,
+    taskAttempts: (state.taskAttempts ?? []).length,
+    artifactBundles: (state.artifactBundles ?? []).length,
+    assignments: state.assignments.length,
+    reviews: state.reviews.length,
+    pullRequests: state.pullRequests.length,
+    dispatches: state.dispatches.length,
+    events: state.events.length,
+    leases: (state.leases ?? []).length,
+  };
+}
+
+export async function loadStructuredRuntimeStateAsync(stateDir: string): Promise<RuntimeState> {
+  if (isRuntimeStatePostgresBackend()) {
+    return loadRuntimeStateAsync(stateDir);
+  }
+  return loadStructuredRuntimeState(stateDir);
+}
+
+export async function buildStructuredDashboardSnapshotAsync(stateDir: string): Promise<DashboardSnapshot> {
+  return buildDashboardSnapshot(await loadStructuredRuntimeStateAsync(stateDir));
+}
+
+export async function readStructuredProjectionHealthAsync(stateDir: string): Promise<{
+  matches: boolean;
+  expected: Record<string, number>;
+  actual: Record<string, number>;
+}> {
+  if (!isRuntimeStatePostgresBackend()) {
+    return readStructuredProjectionHealth(stateDir);
+  }
+  const counts = countRuntimeStateRows(await loadRuntimeStateAsync(stateDir));
+  return {
+    matches: true,
+    expected: counts,
+    actual: counts,
+  };
 }

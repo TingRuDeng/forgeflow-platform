@@ -214,17 +214,17 @@ Current situation:
 - `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1` and `pnpm verify:shadow-drift:reconcile` provide an explicit automatic reconciliation cadence hook without changing the default read-only gate
 - `pnpm verify:shadow-cutover` is a strict production cutover preflight: shadow must be configured and zero-drift under `--max-mismatches 0 --max-delta 0`
 - `DISPATCHER_SHADOW_MODE=primary` is now explicitly rejected as `primary_store_not_implemented` until a real primary `RuntimeStateStore` exists
-- `@forgeflow/dispatcher-store-postgres` now has primary snapshot primitives (`dispatcher_runtime_state`, JSONB load/save), and dispatcher HTTP routes use the async runtime-state path for state mutations / reads
+- `@forgeflow/dispatcher-store-postgres` now has primary snapshot primitives (`dispatcher_runtime_state`, JSONB load/save), and dispatcher HTTP routes plus `/api/query/*` use the async runtime-state path for state mutations / reads
 - `pnpm verify:stage3` 和 release workflow 都会执行 `pnpm verify:shadow-drift` 作为 rollout / release gate
 
 Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
-- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、strict cutover preflight、primary-mode 硬拒绝、Postgres primary snapshot 原语和 HTTP route async state path；真正 primary-store 切换仍需要 Postgres structured query projection、生产阈值演练和外部存储运维确认
+- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、strict cutover preflight、primary-mode 硬拒绝、Postgres primary snapshot 原语、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真正 primary-store 切换仍需要生产阈值演练和外部存储运维确认
 
 Desired direction:
 
-- wire structured query endpoints to Postgres projection, then run production threshold drills and require `pnpm verify:shadow-cutover` before any primary-store switch
+- run production threshold drills and require `pnpm verify:shadow-cutover` before any primary-store switch
 - keep the event / metric / SLO contract stable while shadow remains best-effort
 
 ## 10. Live dispatcher DR drill covers local failure scenarios, but production cutover is still deferred

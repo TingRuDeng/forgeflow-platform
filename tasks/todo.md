@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M21 串行：补齐 `/api/query/*` Postgres primary snapshot reads。
+- [x] M21 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M21 Review 小结
+
+已补齐 `/api/query/*` 在 `RUNTIME_STATE_BACKEND=postgres` 下的读取路径：`runtime-state-query-store` 新增 async facade，SQLite backend 继续走现有 structured projection，Postgres backend 读取 primary snapshot；dispatcher 的 dashboard/context/metrics/slo/leases/query/projection-health 结构化读取路径统一 await async facade。
+
+Review Gate：finished。Spec 符合度通过，本轮把剩余 query endpoint 从 SQLite-only 收敛为 backend-aware async path；安全检查通过，未新增 secret、隐式切主或静默 fallback，缺少 `DISPATCHER_PRIMARY_POSTGRES_URL` 仍由 Postgres state backend 显式失败；复杂度检查局部通过，新增逻辑集中在 query facade 和 dispatcher route await 调用，新增测试低于 300 行；Document-refresh: needed，原因：`/api/query/*` Postgres backend 能力和剩余 cutover 边界变化，已同步 README、runtime-state query 契约、Stage 3 runbook 和技术债。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher build`、`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/dispatcher-server-postgres.test.ts tests/modules/server/runtime-state-postgres.test.ts`、`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/dispatcher-server.test.ts`（默认沙箱因 `listen EPERM 127.0.0.1` 超时后，按同命令非沙箱重跑通过，65 tests passed）、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
+
+剩余风险：完整 production primary-store cutover 还需要生产阈值演练、外部存储运维确认，并重新评估 `DISPATCHER_SHADOW_MODE=primary` 的硬拒绝门禁是否切换为正式开关。
+
 - [x] M20 串行：补齐 dispatcher HTTP route 主链 async Postgres state path。
 - [x] M20 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 

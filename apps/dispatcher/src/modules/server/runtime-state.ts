@@ -48,7 +48,7 @@ function resolveStore(): RuntimeStateStore {
   return defaultStore;
 }
 
-function isPostgresBackend(): boolean {
+export function isRuntimeStatePostgresBackend(): boolean {
   return process.env[RUNTIME_STATE_BACKEND_ENV] === "postgres";
 }
 
@@ -57,28 +57,28 @@ export function createEmptyRuntimeState(): RuntimeState {
 }
 
 export function loadRuntimeState(stateDir: string): RuntimeState {
-  if (isPostgresBackend()) {
+  if (isRuntimeStatePostgresBackend()) {
     throw new Error("RUNTIME_STATE_BACKEND=postgres requires loadRuntimeStateAsync");
   }
   return resolveStore().load(stateDir);
 }
 
 export function saveRuntimeState(stateDir: string, state: RuntimeState): void {
-  if (isPostgresBackend()) {
+  if (isRuntimeStatePostgresBackend()) {
     throw new Error("RUNTIME_STATE_BACKEND=postgres requires saveRuntimeStateAsync");
   }
   return resolveStore().save(stateDir, state);
 }
 
 export async function loadRuntimeStateAsync(stateDir: string): Promise<RuntimeState> {
-  if (isPostgresBackend()) {
+  if (isRuntimeStatePostgresBackend()) {
     return loadRuntimeStateFromPostgres();
   }
   return loadRuntimeState(stateDir);
 }
 
 export async function saveRuntimeStateAsync(stateDir: string, state: RuntimeState): Promise<void> {
-  if (isPostgresBackend()) {
+  if (isRuntimeStatePostgresBackend()) {
     await saveRuntimeStateToPostgres(state);
     return;
   }

@@ -4,11 +4,17 @@ const mocks = vi.hoisted(() => {
   const client = {
     end: vi.fn(async () => {}),
   };
+  const store = {
+    state: null as unknown,
+  };
   return {
     client,
+    store,
     createPgClient: vi.fn(async () => client),
-    loadPrimaryRuntimeStateSnapshot: vi.fn(async () => null),
-    savePrimaryRuntimeStateSnapshot: vi.fn(async (_client: unknown, _state: unknown) => {}),
+    loadPrimaryRuntimeStateSnapshot: vi.fn(async () => store.state),
+    savePrimaryRuntimeStateSnapshot: vi.fn(async (_client: unknown, state: unknown) => {
+      store.state = state;
+    }),
   };
 });
 
@@ -47,6 +53,7 @@ async function loadServerModule() {
 describe("dispatcher server postgres backend", () => {
   afterEach(() => {
     restoreEnv();
+    mocks.store.state = null;
     vi.clearAllMocks();
   });
 
@@ -82,5 +89,66 @@ describe("dispatcher server postgres backend", () => {
       throw new Error("missing saved runtime state");
     }
     expect(savedState.workers?.[0]?.id).toBe("worker-1");
+  });
+
+  it("serves query endpoints from the postgres primary snapshot", async () => {
+    process.env.RUNTIME_STATE_BACKEND = "postgres";
+    process.env.DISPATCHER_PRIMARY_POSTGRES_URL = "postgres://localhost/forgeflow";
+    process.env.DISPATCHER_AUTH_MODE = "open";
+    mocks.store.state = {
+      version: 1,
+      updatedAt: "2026-07-05T10:00:00.000Z",
+      sequence: 7,
+      tasks: [{ id: "task-1", title: "Task 1" }],
+      events: [{ taskId: "task-1", type: "created", at: "2026-07-05T10:00:00.000Z" }],
+      reviews: [{ taskId: "task-1", decision: "pending", notes: "" }],
+      leases: [{ id: "lease-1", resourceType: "assignment", resourceId: "task-1" }],
+      artifactBundles: [{ bundleId: "bundle-1", taskId: "task-1", attemptId: "attempt-1", schemaVersion: "artifact-bundle-v1" }],
+    };
+    const { handleDispatcherHttpRequest } = await loadServerModule();
+
+    const tasksResponse = await handleDispatcherHttpRequest({
+      stateDir: "unused-state-dir",
+      method: "GET",
+      pathname: "/api/query/tasks",
+      internalCall: true,
+    });
+    const artifactsResponse = await handleDispatcherHttpRequest({
+      stateDir: "unused-state-dir",
+      method: "GET",
+      pathname: "/api/query/artifacts",
+      internalCall: true,
+    });
+    const healthResponse = await handleDispatcherHttpRequest({
+      stateDir: "unused-state-dir",
+      method: "GET",
+      pathname: "/api/query/projection-health",
+      internalCall: true,
+    });
+
+    expect(tasksResponse.status).toBe(200);
+    expect(tasksResponse.json).toEqual([{ id: "task-1", title: "Task 1" }]);
+    expect(artifactsResponse.status).toBe(200);
+    expect(artifactsResponse.json).toEqual([
+      { bundleId: "bundle-1", taskId: "task-1", attemptId: "attempt-1", schemaVersion: "artifact-bundle-v1" },
+    ]);
+    expect(healthResponse.status).toBe(200);
+    expect(healthResponse.json).toMatchObject({
+      matches: true,
+      expected: {
+        tasks: 1,
+        events: 1,
+        reviews: 1,
+        leases: 1,
+        artifactBundles: 1,
+      },
+      actual: {
+        tasks: 1,
+        events: 1,
+        reviews: 1,
+        leases: 1,
+        artifactBundles: 1,
+      },
+    });
   });
 });

@@ -10,9 +10,9 @@ import {
   readArtifactStoreFile,
 } from "./artifact-store.js";
 import {
-  buildStructuredDashboardSnapshot,
-  loadStructuredRuntimeState,
-  readStructuredProjectionHealth,
+  buildStructuredDashboardSnapshotAsync,
+  loadStructuredRuntimeStateAsync,
+  readStructuredProjectionHealthAsync,
 } from "./runtime-state-query-store.js";
 import { getRuntimeStateShadowMode, readRuntimeStateShadowWriteStatus } from "./runtime-state-shadow.js";
 import {
@@ -898,7 +898,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
 
     if (method === "GET" && pathname === "/api/dashboard/snapshot") {
       const snapshot = useStructuredReads()
-        ? { snapshot: buildStructuredDashboardSnapshot(stateDir) }
+        ? { snapshot: await buildStructuredDashboardSnapshotAsync(stateDir) }
         : await withStateAsync(stateDir, (state) => {
           const nextState = reconcileRuntimeState(state);
           return {
@@ -911,7 +911,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
 
     if (method === "GET" && pathname === "/api/context") {
       const snapshot = useStructuredReads()
-        ? buildStructuredDashboardSnapshot(stateDir)
+        ? await buildStructuredDashboardSnapshotAsync(stateDir)
         : (await withStateAsync(stateDir, (state) => {
           const nextState = reconcileRuntimeState(state);
           return {
@@ -929,8 +929,8 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
 
     if (method === "GET" && pathname === "/api/metrics") {
       const payload = (useStructuredReads()
-        ? (() => {
-          const snapshot = buildStructuredDashboardSnapshot(stateDir);
+        ? await (async () => {
+          const snapshot = await buildStructuredDashboardSnapshotAsync(stateDir);
           return {
             metrics: {
               updatedAt: snapshot.updatedAt,
@@ -994,7 +994,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
 
     if (method === "GET" && pathname === "/api/slo") {
       const snapshot = useStructuredReads()
-        ? buildStructuredDashboardSnapshot(stateDir)
+        ? await buildStructuredDashboardSnapshotAsync(stateDir)
         : (await withStateAsync(stateDir, (state) => {
           const nextState = reconcileRuntimeState(state);
           return {
@@ -1011,14 +1011,14 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
         structuredReads: useStructuredReads(),
         shadowMode: getRuntimeStateShadowMode(),
         shadowWrite: readRuntimeStateShadowWriteStatus(stateDir),
-        projectionHealth: readStructuredProjectionHealth(stateDir),
+        projectionHealth: await readStructuredProjectionHealthAsync(stateDir),
         backups: listBackupManifests(stateDir),
       });
     }
 
     if (method === "GET" && pathname === "/api/workers") {
       const snapshot = useStructuredReads()
-        ? { snapshot: buildStructuredDashboardSnapshot(stateDir) }
+        ? { snapshot: await buildStructuredDashboardSnapshotAsync(stateDir) }
         : await withStateAsync(stateDir, (state) => {
           const nextState = reconcileRuntimeState(state);
           return {
@@ -1031,7 +1031,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
 
     if (method === "GET" && pathname === "/api/leases") {
       const state = useStructuredReads()
-        ? loadStructuredRuntimeState(stateDir)
+        ? await loadStructuredRuntimeStateAsync(stateDir)
         : (await withStateAsync(stateDir, (currentState) => ({
           state: reconcileRuntimeState(currentState),
         }))).state;
@@ -1039,27 +1039,27 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
     }
 
     if (method === "GET" && pathname === "/api/query/tasks") {
-      return createNoStoreJsonResponse(200, loadStructuredRuntimeState(stateDir).tasks);
+      return createNoStoreJsonResponse(200, (await loadStructuredRuntimeStateAsync(stateDir)).tasks);
     }
 
     if (method === "GET" && pathname === "/api/query/events") {
-      return createNoStoreJsonResponse(200, loadStructuredRuntimeState(stateDir).events);
+      return createNoStoreJsonResponse(200, (await loadStructuredRuntimeStateAsync(stateDir)).events);
     }
 
     if (method === "GET" && pathname === "/api/query/reviews") {
-      return createNoStoreJsonResponse(200, loadStructuredRuntimeState(stateDir).reviews);
+      return createNoStoreJsonResponse(200, (await loadStructuredRuntimeStateAsync(stateDir)).reviews);
     }
 
     if (method === "GET" && pathname === "/api/query/leases") {
-      return createNoStoreJsonResponse(200, loadStructuredRuntimeState(stateDir).leases ?? []);
+      return createNoStoreJsonResponse(200, (await loadStructuredRuntimeStateAsync(stateDir)).leases ?? []);
     }
 
     if (method === "GET" && pathname === "/api/query/artifacts") {
-      return createNoStoreJsonResponse(200, loadStructuredRuntimeState(stateDir).artifactBundles ?? []);
+      return createNoStoreJsonResponse(200, (await loadStructuredRuntimeStateAsync(stateDir)).artifactBundles ?? []);
     }
 
     if (method === "GET" && pathname === "/api/query/dashboard-snapshot") {
-      return createNoStoreJsonResponse(200, buildStructuredDashboardSnapshot(stateDir));
+      return createNoStoreJsonResponse(200, await buildStructuredDashboardSnapshotAsync(stateDir));
     }
 
     const artifactMatch = method === "GET"
@@ -1096,7 +1096,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
     }
 
     if (method === "GET" && pathname === "/api/query/projection-health") {
-      return createNoStoreJsonResponse(200, readStructuredProjectionHealth(stateDir));
+      return createNoStoreJsonResponse(200, await readStructuredProjectionHealthAsync(stateDir));
     }
 
     if (method === "POST" && pathname === "/api/workers/register") {
