@@ -30,6 +30,7 @@
     "verify:shadow-cutover:complete:evidence": "node scripts/verify-shadow-cutover-complete.mjs .forgeflow-dispatcher --output .forgeflow-dispatcher/shadow-cutover-complete.json",
     "verify:shadow-cutover:revoke": "node scripts/revoke-shadow-cutover.mjs .forgeflow-dispatcher --reason operator_rollback",
     "verify:runtime-packages": "node scripts/check-runtime-package-readiness.mjs",
+    "verify:runtime-packages:published": "node scripts/check-runtime-package-readiness.mjs --check-registry --check-published-metadata --require-published",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   },

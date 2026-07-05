@@ -88,7 +88,7 @@ function writeRuntimePackages(rootDir: string, overrides: Record<string, Record<
   }
 }
 
-function createFakeNpm(rootDir: string) {
+function createFakeNpm(rootDir: string, options: { missingPackages?: string[]; dependencyMetadata?: Record<string, Record<string, string>> } = {}) {
   const binDir = path.join(rootDir, "fake-bin");
   fs.mkdirSync(binDir, { recursive: true });
   const npmPath = path.join(binDir, "npm");
@@ -96,10 +96,17 @@ function createFakeNpm(rootDir: string) {
     npmPath,
     [
       "#!/usr/bin/env node",
+      `const missingPackages = ${JSON.stringify(options.missingPackages ?? ["beta-runtime-core", "gemini-beta-runtime"])};`,
+      `const dependencyMetadata = ${JSON.stringify(options.dependencyMetadata ?? {})};`,
       'const target = process.argv[3] || "";',
-      'if (target.includes("beta-runtime-core") || target.includes("gemini-beta-runtime")) {',
+      'const field = process.argv[4] || "version";',
+      'if (missingPackages.some((name) => target.includes(name))) {',
       '  process.stderr.write("npm ERR! code E404\\n");',
       "  process.exit(1);",
+      "}",
+      'if (field === "dependencies") {',
+      '  process.stdout.write(JSON.stringify(dependencyMetadata[target] || {}));',
+      "  process.exit(0);",
       "}",
       'process.stdout.write("0.1.0-beta.1\\n");',
     ].join("\n"),
@@ -161,5 +168,37 @@ describe("runtime package readiness", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("@tingrudeng/beta-runtime-core 尚未在 npm registry 创建");
     expect(result.stderr).toContain("@tingrudeng/gemini-beta-runtime 尚未在 npm registry 创建");
+  });
+
+  it("rejects published runtime packages whose npm dependency metadata is stale", () => {
+    const tempDir = makeTempRoot();
+    writeRuntimePackages(tempDir);
+    const fakeNpmBin = createFakeNpm(tempDir, {
+      missingPackages: [],
+      dependencyMetadata: {
+        "@tingrudeng/codex-beta-runtime@0.1.0-beta.1": {},
+        "@tingrudeng/gemini-beta-runtime@0.1.0-beta.1": {
+          "@tingrudeng/beta-runtime-core": "0.1.0-beta.1",
+        },
+        "@tingrudeng/trae-beta-runtime@0.1.0-beta.1": {
+          "@tingrudeng/automation-gateway-core": "0.1.0-beta.1",
+        },
+      },
+    });
+
+    const result = spawnSync(
+      "node",
+      [readinessScriptPath, "--root", tempDir, "--check-registry", "--check-published-metadata"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${fakeNpmBin}:${process.env.PATH || ""}` },
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "@tingrudeng/codex-beta-runtime@0.1.0-beta.1 published dependency @tingrudeng/beta-runtime-core 应为 0.1.0-beta.1",
+    );
   });
 });
