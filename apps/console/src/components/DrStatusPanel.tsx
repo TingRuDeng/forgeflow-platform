@@ -12,6 +12,7 @@ type ShadowReconciler = {
   runCount?: number;
   failedRunCount?: number;
   updatedAt?: string | null;
+  lastRun?: Record<string, unknown> | null;
   lastError?: string | null;
 };
 
@@ -70,6 +71,23 @@ function formatBoolean(value: boolean | undefined, yes: string, no: string): str
   return value ? yes : no;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readReconciliation(lastRun?: Record<string, unknown> | null) {
+  const payload = isRecord(lastRun?.payload) ? lastRun.payload : null;
+  const reconciliation = isRecord(payload?.reconciliation) ? payload.reconciliation : null;
+  if (!reconciliation) {
+    return null;
+  }
+  return {
+    requested: typeof reconciliation.requested === 'boolean' ? reconciliation.requested : undefined,
+    attempted: typeof reconciliation.attempted === 'boolean' ? reconciliation.attempted : undefined,
+    reason: typeof reconciliation.reason === 'string' ? reconciliation.reason : undefined,
+  };
+}
+
 export const DrStatusPanel: React.FC<{ status?: DrStatus | null }> = ({ status }) => {
   const { t } = useTranslation();
   if (!status) {
@@ -80,6 +98,7 @@ export const DrStatusPanel: React.FC<{ status?: DrStatus | null }> = ({ status }
   const reconcilerStatus = status.shadowReconciler?.status || 'unknown';
   const primaryCutoverStatus = status.primaryCutover?.status || 'unknown';
   const projectionMatches = status.projectionHealth?.matches === true;
+  const reconciliation = readReconciliation(status.shadowReconciler?.lastRun);
 
   return (
     <section className="glass rounded-2xl p-4 mb-6" aria-label={t('drStatus')}>
@@ -119,6 +138,14 @@ export const DrStatusPanel: React.FC<{ status?: DrStatus | null }> = ({ status }
             <div className="mt-1">
               {t('runs')}: {status.shadowReconciler?.runCount ?? 0} · {t('failed')}: {status.shadowReconciler?.failedRunCount ?? 0}
             </div>
+            {status.shadowReconciler?.updatedAt && (
+              <div className="mt-1 text-white/60 break-words">{t('updatedAtLabel')}: {status.shadowReconciler.updatedAt}</div>
+            )}
+            {reconciliation && (
+              <div className="mt-1 text-white/60 break-words">
+                {t('lastReconciliation')}: {formatBoolean(reconciliation.requested, t('requested'), t('notRequested'))} · {formatBoolean(reconciliation.attempted, t('attempted'), t('notAttempted'))}{reconciliation.reason ? ` · ${reconciliation.reason}` : ''}
+              </div>
+            )}
             {status.shadowReconciler?.lastError && (
               <div className="mt-1 text-white/60 break-words">{status.shadowReconciler.lastError}</div>
             )}

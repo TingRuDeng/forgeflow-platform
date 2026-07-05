@@ -29,6 +29,18 @@ describe('DrStatusPanel', () => {
             status: 'ok',
             runCount: 4,
             failedRunCount: 0,
+            updatedAt: '2999-05-15T00:00:02.000Z',
+            lastRun: {
+              runNumber: 4,
+              ok: true,
+              payload: {
+                reconciliation: {
+                  requested: true,
+                  attempted: false,
+                  reason: 'not_needed',
+                },
+              },
+            },
           },
           primaryCutover: {
             status: 'completed',
@@ -52,6 +64,8 @@ describe('DrStatusPanel', () => {
     expect(screen.getByText(/完成证据: 是 · 序列: 42/i)).toBeInTheDocument();
     expect(screen.getByText(/主库后端: 是/i)).toBeInTheDocument();
     expect(screen.getByText(/运行次数: 4 · 失败: 0/i)).toBeInTheDocument();
+    expect(screen.getByText(/更新时间: 2999-05-15T00:00:02.000Z/i)).toBeInTheDocument();
+    expect(screen.getByText(/最近对账: 已请求 · 未执行 · not_needed/i)).toBeInTheDocument();
     expect(screen.getByText(/匹配 · 备份: 1/i)).toBeInTheDocument();
     expect(screen.getByText(/只读: 否 · 结构化读取: 是/i)).toBeInTheDocument();
   });

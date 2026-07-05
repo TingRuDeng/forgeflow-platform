@@ -243,7 +243,7 @@ Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
 - shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、长期 reconciler 入口、默认 reconciler durable status snapshot、strict cutover reconciler 模式、strict cutover preflight、production cutover drill、cutover evidence file、primary approval marker、approval marker 独立校验、最终 ready 组合门禁、post-cutover completion evidence、ready evidence primary backend guard、rollback revocation marker、Postgres primary snapshot 原语、primary-mode 兼容状态、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真实生产执行仍需要 operator 在变更窗口切换 `RUNTIME_STATE_BACKEND=postgres` / `DISPATCHER_PRIMARY_POSTGRES_URL` 并保留 evidence
-- Console 首屏已展示 `/api/dr/status` 的 shadow write、shadow reconciler、primary cutover / completion evidence、projection、backup、read-only 和 structured reads 摘要，reviewer 可以在同一工作台看到 cutover 前后轻量状态
+- Console 首屏已展示 `/api/dr/status` 的 shadow write、shadow reconciler 运行次数 / 更新时间 / 最近一轮 reconciliation request-attempt-reason 证据、primary cutover / completion evidence、projection、backup、read-only 和 structured reads 摘要，reviewer 可以在同一工作台看到 cutover 前后轻量状态
 
 Desired direction:
 
