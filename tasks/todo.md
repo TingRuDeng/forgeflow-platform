@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M101 串行：把 Trae debugger wait / spawn 编排下沉到 automation-gateway-core。
 - [x] M100 串行：把 Trae launch target 构建下沉到 automation-gateway-core。
 - [x] M99 串行：把 Trae `.app` launch target 解析下沉到 automation-gateway-core。
 - [x] M98 串行：把 Trae clean relaunch 原语下沉到 automation-gateway-core 共享实现。
@@ -24,6 +25,16 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M101 Review 小结
+
+已新增 `packages/automation-gateway-core/src/trae-launcher.ts`，把 Trae debugger target 复用、clean relaunch 后 spawn、spawn error race、debugger wait 和 result 组装收敛为共享 `waitForTraeDebugger` / `launchTraeForAutomation`。`scripts/lib/trae-launcher.ts` 与 `packages/trae-beta-runtime/src/runtime/trae-launcher.ts` 现在只负责注入各自默认 timeout、默认 remote debugging port、CDP discovery 和兼容 re-export，不再各自维护 wait / spawn 编排。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 runtime executor / launch 去重，只迁移 Trae launcher 编排，不改变 gateway、worker、dispatcher API、session-store、CDP discovery 选择策略或 clean relaunch 原语。安全检查通过，共享 helper 只使用显式传入或默认的本地 spawn / CDP discovery / clean relaunch helper；spawn error 仍显式抛出，不新增 secret、网络写入、mock 成功路径或静默 fallback。复杂度检查通过，新增共享 launcher 低于 300 行，两个 adapter 降为薄 wrapper。Document-refresh: needed，原因：Trae launcher 权威边界变化，已同步 README、TECH_DEBT、package README 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @tingrudeng/automation-gateway-core exec vitest run tests/trae-launcher.test.ts tests/trae-launch-target.test.ts tests/trae-clean-relaunch.test.ts --maxWorkers=1`，3 个测试文件、16 个测试通过；`CI=true pnpm --filter @tingrudeng/automation-gateway-core typecheck`；`CI=true pnpm --filter @tingrudeng/automation-gateway-core build`；`CI=true pnpm --dir scripts/lib exec tsc -p tsconfig.json`；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-launcher.test.ts --maxWorkers=1`，1 个测试文件、6 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime exec vitest run tests/trae-launcher.test.ts --maxWorkers=1`，1 个测试文件、2 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime typecheck`；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime build`；`CI=true pnpm typecheck`；`CI=true pnpm lint`；`CI=true pnpm docs:validate`；`python3 scripts/validate_docs.py . --profile generic`；`git diff --check`；`node --check scripts/lib/trae-launcher.js`；`node --check packages/automation-gateway-core/dist/trae-launcher.js`；`node --check packages/trae-beta-runtime/dist/runtime/trae-launcher.js`；提升权限运行 `CI=true pnpm test`，全量测试通过，其中 automation-gateway-core 9 个测试文件、35 个测试通过，trae-beta-runtime 20 个测试文件、175 个测试通过，dispatcher 60 个测试文件、548 个测试通过。
+
+剩余风险：Trae launcher 的 target 构建、clean relaunch、debugger wait / spawn 编排已共享；Trae automation worker 的 executor、session lifecycle、phase event 和 failure evidence 仍是独立 runtime 边界，后续若要做到所有 provider 共用同一 executor core，需要单独评估模型差异。
 
 ## M100 Review 小结
 
