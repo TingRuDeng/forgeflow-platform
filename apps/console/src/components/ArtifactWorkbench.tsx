@@ -3,7 +3,9 @@ import { Search } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import type { ArtifactBundle } from './TaskTimeline';
 import { ArtifactWorkbenchRefs } from './ArtifactWorkbenchRefs';
+import { ArtifactWorkbenchTrajectory } from './ArtifactWorkbenchTrajectory';
 import { RuntimeEventWorkbench } from './RuntimeEventWorkbench';
+import { flattenTrajectorySearchTerms } from './artifactTrajectorySummaryModel';
 import { flattenArtifactRefs } from './artifactWorkbenchRefsModel';
 
 interface TaskSummary {
@@ -78,6 +80,7 @@ function bundleMatches(bundle: ArtifactBundle, task: TaskSummary | undefined, re
     ...(bundle.changedFiles ?? []).map((file) => file.path),
     ...Object.keys(bundle.refs ?? {}),
     ...flattenArtifactRefs(bundle).map((entry) => entry.ref),
+    ...flattenTrajectorySearchTerms(bundle),
   ].map(normalize).join(' ');
   return searchable.includes(query);
 }
@@ -234,6 +237,7 @@ export const ArtifactWorkbench: React.FC<ArtifactWorkbenchProps> = ({
                     {task?.repo && <span>{t('repo')}: {task.repo}</span>}
                   </div>
                 </button>
+                <ArtifactWorkbenchTrajectory bundle={bundle} />
                 <ArtifactWorkbenchRefs bundle={bundle} />
               </div>
             );
