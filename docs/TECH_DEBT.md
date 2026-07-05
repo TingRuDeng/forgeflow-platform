@@ -99,23 +99,24 @@ Desired direction:
 - keep shadow mode / primary mode boundaries explicit
 - add stronger drift reporting and eventual cutover / rollback discipline before any primary-store switch
 
-## 4. Trae automation gateway 仍有重复实现和剩余行为漂移
+## 4. Trae automation gateway HTTP handler 已共享，剩余债务集中在 adapter 层
 
 已确认情况：
 
-- 两套实现都已经暴露 `POST /v1/sessions/:sessionId/release`
-- 两套实现都已经在 `POST /v1/sessions/prepare` 中创建会话，并在 prepare 成功后标记为 `running`
+- `@tingrudeng/automation-gateway-core` 已提供共享 `handleAutomationGatewayRequest`，统一处理 `GET /ready`、session 查询 / release / prepare 和 `POST /v1/chat`
+- 脚本侧 `scripts/lib/trae-automation-gateway.ts` 与 packaged runtime `packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts` 都已委托共享 handler，只保留 HTTP server、body/error writer、debug logger、driver adapter 和 session-store adapter
 - 脚本侧已经对齐 packaged runtime 的持久化 session 解析、`POST /v1/chat` 元数据透传和结构化 debugLog 关键事件
 - packaged runtime 已补齐脚本侧 `POST /v1/chat` 的 completed-session cache、running-session conflict、request fingerprint conflict、progress touch 和 soft-timeout 保持 running 语义
 
 影响：
 
 - 默认 session-store 路径、持久化解析和 chat 调用关键行为已经对齐
-- 由于源码脚本与 packaged runtime 仍是两套实现，后续修复仍可能只落到其中一套实现；当前风险已经收窄到实现复用不足，而不是关键 session 语义缺失
+- route / session / chat 语义已经集中到共享 core；后续 handler 语义修复不应再分别修改脚本侧和 packaged runtime
+- 剩余漂移风险主要来自 adapter 层：HTTP server 启动、debug logger 组装、driver 创建、session-store 包装和发布前 dist / workspace 依赖同步
 
 期望方向：
 
-- 继续减少重复实现，优先把 chat / session handler 抽到共享 core，或让源码脚本 gateway 委托 packaged runtime
+- 后续继续收敛 adapter 层，优先把 session-store adapter / debug logger / request IO 归一化为共享小模块，而不是重新在两侧扩写 route handler
 
 ## 5. Stable agent-facing docs were previously concentrated in rule/nav docs but lacked a durable knowledge layer
 

@@ -1,19 +1,12 @@
 import http from "node:http";
+import { ApiError, handleAutomationGatewayRequest, normalizeApiError, } from "@tingrudeng/automation-gateway-core";
 import { createTraeAutomationDriver } from "./trae-dom-driver.js";
 import { normalizeAutomationError } from "./trae-automation-errors.js";
 import { createSessionStore, DEFAULT_STATE_DIR } from "./trae-automation-session-store.js";
 import { logger } from "./logger.js";
-import { ApiError, normalizeApiError, isTimeoutError, parseDiscoveryFromQuery } from "./trae-automation-gateway-helpers.js";
 function writeJson(res, statusCode, payload) {
     res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(payload));
-}
-function writeSuccess(res, statusCode, data) {
-    writeJson(res, statusCode, {
-        success: true,
-        code: "OK",
-        data,
-    });
 }
 function writeError(res, error) {
     const normalized = normalizeApiError(error);
@@ -49,216 +42,21 @@ async function readJsonBody(req) {
         });
     });
 }
-function readOptionalString(value) {
-    if (typeof value !== "string") {
-        return null;
-    }
-    const trimmed = value.trim();
-    return trimmed ? trimmed : null;
-}
 export async function handleTraeAutomationHttpRequest(input, options = {}) {
-    const automationDriver = options.automationDriver || createTraeAutomationDriver(options.automationOptions || {});
-    const sessionStore = options.sessionStore || null;
-    const debugLog = options.debugLog || (() => { });
-    const method = String(input.method || "GET").toUpperCase();
-    const pathname = input.pathname || "/";
-    const query = input.query || {};
-    const body = input.body ?? {};
-    debugLog("request.received", { method, pathname });
-    if (method === "GET" && pathname === "/ready") {
-        const readiness = await automationDriver.getReadiness({
-            discovery: parseDiscoveryFromQuery(query) || undefined,
-        });
-        return {
-            status: 200,
-            json: {
-                success: true,
-                code: "OK",
-                data: readiness,
-            },
-        };
-    }
-    if (method === "GET" && pathname.startsWith("/v1/sessions/")) {
-        const sessionId = pathname.slice("/v1/sessions/".length);
-        if (!sessionId) {
-            throw new ApiError("INVALID_REQUEST", "sessionId is required", 400);
-        }
-        if (!sessionStore) {
-            throw new ApiError("SESSION_STORE_NOT_CONFIGURED", "Session store is not configured", 500);
-        }
-        const session = sessionStore.get(sessionId);
-        if (!session) {
-            throw new ApiError("SESSION_NOT_FOUND", `Session ${sessionId} not found`, 404);
-        }
-        return {
-            status: 200,
-            json: {
-                success: true,
-                code: "OK",
-                data: session,
-            },
-        };
-    }
-    if (method === "POST" && pathname.startsWith("/v1/sessions/") && pathname.endsWith("/release")) {
-        const sessionId = pathname.slice("/v1/sessions/".length, -"/release".length);
-        if (!sessionId) {
-            throw new ApiError("INVALID_REQUEST", "sessionId is required", 400);
-        }
-        if (!sessionStore) {
-            throw new ApiError("SESSION_STORE_NOT_CONFIGURED", "Session store is not configured", 500);
-        }
-        const released = sessionStore.release(sessionId);
-        return {
-            status: 200,
-            json: {
-                success: true,
-                code: "OK",
-                data: {
-                    sessionId,
-                    released,
-                },
-            },
-        };
-    }
-    if (method === "POST" && pathname === "/v1/sessions/prepare") {
-        try {
-            const bodyObj = body;
-            let sessionId = typeof bodyObj.sessionId === "string" && bodyObj.sessionId.trim()
-                ? bodyObj.sessionId.trim()
-                : null;
-            if (sessionStore) {
-                const session = sessionStore.create({
-                    ...(sessionId ? { sessionId } : {}),
-                    requestFingerprint: bodyObj.content || null,
-                });
-                sessionId = session.sessionId;
-            }
-            const result = await automationDriver.prepareSession(bodyObj);
-            if (sessionStore && sessionId) {
-                sessionStore.markRunning(sessionId);
-            }
+    const automationDriver = (options.automationDriver || createTraeAutomationDriver(options.automationOptions || {}));
+    return handleAutomationGatewayRequest(input, {
+        automationDriver,
+        sessionStore: options.sessionStore || null,
+        debugLog: options.debugLog,
+        normalizeAutomationError: (error, fallbackCode) => {
+            const normalized = normalizeAutomationError(error, fallbackCode);
             return {
-                status: 200,
-                json: {
-                    success: true,
-                    code: "OK",
-                    data: {
-                        ...result,
-                        ...(sessionId ? { sessionId } : {}),
-                    },
-                },
+                code: normalized.code || fallbackCode,
+                message: normalized.message || "Trae automation failed",
+                details: normalized.details || {},
             };
-        }
-        catch (error) {
-            const normalized = normalizeAutomationError(error, "AUTOMATION_PREPARE_FAILED");
-            return {
-                status: 502,
-                json: {
-                    success: false,
-                    code: normalized.code,
-                    message: normalized.message,
-                    details: normalized.details,
-                },
-            };
-        }
-    }
-    if (method === "POST" && pathname === "/v1/chat") {
-        const bodyObj = body;
-        const content = String(bodyObj.content || "").trim();
-        if (!content) {
-            throw new ApiError("INVALID_REQUEST", "content is required", 400);
-        }
-        const sessionId = readOptionalString(bodyObj.sessionId);
-        let session = null;
-        debugLog("chat.start", {
-            sessionId,
-            contentLength: content.length,
-            contentPreview: content.slice(0, 120),
-            chatMode: readOptionalString(bodyObj.chatMode),
-            responseRequiredPrefix: readOptionalString(bodyObj.responseRequiredPrefix),
-            responseTimeoutMs: typeof bodyObj.responseTimeoutMs === "number" ? bodyObj.responseTimeoutMs : null,
-        });
-        if (sessionStore && sessionId) {
-            session = sessionStore.getInternal(sessionId);
-            if (session && session.status === "completed" && session.responseText) {
-                return {
-                    status: 200,
-                    json: {
-                        success: true,
-                        code: "OK",
-                        data: {
-                            status: "ok",
-                            response: { text: session.responseText },
-                            cached: true,
-                        },
-                    },
-                };
-            }
-            if (session && session.status === "running") {
-                throw new ApiError("SESSION_CONFLICT", `Session ${sessionId} is already running`, 409);
-            }
-            if (session && session.requestFingerprint && session.requestFingerprint !== content) {
-                throw new ApiError("SESSION_CONFLICT", `Session ${sessionId} request fingerprint mismatch`, 409);
-            }
-        }
-        if (sessionStore && sessionId && session) {
-            sessionStore.markRunning(sessionId);
-        }
-        try {
-            const result = await automationDriver.sendPrompt({
-                content,
-                sessionId,
-                expectedTaskId: readOptionalString(bodyObj.expectedTaskId),
-                prepare: bodyObj.prepare !== false,
-                discovery: bodyObj.discovery || null,
-                chatMode: readOptionalString(bodyObj.chatMode),
-                responseRequiredPrefix: bodyObj.responseRequiredPrefix || undefined,
-                responseTimeoutMs: bodyObj.responseTimeoutMs || undefined,
-                onProgress: sessionStore && sessionId ? (details) => {
-                    sessionStore.touchActivity(sessionId, details);
-                } : undefined,
-            });
-            if (sessionStore && sessionId) {
-                sessionStore.markCompleted(sessionId, {
-                    responseText: result?.response?.text || "",
-                });
-            }
-            debugLog("chat.done", {
-                sessionId,
-                hasResponseText: Boolean(result?.response?.text),
-                responseLength: String(result?.response?.text || "").length,
-            });
-            return {
-                status: 200,
-                json: {
-                    success: true,
-                    code: "OK",
-                    data: result,
-                },
-            };
-        }
-        catch (error) {
-            debugLog("chat.error", {
-                sessionId,
-                message: error instanceof Error ? error.message : String(error),
-                timeout: isTimeoutError(error),
-            });
-            if (sessionStore && sessionId && !isTimeoutError(error)) {
-                sessionStore.markFailed(sessionId, error?.message || "Unknown error");
-            }
-            const normalized = normalizeAutomationError(error, "AUTOMATION_REQUEST_FAILED");
-            return {
-                status: 502,
-                json: {
-                    success: false,
-                    code: normalized.code,
-                    message: normalized.message,
-                    details: normalized.details,
-                },
-            };
-        }
-    }
-    throw new ApiError("NOT_FOUND", "Not found", 404);
+        },
+    });
 }
 export async function startTraeAutomationGateway(options = {}) {
     const host = options.host || "127.0.0.1";

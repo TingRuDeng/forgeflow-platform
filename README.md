@@ -148,7 +148,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - `scripts/` 根目录现在只保留当前主线入口和少量 legacy 演练脚本。
 - 未被主线文档或运行时引用的 `start-staging-*.sh` 包装脚本、`trigger-ai-dispatch.*`，以及未消费的 checked-in `.d.ts` 产物已清理。
 - 旧的本地 codex drill 脚本 `run-codex-control-flow.*`、`create-two-codex-drill-planner.*`、`run-dispatch-assignments.*`、`process-worker-result.*` 已退役；`codex/gemini` 多机执行保留 `run-worker-daemon.js` 和其执行依赖。
-- `scripts/lib/*.js` 仍是 live adapter / bootstrap 层；dispatcher 的 server/state/review-memory/task-worktree 权威实现已下沉到 `apps/dispatcher`，Trae gateway / worker 和 generic worker daemon glue 仍保留在脚本层。
+- `scripts/lib/*.js` 仍是 live adapter / bootstrap 层；dispatcher 的 server/state/review-memory/task-worktree 权威实现已下沉到 `apps/dispatcher`，Trae gateway 的 route/session/chat handler 已委托 `@tingrudeng/automation-gateway-core`，脚本层只保留 HTTP server、driver/session adapter 和 worker / daemon glue。
 
 ## 当前使用方式
 
