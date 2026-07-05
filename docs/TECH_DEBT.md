@@ -189,12 +189,11 @@ Desired direction:
 - 空 envelope / 无 active attempt 的 worker mutation 已被拒绝，历史夹具或迁移脚本必须先补 claim / attempt 语义
 - ArtifactBundle 已支持结构化 `trajectory` 和受限 `retainedContent`，dispatcher 会把 trajectory / retained diff / log / test result 写入本地 artifact store，并通过 manifest、retention 和 `/api/artifacts/:bundleId/files/:fileName` 支持按需读取
 - Console 任务详情可通过摘要 / 引用 / 正文 / 轨迹 tabs 查看审查证据，并可在 `review` 状态直接提交带 `reasonCode`、`mustFix[]`、重驱动策略和高风险确认的 `merge` / `rework` / `block` 决策；Console 审查队列支持对多个 `review` 任务批量提交共享证据的 `merge` / `rework` / `block` 决策，批量 merge 会要求确认已选高风险任务，批量提交结果会在队列内展示成功数和逐项 taskId / error 明细；审查队列也会单独列出 `waiting_for_input` 任务供点击定位；`waiting_for_input` 任务可在 Console 详情页按 `resumePayloadSchema` 提交结构化恢复输入，未提供 schema 时保留 JSON fallback
-- HITL 当前已接通 dispatcher 状态语义、worker 主动 `waitingForInput`、Console schema 驱动 resume payload 编辑和 beta runtime assignment package 消费
+- HITL 当前已接通 dispatcher 状态语义、worker 主动 `waitingForInput`、Console schema 驱动 resume payload 编辑和 beta runtime assignment package 消费；`resumePayloadSchema` 已支持 `string` / `number` / `integer` / `boolean` / `array`、textarea、范围和数组数量校验，Console 会在页面内展示校验文案，Codex / Gemini worker prompt 已写入共享 schema 子集约束
 
 期望方向：
 
 - Console refs tab 已支持 artifact 引用复制、manifest 文件按需展开和下载；Artifact Review Workbench 已支持跨任务 artifact 筛选、review reasonCode / risk / mustFix 证据联动、reasonCode / risk 计数对比摘要、差异高亮、跨任务并排详情，并可跳转到对应任务；审查队列已支持批量 `merge` / `rework` / `block`
-- 继续补 HITL resume schema 的更丰富字段类型、跨 worker prompt 模板约束和 Console 校验文案
 
 ## 9. Shadow path has drift gate, reconciliation, and cutover drill, but external primary ops remain deferred
 

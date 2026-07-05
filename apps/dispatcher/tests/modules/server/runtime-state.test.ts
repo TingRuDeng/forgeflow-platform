@@ -4704,8 +4704,11 @@ describe("dispatcher runtime state (TypeScript)", () => {
         properties: {
           decision: { type: "string", title: "Decision" },
           acknowledgeRisk: { type: "boolean", title: "Acknowledge Risk" },
+          retryLimit: { type: "integer", title: "Retry Limit", minimum: 1, maximum: 3 },
+          reviewers: { type: "array", title: "Reviewers", items: { type: "string" }, minItems: 1 },
+          notes: { type: "string", title: "Notes", format: "textarea", placeholder: "补充恢复说明" },
         },
-        required: ["decision"],
+        required: ["decision", "reviewers"],
       },
       at: "2026-04-08T10:10:04.000Z",
     });
@@ -4720,8 +4723,11 @@ describe("dispatcher runtime state (TypeScript)", () => {
           properties: {
             decision: { type: "string", title: "Decision" },
             acknowledgeRisk: { type: "boolean", title: "Acknowledge Risk" },
+            retryLimit: { type: "integer", title: "Retry Limit", minimum: 1, maximum: 3 },
+            reviewers: { type: "array", title: "Reviewers", items: { type: "string" }, minItems: 1 },
+            notes: { type: "string", title: "Notes", format: "textarea", placeholder: "补充恢复说明" },
           },
-          required: ["decision"],
+          required: ["decision", "reviewers"],
         },
       },
     });

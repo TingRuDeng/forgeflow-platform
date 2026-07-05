@@ -52,6 +52,7 @@ export interface WorkerResult {
     requestedBy?: string;
     reason?: string;
     prompt?: string;
+    resumePayloadSchema?: Record<string, unknown>;
   };
   evidence?: {
     failureType?: "preflight" | "execution" | "verification" | "unknown";

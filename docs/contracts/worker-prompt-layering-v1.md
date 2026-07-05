@@ -49,6 +49,7 @@
 - 不得伪造测试结果
 - 必须使用 `worktree_dir`
 - 若 `assignment_dir` 存在，先读取其中材料
+- 需要人工输入时，只能通过 `waitingForInput.resumePayloadSchema` 声明稳定字段；跨 worker 共享子集是 `string` / `number` / `integer` / `boolean` / `array`、`enum`、`format: textarea`、`required`、`minimum` / `maximum`、`minItems` / `maxItems`
 
 特点：
 
@@ -128,6 +129,7 @@
 - 只允许修改 `docs/**`
 - 完成后必须回报 `summary`、`test_output`、`risks`、`files_changed`
 - 如信息不足，优先报告阻塞点，不要扩展范围
+- 如需 HITL 恢复输入，必须声明字段名、类型、标题和必填项，不要只在自然语言里要求人类回答
 
 特点：
 

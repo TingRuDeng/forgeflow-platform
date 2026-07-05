@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M38 串行：补齐 HITL resume schema 丰富字段、跨 worker prompt 约束和 Console 校验文案。
+- [x] M38 串行：运行最小充分验证并补充 review 小结。
+
+## M38 Review 小结
+
+已把 HITL `resumePayloadSchema` 从基础 `string` / `number` / `boolean` 扩展为支持 `integer`、`array`、textarea、placeholder、数字范围、数组数量和 string item enum；dispatcher runtime 归一化、`@forgeflow/worker-protocol`、`@forgeflow/task-schema`、beta runtime 类型和 Console 表单已同步。Console 不再用弹窗吞掉结构化输入错误，而是在页面内展示“恢复输入校验失败”及字段级错误；Codex / Gemini worker prompt 和 worker prompt layering 契约已写入共享 schema 子集约束。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 HITL resume schema 丰富字段、Console 页面内校验文案和跨 worker prompt 约束；安全检查通过，仅扩展结构化 schema 和前端表单校验，未新增 secret、外部网络调用、命令拼接、mock 成功路径或静默 fallback；复杂度检查基本通过，`TaskHitlSection.tsx` 降至 188 行，新增 `taskHitlSchema.ts` 134 行，新增 helper 均低于 50 行，既有 `runtime-state.ts` 和 `worker-protocol/src/index.ts` 仍超过 300 行但本轮只做协议字段最小扩展；Document-refresh: needed，原因：HITL 协议、Console 恢复体验和 worker prompt 约束发生变化，已同步 README、docs/README、API endpoints、Worker Protocol、worker prompt layering、TECH_DEBT、prompts 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx`、`CI=true pnpm --filter @forgeflow/worker-protocol test`、`CI=true pnpm --filter @forgeflow/task-schema test`、`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state.test.ts` 均先失败于缺少 richer schema / 校验支持；GREEN 后上述四组定向测试均通过；`CI=true pnpm --filter console test` 通过，30 个测试通过；`CI=true pnpm --filter console build`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。额外尝试 `CI=true pnpm test` 时，8 个 Trae gateway 测试因沙箱拒绝写 `/Users/dengtingru/.forgeflow-trae-beta/sessions/sessions.json.tmp` 失败，1 个历史慢测 `run-worker-daemon.test.ts` 在全仓并发下 15 秒超时；按规则申请非沙箱重跑被当前 Codex 使用额度拦截，未继续绕过。
+
+剩余风险：当前 array 只支持字符串列表和 string item enum，尚未支持嵌套对象数组；这是有意保守的跨 worker 共享子集。全仓 `pnpm test` 未能在当前沙箱完成，相关 HITL / 协议 / Console / runtime 定向验证已通过。
+
 - [x] M37 串行：补齐 Console Artifact Workbench 跨任务 artifact / review 并排详情。
 - [x] M37 串行：运行最小充分验证并补充 review 小结。
 
