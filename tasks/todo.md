@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M35 串行：把 worker-daemon dispatcher client 和 managed executor lifecycle 下沉到共享 runtime core。
+- [x] M35 串行：运行最小充分验证并补充 review 小结。
+
+## M35 Review 小结
+
+已继续收敛 `scripts/lib/worker-daemon.ts`：dispatcher HTTP client、state-dir client、auth header、reportEvent route 和 state-dir error 处理下沉到 `apps/dispatcher/src/modules/server/runtime-glue-dispatcher-client.ts`；执行期 heartbeat、完成/失败 callback 编排和失败 result 回写入口下沉到 `packages/beta-runtime-core/src/runtime/managed-task-processor.ts:executeManagedWorkerTask`。脚本侧现在通过 lazy wrapper 复用 runtime-glue client，并只负责 dist bootstrap、本地 logger / metrics hook 组装和兼容导出。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 runtime executor/launch 去重：脚本侧不再保留 dispatcher client plumbing 或执行期 heartbeat 定时器，主循环、client、managed executor、live executor 和失败回写均由共享 runtime core 承担；安全检查通过，HTTP auth header 逻辑从脚本侧移动到 runtime-glue，未新增 secret、外部命令拼接、mock 成功路径或静默 fallback，state-dir 400+ 响应继续显式抛错；复杂度检查基本通过，新增 `managed-task-processor.ts` 89 行、薄 adapter 测试 21 行，新增函数均低于 50 行，既有 `scripts/lib/worker-daemon.ts` 仍为 586 行但本轮净删除逻辑并用源码约束测试防止重复实现回流；Document-refresh: needed，原因：worker runtime 去重边界变化，已同步 README、docs/README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/worker-daemon-thin-adapter.test.ts` 先失败于 `function callWithRetry`，后续扩展断言后再次失败于 `setInterval`；GREEN 后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/worker-daemon-thin-adapter.test.ts tests/modules/server/run-worker-daemon.test.ts tests/modules/server/runtime-glue.test.ts` 通过，28 个测试通过；`CI=true pnpm --filter @tingrudeng/beta-runtime-core test` 通过，16 个测试通过；`CI=true pnpm --filter @forgeflow/dispatcher build`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core build`、`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。`rg -n "setInterval|function callWithRetry|function callStateDirDispatcher|function readStateDirResponseJson" scripts/lib/worker-daemon.ts scripts/lib/worker-daemon.js` 无匹配。
+
+剩余风险：脚本侧仍需保留 dist bootstrap 和本地 logger / metrics hook 组装，直到源码仓 live 入口完全改成发布包 adapter；`scripts/lib/worker-daemon.ts` 仍超过 300 行，主要来自兼容类型和本地 hook 组装，后续可继续拆成 adapter helper。
+
 - [x] M34 串行：补齐 Console Artifact Workbench 跨任务证据对比摘要。
 - [x] M34 串行：运行最小充分验证并补充 review 小结。
 

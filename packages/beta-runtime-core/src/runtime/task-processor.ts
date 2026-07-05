@@ -21,7 +21,7 @@ const HEARTBEAT_INTERVAL_MS = 10_000;
 const SUBMIT_RESULT_MAX_RETRIES = 3;
 const SUBMIT_RESULT_RETRY_DELAY_MS = 2_000;
 
-interface TaskExecutionResult {
+export interface TaskExecutionResult {
   result: WorkerResult;
   worktreeDir: string;
   outputDir: string;
