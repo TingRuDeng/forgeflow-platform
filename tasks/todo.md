@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M50 串行：补齐 shadow cutover rollback revocation marker。
+- [x] M50 串行：运行最小充分验证并补充 review 小结。
+
+## M50 Review 小结
+
+已为 production cutover 增加显式 rollback / revoke 命令：`pnpm verify:shadow-cutover:revoke` 会读取 `.forgeflow-dispatcher/shadow-cutover-approval.json`，生成 `.forgeflow-dispatcher/shadow-cutover-revocation.json`，并把原 approval marker 归档为 `shadow-cutover-approval.revoked-*.json`。`RUNTIME_STATE_BACKEND=postgres` 的 async primary snapshot load/save 会在连接 Postgres 前检查 revocation marker；一旦存在 revocation marker，就拒绝继续使用 primary backend，直到重新完成 drill evidence 和 approval。backup / restore 文件清单也已包含 `shadow-cutover-revocation.json`，避免 DR 恢复后丢失回滚证据。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 shadow 自动 reconciliation / production cutover 收口，补齐 approval 后的撤销和回滚证据链；未改变 drift gate、reconcile、cutover drill、approval 生成、Postgres snapshot 表结构或 HTTP route async state path。安全检查通过，revoke 脚本只读取本地 approval marker，先准备 revocation 临时文件，再归档 approval marker，最后原子落正式 revocation marker；未新增 secret、外部网络调用、mock 成功路径或静默 fallback。复杂度检查通过，`scripts/revoke-shadow-cutover.mjs` 保持单一职责，新增 gate 只在连接 Postgres 前读取本地 marker。Document-refresh: needed，原因：production cutover rollback 操作契约、backup/restore 文件清单和 docs 入口发生变化，已同步 README、docs/README、runtime-state query contract、Stage 3 runbook、backup/restore runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-cutover-approval.test.ts --maxWorkers=1` 先失败于缺少 `scripts/revoke-shadow-cutover.mjs`；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state-postgres.test.ts --maxWorkers=1` 先失败于 revocation marker 未阻止 Postgres primary；`CI=true pnpm --filter @tingrudeng/forgeflow-dispatcher test` 先失败于 backup 清单缺少 `shadow-cutover-revocation.json`。GREEN 后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-cutover-approval.test.ts tests/modules/server/runtime-state-postgres.test.ts tests/modules/execution/workflows.test.ts --maxWorkers=1` 通过，3 个测试文件、15 个测试通过；`CI=true pnpm --filter @tingrudeng/forgeflow-dispatcher test` 通过，4 个测试文件、4 个测试通过；`node --check scripts/revoke-shadow-cutover.mjs` 通过。
+
+剩余风险：revocation marker 可以阻止本仓库 dispatcher runtime 继续使用 Postgres primary backend；真实生产 rollback 仍依赖外部 Postgres、queue、DNS / 进程切流和变更窗口执行。
+
 - [x] M49 串行：拆分 `worker-daemon.ts` 剩余 dispatcher client / task executor / types adapter。
 - [x] M49 串行：运行最小充分验证并补充 review 小结。
 

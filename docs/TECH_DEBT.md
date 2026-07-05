@@ -207,6 +207,7 @@ Current situation:
 - shadow write status is also persisted to `runtime-state-shadow-status.json`
 - backup / restore scripts include `runtime-state-shadow-status.json`
 - backup / restore scripts include `shadow-cutover-approval.json`
+- backup / restore scripts include `shadow-cutover-revocation.json`
 - shadow write failures now append `shadow_write_failed` system events and feed metrics / SLO
 - `scripts/check-shadow-drift.mjs` compares SQLite expected counts with Postgres projection / queue shadow counts
 - `scripts/check-shadow-drift.mjs --max-mismatches <n> --max-delta <n>` emits a stable `alert` summary with `none` / `warning` / `critical` levels; rollout / release environments can also set `DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES` and `DISPATCHER_SHADOW_DRIFT_MAX_DELTA`
@@ -216,7 +217,8 @@ Current situation:
 - `pnpm verify:shadow-cutover` is a strict production cutover preflight: shadow must be configured and zero-drift under `--max-mismatches 0 --max-delta 0`, and the primary backend must be configured as `RUNTIME_STATE_BACKEND=postgres` with `DISPATCHER_PRIMARY_POSTGRES_URL`
 - `pnpm verify:shadow-cutover:drill` runs drift gate, explicit reconcile + alert recording, and strict cutover preflight as one production rehearsal command; `pnpm verify:shadow-cutover:drill:evidence` writes the same phase payload to `.forgeflow-dispatcher/shadow-cutover-drill.json`
 - `pnpm verify:shadow-cutover:approve` validates archived drill evidence and writes `.forgeflow-dispatcher/shadow-cutover-approval.json`
-- `RUNTIME_STATE_BACKEND=postgres` refuses primary snapshot load/save until `shadow-cutover-approval.json` exists, has `approved=true`, records `cutoverReason=cutover_ready`, and includes a drill evidence SHA-256
+- `pnpm verify:shadow-cutover:revoke` archives the approval marker and writes `.forgeflow-dispatcher/shadow-cutover-revocation.json` for rollback / aborted change windows
+- `RUNTIME_STATE_BACKEND=postgres` refuses primary snapshot load/save until `shadow-cutover-approval.json` exists, has `approved=true`, records `cutoverReason=cutover_ready`, and includes a drill evidence SHA-256; it also refuses primary snapshot load/save when `shadow-cutover-revocation.json` exists
 - `DISPATCHER_SHADOW_MODE=primary` is still explicitly rejected as `primary_store_not_implemented`; it is not the primary-store switch
 - `@forgeflow/dispatcher-store-postgres` now has primary snapshot primitives (`dispatcher_runtime_state`, JSONB load/save), and dispatcher HTTP routes plus `/api/query/*` use the async runtime-state path for state mutations / reads
 - `pnpm verify:stage3` 和 release workflow 都会执行 `pnpm verify:shadow-drift` 作为 rollout / release gate
@@ -224,11 +226,11 @@ Current situation:
 Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
-- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、strict cutover preflight、production cutover drill、cutover evidence file、primary approval marker、primary-mode 硬拒绝、Postgres primary snapshot 原语、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真正 primary-store 切换仍需要外部存储运维确认和真实生产变更窗口
+- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、strict cutover preflight、production cutover drill、cutover evidence file、primary approval marker、rollback revocation marker、primary-mode 硬拒绝、Postgres primary snapshot 原语、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真正 primary-store 切换仍需要外部存储运维确认和真实生产变更窗口
 
 Desired direction:
 
-- require `pnpm verify:shadow-cutover:drill:evidence` and `pnpm verify:shadow-cutover:approve` before any primary-store switch, then retain `.forgeflow-dispatcher/shadow-cutover-drill.json` and `.forgeflow-dispatcher/shadow-cutover-approval.json` as change evidence
+- require `pnpm verify:shadow-cutover:drill:evidence` and `pnpm verify:shadow-cutover:approve` before any primary-store switch, then retain `.forgeflow-dispatcher/shadow-cutover-drill.json` and `.forgeflow-dispatcher/shadow-cutover-approval.json` as change evidence; use `pnpm verify:shadow-cutover:revoke` to retain rollback evidence when aborting or reverting a cutover window
 - keep the event / metric / SLO contract stable while shadow remains best-effort
 
 ## 10. Live dispatcher DR drill covers local failure scenarios, but production cutover is still deferred

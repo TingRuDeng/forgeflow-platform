@@ -130,4 +130,20 @@ describe("runtime-state postgres backend", () => {
     await expect(loadRuntimeStateAsync(makeStateDir())).rejects.toThrow("shadow-cutover-approval.json");
     expect(mocks.createPgClient).not.toHaveBeenCalled();
   });
+
+  it("rejects primary backend when cutover approval has been revoked", async () => {
+    process.env.RUNTIME_STATE_BACKEND = "postgres";
+    process.env.DISPATCHER_PRIMARY_POSTGRES_URL = "postgres://localhost/forgeflow";
+    const stateDir = makeStateDir();
+    writeCutoverApproval(stateDir);
+    fs.writeFileSync(path.join(stateDir, "shadow-cutover-revocation.json"), JSON.stringify({
+      revoked: true,
+      revokedAt: "2026-07-05T11:00:00.000Z",
+      reason: "operator_rollback",
+    }));
+    const { loadRuntimeStateAsync } = await loadRuntimeStateModule();
+
+    await expect(loadRuntimeStateAsync(stateDir)).rejects.toThrow("shadow-cutover-revocation.json");
+    expect(mocks.createPgClient).not.toHaveBeenCalled();
+  });
 });
