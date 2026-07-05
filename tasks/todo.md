@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M48 串行：把 `run-worker-assignment` dist bootstrap / freshness 检查下沉到 runtime-bootstrap。
+- [x] M48 串行：运行最小充分验证并补充 review 小结。
+
+## M48 Review 小结
+
+已把 root `scripts/run-worker-assignment.ts` 中的 `execSync`、`pathToFileURL`、src/dist mtime freshness 和 runtime dist import 细节下沉到 `scripts/lib/runtime-bootstrap.ts`。`run-worker-assignment.ts` 现在只保留 `FORGEFLOW_CODEX_MODEL` / Gemini 默认 model / timeout 环境变量 wiring、`formatLocalTimestamp` 注入和 `runWorkerAssignmentCli` 调用；`runtime-bootstrap` 统一负责 beta-runtime-core assignment runtime、worker-daemon runtime、dispatcher runtime bridge、Codex/Gemini runtime factory 的 dist freshness 检查和动态 import。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 runtime executor / launch 去重，把 root assignment runner 的 dist build/import/freshness 逻辑从脚本入口下沉到共享 `runtime-bootstrap`，没有改变 Codex/Gemini launch argv、dry-run 输出、默认 Gemini model、`FORGEFLOW_CODEX_MODEL`、执行 timeout 或 verification timeout 语义。安全检查通过，build command 仍是固定仓库内命令，未新增 secret、外部输入命令拼接、mock 成功路径或静默 fallback；脚本入口不再直接持有 `execSync` 或 `pathToFileURL`。复杂度检查通过，`scripts/run-worker-assignment.ts` 降到 56 行，`scripts/lib/runtime-bootstrap.ts` 91 行，新增 helper 均保持单一职责；Document-refresh: needed，原因：runtime bootstrap 权威边界变化，已同步 TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/worker-daemon-thin-adapter.test.ts` 失败于 `scripts/run-worker-assignment.ts` 仍包含 `execSync`。GREEN 后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/worker-daemon-thin-adapter.test.ts tests/modules/server/run-worker-assignment.test.ts tests/modules/server/run-worker-daemon.test.ts --maxWorkers=1` 通过，3 个测试文件、13 个测试通过；`CI=true pnpm --filter @tingrudeng/beta-runtime-core test` 通过，3 个测试文件、17 个测试通过；`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json`、`CI=true pnpm exec tsc -p scripts/tsconfig.json`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过；非沙箱 `CI=true pnpm test` 通过，dispatcher 48 个测试文件、492 个测试通过。
+
+剩余风险：`scripts/lib/worker-daemon.ts` 仍超过 300 行，剩余主要是兼容导出、lazy client 和 run loop adapter；后续如果继续压缩，应拆这些 adapter 边界，而不是再扩写 root script。
+
 - [x] M47 串行：补齐 shadow production cutover approval marker 硬门禁。
 - [x] M47 串行：运行最小充分验证并补充 review 小结。
 

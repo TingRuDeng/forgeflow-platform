@@ -10,6 +10,7 @@ const repoRoot = path.resolve(
 const workerDaemonSourcePath = path.join(repoRoot, "scripts/lib/worker-daemon.ts");
 const workerDaemonHooksSourcePath = path.join(repoRoot, "scripts/lib/worker-daemon-hooks.ts");
 const runWorkerDaemonSourcePath = path.join(repoRoot, "scripts/run-worker-daemon.ts");
+const runWorkerAssignmentSourcePath = path.join(repoRoot, "scripts/run-worker-assignment.ts");
 const runtimeBootstrapSourcePath = path.join(repoRoot, "scripts/lib/runtime-bootstrap.ts");
 
 describe("worker daemon thin adapter", () => {
@@ -37,13 +38,19 @@ describe("worker daemon thin adapter", () => {
   it("keeps dist bootstrap logic inside the explicit runtime bootstrap adapter", () => {
     const workerDaemonSource = fs.readFileSync(workerDaemonSourcePath, "utf8");
     const runWorkerDaemonSource = fs.readFileSync(runWorkerDaemonSourcePath, "utf8");
+    const runWorkerAssignmentSource = fs.readFileSync(runWorkerAssignmentSourcePath, "utf8");
     const runtimeBootstrapSource = fs.readFileSync(runtimeBootstrapSourcePath, "utf8");
 
     expect(workerDaemonSource).not.toContain("execSync");
     expect(workerDaemonSource).not.toContain("pathToFileURL");
     expect(workerDaemonSource).not.toContain("pnpm --filter @tingrudeng/beta-runtime-core build");
     expect(runWorkerDaemonSource).not.toContain("execSync");
+    expect(runWorkerAssignmentSource).not.toContain("execSync");
+    expect(runWorkerAssignmentSource).not.toContain("pathToFileURL");
+    expect(runWorkerAssignmentSource).not.toContain("newestMtimeMs");
     expect(runtimeBootstrapSource).toContain("importWorkerDaemonRuntime");
+    expect(runtimeBootstrapSource).toContain("importWorkerAssignmentRuntime");
+    expect(runtimeBootstrapSource).toContain("importDispatcherWorkerRuntimeFactories");
     expect(runtimeBootstrapSource).toContain("ensureDispatcherRuntimeBridgeDist");
   });
 });
