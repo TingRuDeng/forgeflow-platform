@@ -111,6 +111,7 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - 归档 drill 证据后必须执行 `pnpm verify:shadow-cutover:approve`，该命令会校验证据里的 `cutover_preflight=cutover_ready`，记录 `evidencePath` / `evidenceSha256`，并生成 `.forgeflow-dispatcher/shadow-cutover-approval.json`
 - 切换窗口开始前必须执行 `pnpm verify:shadow-cutover:approval`，该命令会独立校验 approval marker 仍为 `cutover_ready`、归档 evidence SHA-256 未漂移，并确认不存在 `shadow-cutover-revocation.json`
 - 最终切换前必须执行 `pnpm verify:shadow-cutover:ready`，该命令会输出 `strict_cutover_preflight` 与 `approval_evidence` 两个 phase，只有 strict preflight 和 approval evidence 同时通过才返回成功
+- 需要归档最终切换前门禁证据时执行 `pnpm verify:shadow-cutover:ready:evidence`，它会把同一 payload 原子写入 `.forgeflow-dispatcher/shadow-cutover-ready.json`；自定义归档路径可直接调用 `node scripts/verify-shadow-cutover-ready.mjs <stateDir> --output <path>`
 - 回滚或撤销生产切换窗口时执行 `pnpm verify:shadow-cutover:revoke`；该命令会把 approval marker 归档为 `shadow-cutover-approval.revoked-*.json`，并写入 `.forgeflow-dispatcher/shadow-cutover-revocation.json`
 - `RUNTIME_STATE_BACKEND=postgres` 现在会在读写 primary snapshot 前校验 `shadow-cutover-approval.json`，并重新读取 `evidencePath` 确认当前文件 SHA-256 与 approval 里的 `evidenceSha256` 匹配；自定义审批文件路径可设置 `DISPATCHER_PRIMARY_CUTOVER_APPROVAL_FILE`；如果存在 `shadow-cutover-revocation.json`，primary backend 会拒绝连接，直到重新完成 drill evidence 和 approval
 - `DISPATCHER_SHADOW_MODE=primary` 不是独立生产切换开关；只有 `RUNTIME_STATE_BACKEND=postgres` 和 `DISPATCHER_PRIMARY_POSTGRES_URL` 已配置时，它才作为切换后兼容状态通过 drift / cutover 检查。primary backend 未选择时会失败为 `primary_backend_not_selected`

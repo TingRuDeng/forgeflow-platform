@@ -225,6 +225,7 @@ Current situation:
 - `pnpm verify:shadow-cutover:approve` validates archived drill evidence and writes `.forgeflow-dispatcher/shadow-cutover-approval.json`
 - `pnpm verify:shadow-cutover:approval` independently verifies the approval marker, archived evidence SHA-256, and absence of `.forgeflow-dispatcher/shadow-cutover-revocation.json`
 - `pnpm verify:shadow-cutover:ready` combines strict cutover preflight and approval evidence verification into the final pre-switch gate
+- `pnpm verify:shadow-cutover:ready:evidence` archives that final pre-switch gate payload to `.forgeflow-dispatcher/shadow-cutover-ready.json`
 - `pnpm verify:shadow-cutover:revoke` archives the approval marker and writes `.forgeflow-dispatcher/shadow-cutover-revocation.json` for rollback / aborted change windows
 - `RUNTIME_STATE_BACKEND=postgres` refuses primary snapshot load/save until `shadow-cutover-approval.json` exists, has `approved=true`, records `cutoverReason=cutover_ready`, points to archived drill evidence through `evidencePath`, and the current evidence file SHA-256 matches `evidenceSha256`; it also refuses primary snapshot load/save when `shadow-cutover-revocation.json` exists
 - `DISPATCHER_SHADOW_MODE=primary` is accepted only as a post-cutover compatibility state when `RUNTIME_STATE_BACKEND=postgres` and `DISPATCHER_PRIMARY_POSTGRES_URL` are configured; without that primary backend it fails as `primary_backend_not_selected`
