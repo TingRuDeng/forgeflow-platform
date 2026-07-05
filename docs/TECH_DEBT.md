@@ -326,10 +326,11 @@ Desired direction:
 - **runtime tarball 安装 smoke 已落地（P2 完成）**：`pnpm verify:runtime-packages:install` 会构建并本地 staging `codex`、`gemini`、`trae` runtime 组，重写 `workspace:*` 依赖为本地 workspace 版本，使用临时 npm cache 执行 `npm pack` / `npm install --ignore-scripts`，并校验 provider CLI bin 安装成功、安装后的 package 不含 `workspace:*` 依赖。CI 与 release workflow 都会执行该门禁，证明发布前 tarball 形态可安装且不依赖外部 registry。
 - **release preflight 会提前阻断未配置包名（P2 完成）**：`release-publish-preflight.mjs --require-package-exists` 会在手动发布和自动发布进入 typecheck / test / build / publish 前执行只读 `npm view <package> version`。包名不存在、权限不足或 registry 查询失败时，workflow 会停在 preflight，并提示先创建 npm 包名和配置 Trusted Publisher，避免在 `npm publish` PUT 阶段才失败。
 - **runtime 包设置报告已落地（P2 完成）**：`pnpm report:runtime-packages:setup` 复用同一份 runtime package spec，只读查询 npm registry，输出每个包名、当前源码版本、package/version 发布状态、推荐发布顺序和 Trusted Publisher 配置要求；需要把缺口作为硬失败时可加 `-- --require-ready`。
+- **已发布 provider runtime smoke 已落地（P2 完成）**：`pnpm verify:runtime-packages:published-smoke` 会从 npm registry 安装当前源码版本的 `codex`、`gemini`、`trae` provider runtime，并校验 provider CLI bin、`--version` 和 `--help`；该命令要求所有 provider 包名和版本都已发布，适合作为发布后远端安装证据入口。
 
 仍存在的债务：
 
-- `@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 的本地发布清单、release preflight、tarball install smoke 和设置报告已有门禁，但仍需要完成 npm 包名和 Trusted Publisher 配置后，才能进入自动发布矩阵。
+- `@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 的本地发布清单、release preflight、tarball install smoke、设置报告和 published smoke 入口已有门禁，但仍需要完成 npm 包名和 Trusted Publisher 配置后，才能进入自动发布矩阵。
 - codex/gemini 已是源码内受支持路径，但生产远端部署仍应以已发布包、固定版本和 CI 验证证据为准，不应直接依赖本仓未发布 dist。
 
 影响：

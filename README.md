@@ -44,7 +44,7 @@ ai_summary:
 - 用 `pnpm test`、`pnpm typecheck` 和 `git diff --check` 做常规交付验证。
 - 对运行入口事实，核对 `scripts/start-control-plane.sh`、`scripts/run-dispatcher-server.js`、`packages/forgeflow-dispatcher/README.md` 和 `packages/trae-beta-runtime/README.md`。
 
-forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都是受支持、并列的 worker 接入方式。源码中三者均有远程运行时包；npm registry 当前公开可安装的是 `@tingrudeng/codex-beta-runtime` 与 `@tingrudeng/trae-beta-runtime`，`@tingrudeng/gemini-beta-runtime` 仍需先完成 npm 包名和 Trusted Publisher 配置。说明：Trae automation 仍是最成熟的无人值守链路；`codex/gemini` worker daemon 的主循环、worker CLI、executor、launch builder 和失败回写已收敛到 `@tingrudeng/beta-runtime-core`，dispatcher runtime-glue 和源码脚本只保留薄适配；`pnpm verify:runtime-packages` 会校验 runtime 包发布清单，`pnpm verify:runtime-packages:install` 会本地打包并安装验证 codex/gemini/trae runtime tarball，`pnpm report:runtime-packages:setup` 会输出 npm 包名 / 版本 / Trusted Publisher 设置缺口，生产发布窗口可用 `pnpm verify:runtime-packages:published` 强制校验 npm registry 包名、版本和已发布依赖元数据，但 Gemini 远程包发布仍依赖外部 npm 配置（见 `docs/TECH_DEBT.md`）。
+forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都是受支持、并列的 worker 接入方式。源码中三者均有远程运行时包；npm registry 当前公开可安装的是 `@tingrudeng/codex-beta-runtime` 与 `@tingrudeng/trae-beta-runtime`，`@tingrudeng/gemini-beta-runtime` 仍需先完成 npm 包名和 Trusted Publisher 配置。说明：Trae automation 仍是最成熟的无人值守链路；`codex/gemini` worker daemon 的主循环、worker CLI、executor、launch builder 和失败回写已收敛到 `@tingrudeng/beta-runtime-core`，dispatcher runtime-glue 和源码脚本只保留薄适配；`pnpm verify:runtime-packages` 会校验 runtime 包发布清单，`pnpm verify:runtime-packages:install` 会本地打包并安装验证 codex/gemini/trae runtime tarball，`pnpm report:runtime-packages:setup` 会输出 npm 包名 / 版本 / Trusted Publisher 设置缺口，生产发布窗口可用 `pnpm verify:runtime-packages:published` 强制校验 npm registry 包名、版本和已发布依赖元数据，并用 `pnpm verify:runtime-packages:published-smoke` 从 registry 安装已发布 provider runtime 后验证 CLI；Gemini 远程包发布仍依赖外部 npm 配置（见 `docs/TECH_DEBT.md`）。
 
 ## 当前主线
 
@@ -387,6 +387,7 @@ node scripts/release-package.js --package trae-beta-runtime --bump prerelease --
 - push 自动发布在 `npm publish` 前会先运行 `pnpm lint`、`pnpm docs:validate`、`pnpm typecheck`、`pnpm test` 和 `pnpm verify:shadow-drift`，避免 main 分支直接绕过常规验证发包。
 - release job 会先把 npm CLI 升到 `11.12.1`；npm Trusted Publishing 至少要求 `npm 11.5.1+`，不要再用 Node 自带的 npm 10.x 直接判断发布链是否可用。
 - `pnpm report:runtime-packages:setup` 会只读查询 npm registry，输出 runtime 包的 package/version 状态、发布顺序和 Trusted Publisher 配置要求；需要把缺口作为硬失败时可加 `-- --require-ready`。
+- `pnpm verify:runtime-packages:published-smoke` 会从 npm registry 安装当前源码版本的 codex/gemini/trae provider runtime，并验证对应 CLI bin、`--version` 和 `--help`；该命令要求所有 provider 包名和版本都已发布。
 - 如果手动发布已经成功写入 npm，但后续 git commit/tag/push 失败，Actions summary 会提示 `手动发布需要恢复` 并创建恢复 issue；此时按 `docs/runbooks/release-cadence.md` 补交版本记录和同名 release tag。
 
 当前还要注意一个外部前置条件：
