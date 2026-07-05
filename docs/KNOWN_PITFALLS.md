@@ -233,6 +233,6 @@ Do not copy package CLI examples into source-script runbooks without checking th
 
 `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts:saveRuntimeState` calls `syncRuntimeStateShadowAndPersistStatus()` asynchronously and does not surface shadow errors to the mutating HTTP response.
 
-Shadow write status is persisted to `runtime-state-shadow-status.json` and exposed through `/api/dr/status.shadowWrite`.
+Shadow write status is persisted to `runtime-state-shadow-status.json` and exposed through `/api/dr/status.shadowWrite`. Automatic reconciliation status is persisted to `shadow-reconciler-status.json` and exposed through `/api/dr/status.shadowReconciler`.
 
-Do not treat a green SQLite write as proof that Postgres / queue shadow stores are healthy; check `/api/dr/status.shadowWrite` before shadow rollout or DR cutover decisions.
+Do not treat a green SQLite write as proof that Postgres / queue shadow stores are healthy; check `/api/dr/status.shadowWrite` and `/api/dr/status.shadowReconciler` before shadow rollout or DR cutover decisions.

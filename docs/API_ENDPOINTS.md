@@ -193,9 +193,11 @@ Current endpoint families:
     - `structuredReads`
     - `shadowMode`
     - `shadowWrite`
+    - `shadowReconciler`
     - `projectionHealth`
     - `backups`
   - `shadowWrite` 会合并 stateDir 下的 `runtime-state-shadow-status.json`，因此 dispatcher 重启后仍能显示最后一次 shadow 写入结果。
+  - `shadowReconciler` 会读取 stateDir 下的 `shadow-reconciler-status.json`，返回最近一轮自动 reconciliation 的 `status`、`runCount`、`failedRunCount`、`updatedAt` 和 `lastRun`；文件缺失返回 `unknown`，文件损坏返回 `failed` 和 `lastError`。
   - Shadow projection / queue count drift 通过 `node scripts/check-shadow-drift.mjs <stateDir>` 做 operator check；该检查需要异步访问 Postgres，因此不塞进同步 `/api/dr/status` handler。
   - `check-shadow-drift.mjs` 支持 `--max-mismatches` / `--max-delta` 或环境变量 `DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES` / `DISPATCHER_SHADOW_DRIFT_MAX_DELTA` 输出 alert 摘要；支持 `--reconcile` 或 `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1` 主动重放 shadow；支持 `--record-alert` 或 `DISPATCHER_SHADOW_DRIFT_RECORD_ALERT=1` 写入 `shadow_drift_detected` system event；`run-shadow-reconciler.mjs` / `pnpm verify:shadow-drift:reconciler` 可作为长期运行的自动 reconciliation cadence 入口，并支持 `--output <path>` 或 `DISPATCHER_SHADOW_RECONCILER_STATUS_FILE=<path>` 原子写入 `shadow-reconciler-status/v1` 最近一轮状态快照；root `verify:shadow-drift:reconciler` 和 `verify:shadow-cutover:reconciler` 默认写入 `.forgeflow-dispatcher/shadow-reconciler-status.json`；支持 `--require-configured` 或 `DISPATCHER_SHADOW_DRIFT_REQUIRE_CONFIGURED=1` 校验 shadow 配置，支持 `--require-primary-backend` 或 `DISPATCHER_PRIMARY_BACKEND_REQUIRE_CONFIGURED=1` 校验 `RUNTIME_STATE_BACKEND=postgres` 与 `DISPATCHER_PRIMARY_POSTGRES_URL`。
   - `verify-shadow-cutover-drill.mjs` / `pnpm verify:shadow-cutover:drill` 会串行执行 drift gate、`--reconcile --record-alert` 和 strict `--require-configured --require-primary-backend --max-mismatches 0 --max-delta 0` preflight，并输出每个 phase 的结构化结果；追加 `--output <path>` 或使用 `pnpm verify:shadow-cutover:drill:evidence` 可把同一 payload 原子写入证据文件；`pnpm verify:shadow-cutover:approve` 会从已归档证据生成 `.forgeflow-dispatcher/shadow-cutover-approval.json`，Postgres primary async state path 会在连接数据库前校验该 approval marker、其 `evidencePath` 和 `evidenceSha256`；`pnpm verify:shadow-cutover:ready:evidence` 会把最终 strict preflight + approval evidence payload 原子写入 `.forgeflow-dispatcher/shadow-cutover-ready.json`，Postgres primary async state path 也会在连接数据库前校验该 ready evidence 与 approval marker 完全匹配。

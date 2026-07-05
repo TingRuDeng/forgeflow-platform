@@ -614,6 +614,22 @@ describe("dispatcher server", () => {
       lastFailureAt: "2999-05-15T00:00:01.000Z",
       lastError: "persisted shadow failure",
     }));
+    fs.writeFileSync(path.join(stateDir, "shadow-reconciler-status.json"), JSON.stringify({
+      schemaVersion: "shadow-reconciler-status/v1",
+      ok: true,
+      mode: "loop",
+      stateDir,
+      intervalMs: 300000,
+      maxRuns: null,
+      runCount: 3,
+      failedRunCount: 0,
+      updatedAt: "2999-05-15T00:00:02.000Z",
+      lastRun: {
+        runNumber: 3,
+        ok: true,
+        payload: { reconciliation: { requested: true, attempted: false } },
+      },
+    }));
 
     const drResponse = await mod.handleDispatcherHttpRequest({
       stateDir,
@@ -625,6 +641,26 @@ describe("dispatcher server", () => {
     expect(drResponse.json).toHaveProperty("projectionHealth");
     expect(drResponse.json).toHaveProperty("shadowWrite");
     expect(drResponse.json.shadowWrite.lastError).toBe("persisted shadow failure");
+    expect(drResponse.json).toHaveProperty("shadowReconciler");
+    expect(drResponse.json.shadowReconciler.status).toBe("ok");
+    expect(drResponse.json.shadowReconciler.runCount).toBe(3);
+    expect(drResponse.json.shadowReconciler.lastRun.payload.reconciliation.requested).toBe(true);
+  });
+
+  it("surfaces broken shadow reconciler status in dr status", async () => {
+    const stateDir = makeTempDir();
+    fs.writeFileSync(path.join(stateDir, "shadow-reconciler-status.json"), "{");
+    const mod = await import(serverModulePath);
+
+    const drResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dr/status",
+    });
+
+    expect(drResponse.status).toBe(200);
+    expect(drResponse.json.shadowReconciler.status).toBe("failed");
+    expect(drResponse.json.shadowReconciler.lastError).toContain("failed to read shadow reconciler status");
   });
 
   it("rejects mutation routes when read-only mode is enabled", async () => {

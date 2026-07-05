@@ -190,4 +190,4 @@
 - `pnpm verify:stage3`
 - `/api/query/projection-health` 显示 SQLite projection 无漂移
 - `/api/slo` 可输出 burn-rate 状态
-- `/api/dr/status` 可输出 read-only / structured reads / shadow write health / projection health / backup 清单
+- `/api/dr/status` 可输出 read-only / structured reads / shadow write health / shadow reconciler latest status / projection health / backup 清单
