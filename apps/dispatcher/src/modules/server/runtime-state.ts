@@ -1,5 +1,9 @@
 import { jsonStore } from "./runtime-state-json.js";
 import {
+  loadRuntimeStateFromPostgres,
+  saveRuntimeStateToPostgres,
+} from "./runtime-state-postgres.js";
+import {
   DEFAULT_LEASE_TTL_MS,
   acquireLease,
   listActiveLeases,
@@ -44,16 +48,41 @@ function resolveStore(): RuntimeStateStore {
   return defaultStore;
 }
 
+function isPostgresBackend(): boolean {
+  return process.env[RUNTIME_STATE_BACKEND_ENV] === "postgres";
+}
+
 export function createEmptyRuntimeState(): RuntimeState {
   return resolveStore().createEmpty();
 }
 
 export function loadRuntimeState(stateDir: string): RuntimeState {
+  if (isPostgresBackend()) {
+    throw new Error("RUNTIME_STATE_BACKEND=postgres requires loadRuntimeStateAsync");
+  }
   return resolveStore().load(stateDir);
 }
 
 export function saveRuntimeState(stateDir: string, state: RuntimeState): void {
+  if (isPostgresBackend()) {
+    throw new Error("RUNTIME_STATE_BACKEND=postgres requires saveRuntimeStateAsync");
+  }
   return resolveStore().save(stateDir, state);
+}
+
+export async function loadRuntimeStateAsync(stateDir: string): Promise<RuntimeState> {
+  if (isPostgresBackend()) {
+    return loadRuntimeStateFromPostgres();
+  }
+  return loadRuntimeState(stateDir);
+}
+
+export async function saveRuntimeStateAsync(stateDir: string, state: RuntimeState): Promise<void> {
+  if (isPostgresBackend()) {
+    await saveRuntimeStateToPostgres(state);
+    return;
+  }
+  saveRuntimeState(stateDir, state);
 }
 
 export type WorkerStatus = "idle" | "busy" | "offline" | "disabled";
