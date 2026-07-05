@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M16 串行：补齐 Console artifact refs 复制和按需文件展开。
+- [x] M16 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M16 Review 小结
+
+已把 Console artifact 展示从 `TaskTimeline.tsx` 拆分到 `ArtifactSummary.tsx`，让 `TaskTimeline.tsx` 保持 attempt timeline / runtime events 职责；refs tab 现在支持复制 `artifact://...` 引用，并通过 `/api/artifacts/:bundleId/files/:fileName` 按需展开 manifest 登记文件正文。同步补充 Console i18n、列表详情测试和 artifact 文档事实。
+
+Review Gate：finished。Spec 符合度通过，完成本轮 Console artifact refs 复制和按需文件展开；安全检查通过，读取路径只使用既有 dispatcher artifact 文件 API，前端对 artifact ref 做 `artifact://<bundleId>/<fileName>` 解析并对路径片段使用 `encodeURIComponent`，未新增 secret、外部网络副作用或静默成功路径；复杂度检查通过，新增 `ArtifactSummary.tsx` 291 行、`TaskTimeline.tsx` 105 行，核心交互已拆成 `ArtifactRefRow`、`readArtifactRefFile` 等 helper；Document-refresh: needed，原因：Console artifact refs 行为从只展示变为可复制和按需展开，已同步 `README.md`、`ARTIFACT_BUNDLE_V1.md` 与 `TECH_DEBT.md`。结论：通过。
+
+验证已通过：`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
+
+剩余风险：本轮补齐的是单 task 详情侧 refs 文件展开和复制；下载按钮、跨任务 artifact 筛选、批量审查仍是 Console 审查工作台后续产品化项。
+
 - [x] M15 串行：补齐 dispatcher 级 HITL interrupt/resume 基础协议。
 - [x] M15 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 
