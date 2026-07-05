@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M95 串行：让 release preflight 发布前校验 workspace 依赖已发布。
 - [x] M94 串行：收敛 Trae worker submitResult 生命周期重复结构。
 - [x] M93 串行：把 worker daemon submitResult retry policy 下沉到 beta-runtime-core。
 - [x] M92 串行：让 Release workflow 在 provider runtime 发布后运行 published smoke。
@@ -18,6 +19,16 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M95 Review 小结
+
+已为 `scripts/release-publish-preflight.mjs` 增加 `--require-published-workspace-deps`。手动发布和自动发布现在都会在进入 install / typecheck / test / build / `npm publish` 前，把目标 package 的 `dependencies` / `peerDependencies` / `optionalDependencies` 中的 `workspace:*` 依赖解析为本地 workspace package 版本，并用只读 `npm view <name>@<version> version` 校验该精确版本已发布。provider runtime 如果依赖的 shared core 版本还没发布，会在 release preflight 阶段失败，不再等到 `npm publish` 或发布后 smoke 才暴露。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 runtime 发布链去重和 runtime 包漂移收口，不改变 package 内容、version bump、npm publish 命令、post-publish smoke 或 worker runtime 行为。安全检查通过，新逻辑只读查询 npm registry，不发布、不写 registry、不读取 secret、不引入 mock 成功路径；registry 超时和未发布版本都会显式失败。复杂度检查通过，`release-publish-preflight.mjs` 206 行、测试 160 行、workflow 测试 136 行，均低于 300 行；新增 helper 均为短函数。Document-refresh: needed，原因：release preflight 发布前门禁语义变化，已同步 README、docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`node --check scripts/release-publish-preflight.mjs`；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/release-publish-preflight.test.ts tests/modules/execution/workflows.test.ts --maxWorkers=1`，2 个测试文件、8 个测试通过；提升权限真实 registry 抽样 `NPM_TRUSTED_PUBLISHING_ENABLED=true node scripts/release-publish-preflight.mjs --package-dir packages/codex-beta-runtime --expected-repo TingRuDeng/forgeflow-platform --require-trusted-publishing --require-package-exists --require-published-workspace-deps` 按预期失败，原因为 `@tingrudeng/beta-runtime-core@0.1.0-beta.1 is not published`；`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：preflight 已能阻断 provider 早于 shared core 发布；真实发布仍取决于 npm 包名创建、Trusted Publisher 配置、shared core 先发布，以及后续 Release workflow 成功执行。
 
 ## M94 Review 小结
 

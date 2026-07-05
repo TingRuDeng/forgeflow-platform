@@ -43,6 +43,7 @@ describe("workflow quality gates", () => {
     expect(workflow).toContain("手动发布需要恢复");
     expect(workflow).toContain("创建发布后 git 恢复 issue");
     expect(workflow).toContain("gh issue create");
+    expect(workflow).toContain("--require-published-workspace-deps");
     expect(workflow).toContain("Run shadow drift gate");
     expect(workflow).toContain("pnpm verify:shadow-drift");
     expect(workflow).toContain("Verify published provider runtime smoke");
@@ -93,6 +94,7 @@ describe("workflow quality gates", () => {
     expect(setupSummaryIndex).toBeGreaterThan(detectScriptIndex);
     expect(setupSummaryIndex).toBeLessThan(publishAutoIndex);
     expect(workflow.match(/--require-package-exists/g)?.length).toBe(2);
+    expect(workflow.match(/--require-published-workspace-deps/g)?.length).toBe(2);
   });
 
   it("runs shadow drift as part of the stage3 rollout gate", () => {

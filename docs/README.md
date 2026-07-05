@@ -328,7 +328,7 @@ vNext runtime reliability 推进：
 - `../.github/workflows/release.yml`
   - GitHub Actions 发布入口。
   - 用 OIDC + provenance 执行 npm 发布。
-  - 发布前会校验包元数据是否与当前仓库 `TingRuDeng/forgeflow-platform` 对齐，并要求 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 作为自动发布显式门禁；手动发布和自动发布都会先用 `npm view <package> version` 确认目标包名已在 npm registry 创建，避免跑完构建后才在 `npm publish` 阶段暴露包名 / Trusted Publisher 权限缺口。
+  - 发布前会校验包元数据是否与当前仓库 `TingRuDeng/forgeflow-platform` 对齐，并要求 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 作为自动发布显式门禁；手动发布和自动发布都会先用 `npm view <package> version` 确认目标包名已在 npm registry 创建，避免跑完构建后才在 `npm publish` 阶段暴露包名 / Trusted Publisher 权限缺口；preflight 还会把 `workspace:*` 依赖解析为本地 workspace 版本，并要求该精确依赖版本已经发布。
   - CI 和 release workflow 会执行 `pnpm verify:runtime-packages:install`，在不访问 npm registry 的情况下本地打包并安装 runtime tarball，确认 provider 包不会泄漏 `workspace:*` 依赖且 CLI bin 可安装。
   - `pnpm report:runtime-packages:setup` 会只读查询 npm registry，输出 runtime 包 package/version 状态、发布顺序和 Trusted Publisher 绑定要求；发布窗口可加 `-- --require-ready` 把缺口转成硬失败。
   - 生产发布窗口可额外执行 `pnpm verify:runtime-packages:published`，校验 runtime 包名、当前本地版本和已发布依赖元数据是否与源码发布清单一致。
