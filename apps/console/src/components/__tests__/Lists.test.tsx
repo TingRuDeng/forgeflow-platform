@@ -416,6 +416,14 @@ describe('ArtifactWorkbench', () => {
             },
             riskAssessment: { level: 'needs_human_attention', reasons: ['auth touched'] },
           },
+          {
+            taskId: 'task-2',
+            evidence: {
+              reasonCode: 'docs_ready',
+              mustFix: [],
+            },
+            riskAssessment: { level: 'low', reasons: [] },
+          },
         ]}
         bundles={[
           {
@@ -440,9 +448,14 @@ describe('ArtifactWorkbench', () => {
 
     expect(screen.getByText(/docs updated/i)).toBeInTheDocument();
     expect(screen.getByText(/auth diff ready/i)).toBeInTheDocument();
-    expect(screen.getByText(/test_gap/i)).toBeInTheDocument();
-    expect(screen.getByText(/needs_human_attention/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/test_gap/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/needs_human_attention/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/补齐鉴权失败测试/i)).toBeInTheDocument();
+    expect(screen.getByText(/证据对比|evidence comparison/i)).toBeInTheDocument();
+    expect(screen.getByText(/test_gap.*1/i)).toBeInTheDocument();
+    expect(screen.getByText(/docs_ready.*1/i)).toBeInTheDocument();
+    expect(screen.getByText(/needs_human_attention.*1/i)).toBeInTheDocument();
+    expect(screen.getByText(/low.*1/i)).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText(/筛选|filter/i), {
       target: { value: 'test_gap' },
