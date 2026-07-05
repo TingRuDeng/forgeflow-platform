@@ -56,6 +56,7 @@ ai_summary:
 - worker start/result 写入必须携带完整 v1 envelope；dispatcher 会校验 `attemptId`、`leaseToken`、`protocolVersion`、`traceId` 和 `idempotencyKey` 必须匹配当前 active attempt。
 - Trae `fetch-task` 会创建或复用 active attempt，并把 `attempt_id` / `lease_token` / `protocol_version` / `trace_id` / `idempotency_key` 返回给 runtime；Trae runtime 在 start/result 回写时会继续携带这些字段。
 - reconcile 支持 `maxTaskAttempts` retry policy；task-level `terminationPolicy.maxAttempts` 优先于 reconcile 调用方传入的全局 `maxTaskAttempts`，未配置时默认最多 2 次 attempt。
+- task-level `terminationPolicy.attemptLeaseTimeoutMs` 会覆盖 attempt lease 过期时间；`terminationPolicy.heartbeatTimeoutMs` 会覆盖该 task 的 worker offline 判定；`terminationPolicy.assignmentTimeoutMs` 会覆盖该 task 的未 claim assignment 回收时间。
 
 尚未实现：
 

@@ -1034,6 +1034,7 @@ function createOrReuseTaskAttempt(
   at: string,
 ): RuntimeState {
   const activeAttempt = findActiveTaskAttempt(state, task.id);
+  const leaseExpiresAt = new Date(Date.parse(at) + resolveAttemptLeaseTimeoutMs(task)).toISOString();
   if (activeAttempt) {
     return {
       ...state,
@@ -1043,7 +1044,7 @@ function createOrReuseTaskAttempt(
         leaseToken: `assignment:${workerId}`,
         status: activeAttempt.status === "created" ? "leased" : activeAttempt.status,
         heartbeatAt: at,
-        leaseExpiresAt: new Date(Date.parse(at) + DEFAULT_LEASE_TTL_MS).toISOString(),
+        leaseExpiresAt,
       }),
     };
   }
@@ -1063,7 +1064,7 @@ function createOrReuseTaskAttempt(
       status: "leased",
       traceId: resolveTaskTraceId(task) ?? buildTaskTraceId(task.id),
       heartbeatAt: at,
-      leaseExpiresAt: new Date(Date.parse(at) + DEFAULT_LEASE_TTL_MS).toISOString(),
+      leaseExpiresAt,
       idempotencyKey: `worker-v1:${task.id}:attempt-${attemptNo}`,
     }),
   };
@@ -1379,12 +1380,16 @@ function releaseTaskResourceLeases(
   }, state);
 }
 
-function resolveHeartbeatTimeoutMs(options: ReconcileOptions = {}): number {
-  return options.heartbeatTimeoutMs ?? 5 * 60_000;
+function resolveAttemptLeaseTimeoutMs(task?: Task): number {
+  return task?.terminationPolicy?.attemptLeaseTimeoutMs ?? DEFAULT_LEASE_TTL_MS;
 }
 
-function resolveAssignmentTimeoutMs(options: ReconcileOptions = {}): number {
-  return options.assignmentTimeoutMs ?? 5 * 60_000;
+function resolveHeartbeatTimeoutMs(options: ReconcileOptions = {}, task?: Task): number {
+  return task?.terminationPolicy?.heartbeatTimeoutMs ?? options.heartbeatTimeoutMs ?? 5 * 60_000;
+}
+
+function resolveAssignmentTimeoutMs(options: ReconcileOptions = {}, task?: Task): number {
+  return task?.terminationPolicy?.assignmentTimeoutMs ?? options.assignmentTimeoutMs ?? 5 * 60_000;
 }
 
 function resolveMaxTaskAttempts(options: ReconcileOptions = {}, task?: Task): number {
@@ -1392,13 +1397,13 @@ function resolveMaxTaskAttempts(options: ReconcileOptions = {}, task?: Task): nu
   return configured > 0 ? configured : DEFAULT_MAX_TASK_ATTEMPTS;
 }
 
-function resolveWorkerStatus(worker: Worker, options: ReconcileOptions = {}): WorkerStatus {
+function resolveWorkerStatus(worker: Worker, options: ReconcileOptions = {}, task?: Task): WorkerStatus {
   if (worker.disabledAt) {
     return "disabled";
   }
 
   const now = Date.parse(options.now ?? nowIso());
-  const heartbeatTimeoutMs = resolveHeartbeatTimeoutMs(options);
+  const heartbeatTimeoutMs = resolveHeartbeatTimeoutMs(options, task);
   const lastHeartbeatAt = Date.parse(worker.lastHeartbeatAt ?? "");
   if (!Number.isFinite(lastHeartbeatAt)) {
     return "offline";
@@ -1464,13 +1469,13 @@ function selectTargetWorker(state: RuntimeState, pool: string, workerId: string 
   return worker;
 }
 
-function hasHealthyIdleAlternative(state: RuntimeState, pool: string, workerId: string, options: ReconcileOptions = {}): boolean {
+function hasHealthyIdleAlternative(state: RuntimeState, pool: string, workerId: string, options: ReconcileOptions = {}, task?: Task): boolean {
   return state.workers.some((worker) =>
     worker.id !== workerId &&
     worker.pool === pool &&
     worker.status === "idle" &&
     !worker.disabledAt &&
-    resolveWorkerStatus(worker, options) === "idle");
+    resolveWorkerStatus(worker, options, task) === "idle");
 }
 
 function assignmentWasClaimed(assignment: Assignment | undefined): boolean {
@@ -1497,7 +1502,7 @@ function didWorkerHeartbeatAfterAssignment(worker: Worker | undefined, assignmen
   return lastHeartbeatAt > assignedAt;
 }
 
-function isAssignmentTimedOut(assignment: Assignment | undefined, worker: Worker | undefined, options: ReconcileOptions = {}): boolean {
+function isAssignmentTimedOut(assignment: Assignment | undefined, worker: Worker | undefined, options: ReconcileOptions = {}, task?: Task): boolean {
   if (!assignment?.assignedAt || assignmentWasClaimed(assignment)) {
     return false;
   }
@@ -1508,7 +1513,7 @@ function isAssignmentTimedOut(assignment: Assignment | undefined, worker: Worker
     return false;
   }
 
-  if (now - assignedAt <= resolveAssignmentTimeoutMs(options)) {
+  if (now - assignedAt <= resolveAssignmentTimeoutMs(options, task)) {
     return false;
   }
 
@@ -1650,7 +1655,7 @@ function reconcileExpiredRunningAttempts(state: RuntimeState, options: Reconcile
     if (!worker || !assignment || !attempt || !isAttemptLeaseExpired(attempt, at)) {
       continue;
     }
-    if (resolveWorkerStatus(worker, options) !== "offline") {
+    if (resolveWorkerStatus(worker, options, task) !== "offline") {
       continue;
     }
     nextState = appendEvent(expireTaskAttempt(nextState, attempt, at), {
@@ -1705,7 +1710,7 @@ export function reconcileRuntimeState(state: RuntimeState, options: ReconcileOpt
     const assignment = currentWorker.currentTaskId
       ? nextState.assignments.find((candidate) => candidate.taskId === currentWorker.currentTaskId)
       : null;
-    const workerResolvedStatus = resolveWorkerStatus(currentWorker, options);
+    const workerResolvedStatus = resolveWorkerStatus(currentWorker, options, assignedTask ?? undefined);
     const shouldRequeueBecauseOffline =
       workerResolvedStatus === "offline" &&
       assignedTask &&
@@ -1722,7 +1727,7 @@ export function reconcileRuntimeState(state: RuntimeState, options: ReconcileOpt
       assignedTask.assignedWorkerId === worker.id &&
       assignment.workerId === worker.id &&
       assignment.status === "assigned" &&
-      isAssignmentTimedOut(assignment, worker, options);
+      isAssignmentTimedOut(assignment, worker, options, assignedTask);
 
     if (
       shouldRequeueBecauseOffline ||
@@ -2298,7 +2303,7 @@ export function claimAssignedTaskForWorker(state: RuntimeState, input: ClaimAssi
       return !hasHealthyIdleAlternative(reconciledState, worker.pool, worker.id, {
         now: at,
         heartbeatTimeoutMs: input.heartbeatTimeoutMs,
-      });
+      }, task);
     })
     .sort((left, right) => compareTimestampAsc(left.createdAt, right.createdAt) || left.id.localeCompare(right.id))[0];
 
