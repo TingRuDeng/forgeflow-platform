@@ -327,11 +327,13 @@ Desired direction:
 - **release preflight 会提前阻断未配置包名和未发布 workspace 依赖（P2 完成）**：`release-publish-preflight.mjs --require-package-exists --require-published-workspace-deps` 会在手动发布和自动发布进入 typecheck / test / build / publish 前执行只读 `npm view <package> version`，并把当前 package.json 的 `workspace:*` 依赖解析为本地 workspace 版本后校验对应精确版本已发布。包名不存在、权限不足、registry 查询失败或 provider 依赖的 shared core 版本未发布时，workflow 会停在 preflight，避免在 `npm publish` PUT 阶段或发布后 smoke 才暴露依赖缺口。
 - **runtime 包设置报告已落地（P2 完成）**：`pnpm report:runtime-packages:setup` 复用同一份 runtime package spec，只读查询 npm registry，输出每个包名、当前源码版本、package/version 发布状态、推荐发布顺序和 Trusted Publisher 配置要求；需要把缺口作为硬失败时可加 `-- --require-ready`。
 - **已发布 provider runtime smoke 已落地（P2 完成）**：`pnpm verify:runtime-packages:published-smoke` 会从 npm registry 安装当前源码版本的 `codex`、`gemini`、`trae` provider runtime，并校验 provider CLI bin、`--version` 和 `--help`；该命令要求所有 provider 包名和版本都已发布，适合作为发布后远端安装证据入口。
+- **源码 Trae launcher clean relaunch 行为已与 packaged runtime 对齐（P2 完成）**：`scripts/run-trae-automation-launch.ts` / `.js` 现在支持 `--force-clean-launch`，并复用 `scripts/lib/trae-launcher-clean-relaunch.ts` 在 macOS 上先退出既有 Trae app、等待旧 CDP 端口释放，再拉起新进程；避免源码调试脚本与 `@tingrudeng/trae-beta-runtime` 的 clean relaunch 语义继续漂移。
 
 仍存在的债务：
 
 - `@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 的本地发布清单、release preflight、tarball install smoke、设置报告和 published smoke 入口已有门禁，但仍需要完成 npm 包名和 Trusted Publisher 配置后，才能进入自动发布矩阵。
 - codex/gemini 已是源码内受支持路径，但生产远端部署仍应以已发布包、固定版本和 CI 验证证据为准，不应直接依赖本仓未发布 dist。
+- Trae automation worker 的 executor / session-store / gateway 仍保留独立 runtime 边界；后续若要做到所有 provider 完全同一 executor core，需要单独评估 worktree、session、phase event 和 failure evidence 模型。
 
 影响：
 

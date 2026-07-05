@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M97 串行：收敛源码 Trae launcher clean relaunch 与 packaged runtime 行为。
 - [x] M96 串行：让 Console DR 面板展示 shadow reconciler 最近一轮对账证据。
 - [x] M95 串行：让 release preflight 发布前校验 workspace 依赖已发布。
 - [x] M94 串行：收敛 Trae worker submitResult 生命周期重复结构。
@@ -20,6 +21,16 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M97 Review 小结
+
+已让源码开发脚本 `scripts/run-trae-automation-launch.ts` / `.js` 支持 `--force-clean-launch`，并把脚本侧 clean relaunch 逻辑拆到 `scripts/lib/trae-launcher-clean-relaunch.ts`。`scripts/lib/trae-launcher.ts` 现在在 macOS clean relaunch 时会先按 `.app` 名称退出既有 Trae、等待旧 CDP 端口 drain，再 spawn 新进程；`preferExisting` 在 force clean 模式下不会复用旧 target。README、onboarding 和 TECH_DEBT 已同步说明源码脚本与 packaged runtime 的 clean relaunch 行为已对齐。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 runtime executor / launch 去重，只收敛源码 Trae launcher clean relaunch 行为，不改变 gateway、worker、dispatcher API、session-store 或 packaged runtime CLI 语义。安全检查通过，新增逻辑只调用本机 `osascript` 退出指定 macOS app 并轮询 CDP 端口；端口未释放会显式抛错，不吞失败、不写 secret、不新增 mock 成功路径。复杂度检查通过，`scripts/lib/trae-launcher.ts` 已压到 300 行，`scripts/lib/trae-launcher-clean-relaunch.ts` 为 100 行，测试 244 行；`launchTraeForAutomation` 已拆出 result 构造、spawn debugger 等 helper，主函数保持短编排。Document-refresh: needed，原因：新增源码脚本可见参数与操作语义，已同步 README、docs/onboarding、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --dir scripts/lib exec tsc -p tsconfig.json`；`node --check scripts/run-trae-automation-launch.js`；`node --check scripts/lib/trae-launcher.js`；`node --check scripts/lib/trae-launcher-clean-relaunch.js`；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-launcher.test.ts --maxWorkers=1`，1 个测试文件、6 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime exec vitest run tests/trae-launcher.test.ts --maxWorkers=1`，1 个测试文件、2 个测试通过；`CI=true pnpm typecheck`；`CI=true pnpm lint`；`CI=true pnpm docs:validate`；`python3 scripts/validate_docs.py . --profile generic`；`git diff --check`；提升权限复跑 `CI=true pnpm test`，全量测试通过。首次普通沙箱执行 `CI=true pnpm test` 时，`automation-gateway-core` 的 HTTP server 测试因 `listen EPERM: operation not permitted 127.0.0.1` 失败；提升权限后同一套测试通过。
+
+剩余风险：源码脚本与 packaged runtime 的 clean relaunch 行为已对齐并有测试保护；但 `packages/trae-beta-runtime/src/runtime/trae-launcher.ts` 与 `scripts/lib/trae-launcher*.ts` 仍未共享同一个源码 helper。若要做到 Trae launch 彻底去重，需要后续把可复用 clean relaunch 原语迁到合适的共享包，并同时处理本地脚本运行时对 dist / source 的依赖边界。
 
 ## M96 Review 小结
 
