@@ -193,7 +193,7 @@ Desired direction:
 
 期望方向：
 
-- 继续接入 Console 侧 artifact 文件按需展开 / 下载体验
+- Console refs tab 已支持 artifact 引用复制和 manifest 文件按需展开；后续继续补下载、跨任务筛选和批量审查体验
 - 继续把 worker runtime 的主动 interrupt、resume payload 消费和 Console 表单化输入接入 `waiting_for_input` 主链
 - 继续补齐审查结果的批量筛选、复制链接和跨任务对比体验
 

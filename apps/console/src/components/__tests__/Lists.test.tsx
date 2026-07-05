@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { TaskDetailsPanel, TaskList } from '../Lists';
@@ -19,6 +19,10 @@ const renderWithProviders = (ui: React.ReactElement) => {
     </LanguageProvider>
   );
 };
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('TaskList Pagination', () => {
   it('should not show pagination when task count is <= 10', () => {
@@ -111,9 +115,14 @@ describe('Task drill-down', () => {
     expect(onSelect).toHaveBeenCalledWith('T-1');
   });
 
-  it('renders task details and exposes the cancel action for cancellable tasks', () => {
+  it('renders task details and exposes the cancel action for cancellable tasks', async () => {
     const onCancel = vi.fn();
     const onReviewDecision = vi.fn();
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => 'artifact file body',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
 
     renderWithProviders(
       <TaskDetailsPanel
@@ -245,6 +254,9 @@ describe('Task drill-down', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /refs|引用/i }));
     expect(screen.getByText(/artifact:\/\/att-001\/diff.patch/i)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: /展开文件|open file/i })[0]);
+    expect(await screen.findByText(/artifact file body/i)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/artifacts/att-001/files/diff.patch');
 
     fireEvent.click(screen.getByRole('tab', { name: /retained|正文/i }));
     expect(screen.getByText(/diff --git a\/src\/auth.ts b\/src\/auth.ts/i)).toBeInTheDocument();
