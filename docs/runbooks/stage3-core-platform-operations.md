@@ -145,7 +145,7 @@ node scripts/verify-live-dispatcher-dr.mjs
 建议：
 
 - 发布前至少做一次 backup
-- backup / restore 会包含 `runtime-state-shadow-status.json`、`shadow-cutover-approval.json` 和 `shadow-cutover-revocation.json`，确保 shadow 健康状态、cutover approval marker 与 rollback revocation marker 可随运行时状态恢复
+- backup / restore 会包含 `runtime-state-shadow-status.json`、`shadow-cutover-drill.json`、`shadow-cutover-approval.json`、`shadow-cutover-ready.json` 和 `shadow-cutover-revocation.json`，确保 shadow 健康状态、cutover drill / ready evidence、approval marker 与 rollback revocation marker 可随运行时状态恢复
 - 每季度跑一次 `verify-stage3-dr`，它能证明源码级 SQLite WAL 备份恢复与 checksum 校验
 - 风险较高的 runtime 发布前跑一次 `verify-live-dispatcher-dr`，它能启动本地 live dispatcher、执行真实 HTTP 写入，并覆盖 SIGKILL 替换恢复、磁盘损坏后恢复和双 stateDir 多节点恢复一致性；它仍不替代真实生产 quorum / fencing / DNS 切流演练
 - 先切 read-only，再做 restore
