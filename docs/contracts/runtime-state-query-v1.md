@@ -158,7 +158,7 @@
 - `primary`
 
 当前主线只把 `shadow-write` 作为稳定用法写进主文档。
-`primary` 目前仍不是默认启用能力；生产 cutover 预检会把未完成的切换条件报告为 `primary_unsupported` / `primary_store_not_implemented`。`@forgeflow/dispatcher-store-postgres` 已提供 primary snapshot 的包级 load/save 原语，dispatcher runtime-state 层已有 `loadRuntimeStateAsync()` / `saveRuntimeStateAsync()` 的 Postgres backend 入口，HTTP route 主链和 `/api/query/*` 已通过 async state path 读写 primary snapshot。
+`primary` 目前仍不是默认启用能力；`DISPATCHER_SHADOW_MODE=primary` 仍会报告 `primary_unsupported` / `primary_store_not_implemented`，避免把 shadow mode 误当 primary store 开关。真正 primary store 切换入口是 `RUNTIME_STATE_BACKEND=postgres` + `DISPATCHER_PRIMARY_POSTGRES_URL`，生产 cutover 预检会校验该 primary backend 配置。`@forgeflow/dispatcher-store-postgres` 已提供 primary snapshot 的包级 load/save 原语，dispatcher runtime-state 层已有 `loadRuntimeStateAsync()` / `saveRuntimeStateAsync()` 的 Postgres backend 入口，HTTP route 主链和 `/api/query/*` 已通过 async state path 读写 primary snapshot。
 
 当前落地行为：
 
@@ -177,7 +177,8 @@
 - shadow 同步失败不会阻断 SQLite 主链写入
 - shadow 同步失败会通过 `/api/dr/status.shadowWrite` 暴露最后一次 durable health 状态，但不会阻断 SQLite 主链写入
 - Postgres 当前默认仍是 shadow projection / queue shadow；只有显式 `RUNTIME_STATE_BACKEND=postgres` 才使用 primary snapshot backend
-- `DISPATCHER_SHADOW_MODE=primary` 不会把 Postgres 切为 truth source；当前 runtime 会拒绝该写入模式，避免把 shadow projection 误当主存储
+- `DISPATCHER_SHADOW_MODE=primary` 不会把 Postgres 切为 truth source；当前 runtime 会拒绝该 shadow 写入模式，避免把 shadow projection 误当主存储
+- `pnpm verify:shadow-cutover` 会要求 shadow 已配置且零 drift，同时要求 `RUNTIME_STATE_BACKEND=postgres` 和 `DISPATCHER_PRIMARY_POSTGRES_URL` 已配置
 - Postgres primary snapshot 原语提供底层表与 JSONB snapshot 读写；同步 `loadRuntimeState()` / `saveRuntimeState()` 在 `RUNTIME_STATE_BACKEND=postgres` 下会显式失败，HTTP route 主链和 `/api/query/*` 使用 async state API
 - `/api/query/*` 在 SQLite backend 下仍读取 SQLite structured projection；在 Postgres backend 下读取 primary snapshot，并由 `/api/query/projection-health` 对同一 primary snapshot 输出计数一致性
 

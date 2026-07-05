@@ -16,7 +16,7 @@
     "verify:stage3:live": "node scripts/verify-live-dispatcher-dr.mjs",
     "verify:shadow-drift": "node scripts/check-shadow-drift.mjs .forgeflow-dispatcher",
     "verify:shadow-drift:reconcile": "node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --reconcile --record-alert",
-    "verify:shadow-cutover": "node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --require-configured --max-mismatches 0 --max-delta 0",
+    "verify:shadow-cutover": "node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --require-configured --require-primary-backend --max-mismatches 0 --max-delta 0",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   },

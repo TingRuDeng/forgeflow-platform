@@ -142,6 +142,66 @@ describe("shadow drift verification", () => {
     });
   }, 30_000);
 
+  it("fails cutover readiness when postgres primary backend is not selected", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-drift-"));
+    const result = spawnSync("node", [checkShadowDriftScriptPath, stateDir, "--require-primary-backend"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "disabled",
+        DISPATCHER_QUEUE_SHADOW_MODE: "disabled",
+        DISPATCHER_POSTGRES_URL: "",
+        RUNTIME_STATE_BACKEND: "sqlite",
+        DISPATCHER_PRIMARY_POSTGRES_URL: "postgres://example.invalid/forgeflow",
+      },
+    });
+
+    expect(result.status).toBe(2);
+    const payload = JSON.parse(result.stdout);
+    expect(payload.primaryBackend).toEqual({
+      required: true,
+      ready: false,
+      reason: "primary_backend_not_selected",
+    });
+    expect(payload.cutover).toEqual({
+      required: true,
+      ready: false,
+      reason: "primary_backend_not_selected",
+    });
+  }, 30_000);
+
+  it("accepts cutover readiness when postgres primary backend env is configured", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-drift-"));
+    const result = spawnSync("node", [checkShadowDriftScriptPath, stateDir, "--require-primary-backend"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "disabled",
+        DISPATCHER_QUEUE_SHADOW_MODE: "disabled",
+        DISPATCHER_POSTGRES_URL: "",
+        RUNTIME_STATE_BACKEND: "postgres",
+        DISPATCHER_PRIMARY_POSTGRES_URL: "postgres://example.invalid/forgeflow",
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const payload = JSON.parse(result.stdout);
+    expect(payload.primaryBackend).toEqual({
+      required: true,
+      ready: true,
+      reason: "primary_backend_configured",
+    });
+    expect(payload.cutover).toEqual({
+      required: true,
+      ready: true,
+      reason: "cutover_ready",
+    });
+  }, 30_000);
+
   it("rejects invalid environment threshold values", () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-drift-"));
     const result = spawnSync("node", [checkShadowDriftScriptPath, stateDir], {
