@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M43 串行：把 Trae automation gateway route / session / chat handler 抽到共享 core。
+- [x] M43 串行：运行最小充分验证并补充 review 小结。
+
+## M43 Review 小结
+
+已在 `packages/automation-gateway-core` 新增共享 gateway handler，把 `GET /ready`、session 查询 / release / prepare 和 `POST /v1/chat` 的 route、session conflict、request fingerprint、cached response、progress touch、timeout 归一化和 automation error envelope 集中到 `handleAutomationGatewayRequest`。`scripts/lib/trae-automation-gateway.ts` 与 `packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts` 都改为薄 adapter，分别只保留 HTTP server/body/error writer、debug logger、Trae driver 创建和 session-store 注入。新增 thin-adapter 测试防止 `/v1/chat` handler 逻辑回流到脚本侧或 packaged runtime。
+
+Review Gate：finished。Spec 符合度通过，本轮按 Trae gateway 去重计划推进共享 handler 抽取，没有改变 HTTP route 名称、session-store 文件格式、driver 行为或 timeout 语义；安全检查通过，未新增 secret、外部网络调用、命令拼接、mock 成功路径或静默 fallback，session 冲突仍显式返回 `SESSION_CONFLICT`；复杂度检查通过，新增共享文件均低于 300 行，`gateway-handler.ts` 296 行，新增 helper 函数均低于 50 行；Document-refresh: needed，原因：Trae gateway 重复实现边界变化，已同步 README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @tingrudeng/automation-gateway-core exec vitest run tests/gateway-handler.test.ts` 先失败于缺少共享 handler 导出；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-gateway-thin-adapter.test.ts` 先失败于缺少共享 handler 文件。GREEN 后 `CI=true pnpm --filter @tingrudeng/automation-gateway-core test` 通过，2 个测试文件、9 个测试通过；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-gateway.test.ts tests/modules/server/trae-automation-gateway-helpers.test.ts tests/modules/server/trae-automation-gateway-thin-adapter.test.ts` 通过，33 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime test` 通过，19 个测试文件、174 个测试通过；`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json`、`CI=true pnpm exec tsc -p scripts/tsconfig.json`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：route / session / chat handler 已去重；脚本侧和 packaged runtime 仍各自保留 HTTP server 启动、debug logger、driver adapter 与 session-store wrapper。后续如果继续收敛，应优先抽这些 adapter 小模块，而不是再复制 handler 逻辑。
+
 - [x] M42 串行：把 packaged Trae automation gateway 补齐脚本侧 chat session 语义。
 - [x] M42 串行：运行最小充分验证并补充 review 小结。
 

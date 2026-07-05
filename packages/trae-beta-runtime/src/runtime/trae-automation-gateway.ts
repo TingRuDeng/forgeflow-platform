@@ -1,13 +1,15 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 
+import {
+  ApiError,
+  handleAutomationGatewayRequest,
+  normalizeApiError,
+  type AutomationGatewayDriver,
+} from "@tingrudeng/automation-gateway-core";
+
 import { normalizeAutomationError } from "./trae-automation-errors.js";
 import { DEFAULT_STATE_DIR, createSessionStore, type SessionStore } from "./trae-automation-session-store.js";
 import { createTraeAutomationDriver } from "./trae-dom-driver.js";
-
-interface DiscoveryHints {
-  titleContains?: string[];
-  urlContains?: string[];
-}
 
 interface HttpRequestInput {
   method?: string;
@@ -29,30 +31,8 @@ interface ApiErrorResponse {
   details: Record<string, unknown>;
 }
 
-interface AutomationSendPromptResult extends Record<string, unknown> {
-  response?: {
-    text?: string;
-  };
-}
-
-interface AutomationDriver {
-  getReadiness: (input: { discovery?: DiscoveryHints | null }) => Promise<Record<string, unknown>>;
-  prepareSession: (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  sendPrompt: (input: {
-    content: string;
-    sessionId: string | null;
-    expectedTaskId?: string | null;
-    prepare: boolean;
-    discovery: unknown;
-    chatMode?: string | null;
-    responseRequiredPrefix: unknown;
-    responseTimeoutMs: unknown;
-    onProgress?: (details: { responseDetected?: boolean }) => void;
-  }) => Promise<AutomationSendPromptResult>;
-}
-
 interface HandleTraeAutomationHttpRequestOptions {
-  automationDriver?: AutomationDriver;
+  automationDriver?: AutomationGatewayDriver;
   automationOptions?: Record<string, unknown>;
   sessionStore?: SessionStore | null;
   debugLog?: (event: string, details?: Record<string, unknown>) => void;
@@ -62,7 +42,7 @@ interface StartTraeAutomationGatewayOptions {
   host?: string;
   port?: number;
   stateDir?: string | null;
-  automationDriver?: AutomationDriver;
+  automationDriver?: AutomationGatewayDriver;
   automationOptions?: Record<string, unknown>;
   sessionStore?: SessionStore | null;
   logger?: Pick<typeof console, "log" | "warn">;
@@ -78,32 +58,6 @@ export interface StartedTraeAutomationGateway {
   close: () => Promise<void>;
 }
 
-class ApiError extends Error {
-  code: string;
-  statusCode: number;
-  details: Record<string, unknown>;
-
-  constructor(code: string, message: string, statusCode: number, details: Record<string, unknown> = {}) {
-    super(message);
-    this.name = "ApiError";
-    this.code = code;
-    this.statusCode = statusCode;
-    this.details = details;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readOptionalString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
 function writeJson(
   res: ServerResponse,
   statusCode: number,
@@ -114,14 +68,7 @@ function writeJson(
 }
 
 function writeError(res: ServerResponse, error: unknown) {
-  const normalized = error instanceof ApiError
-    ? error
-    : new ApiError(
-      isRecord(error) && typeof error.code === "string" ? error.code : "INTERNAL_ERROR",
-      error instanceof Error ? error.message : "Internal server error",
-      500,
-      isRecord(error) && isRecord(error.details) ? error.details : {},
-    );
+  const normalized = normalizeApiError(error);
   writeJson(res, normalized.statusCode, {
     success: false,
     code: normalized.code,
@@ -159,55 +106,8 @@ function createDebugLogger(
   };
 }
 
-function parseDiscoveryFromQuery(query: Record<string, string | undefined> = {}): DiscoveryHints | null {
-  const titleContains = String(query.title_contains || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const urlContains = String(query.url_contains || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  const discovery: DiscoveryHints = {};
-  if (titleContains.length > 0) {
-    discovery.titleContains = titleContains;
-  }
-  if (urlContains.length > 0) {
-    discovery.urlContains = urlContains;
-  }
-  return Object.keys(discovery).length > 0 ? discovery : null;
-}
-
-function toAutomationErrorPayload(
-  error: unknown,
-  fallbackCode: string,
-): { code: string; message: string; details: Record<string, unknown> } {
-  const normalized = normalizeAutomationError(error, fallbackCode) as Error & {
-    code?: string;
-    details?: Record<string, unknown>;
-  };
-
-  return {
-    code: normalized.code || fallbackCode,
-    message: normalized.message || "Trae automation failed",
-    details: isRecord(normalized.details) ? normalized.details : {},
-  };
-}
-
-function isTimeoutError(error: unknown): boolean {
-  if (!error) {
-    return false;
-  }
-
-  const errorRecord = error as Record<string, unknown>;
-  if (errorRecord.code === "AUTOMATION_RESPONSE_TIMEOUT") {
-    return true;
-  }
-
-  const message = error instanceof Error ? error.message : String(errorRecord.message || "");
-  return /request timeout/i.test(message)
-    || /timed out waiting for trae to finish responding/i.test(message);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -241,243 +141,23 @@ export async function handleTraeAutomationHttpRequest(
   options: HandleTraeAutomationHttpRequestOptions = {},
 ): Promise<{ status: number; json: ApiSuccessResponse<unknown> | ApiErrorResponse }> {
   const automationDriver = (options.automationDriver
-    || createTraeAutomationDriver(options.automationOptions || {})) as AutomationDriver;
-  const sessionStore = options.sessionStore || null;
-  const debugLog = options.debugLog || (() => {});
-  const method = String(input.method || "GET").toUpperCase();
-  const pathname = input.pathname || "/";
-  const query = input.query || {};
-  const body = isRecord(input.body) ? input.body : {};
-  debugLog("request.received", { method, pathname });
-
-  if (method === "GET" && pathname === "/ready") {
-    debugLog("ready.start", { discovery: parseDiscoveryFromQuery(query) });
-    const readiness = await automationDriver.getReadiness({
-      discovery: parseDiscoveryFromQuery(query),
-    });
-    debugLog("ready.done", {
-      ready: Boolean((readiness as { ready?: boolean }).ready),
-    });
-    return {
-      status: 200,
-      json: {
-        success: true,
-        code: "OK",
-        data: readiness,
-      },
-    };
-  }
-
-  if (method === "GET" && pathname.startsWith("/v1/sessions/")) {
-    const sessionId = pathname.slice("/v1/sessions/".length);
-    if (!sessionId) {
-      throw new ApiError("INVALID_REQUEST", "sessionId is required", 400);
-    }
-    if (!sessionStore) {
-      throw new ApiError("SESSION_STORE_NOT_CONFIGURED", "Session store is not configured", 500);
-    }
-
-    const session = sessionStore.get(sessionId);
-    if (!session) {
-      throw new ApiError("SESSION_NOT_FOUND", `Session ${sessionId} not found`, 404);
-    }
-
-    debugLog("session.get.done", {
-      sessionId,
-      status: (session as { status?: string }).status || null,
-      responseDetected: Boolean((session as { responseDetected?: boolean }).responseDetected),
-      hasResponseText: Boolean((session as { responseText?: string | null }).responseText),
-    });
-    return {
-      status: 200,
-      json: {
-        success: true,
-        code: "OK",
-        data: session,
-      },
-    };
-  }
-
-  if (method === "POST" && pathname.startsWith("/v1/sessions/") && pathname.endsWith("/release")) {
-    const sessionId = pathname.slice("/v1/sessions/".length, -"/release".length);
-    if (!sessionId) {
-      throw new ApiError("INVALID_REQUEST", "sessionId is required", 400);
-    }
-    if (!sessionStore) {
-      throw new ApiError("SESSION_STORE_NOT_CONFIGURED", "Session store is not configured", 500);
-    }
-
-    const released = sessionStore.release(sessionId);
-    debugLog("session.release", { sessionId, released });
-    return {
-      status: 200,
-      json: {
-        success: true,
-        code: "OK",
-        data: {
-          sessionId,
-          released,
-        },
-      },
-    };
-  }
-
-  if (method === "POST" && pathname === "/v1/sessions/prepare") {
-    debugLog("session.prepare.start", {
-      requestedSessionId: readOptionalString(body.sessionId),
-      chatMode: readOptionalString(body.chatMode),
-    });
-    try {
-      let sessionId = readOptionalString(body.sessionId);
-
-      if (sessionStore) {
-        const session = sessionStore.create({
-          ...(sessionId ? { sessionId } : {}),
-          requestFingerprint: readOptionalString(body.content),
-        });
-        sessionId = session.sessionId;
-      }
-
-      const result = await automationDriver.prepareSession(body);
-
-      if (sessionStore && sessionId) {
-        sessionStore.markRunning(sessionId);
-      }
-      debugLog("session.prepare.done", { sessionId });
-
-      return {
-        status: 200,
-        json: {
-          success: true,
-          code: "OK",
-          data: {
-            ...result,
-            ...(sessionId ? { sessionId } : {}),
-          },
-        },
+    || createTraeAutomationDriver(options.automationOptions || {})) as AutomationGatewayDriver;
+  return handleAutomationGatewayRequest(input, {
+    automationDriver,
+    sessionStore: options.sessionStore || null,
+    debugLog: options.debugLog,
+    normalizeAutomationError: (error, fallbackCode) => {
+      const normalized = normalizeAutomationError(error, fallbackCode) as Error & {
+        code?: string;
+        details?: Record<string, unknown>;
       };
-    } catch (error) {
-      debugLog("session.prepare.error", {
-        message: error instanceof Error ? error.message : String(error),
-      });
-      const normalized = toAutomationErrorPayload(error, "AUTOMATION_PREPARE_FAILED");
       return {
-        status: 502,
-        json: {
-          success: false,
-          code: normalized.code,
-          message: normalized.message,
-          details: normalized.details,
-        },
+        code: normalized.code || fallbackCode,
+        message: normalized.message || "Trae automation failed",
+        details: normalized.details || {},
       };
-    }
-  }
-
-  if (method === "POST" && pathname === "/v1/chat") {
-    const content = String(body.content || "").trim();
-    if (!content) {
-      throw new ApiError("INVALID_REQUEST", "content is required", 400);
-    }
-
-    const sessionId = readOptionalString(body.sessionId);
-    let session: ReturnType<SessionStore["getInternal"]> = null;
-    debugLog("chat.start", {
-      sessionId,
-      contentLength: content.length,
-      contentPreview: content.slice(0, 120),
-      chatMode: typeof body.chatMode === "string" ? body.chatMode : null,
-      responseRequiredPrefix: readOptionalString(body.responseRequiredPrefix),
-      responseTimeoutMs: typeof body.responseTimeoutMs === "number" ? body.responseTimeoutMs : null,
-    });
-    if (sessionStore && sessionId) {
-      session = sessionStore.getInternal(sessionId);
-      if (session && session.status === "completed" && session.responseText) {
-        return {
-          status: 200,
-          json: {
-            success: true,
-            code: "OK",
-            data: {
-              status: "ok",
-              response: { text: session.responseText },
-              cached: true,
-            },
-          },
-        };
-      }
-      if (session && session.status === "running") {
-        throw new ApiError("SESSION_CONFLICT", `Session ${sessionId} is already running`, 409);
-      }
-      if (session && session.requestFingerprint && session.requestFingerprint !== content) {
-        throw new ApiError("SESSION_CONFLICT", `Session ${sessionId} request fingerprint mismatch`, 409);
-      }
-    }
-
-    if (sessionStore && sessionId && session) {
-      sessionStore.markRunning(sessionId);
-    }
-
-    try {
-      const result = await automationDriver.sendPrompt({
-        content,
-        sessionId,
-        expectedTaskId: readOptionalString(body.expectedTaskId),
-        prepare: body.prepare !== false,
-        discovery: body.discovery || null,
-        chatMode: typeof body.chatMode === "string" ? body.chatMode : null,
-        responseRequiredPrefix: body.responseRequiredPrefix || null,
-        responseTimeoutMs: body.responseTimeoutMs || null,
-        onProgress: sessionStore && sessionId ? (details) => {
-          sessionStore.touchActivity(sessionId, details);
-        } : undefined,
-      });
-
-      if (sessionStore && sessionId) {
-        sessionStore.markCompleted(sessionId, {
-          responseText: result.response?.text || "",
-        });
-      }
-      debugLog("chat.done", {
-        sessionId,
-        hasResponseText: Boolean(result.response?.text),
-        responseLength: String(result.response?.text || "").length,
-      });
-
-      return {
-        status: 200,
-        json: {
-          success: true,
-          code: "OK",
-          data: result,
-        },
-      };
-    } catch (error) {
-      debugLog("chat.error", {
-        sessionId,
-        message: error instanceof Error ? error.message : String(error),
-        timeout: isTimeoutError(error),
-      });
-      if (sessionStore && sessionId && !isTimeoutError(error)) {
-        sessionStore.markFailed(
-          sessionId,
-          error instanceof Error ? error.message : "Unknown error",
-        );
-      }
-
-      const normalized = toAutomationErrorPayload(error, "AUTOMATION_REQUEST_FAILED");
-      return {
-        status: 502,
-        json: {
-          success: false,
-          code: normalized.code,
-          message: normalized.message,
-          details: normalized.details,
-        },
-      };
-    }
-  }
-
-  throw new ApiError("NOT_FOUND", "Not found", 404);
+    },
+  });
 }
 
 export function startTraeAutomationGateway(
@@ -493,7 +173,7 @@ export function startTraeAutomationGateway(
     || createTraeAutomationDriver({
       ...(options.automationOptions || {}),
       debug: debugEnabled,
-    })) as AutomationDriver;
+    })) as AutomationGatewayDriver;
   const sessionStore = options.sessionStore === null
     ? null
     : options.sessionStore || createSessionStore(stateDir);

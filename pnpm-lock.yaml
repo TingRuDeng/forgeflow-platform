@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@tingrudeng/automation-gateway-core':
+        specifier: workspace:*
+        version: link:packages/automation-gateway-core
       pino:
         specifier: ^9.6.0
         version: 9.14.0
