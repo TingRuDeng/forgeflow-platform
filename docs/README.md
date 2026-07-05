@@ -391,7 +391,7 @@ vNext runtime reliability 推进：
 - `runbooks/stage3-core-platform-operations.md`
   - 阶段三核心底座操作入口。
   - 收口 structured reads、shadow write、SLO、DR 与参考部署。
-  - shadow drift 默认 gate 保持只读；生产巡检可用 `pnpm verify:shadow-drift:reconcile` 显式对账并记录 drift alert，primary-store cutover 前必须通过 `pnpm verify:shadow-cutover:drill`，该 drill 会串行执行 drift gate、reconcile + alert 记录和 strict cutover preflight。
+  - shadow drift 默认 gate 保持只读；生产巡检可用 `pnpm verify:shadow-drift:reconcile` 显式对账并记录 drift alert，primary-store cutover 前必须通过 `pnpm verify:shadow-cutover:drill`，该 drill 会串行执行 drift gate、reconcile + alert 记录和 strict cutover preflight；需要归档变更证据时使用 `pnpm verify:shadow-cutover:drill:evidence` 或 `--output <path>`。
   - Postgres primary snapshot 已有 async state path，`/api/query/*` 在 Postgres backend 下读取 primary snapshot；完整切换仍需外部存储运维确认和真实生产变更窗口。
 - `runbooks/single-machine-deployment.md`
   - 阶段一单机控制面部署与恢复入口。

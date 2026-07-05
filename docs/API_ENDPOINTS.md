@@ -198,7 +198,7 @@ Current endpoint families:
   - `shadowWrite` 会合并 stateDir 下的 `runtime-state-shadow-status.json`，因此 dispatcher 重启后仍能显示最后一次 shadow 写入结果。
   - Shadow projection / queue count drift 通过 `node scripts/check-shadow-drift.mjs <stateDir>` 做 operator check；该检查需要异步访问 Postgres，因此不塞进同步 `/api/dr/status` handler。
   - `check-shadow-drift.mjs` 支持 `--max-mismatches` / `--max-delta` 或环境变量 `DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES` / `DISPATCHER_SHADOW_DRIFT_MAX_DELTA` 输出 alert 摘要；支持 `--reconcile` 或 `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1` 主动重放 shadow；支持 `--record-alert` 或 `DISPATCHER_SHADOW_DRIFT_RECORD_ALERT=1` 写入 `shadow_drift_detected` system event；支持 `--require-configured` 或 `DISPATCHER_SHADOW_DRIFT_REQUIRE_CONFIGURED=1` 校验 shadow 配置，支持 `--require-primary-backend` 或 `DISPATCHER_PRIMARY_BACKEND_REQUIRE_CONFIGURED=1` 校验 `RUNTIME_STATE_BACKEND=postgres` 与 `DISPATCHER_PRIMARY_POSTGRES_URL`。
-  - `verify-shadow-cutover-drill.mjs` / `pnpm verify:shadow-cutover:drill` 会串行执行 drift gate、`--reconcile --record-alert` 和 strict `--require-configured --require-primary-backend --max-mismatches 0 --max-delta 0` preflight，并输出每个 phase 的结构化结果。
+  - `verify-shadow-cutover-drill.mjs` / `pnpm verify:shadow-cutover:drill` 会串行执行 drift gate、`--reconcile --record-alert` 和 strict `--require-configured --require-primary-backend --max-mismatches 0 --max-delta 0` preflight，并输出每个 phase 的结构化结果；追加 `--output <path>` 或使用 `pnpm verify:shadow-cutover:drill:evidence` 可把同一 payload 原子写入证据文件。
   - 如果环境误设 `DISPATCHER_SHADOW_MODE=primary`，shadow drift / cutover 检查会返回 `primary_unsupported`，runtime shadow 写入会记录 `primary_store_not_implemented`。
 
 ### Structured reads, read-only, and shadow modes

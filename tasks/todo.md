@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M40 串行：为 shadow production cutover drill 增加可归档证据文件输出。
+- [x] M40 串行：运行最小充分验证并补充 review 小结。
+
+## M40 Review 小结
+
+已为 `scripts/verify-shadow-cutover-drill.mjs` 增加 `--output <path>`，drill 的 stdout payload 会被原子写入指定 JSON 文件；新增 `pnpm verify:shadow-cutover:drill:evidence`，默认把证据写到 `.forgeflow-dispatcher/shadow-cutover-drill.json`。这让 production cutover 前的 drift gate、reconcile + alert、strict preflight 三阶段结果可以直接归档，而不是依赖终端复制。
+
+Review Gate：finished。Spec 符合度通过，本轮补齐 production cutover drill 的证据文件输出，未改变 drift gate、reconcile、strict preflight 的判定语义，也没有隐式切换 primary store；安全检查通过，`--output` 只写 operator 显式指定路径或 `.forgeflow-dispatcher/shadow-cutover-drill.json`，未新增 secret、外部网络调用、mock 成功路径或静默 fallback；复杂度检查通过，`verify-shadow-cutover-drill.mjs` 127 行，新增函数低于 50 行，测试文件 280 行；Document-refresh: needed，原因：新增 cutover drill evidence 命令和 `--output` 操作契约，已同步 README、docs/README、API endpoints、runtime-state query 契约、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts` 先失败于 `--output` 不支持；GREEN 后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts tests/modules/execution/workflows.test.ts` 通过，15 个测试通过；`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：该命令让 cutover 演练证据可归档，但真实 primary-store 生产切换仍需要外部 Postgres / queue 运维确认和变更窗口执行。
+
 - [x] M39 串行：把 worker daemon dist bootstrap 收敛到显式 runtime-bootstrap adapter。
 - [x] M39 串行：运行最小充分验证并补充 review 小结。
 
