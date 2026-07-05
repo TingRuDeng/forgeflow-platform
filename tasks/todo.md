@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M20 串行：补齐 dispatcher runtime-state async Postgres load/save API。
+- [x] M20 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M20 Review 小结
+
+已补齐 dispatcher runtime-state 层 async Postgres load/save API：`loadRuntimeStateAsync()` / `saveRuntimeStateAsync()` 在 `RUNTIME_STATE_BACKEND=postgres` 时走 `DISPATCHER_PRIMARY_POSTGRES_URL` 和 `@forgeflow/dispatcher-store-postgres` 的 primary snapshot 原语；同步 `loadRuntimeState()` / `saveRuntimeState()` 在 postgres backend 下会显式失败，避免调用方误用同步路径。SQLite / JSON backend 行为保持不变。
+
+Review Gate：finished。Spec 符合度通过，本轮把 Postgres primary 从包级原语推进到 dispatcher runtime-state async API；安全检查通过，未新增 secret、隐式切主或静默 fallback，缺少 `DISPATCHER_PRIMARY_POSTGRES_URL` 会显式失败；复杂度检查局部通过，新增 `runtime-state-postgres.ts` 40 行、测试 96 行，`runtime-state.ts` 是既有超大文件，本轮只新增顶部桥接逻辑不做无关拆分；Document-refresh: needed，原因：runtime-state 层 Postgres backend 能力和剩余 HTTP route cutover 边界变化，已同步 runtime-state query 契约、Stage 3 runbook 和技术债。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state-postgres.test.ts`、`CI=true pnpm --filter @forgeflow/dispatcher-store-postgres test`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
+
+剩余风险：dispatcher HTTP route 主链仍调用同步 `handleDispatcherHttpRequest()` / `withState()`；真实 production primary-store cutover 仍需要把 HTTP server 接到 async state path。
+
 - [x] M19 串行：补齐 Postgres primary runtime-state snapshot 包级原语。
 - [x] M19 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 

@@ -107,7 +107,7 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - 如果需要把 drift 留作运行时告警证据，operator 可追加 `--record-alert` 写入 `shadow_drift_detected` system event
 - 生产 cutover 前必须执行 `pnpm verify:shadow-cutover`，该命令要求 shadow 已配置并且 `--max-mismatches 0 --max-delta 0` 通过；未配置 shadow 时会失败，而不是把 `not_configured` 当成可切换状态
 - 当前 `DISPATCHER_SHADOW_MODE=primary` 会被明确拒绝为 `primary_store_not_implemented`；不要把它作为生产切换开关
-- `@forgeflow/dispatcher-store-postgres` 已有 primary snapshot 表原语，但 dispatcher 尚未把同步 state path 切到 Postgres primary
+- `@forgeflow/dispatcher-store-postgres` 已有 primary snapshot 表原语，dispatcher runtime-state 层已有 async Postgres load/save API；HTTP route 主链尚未切到该 async state path
 - `pnpm verify:stage3` 和 release workflow 会执行 `pnpm verify:shadow-drift`，shadow 配置存在且 drifted 时必须阻断 rollout / release
 - assignment delivery queue 影子计数合理
 
