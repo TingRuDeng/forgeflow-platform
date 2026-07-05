@@ -13,6 +13,14 @@ export {
   startAutomationGatewayHttpServer,
 } from "./gateway-http-server.js";
 
+export {
+  AUTOMATION_SESSION_RESTART_ERROR,
+  AUTOMATION_SESSION_TTL_MS,
+  AutomationSessionStatus,
+  createPersistentAutomationSessionStore,
+  getAutomationSessionPublicShape,
+} from "./session-store.js";
+
 export type {
   AutomationGatewayDriver,
   AutomationGatewayRequest,
@@ -28,6 +36,15 @@ export type {
   StartedAutomationGatewayHttpServer,
   StartAutomationGatewayHttpServerOptions,
 } from "./gateway-http-server.js";
+
+export type {
+  AutomationSessionPublic,
+  AutomationSessionRecord,
+  AutomationSessionStatusValue,
+  AutomationSessionStore,
+  AutomationSessionStoreOptions,
+  CreateAutomationSessionParams,
+} from "./session-store.js";
 
 export {
   getLastReportFieldValue,
