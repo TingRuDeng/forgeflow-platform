@@ -83,7 +83,8 @@ function evidenceCountClass(hasDifference: boolean): string {
 const EvidenceComparison: React.FC<{
   bundles: ArtifactBundle[];
   reviewByTask: Map<string, ReviewSummary | undefined>;
-}> = ({ bundles, reviewByTask }) => {
+  taskById: Map<string, TaskSummary>;
+}> = ({ bundles, reviewByTask, taskById }) => {
   const { t } = useTranslation();
   if (bundles.length < 2) return null;
   const reviews = bundles.map((bundle) => reviewByTask.get(bundle.taskId));
@@ -109,6 +110,20 @@ const EvidenceComparison: React.FC<{
         {riskCounts.map(([risk, count]) => (
           <span key={`risk-${risk}`} className={evidenceCountClass(hasRiskDiff)}>{risk} {count}</span>
         ))}
+      </div>
+      <div className="mt-3">
+        <div className="text-[11px] uppercase tracking-wide text-white/45">{t('artifactEvidenceSideBySide')}</div>
+        <div className="mt-2 grid grid-cols-1 gap-1 md:grid-cols-2">
+          {bundles.map((bundle) => {
+            const task = taskById.get(bundle.taskId);
+            const review = reviewByTask.get(bundle.taskId);
+            return (
+              <div key={`evidence-row-${bundle.bundleId || bundle.taskId}`} className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] text-white/60">
+                {task?.title || bundle.taskId} | {review?.evidence?.reasonCode || '--'} | {review?.riskAssessment?.level || '--'}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -167,7 +182,7 @@ export const ArtifactWorkbench: React.FC<ArtifactWorkbenchProps> = ({
 
       {filteredBundles.length > 0 ? (
         <div className="grid grid-cols-1 gap-2">
-          <EvidenceComparison bundles={filteredBundles} reviewByTask={reviewByTask} />
+          <EvidenceComparison bundles={filteredBundles} reviewByTask={reviewByTask} taskById={taskById} />
           {filteredBundles.map((bundle) => {
             const task = taskById.get(bundle.taskId);
             const review = reviewByTask.get(bundle.taskId);
