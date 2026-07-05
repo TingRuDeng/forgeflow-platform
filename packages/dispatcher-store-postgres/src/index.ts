@@ -24,6 +24,50 @@ export async function ensureShadowProjectionTables(client: PgClientLike): Promis
   `);
 }
 
+export async function ensurePrimaryRuntimeStateTables(client: PgClientLike): Promise<void> {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS dispatcher_runtime_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      sequence BIGINT NOT NULL,
+      payload_json JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+}
+
+export async function savePrimaryRuntimeStateSnapshot(
+  client: PgClientLike,
+  state: { sequence?: number; updatedAt?: string } & Record<string, unknown>,
+): Promise<void> {
+  await ensurePrimaryRuntimeStateTables(client);
+  await client.query(`
+    INSERT INTO dispatcher_runtime_state (id, sequence, payload_json, updated_at)
+    VALUES (1, $1, $2::jsonb, COALESCE($3::timestamptz, NOW()))
+    ON CONFLICT (id)
+    DO UPDATE SET
+      sequence = EXCLUDED.sequence,
+      payload_json = EXCLUDED.payload_json,
+      updated_at = EXCLUDED.updated_at
+  `, [
+    Number(state.sequence ?? 0),
+    JSON.stringify(state),
+    state.updatedAt ?? null,
+  ]);
+}
+
+export async function loadPrimaryRuntimeStateSnapshot<T>(
+  client: PgClientLike,
+): Promise<T | null> {
+  await ensurePrimaryRuntimeStateTables(client);
+  const result = await client.query(`
+    SELECT payload_json
+    FROM dispatcher_runtime_state
+    WHERE id = 1
+  `);
+  const row = result.rows[0];
+  return row ? row.payload_json as T : null;
+}
+
 export async function applyShadowProjection(
   client: PgClientLike,
   snapshot: SqlProjectionSnapshot,
