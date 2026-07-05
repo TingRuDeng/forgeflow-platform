@@ -521,7 +521,7 @@ describe('ArtifactWorkbench', () => {
     expect(screen.getByText(/submitResult exhausted retries/i)).toBeInTheDocument();
     expect(screen.queryByText(/docs verification passed/i)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText(/Fix auth gate/i));
+    fireEvent.click(screen.getAllByText(/^Fix auth gate$/i)[0]);
 
     expect(onSelectTask).toHaveBeenCalledWith('task-1');
   });
@@ -603,6 +603,19 @@ describe('ArtifactWorkbench', () => {
             summary: 'docs updated',
             changedFiles: [{ path: 'docs/README.md' }],
             refs: { report: 'artifact://bundle-docs/report.md' },
+            trajectory: {
+              schemaVersion: 'artifact-trajectory/v1',
+              steps: [
+                {
+                  sequence: 1,
+                  phase: 'verification',
+                  action: 'verify docs index',
+                  observation: 'docs checklist passed',
+                  status: 'succeeded',
+                  command: 'pnpm docs:validate',
+                },
+              ],
+            },
           },
         ]}
       />
@@ -621,7 +634,7 @@ describe('ArtifactWorkbench', () => {
     expect(screen.getByText(/证据差异|evidence differences/i)).toBeInTheDocument();
     expect(screen.getByText(/原因码.*2|reasoncode.*2/i)).toBeInTheDocument();
     expect(screen.getByText(/风险.*2|risk.*2/i)).toBeInTheDocument();
-    expect(screen.getByText(/并排详情|side-by-side details/i)).toBeInTheDocument();
+    expect(screen.getByText(/^(并排详情|side-by-side details)$/i)).toBeInTheDocument();
     const trajectorySummary = within(screen.getByTestId('artifact-workbench-trajectory-bundle-auth'));
     expect(trajectorySummary.getByText(/轨迹|trajectory/i)).toBeInTheDocument();
     expect(trajectorySummary.getByText('2')).toBeInTheDocument();
@@ -629,6 +642,11 @@ describe('ArtifactWorkbench', () => {
     expect(trajectorySummary.getByText('1')).toBeInTheDocument();
     expect(trajectorySummary.getByText(/最后步骤|last step/i)).toBeInTheDocument();
     expect(trajectorySummary.getByText(/rerun auth regression/i)).toBeInTheDocument();
+    const trajectoryComparison = within(screen.getByTestId('artifact-workbench-trajectory-comparison'));
+    expect(trajectoryComparison.getByText(/轨迹并排详情|trajectory side-by-side/i)).toBeInTheDocument();
+    expect(trajectoryComparison.getByText(/^run auth regression$/i)).toBeInTheDocument();
+    expect(trajectoryComparison.getByText(/verify docs index/i)).toBeInTheDocument();
+    expect(trajectoryComparison.getByText(/pnpm docs:validate/i)).toBeInTheDocument();
     expect(screen.getByText(/Fix auth gate.*test_gap.*needs_human_attention/i)).toBeInTheDocument();
     expect(screen.getByText(/Update docs.*docs_ready.*low/i)).toBeInTheDocument();
     expect(screen.getByText(/artifact:\/\/bundle-auth\/diff.patch/i)).toBeInTheDocument();
@@ -652,8 +670,9 @@ describe('ArtifactWorkbench', () => {
 
     expect(screen.getByText(/auth diff ready/i)).toBeInTheDocument();
     expect(screen.queryByText(/docs updated/i)).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('artifact-workbench-trajectory-comparison')).queryByText(/verify docs index/i)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText(/Fix auth gate/i));
+    fireEvent.click(screen.getAllByText(/^Fix auth gate$/i)[0]);
 
     expect(onSelectTask).toHaveBeenCalledWith('task-1');
   });

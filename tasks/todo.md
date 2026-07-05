@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M103 串行：让 Console Artifact Workbench 支持跨任务 trajectory 并排详情。
 - [x] M102 串行：让 Console Artifact Workbench 支持 trajectory step 搜索和卡片轨迹摘要。
 - [x] M101 串行：把 Trae debugger wait / spawn 编排下沉到 automation-gateway-core。
 - [x] M100 串行：把 Trae launch target 构建下沉到 automation-gateway-core。
@@ -26,6 +27,16 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M103 Review 小结
+
+已新增 Console Artifact Workbench 级的跨任务 trajectory 并排详情区块。Workbench 现在会在筛选后的 artifact bundles 中收集带结构化 trajectory 的 bundle，按任务卡片并排展示每个 step 的 phase、status、action、observation、command 和 artifactRef，并支持从该区块点击回对应任务。这样审查者可以在跨任务视图中直接比较执行轨迹，不必只依赖每张卡片的轨迹摘要或进入单任务详情页。
+
+Review Gate：finished。Spec 符合度通过，当前实现只增强 Console Artifact Workbench 的前端展示，不改变 dispatcher artifact store、trajectory schema、artifact 文件 API、任务状态机或 worker result 合约。安全检查通过，未新增 secret、外部命令、网络写入、mock 成功路径或静默 fallback。复杂度检查通过，新增 `ArtifactWorkbenchTrajectoryComparison.tsx` 85 行，`ArtifactWorkbench.tsx` 255 行。Document-refresh: needed，原因：Console 审查工作台可见能力变化，已同步 README、docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx src/__tests__/App.test.tsx --maxWorkers=1`，2 个测试文件、22 个测试通过；`CI=true pnpm --filter console lint`；`CI=true pnpm --filter console build`；`CI=true pnpm typecheck`；`CI=true pnpm lint`；`CI=true pnpm docs:validate`；`python3 scripts/validate_docs.py . --profile generic`；`git diff --check`；提升权限运行 `CI=true pnpm test`，全量测试通过，其中 Console 7 个测试文件、36 个测试通过，dispatcher 60 个测试文件、548 个测试通过。
+
+剩余风险：Workbench 已能跨任务并排查看结构化 trajectory steps；按 step 展开 / 下载 artifactRef 正文仍在单任务详情 trajectory tab 和卡片 refs 区完成，Workbench 级 trajectory step artifact 文件内联展开不是本轮范围。
 
 ## M102 Review 小结
 
