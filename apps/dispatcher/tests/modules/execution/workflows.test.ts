@@ -45,9 +45,14 @@ describe("workflow quality gates", () => {
     expect(workflow).toContain("gh issue create");
     expect(workflow).toContain("Run shadow drift gate");
     expect(workflow).toContain("pnpm verify:shadow-drift");
+    expect(workflow).toContain("Verify published provider runtime smoke");
+    expect(workflow).toContain("node scripts/verify-published-runtime-smoke.mjs");
+    expect(workflow).toContain("--package ${{ inputs.package }}");
     expect(workflow.match(/pnpm verify:shadow-drift/g)?.length).toBe(2);
     expect(workflow.indexOf("pnpm verify:shadow-drift")).toBeLessThan(workflow.indexOf("npm publish"));
     expect(workflow.indexOf("npm publish")).toBeLessThan(workflow.indexOf("git push"));
+    expect(workflow.indexOf("npm publish")).toBeLessThan(workflow.indexOf("--package ${{ inputs.package }}"));
+    expect(workflow.indexOf("--package ${{ inputs.package }}")).toBeLessThan(workflow.indexOf("git commit"));
   });
 
   it("runs full verification before automatic npm publish", () => {
@@ -57,6 +62,8 @@ describe("workflow quality gates", () => {
 
     expect(publishAutoIndex).toBeGreaterThanOrEqual(0);
     expect(npmPublishIndex).toBeGreaterThan(publishAutoIndex);
+    const publishedSmokeIndex = workflow.indexOf("--package ${{ matrix.package.name }}", publishAutoIndex);
+    expect(publishedSmokeIndex).toBeGreaterThan(npmPublishIndex);
     for (const gate of [
       "Run lint",
       "Validate docs",

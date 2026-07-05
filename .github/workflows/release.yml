@@ -182,6 +182,12 @@ jobs:
           echo "published=true" >> "$GITHUB_OUTPUT"
           echo "✅ Published @tingrudeng/${{ inputs.package }}@${{ env.NEW_VERSION }}"
 
+      - name: Verify published provider runtime smoke
+        run: >
+          node scripts/verify-published-runtime-smoke.mjs
+          --package ${{ inputs.package }}
+          --require-published
+
       - name: Record published package version in git
         run: |
           git config user.name "github-actions[bot]"
@@ -371,3 +377,10 @@ jobs:
           cd packages/${{ matrix.package.name }}
           npm publish --access public --provenance --tag ${{ steps.preflight.outputs.dist_tag }}
           echo "✅ Published @tingrudeng/${{ matrix.package.name }}@${{ matrix.package.version }}"
+
+      - name: Verify published provider runtime smoke
+        if: steps.version_check.outputs.already_published != 'true'
+        run: >
+          node scripts/verify-published-runtime-smoke.mjs
+          --package ${{ matrix.package.name }}
+          --require-published
