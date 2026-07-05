@@ -154,6 +154,9 @@ jobs:
       - name: Run typecheck
         run: pnpm typecheck
 
+      - name: Verify runtime package readiness
+        run: pnpm verify:runtime-packages
+
       - name: Run tests
         run: pnpm --filter @tingrudeng/${{ inputs.package }}... --if-present test
 
@@ -353,6 +356,9 @@ jobs:
 
       - name: Run typecheck
         run: pnpm typecheck
+
+      - name: Verify runtime package readiness
+        run: pnpm verify:runtime-packages
 
       - name: Run tests
         run: pnpm --filter @tingrudeng/${{ matrix.package.name }}... --if-present test

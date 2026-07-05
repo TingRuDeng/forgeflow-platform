@@ -1,0 +1,165 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+const repoRoot = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  "../../../../../",
+);
+const readinessScriptPath = path.join(repoRoot, "scripts/check-runtime-package-readiness.mjs");
+const tempRoots: string[] = [];
+
+const packageSpecs = [
+  {
+    dir: "packages/automation-gateway-core",
+    name: "@tingrudeng/automation-gateway-core",
+    dependencies: {},
+    scripts: { build: "tsc", typecheck: "tsc --noEmit", test: "vitest" },
+  },
+  {
+    dir: "packages/beta-runtime-core",
+    name: "@tingrudeng/beta-runtime-core",
+    dependencies: {},
+    scripts: { build: "tsc", typecheck: "tsc --noEmit", test: "vitest" },
+  },
+  {
+    bin: { "forgeflow-codex-beta": "dist/cli.js" },
+    dir: "packages/codex-beta-runtime",
+    name: "@tingrudeng/codex-beta-runtime",
+    dependencies: { "@tingrudeng/beta-runtime-core": "workspace:*" },
+    scripts: {
+      build: "tsc",
+      prepublishOnly: "node ../../scripts/rewrite-workspace-deps.mjs package.json",
+      typecheck: "tsc --noEmit",
+      test: "vitest",
+    },
+  },
+  {
+    bin: { "forgeflow-gemini-beta": "dist/cli.js" },
+    dir: "packages/gemini-beta-runtime",
+    name: "@tingrudeng/gemini-beta-runtime",
+    dependencies: { "@tingrudeng/beta-runtime-core": "workspace:*" },
+    scripts: {
+      build: "tsc",
+      prepublishOnly: "node ../../scripts/rewrite-workspace-deps.mjs package.json",
+      typecheck: "tsc --noEmit",
+      test: "vitest",
+    },
+  },
+  {
+    bin: { "forgeflow-trae-beta": "dist/cli.js" },
+    dir: "packages/trae-beta-runtime",
+    name: "@tingrudeng/trae-beta-runtime",
+    dependencies: { "@tingrudeng/automation-gateway-core": "workspace:*" },
+    scripts: { build: "tsc", typecheck: "tsc --noEmit", test: "vitest" },
+  },
+];
+
+function makeTempRoot() {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-runtime-readiness-"));
+  tempRoots.push(tempDir);
+  return tempDir;
+}
+
+function writeRuntimePackages(rootDir: string, overrides: Record<string, Record<string, unknown>> = {}) {
+  for (const spec of packageSpecs) {
+    const packageDir = path.join(rootDir, spec.dir);
+    fs.mkdirSync(packageDir, { recursive: true });
+    fs.writeFileSync(path.join(packageDir, "README.md"), `${spec.name}\n`);
+    fs.writeFileSync(path.join(packageDir, "PUBLISHING.md"), `${spec.name}\n`);
+    const override = overrides[spec.name] ?? {};
+    fs.writeFileSync(
+      path.join(packageDir, "package.json"),
+      `${JSON.stringify({
+        name: spec.name,
+        version: "0.1.0-beta.1",
+        private: false,
+        files: ["dist", "README.md", "PUBLISHING.md"],
+        scripts: spec.scripts,
+        dependencies: spec.dependencies,
+        bin: spec.bin,
+        publishConfig: { access: "public" },
+        ...override,
+      }, null, 2)}\n`,
+    );
+  }
+}
+
+function createFakeNpm(rootDir: string) {
+  const binDir = path.join(rootDir, "fake-bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  const npmPath = path.join(binDir, "npm");
+  fs.writeFileSync(
+    npmPath,
+    [
+      "#!/usr/bin/env node",
+      'const target = process.argv[3] || "";',
+      'if (target.includes("beta-runtime-core") || target.includes("gemini-beta-runtime")) {',
+      '  process.stderr.write("npm ERR! code E404\\n");',
+      "  process.exit(1);",
+      "}",
+      'process.stdout.write("0.1.0-beta.1\\n");',
+    ].join("\n"),
+  );
+  fs.chmodSync(npmPath, 0o755);
+  return binDir;
+}
+
+afterEach(() => {
+  for (const tempDir of tempRoots.splice(0)) {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+describe("runtime package readiness", () => {
+  it("passes against the current repository package manifests", () => {
+    const result = spawnSync("node", [readinessScriptPath], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("@tingrudeng/beta-runtime-core");
+    expect(result.stdout).toContain("Runtime package readiness passed.");
+  });
+
+  it("rejects provider runtime packages without workspace dependency rewrite", () => {
+    const tempDir = makeTempRoot();
+    writeRuntimePackages(tempDir, {
+      "@tingrudeng/gemini-beta-runtime": {
+        scripts: { build: "tsc", typecheck: "tsc --noEmit", test: "vitest" },
+      },
+    });
+
+    const result = spawnSync("node", [readinessScriptPath, "--root", tempDir], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("prepublishOnly");
+  });
+
+  it("can turn registry package creation into a hard production gate", () => {
+    const tempDir = makeTempRoot();
+    writeRuntimePackages(tempDir);
+    const fakeNpmBin = createFakeNpm(tempDir);
+
+    const result = spawnSync(
+      "node",
+      [readinessScriptPath, "--root", tempDir, "--check-registry", "--require-published"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${fakeNpmBin}:${process.env.PATH || ""}` },
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("@tingrudeng/beta-runtime-core 尚未在 npm registry 创建");
+    expect(result.stderr).toContain("@tingrudeng/gemini-beta-runtime 尚未在 npm registry 创建");
+  });
+});

@@ -47,6 +47,9 @@ jobs:
       - name: Validate docs
         run: pnpm docs:validate
 
+      - name: Verify runtime package readiness
+        run: pnpm verify:runtime-packages
+
       - name: Run typecheck
         run: pnpm typecheck
 

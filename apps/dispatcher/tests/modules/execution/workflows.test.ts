@@ -19,6 +19,15 @@ describe("workflow quality gates", () => {
     expect(workflow).toContain("pnpm docs:validate");
   });
 
+  it("checks runtime package readiness in CI and release workflows", () => {
+    const ciWorkflow = readWorkflow("ci.yml");
+    const releaseWorkflow = readWorkflow("release.yml");
+
+    expect(ciWorkflow).toContain("Verify runtime package readiness");
+    expect(ciWorkflow).toContain("pnpm verify:runtime-packages");
+    expect(releaseWorkflow.match(/pnpm verify:runtime-packages/g)?.length).toBe(2);
+  });
+
   it("publishes manual releases before recording git version history", () => {
     const workflow = readWorkflow("release.yml");
 
