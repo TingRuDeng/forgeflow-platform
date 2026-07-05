@@ -9,6 +9,8 @@ const repoRoot = path.resolve(
 );
 const workerDaemonSourcePath = path.join(repoRoot, "scripts/lib/worker-daemon.ts");
 const workerDaemonHooksSourcePath = path.join(repoRoot, "scripts/lib/worker-daemon-hooks.ts");
+const workerDaemonClientSourcePath = path.join(repoRoot, "scripts/lib/worker-daemon-dispatcher-client.ts");
+const workerDaemonTaskExecutorSourcePath = path.join(repoRoot, "scripts/lib/worker-daemon-task-executor.ts");
 const runWorkerDaemonSourcePath = path.join(repoRoot, "scripts/run-worker-daemon.ts");
 const runWorkerAssignmentSourcePath = path.join(repoRoot, "scripts/run-worker-assignment.ts");
 const runtimeBootstrapSourcePath = path.join(repoRoot, "scripts/lib/runtime-bootstrap.ts");
@@ -26,11 +28,12 @@ describe("worker daemon thin adapter", () => {
   it("keeps local logger and metrics hooks in a dedicated adapter", () => {
     const workerDaemonSource = fs.readFileSync(workerDaemonSourcePath, "utf8");
     const hookSource = fs.readFileSync(workerDaemonHooksSourcePath, "utf8");
+    const taskExecutorSource = fs.readFileSync(workerDaemonTaskExecutorSourcePath, "utf8");
 
     expect(workerDaemonSource).not.toContain("recordTaskMetric");
     expect(workerDaemonSource).not.toContain("logTaskCompleted");
     expect(workerDaemonSource).not.toContain("logTaskFailed");
-    expect(workerDaemonSource).toContain("./worker-daemon-hooks.js");
+    expect(taskExecutorSource).toContain("./worker-daemon-hooks.js");
     expect(hookSource).toContain("buildManagedTaskCallbacks");
     expect(hookSource).toContain("buildFailedResultCallbacks");
   });
@@ -52,5 +55,19 @@ describe("worker daemon thin adapter", () => {
     expect(runtimeBootstrapSource).toContain("importWorkerAssignmentRuntime");
     expect(runtimeBootstrapSource).toContain("importDispatcherWorkerRuntimeFactories");
     expect(runtimeBootstrapSource).toContain("ensureDispatcherRuntimeBridgeDist");
+  });
+
+  it("keeps worker-daemon as a thin cycle adapter under the file size budget", () => {
+    const workerDaemonSource = fs.readFileSync(workerDaemonSourcePath, "utf8");
+    const clientSourceExists = fs.existsSync(workerDaemonClientSourcePath);
+    const taskExecutorSourceExists = fs.existsSync(workerDaemonTaskExecutorSourcePath);
+
+    expect(workerDaemonSource.split(/\r?\n/).length).toBeLessThanOrEqual(300);
+    expect(workerDaemonSource).toContain("./worker-daemon-dispatcher-client.js");
+    expect(workerDaemonSource).toContain("./worker-daemon-task-executor.js");
+    expect(workerDaemonSource).not.toContain("function createLazyDispatcherClient");
+    expect(workerDaemonSource).not.toContain("executeManagedWorkerTask");
+    expect(clientSourceExists).toBe(true);
+    expect(taskExecutorSourceExists).toBe(true);
   });
 });

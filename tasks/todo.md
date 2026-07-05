@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M49 串行：拆分 `worker-daemon.ts` 剩余 dispatcher client / task executor / types adapter。
+- [x] M49 串行：运行最小充分验证并补充 review 小结。
+
+## M49 Review 小结
+
+已把 `scripts/lib/worker-daemon.ts` 从 437 行压缩到 96 行：公开类型迁移到 `worker-daemon-types.ts`，dispatcher HTTP / state-dir lazy client adapter 迁移到 `worker-daemon-dispatcher-client.ts`，claimed task execution 与 failed result fallback adapter 迁移到 `worker-daemon-task-executor.ts`。主文件只保留 `runWorkerDaemonCycle` / `runWorkerDaemon` 编排、repoRoot 解析和公开导出，继续复用 runtime-glue 与 beta-runtime-core。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 runtime executor / launch 去重，把 `worker-daemon.ts` 的公开类型、dispatcher client lazy adapter、claimed task execution 和 failed result fallback adapter 拆入独立模块；主文件只保留 daemon cycle 编排、repoRoot 解析和公开导出，没有改变 claim/start/result、失败回写、PR/worktree 参数、state-dir client 或 runtime-glue 调用语义。安全检查通过，未新增 secret、外部网络调用、命令拼接输入、mock 成功路径或静默 fallback；固定 runtime script 路径、retry 环境变量和 dispatcher internal call 语义保持不变。复杂度检查通过，`worker-daemon.ts` 从 437 行降至 96 行，新增 `worker-daemon-dispatcher-client.ts` 99 行、`worker-daemon-task-executor.ts` 138 行、`worker-daemon-types.ts` 128 行，均低于 300 行。Document-refresh: needed，原因：worker daemon 薄适配层边界变化，已同步 TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/worker-daemon-thin-adapter.test.ts` 先失败于 `worker-daemon.ts` 仍为 438 行，超过 300 行预算；GREEN 后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/worker-daemon-thin-adapter.test.ts tests/modules/server/run-worker-daemon.test.ts tests/modules/server/run-worker-assignment.test.ts --maxWorkers=1` 通过，3 个测试文件、14 个测试通过；`CI=true pnpm --filter @tingrudeng/beta-runtime-core test` 通过，3 个测试文件、17 个测试通过；`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json`、`CI=true pnpm exec tsc -p scripts/tsconfig.json`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。首次全量 `CI=true pnpm test` 在全仓并发下出现一次 `dispatcher-server.test.ts` 15 秒超时；按 Debug-First 隔离复跑同文件，非沙箱 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/dispatcher-server.test.ts --maxWorkers=1` 通过，66 个测试通过；第二次非沙箱 `CI=true pnpm test` 通过，dispatcher 48 个测试文件、493 个测试通过。
+
+剩余风险：runtime executor / launch 去重主体已经收敛；后续风险主要转向 Trae gateway adapter 层和生产运行观测，不再是 `worker-daemon.ts` 主文件体量。
+
 - [x] M48 串行：把 `run-worker-assignment` dist bootstrap / freshness 检查下沉到 runtime-bootstrap。
 - [x] M48 串行：运行最小充分验证并补充 review 小结。
 
