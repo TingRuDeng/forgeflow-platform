@@ -1,8 +1,19 @@
 # 当前项目审查修复任务
 
+- [x] M80 串行：把 Codex/Gemini packaged worker CLI 下沉到 beta-runtime-core。
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M80 Review 小结
+
+已新增 `packages/beta-runtime-core/src/runtime/provider-worker-cli.ts`，把 Codex/Gemini packaged runtime 的 worker CLI 参数解析、help 输出、必填参数校验、provider pool 校验、`--codex-bin` / `--gemini-bin` 环境变量 wiring 和 `runWorkerDaemon` 启动委托收敛到共享 core。`packages/codex-beta-runtime/src/runtime/worker.ts` 与 `packages/gemini-beta-runtime/src/runtime/worker.ts` 已从各 150 行重复实现降为 provider 配置型薄入口。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 runtime executor / launch 去重，只迁移 provider worker CLI glue，不改变 daemon cycle、dispatcher protocol、assignment runner、launch argv、submitResult 语义或发布配置。安全检查通过，新增 helper 只解析固定 CLI flag 并写入 provider 专属 env key，不新增 secret、网络调用、shell 拼接、mock 成功路径或静默 fallback。复杂度检查通过，新增 core helper 和测试均低于 300 行，两个 packaged runtime `worker.ts` 均低于 50 行。Document-refresh: needed，原因：Codex/Gemini packaged worker CLI 权威边界从各 runtime 包迁移到 beta-runtime-core，已同步 README、docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @tingrudeng/beta-runtime-core exec vitest run tests/provider-worker-cli.test.ts tests/worker-daemon.test.ts tests/run-worker-assignment.test.ts --maxWorkers=1`，3 个测试文件、21 个测试通过；`CI=true pnpm --filter @tingrudeng/codex-beta-runtime test -- tests/runtime-wrapper.test.ts tests/cli.test.ts --maxWorkers=1`，2 个测试文件、4 个测试通过；`CI=true pnpm --filter @tingrudeng/gemini-beta-runtime test -- tests/runtime-wrapper.test.ts tests/cli.test.ts --maxWorkers=1`，2 个测试文件、5 个测试通过；`CI=true pnpm --filter @tingrudeng/codex-beta-runtime build`、`CI=true pnpm --filter @tingrudeng/gemini-beta-runtime build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：provider worker CLI 重复实现已下沉到共享 core；Gemini 远程包发布仍依赖 npm 包名和 Trusted Publisher 外部配置，真实生产部署仍需要固定版本和 CI 发布证据。
 
 ## M79 Review 小结
 
