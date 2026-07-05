@@ -1,10 +1,8 @@
 // @ts-nocheck
-import path from "node:path";
-import { spawn } from "node:child_process";
-
 import {
   DEFAULT_CLEAN_RELAUNCH_DRAIN_TIMEOUT_MS,
   hasRemoteDebuggingPortArg,
+  launchTraeForAutomation as launchSharedTraeForAutomation,
   parseLaunchArgs,
   prepareCleanRelaunch,
   quitExistingMacApp,
@@ -12,6 +10,7 @@ import {
   resolveMacAppName,
   resolveTraeLaunchTarget as resolveSharedTraeLaunchTarget,
   waitForDebuggerPortToDrain,
+  waitForTraeDebugger as waitForSharedTraeDebugger,
 } from "@tingrudeng/automation-gateway-core";
 
 import { discoverTraeTarget, getDebuggerVersion } from "./trae-cdp-discovery.js";
@@ -28,20 +27,6 @@ export {
   waitForDebuggerPortToDrain,
 };
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function onceChildEvent(child, eventName) {
-  return new Promise((resolve) => {
-    if (!child || typeof child.once !== "function") {
-      resolve(null);
-      return;
-    }
-    child.once(eventName, resolve);
-  });
-}
-
 export function resolveTraeLaunchTarget(options = {}) {
   return resolveSharedTraeLaunchTarget({
     defaultRemoteDebuggingPort: DEFAULT_REMOTE_DEBUGGING_PORT,
@@ -50,120 +35,20 @@ export function resolveTraeLaunchTarget(options = {}) {
 }
 
 export async function waitForTraeDebugger(options = {}) {
-  const discoverTarget = options.discoverTarget || discoverTraeTarget;
-  const getVersion = options.getVersion || getDebuggerVersion;
-  const sleepImpl = options.sleepImpl || sleep;
-  const timeoutMs = Number(options.timeoutMs || DEFAULT_START_TIMEOUT_MS);
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      if (options.waitForTarget === false) {
-        return {
-          version: await getVersion({ port: options.port }),
-          target: null,
-        };
-      }
-      return await discoverTarget({
-        port: options.port,
-        titleContains: options.titleContains,
-        urlContains: options.urlContains,
-      });
-    } catch {
-      await sleepImpl(250);
-    }
-  }
-
-  throw new Error(`Trae did not expose a debugger target within ${timeoutMs}ms`);
+  return waitForSharedTraeDebugger({
+    ...options,
+    defaultStartTimeoutMs: DEFAULT_START_TIMEOUT_MS,
+    discoverTarget: options.discoverTarget || discoverTraeTarget,
+    getVersion: options.getVersion || getDebuggerVersion,
+  });
 }
 
 export async function launchTraeForAutomation(options = {}) {
-  const spawnImpl = options.spawnImpl || spawn;
-  const titleContains = options.titleContains || [path.basename(String(options.projectPath || "").trim())].filter(Boolean);
-  const target = resolveTraeLaunchTarget(options);
-  const platform = options.platform || process.platform;
-  const forceCleanLaunch = options.forceCleanLaunch === true;
-  const preferExisting = !forceCleanLaunch && options.preferExisting !== false;
-
-  if (preferExisting) {
-    try {
-      const existingDebuggerInfo = await waitForTraeDebugger({
-        port: target.remoteDebuggingPort,
-        titleContains,
-        waitForTarget: options.waitForTarget !== false,
-        timeoutMs: Math.min(Number(options.timeoutMs || DEFAULT_START_TIMEOUT_MS), 1500),
-        discoverTarget: options.discoverTarget,
-        getVersion: options.getVersion,
-        sleepImpl: options.sleepImpl,
-      });
-
-      return {
-        command: target.command,
-        args: target.args,
-        projectPath: target.projectPath,
-        remoteDebuggingPort: target.remoteDebuggingPort,
-        titleContains,
-        debuggerInfo: existingDebuggerInfo,
-        reusedExisting: true,
-      };
-    } catch {
-      // No reusable debugger target available; fall back to spawning a new Trae process.
-    }
-  }
-
-  if (forceCleanLaunch && platform === "darwin") {
-    await prepareCleanRelaunch({
-      bundlePath: target.bundlePath,
-      platform,
-      port: target.remoteDebuggingPort,
-      timeoutMs: options.cleanRelaunchDrainTimeoutMs,
-      getVersion: options.getVersion,
-      sleepImpl: options.sleepImpl,
-      quitExistingApp: options.quitExistingApp,
-    });
-  }
-
-  const child = spawnImpl(target.command, target.args, {
-    detached: options.detached !== false,
-    stdio: options.stdio || "ignore",
-    env: {
-      ...process.env,
-      ...(options.env || {}),
-    },
+  return launchSharedTraeForAutomation({
+    ...options,
+    defaultRemoteDebuggingPort: DEFAULT_REMOTE_DEBUGGING_PORT,
+    defaultStartTimeoutMs: DEFAULT_START_TIMEOUT_MS,
+    discoverTarget: options.discoverTarget || discoverTraeTarget,
+    getVersion: options.getVersion || getDebuggerVersion,
   });
-
-  if (typeof child.unref === "function") {
-    child.unref();
-  }
-
-  const debuggerPromise = waitForTraeDebugger({
-    port: target.remoteDebuggingPort,
-    titleContains,
-    waitForTarget: options.waitForTarget !== false,
-    timeoutMs: options.timeoutMs,
-    discoverTarget: options.discoverTarget,
-    getVersion: options.getVersion,
-    sleepImpl: options.sleepImpl,
-  });
-
-  const spawnError = await Promise.race([
-    debuggerPromise.then(() => null).catch(() => null),
-    onceChildEvent(child, "error"),
-  ]);
-
-  if (spawnError) {
-    throw new Error(`Failed to launch Trae: ${spawnError.message || String(spawnError)}`);
-  }
-
-  const debuggerInfo = await debuggerPromise;
-
-  return {
-    command: target.command,
-    args: target.args,
-    projectPath: target.projectPath,
-    remoteDebuggingPort: target.remoteDebuggingPort,
-    titleContains,
-    debuggerInfo,
-    reusedExisting: false,
-  };
 }
