@@ -224,12 +224,10 @@ const App: React.FC = () => {
 
       {data && (
         <div className="animate-fade-in">
-          {/* Metrics Overview at the top */}
           <MetricsGrid stats={data.stats} metrics={data.metrics} />
           <DrStatusPanel status={drStatus} />
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
-            {/* Main Column: Tasks and Terminal */}
             <div className="lg:col-span-3 flex flex-col gap-6">
               <Panel title={t('tasks')}>
                 <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.65fr)_minmax(340px,1fr)]">
@@ -261,6 +259,7 @@ const App: React.FC = () => {
                   bundles={Array.isArray(data.artifactBundles) ? data.artifactBundles : []}
                   tasks={Array.isArray(data.tasks) ? data.tasks : []}
                   reviews={Array.isArray(data.reviews) ? data.reviews : []}
+                  events={Array.isArray(data.events) ? data.events : []}
                   selectedTaskId={selectedTask?.id || null}
                   onSelectTask={setSelectedTaskId}
                 />
