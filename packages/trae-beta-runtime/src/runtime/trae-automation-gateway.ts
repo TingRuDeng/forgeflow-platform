@@ -1,7 +1,9 @@
 import type { Server } from "node:http";
 
 import {
+  createAutomationGatewayDebugLogger,
   handleAutomationGatewayRequest,
+  isAutomationGatewayDebugEnabled,
   startAutomationGatewayHttpServer,
   type AutomationGatewayDriver,
   type NormalizedAutomationError,
@@ -58,35 +60,6 @@ export interface StartedTraeAutomationGateway {
   close: () => Promise<void>;
 }
 
-function isDebugEnabled(value: unknown) {
-  if (value === true) {
-    return true;
-  }
-  const envValue = String(process.env.TRAE_AUTOMATION_DEBUG || "").trim().toLowerCase();
-  return envValue === "1" || envValue === "true";
-}
-
-function createDebugLogger(
-  enabled: boolean,
-  logger: Pick<typeof console, "log" | "warn">,
-) {
-  return (event: string, details: Record<string, unknown> = {}) => {
-    if (!enabled) {
-      return;
-    }
-    const payload = {
-      at: new Date().toISOString(),
-      event,
-      ...details,
-    };
-    try {
-      logger.log?.(`[trae-gateway][debug] ${JSON.stringify(payload)}`);
-    } catch {
-      logger.log?.(`[trae-gateway][debug] ${event}`);
-    }
-  };
-}
-
 export async function handleTraeAutomationHttpRequest(
   input: HttpRequestInput,
   options: HandleTraeAutomationHttpRequestOptions = {},
@@ -120,12 +93,16 @@ export function startTraeAutomationGateway(
   const port = options.port === undefined ? 8790 : Number(options.port);
   const stateDir = options.stateDir ?? DEFAULT_STATE_DIR;
   const logger = options.logger || console;
-  const debugEnabled = isDebugEnabled(options.debug);
-  const debugLog = createDebugLogger(debugEnabled, logger);
+  const debugEnabled = isAutomationGatewayDebugEnabled(options.debug);
+  const debugLog = createAutomationGatewayDebugLogger(debugEnabled, logger);
+  const automationOptions = options.automationOptions || {};
+  const driverDebug = debugEnabled
+    || automationOptions.debug === true
+    || String(automationOptions.debug || "").trim() === "1";
   const automationDriver = (options.automationDriver
     || createTraeAutomationDriver({
-      ...(options.automationOptions || {}),
-      debug: debugEnabled,
+      ...automationOptions,
+      debug: driverDebug,
     })) as AutomationGatewayDriver;
   const sessionStore = options.sessionStore === null
     ? null

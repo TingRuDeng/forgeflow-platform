@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M53 串行：把 Trae gateway debug logger 下沉到 automation-gateway-core。
+- [x] M53 串行：运行定向验证并补充 review 小结。
+
+## M53 Review 小结
+
+已在 `packages/automation-gateway-core` 新增共享 `createAutomationGatewayDebugLogger` 和 `isAutomationGatewayDebugEnabled`，统一 `TRAE_AUTOMATION_DEBUG` / `debug` 开关与 `[trae-gateway][debug]` 结构化日志格式。`packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts` 删除本地 `isDebugEnabled` / `createDebugLogger`；`scripts/lib/trae-automation-gateway.ts` 也接入同一 helper，并获得与 packaged runtime 一致的 gateway-level debug 开关。两侧 driver debug 都显式归一化为布尔值，保留 `automationOptions.debug=true` 或 `"1"` 的既有开启路径。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 Trae gateway 去重，把 debug logger 组装从 packaged runtime 下沉到 `@tingrudeng/automation-gateway-core`，并让脚本侧使用同一 helper；没有改变 gateway route、session-store、HTTP JSON IO、automation error envelope 或 debug event 名称。安全检查通过，helper 只写入调用方传入 logger，不新增 secret、外部网络调用、命令拼接、mock 成功路径或静默 fallback；JSON 序列化失败时仍只输出 event 名称，与原 packaged runtime 行为一致。复杂度检查通过，新增 `debug-log.ts` 低于 50 行，两个 gateway wrapper 不再持有本地 debug logger 实现。Document-refresh: needed，原因：Trae gateway debug logger 权威边界变化，已同步 README、TECH_DEBT、automation-gateway-core README 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @tingrudeng/automation-gateway-core test` 先失败于缺少 `isAutomationGatewayDebugEnabled` / `createAutomationGatewayDebugLogger`；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-gateway-thin-adapter.test.ts --maxWorkers=1` 先失败于缺少 `packages/automation-gateway-core/src/debug-log.ts`。GREEN 后 `CI=true pnpm --filter @tingrudeng/automation-gateway-core test` 通过，5 个测试文件、16 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime test` 通过，19 个测试文件、174 个测试通过；非沙箱 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-gateway-thin-adapter.test.ts tests/modules/server/trae-automation-gateway.test.ts --maxWorkers=1` 通过，2 个测试文件、33 个测试通过。
+
+剩余风险：Trae gateway route/session/chat handler、HTTP JSON IO、debug logger 和持久化 session-store 已共享；剩余 adapter 漂移主要在 driver 创建和发布前 dist / workspace 依赖同步。
+
 - [x] M52 串行：把 Trae gateway 持久化 session-store 下沉到 automation-gateway-core。
 - [x] M52 串行：运行最终验证并补充 review 小结。
 

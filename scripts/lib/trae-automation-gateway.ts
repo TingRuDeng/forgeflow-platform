@@ -1,6 +1,8 @@
 import type { Server } from "node:http";
 import {
+  createAutomationGatewayDebugLogger,
   handleAutomationGatewayRequest,
+  isAutomationGatewayDebugEnabled,
   startAutomationGatewayHttpServer,
   type AutomationGatewayDriver,
   type NormalizedAutomationError,
@@ -9,7 +11,7 @@ import {
 import { createTraeAutomationDriver, TraeAutomationDriver } from "./trae-dom-driver.js";
 import { normalizeAutomationError } from "./trae-automation-errors.js";
 import { createSessionStore, SessionStore, DEFAULT_STATE_DIR } from "./trae-automation-session-store.js";
-import { logger } from "./logger.js";
+import { logger as scriptLogger } from "./logger.js";
 
 export interface HandleTraeAutomationHttpRequestInput {
   method: string;
@@ -51,6 +53,8 @@ export interface StartTraeAutomationGatewayOptions {
   automationDriver?: TraeAutomationDriver;
   automationOptions?: Record<string, unknown>;
   sessionStore?: SessionStore | null;
+  logger?: Pick<typeof console, "log" | "warn">;
+  debug?: boolean;
 }
 
 export interface TraeAutomationGateway {
@@ -66,26 +70,45 @@ export async function startTraeAutomationGateway(options: StartTraeAutomationGat
   const host = options.host || "127.0.0.1";
   const port = options.port === undefined ? 8790 : Number(options.port);
   const stateDir = options.stateDir ?? DEFAULT_STATE_DIR;
-  const automationDriver = (options.automationDriver || createTraeAutomationDriver(options.automationOptions || {})) as AutomationGatewayDriver;
+  const debugEnabled = isAutomationGatewayDebugEnabled(options.debug);
+  const debugLog = createAutomationGatewayDebugLogger(debugEnabled, options.logger || console);
+  const automationOptions = options.automationOptions || {};
+  const driverDebug = debugEnabled
+    || automationOptions.debug === true
+    || String(automationOptions.debug || "").trim() === "1";
+  const automationDriver = (options.automationDriver || createTraeAutomationDriver({
+    ...automationOptions,
+    debug: driverDebug,
+  })) as AutomationGatewayDriver;
 
   const sessionStore = options.sessionStore === null
     ? null
     : options.sessionStore || createSessionStore(stateDir);
 
+  debugLog("gateway.start", {
+    host,
+    port,
+    stateDir,
+    sessionStoreEnabled: Boolean(sessionStore),
+  });
+
   if (sessionStore) {
     sessionStore.load();
     const pruned = sessionStore.prune();
     if (pruned > 0) {
-      logger.info({ event: "session_pruned", prunedCount: pruned });
+      scriptLogger.info({ event: "session_pruned", prunedCount: pruned });
+      debugLog("session.pruned", { pruned });
     }
   }
 
   const started = await startAutomationGatewayHttpServer({
     host,
     port,
+    debugLog,
     handlerOptions: {
       automationDriver,
       sessionStore,
+      debugLog,
       normalizeAutomationError: normalizeTraeGatewayError,
     },
   });

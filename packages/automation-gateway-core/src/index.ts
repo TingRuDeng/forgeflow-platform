@@ -1,4 +1,9 @@
 export {
+  createAutomationGatewayDebugLogger,
+  isAutomationGatewayDebugEnabled,
+} from "./debug-log.js";
+
+export {
   ApiError,
   normalizeApiError,
 } from "./gateway-errors.js";
@@ -20,6 +25,11 @@ export {
   createPersistentAutomationSessionStore,
   getAutomationSessionPublicShape,
 } from "./session-store.js";
+
+export type {
+  AutomationGatewayDebugLogger,
+  AutomationGatewayDebugLoggerOptions,
+} from "./debug-log.js";
 
 export type {
   AutomationGatewayDriver,

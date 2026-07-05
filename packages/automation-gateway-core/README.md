@@ -6,7 +6,7 @@ Current scope:
 - parse final report fields emitted by Trae automation tasks
 - detect template-marker reports before they are accepted as real output
 - validate whether a reported task id still matches the dispatcher task being processed
-- provide shared Trae automation gateway request handling, HTTP JSON IO, and persistent session-store primitives
+- provide shared Trae automation gateway request handling, HTTP JSON IO, debug logging, and persistent session-store primitives
 
 This package is intentionally small:
 - parsing, validation, gateway protocol, and local JSON session-store helpers only
@@ -18,6 +18,7 @@ This package is intentionally small:
 ```ts
 import {
   getLastReportFieldValue,
+  createAutomationGatewayDebugLogger,
   createPersistentAutomationSessionStore,
   isEquivalentReportedTaskId,
   isPlaceholderTaskId,
