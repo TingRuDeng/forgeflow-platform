@@ -328,7 +328,7 @@ vNext runtime reliability 推进：
 - `../.github/workflows/release.yml`
   - GitHub Actions 发布入口。
   - 用 OIDC + provenance 执行 npm 发布。
-  - 发布前会校验包元数据是否与当前仓库 `TingRuDeng/forgeflow-platform` 对齐，并要求 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 作为自动发布显式门禁。
+  - 发布前会校验包元数据是否与当前仓库 `TingRuDeng/forgeflow-platform` 对齐，并要求 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 作为自动发布显式门禁；手动发布和自动发布都会先用 `npm view <package> version` 确认目标包名已在 npm registry 创建，避免跑完构建后才在 `npm publish` 阶段暴露包名 / Trusted Publisher 权限缺口。
   - push 自动发布只发布 npm 上已存在包名的缺失版本；全新包名会进入 `自动发布等待 npm 包名配置` summary。
   - push 自动发布会先运行 lint、文档校验、typecheck、测试和 shadow drift gate，再执行 `npm publish`。
   - `@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 当前属于全新包名配置缺口，不应在配置完成前写成已公开安装入口。

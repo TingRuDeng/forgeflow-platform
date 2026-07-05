@@ -2,6 +2,7 @@
 
 import { appendFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { execFileSync } from "node:child_process";
 
 function parseArgs(argv) {
   const parsed = {};
@@ -36,6 +37,7 @@ const args = parseArgs(process.argv.slice(2));
 const packageDir = typeof args["package-dir"] === "string" ? args["package-dir"] : "";
 const expectedRepo = typeof args["expected-repo"] === "string" ? args["expected-repo"] : "";
 const requireTrustedPublishing = args["require-trusted-publishing"] === true;
+const requirePackageExists = args["require-package-exists"] === true;
 
 if (!packageDir) {
   console.error("Error: --package-dir is required");
@@ -103,12 +105,44 @@ if (requireTrustedPublishing && !publishEnabled) {
   );
 }
 
+function readPublishedPackageVersion(packageName) {
+  try {
+    const output = execFileSync("npm", ["view", packageName, "version"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 15000,
+    });
+    return { status: "published", version: output.trim() };
+  } catch (error) {
+    const stderr = error?.stderr?.toString("utf8") ?? "";
+    if (stderr.includes("E404")) {
+      return { status: "missing", version: "" };
+    }
+    if (error?.signal === "SIGTERM" || error?.code === "ETIMEDOUT") {
+      return { status: "error", version: "", error: `${packageName} npm view query timed out` };
+    }
+    return { status: "error", version: "", error: stderr.trim() || String(error) };
+  }
+}
+
+const publishedPackage = requirePackageExists
+  ? readPublishedPackageVersion(packageJson.name)
+  : { status: "not_checked", version: "" };
+
+if (requirePackageExists && publishedPackage.status !== "published") {
+  const message = publishedPackage.status === "missing"
+    ? `${packageJson.name} must exist on npm before this workflow can publish. Create the package name and configure npm Trusted Publisher for repo ${expectedRepo} first.`
+    : `${packageJson.name} npm package existence check failed: ${publishedPackage.error}`;
+  issues.push(message);
+}
+
 const distTag = typeof packageJson.version === "string" && packageJson.version.includes("-") ? "beta" : "latest";
 
 setGithubOutput("package_name", packageJson.name);
 setGithubOutput("package_version", packageJson.version);
 setGithubOutput("dist_tag", distTag);
 setGithubOutput("publish_enabled", publishEnabled ? "true" : "false");
+setGithubOutput("package_exists", publishedPackage.status === "published" ? "true" : "false");
 
 if (issues.length > 0) {
   console.error(`Release preflight failed for ${packageJson.name} (${packageJsonPath})`);
@@ -122,3 +156,4 @@ console.log(`Release preflight passed for ${packageJson.name}@${packageJson.vers
 console.log(`- expected repo: ${expectedRepo}`);
 console.log(`- publish dist-tag: ${distTag}`);
 console.log(`- trusted publishing gate: ${publishEnabled ? "enabled" : "disabled"}`);
+console.log(`- package exists on npm: ${publishedPackage.status === "published" ? `yes (${publishedPackage.version})` : publishedPackage.status}`);

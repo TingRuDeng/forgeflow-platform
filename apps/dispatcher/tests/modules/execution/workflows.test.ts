@@ -82,6 +82,7 @@ describe("workflow quality gates", () => {
     expect(versionExistsIndex).toBeGreaterThan(packageExistsIndex);
     expect(setupSummaryIndex).toBeGreaterThan(packageExistsIndex);
     expect(setupSummaryIndex).toBeLessThan(publishAutoIndex);
+    expect(workflow.match(/--require-package-exists/g)?.length).toBe(2);
   });
 
   it("runs shadow drift as part of the stage3 rollout gate", () => {
