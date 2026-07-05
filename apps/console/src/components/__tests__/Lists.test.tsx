@@ -407,6 +407,16 @@ describe('ArtifactWorkbench', () => {
           { id: 'task-1', title: 'Fix auth gate', status: 'review', repo: 'owner/auth' },
           { id: 'task-2', title: 'Update docs', status: 'merged', repo: 'owner/docs' },
         ]}
+        reviews={[
+          {
+            taskId: 'task-1',
+            evidence: {
+              reasonCode: 'test_gap',
+              mustFix: ['补齐鉴权失败测试'],
+            },
+            riskAssessment: { level: 'needs_human_attention', reasons: ['auth touched'] },
+          },
+        ]}
         bundles={[
           {
             taskId: 'task-1',
@@ -430,9 +440,12 @@ describe('ArtifactWorkbench', () => {
 
     expect(screen.getByText(/docs updated/i)).toBeInTheDocument();
     expect(screen.getByText(/auth diff ready/i)).toBeInTheDocument();
+    expect(screen.getByText(/test_gap/i)).toBeInTheDocument();
+    expect(screen.getByText(/needs_human_attention/i)).toBeInTheDocument();
+    expect(screen.getByText(/补齐鉴权失败测试/i)).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText(/筛选|filter/i), {
-      target: { value: 'auth' },
+      target: { value: 'test_gap' },
     });
 
     expect(screen.getByText(/auth diff ready/i)).toBeInTheDocument();
