@@ -612,6 +612,12 @@ function validateWorkerResultBody(body: unknown): Record<string, any> {
         throw new Error(`worker result waitingForInput.${key} must be a string when provided`);
       }
     }
+    if (
+      body.result.waitingForInput.resumePayloadSchema !== undefined
+      && !isPlainObject(body.result.waitingForInput.resumePayloadSchema)
+    ) {
+      throw new Error("worker result waitingForInput.resumePayloadSchema must be an object when provided");
+    }
   }
 
   if (body.pullRequest !== undefined && body.pullRequest !== null) {
@@ -1361,6 +1367,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
             taskId,
             actor: String(body.actor || "").trim() || "codex-control",
             reason: typeof body.reason === "string" ? body.reason : undefined,
+            resumePayloadSchema: isPlainObject(body.resumePayloadSchema) ? body.resumePayloadSchema as any : undefined,
             at: body.at,
           }),
         }));

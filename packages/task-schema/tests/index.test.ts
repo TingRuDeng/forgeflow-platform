@@ -120,6 +120,18 @@ describe("Runtime convergence schemas", () => {
       continueFromTaskId: "task-0",
       followUpOfTaskId: "task-parent",
       workerChangeReason: "目标 worker 忙碌，改派 Trae",
+      waitingForInput: {
+        requestedBy: "codex-control",
+        reason: "选择发布范围",
+        requestedAt: "2026-07-05T10:00:00.000Z",
+        resumePayloadSchema: {
+          properties: {
+            decision: { type: "string", title: "Decision" },
+            acknowledgeRisk: { type: "boolean", title: "Acknowledge Risk" },
+          },
+          required: ["decision"],
+        },
+      },
       status: "cancelled",
       assignedWorkerId: "trae-worker-1",
       lastAssignedWorkerId: "codex-worker-1",

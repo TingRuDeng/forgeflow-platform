@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M31 串行：把 HITL resume 升级为 schema 驱动表单并保留 JSON fallback。
+- [x] M31 串行：运行最小充分验证并补充 review 小结。
+
+## M31 Review 小结
+
+已把 worker result / HTTP interrupt 的 `waitingForInput.resumePayloadSchema` 接入 dispatcher 状态、`@forgeflow/worker-protocol`、`@forgeflow/task-schema` 和 Console 任务详情。Console 在 schema 提供 `properties` 时渲染 string / number / boolean / enum 表单并构造 `resumePayload`；未提供 schema 时继续使用原 JSON textarea fallback，避免破坏既有 worker。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 HITL resume schema 从 worker result / HTTP interrupt 到 dispatcher snapshot 和 Console 表单的主链；安全检查通过，未新增 secret、外部网络调用、mock 成功路径或静默 fallback，HTTP 输入继续要求 `waitingForInput` 和 `resumePayloadSchema` 为对象并在 runtime-state 归一化字段；复杂度检查通过，`TaskHitlSection.tsx` 231 行，新增表单 helper 均低于 50 行，既有超大 `runtime-state.ts` / `worker-protocol` 文件只做最小字段扩展；Document-refresh: needed，原因：HITL 协议、Console 恢复体验和技术债状态发生变化，已同步 README、docs/README、API endpoints、Worker Protocol、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx`、`CI=true pnpm --filter console test`、`CI=true pnpm --filter console build`、`CI=true pnpm --filter @forgeflow/worker-protocol test`、`CI=true pnpm --filter @forgeflow/task-schema test`、`CI=true pnpm --filter @forgeflow/dispatcher build`、`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state.test.ts tests/modules/server/dispatcher-server.test.ts`（默认沙箱因既有 auth middleware `listen EPERM 127.0.0.1` 超时后，按同命令非沙箱重跑通过，133 tests passed）、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`、非沙箱 `CI=true pnpm test`（24 个 workspace project，dispatcher 45 个测试文件 / 483 个测试全部通过）。
+
+剩余风险：当前 schema 只覆盖 string / number / boolean / enum 的最小可用子集；复杂嵌套对象、数组和自定义校验文案仍需后续按真实 worker prompt 需求补齐。
+
 - [x] M30 串行：把 Console 批量审查结果升级为页面内明细。
 - [x] M30 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 
@@ -50,7 +63,7 @@ Review Gate：finished。Spec 符合度通过，本轮完成 waiting-for-input �
 
 验证已通过：`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx src/__tests__/App.test.tsx`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
 
-剩余风险：HITL resume 仍是 JSON textarea；后续如果 worker prompt schema 稳定，应升级为 schema 驱动表单。批量 merge 仍未开放，仍需单独设计风险确认和逐项失败明细。
+剩余风险：该批次记录的 HITL schema 表单和批量 merge 能力已由 M31 / M28 / M30 补齐；后续主要剩余复杂 schema 字段类型和跨任务证据联动。
 
 - [x] M26 串行：接通 worker 主动 HITL interrupt 与 resume payload 消费。
 - [x] M26 串行：运行最小充分验证、Review Gate 并补充 review 小结。
@@ -63,7 +76,7 @@ Review Gate：finished。Spec 符合度通过，本轮完成 worker 主动 HITL 
 
 验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/dispatcher-server.test.ts tests/modules/server/runtime-state.test.ts`（默认沙箱因既有 auth middleware `listen EPERM 127.0.0.1` 超时后，按同命令非沙箱重跑通过，133 tests passed）、`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx src/__tests__/App.test.tsx`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core test`、`CI=true pnpm --filter @forgeflow/worker-protocol test`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`、非沙箱 `CI=true pnpm test`。
 
-剩余风险：Console 当前使用 JSON textarea 作为最小通用 resume payload 入口；如果后续 worker prompt schema 固化，需要升级为 schema 驱动表单和 waiting-for-input 队列筛选。
+剩余风险：该批次记录的 waiting-for-input 队列筛选和 schema 驱动表单已由 M27 / M31 补齐；后续主要剩余复杂 schema 字段类型和自定义校验文案。
 
 - [x] M25 串行：下沉 worker-daemon live executor 到 beta-runtime-core。
 - [x] M25 串行：运行最小充分验证、Review Gate 并补充 review 小结。

@@ -4700,6 +4700,13 @@ describe("dispatcher runtime state (TypeScript)", () => {
       taskId: dispatch.taskIds[0],
       actor: "codex-control",
       reason: "need product decision",
+      resumePayloadSchema: {
+        properties: {
+          decision: { type: "string", title: "Decision" },
+          acknowledgeRisk: { type: "boolean", title: "Acknowledge Risk" },
+        },
+        required: ["decision"],
+      },
       at: "2026-04-08T10:10:04.000Z",
     });
 
@@ -4709,6 +4716,13 @@ describe("dispatcher runtime state (TypeScript)", () => {
         requestedBy: "codex-control",
         reason: "need product decision",
         requestedAt: "2026-04-08T10:10:04.000Z",
+        resumePayloadSchema: {
+          properties: {
+            decision: { type: "string", title: "Decision" },
+            acknowledgeRisk: { type: "boolean", title: "Acknowledge Risk" },
+          },
+          required: ["decision"],
+        },
       },
     });
     expect(state.assignments[0]).toMatchObject({ status: "waiting_for_input" });
