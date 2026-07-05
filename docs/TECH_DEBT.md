@@ -193,9 +193,9 @@ Desired direction:
 
 期望方向：
 
-- Console refs tab 已支持 artifact 引用复制、manifest 文件按需展开和下载；Artifact Review Workbench 已支持跨任务 artifact 筛选并可跳转到对应任务；审查队列已支持批量 `merge` / `rework` / `block`，后续继续补跨任务对比和 artifact / review 证据联动
+- Console refs tab 已支持 artifact 引用复制、manifest 文件按需展开和下载；Artifact Review Workbench 已支持跨任务 artifact 筛选、review reasonCode / risk / mustFix 证据联动并可跳转到对应任务；审查队列已支持批量 `merge` / `rework` / `block`
 - 继续补 HITL resume schema 的更丰富字段类型、跨 worker prompt 模板约束和 Console 校验文案
-- 继续补齐跨任务对比和 artifact / review 证据联动
+- 继续补齐跨任务 artifact / review 对比视图和证据差异高亮
 
 ## 9. Shadow path has drift gate, reconciliation, and cutover drill, but external primary ops remain deferred
 

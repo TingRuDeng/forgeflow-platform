@@ -254,6 +254,7 @@ const App: React.FC = () => {
                 <ArtifactWorkbench
                   bundles={Array.isArray(data.artifactBundles) ? data.artifactBundles : []}
                   tasks={Array.isArray(data.tasks) ? data.tasks : []}
+                  reviews={Array.isArray(data.reviews) ? data.reviews : []}
                   selectedTaskId={selectedTask?.id || null}
                   onSelectTask={setSelectedTaskId}
                 />

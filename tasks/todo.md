@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M33 串行：把 Console Artifact Workbench 接上 review evidence 联动。
+- [x] M33 串行：运行最小充分验证并补充 review 小结。
+
+## M33 Review 小结
+
+已把 Artifact Workbench 从单纯跨任务 artifact 筛选推进到 artifact / review 证据联动：卡片会展示对应任务最新 review 的 `reasonCode`、`riskAssessment.level`、`mustFix[]` 和首条 risk reason，搜索框也能按这些证据筛选 artifact；App 侧把 dashboard snapshot 的 `reviews` 传入工作台，避免用户在 artifact 与 review queue 之间来回切换才能判断风险。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 Console Artifact Workbench 的 review evidence 摘要和筛选联动；安全检查通过，仅读取 dashboard snapshot 中已有 `reviews` 数据，未新增后端写路径、secret、外部网络调用、mock 成功路径或静默 fallback；复杂度检查通过，`ArtifactWorkbench.tsx` 159 行、`App.tsx` 295 行，新增 helper 均低于 50 行；Document-refresh: needed，原因：Console 审查工作台 artifact / review 证据联动能力发生变化，已同步 README、docs/README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx` 先失败于未展示 `test_gap`；GREEN 后 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx` 通过，15 个测试通过；`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx src/__tests__/App.test.tsx` 通过，20 个测试通过；`CI=true pnpm --filter console test` 通过，29 个测试通过；`CI=true pnpm --filter console build`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：当前补齐的是 evidence 摘要和筛选联动；跨任务 artifact / review 对比视图、证据差异高亮和批量审查前的并排比较仍是后续产品化项。
+
 - [x] M32 串行：新增 shadow production cutover drill 编排入口。
 - [x] M32 串行：运行最小充分验证并补充 review 小结。
 

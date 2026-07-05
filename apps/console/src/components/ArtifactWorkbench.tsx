@@ -10,9 +10,22 @@ interface TaskSummary {
   repo?: string;
 }
 
+interface ReviewSummary {
+  taskId: string;
+  evidence?: {
+    reasonCode?: string;
+    mustFix?: string[];
+  } | null;
+  riskAssessment?: {
+    level?: string | null;
+    reasons?: string[];
+  } | null;
+}
+
 interface ArtifactWorkbenchProps {
   bundles: ArtifactBundle[];
   tasks: TaskSummary[];
+  reviews?: ReviewSummary[];
   selectedTaskId?: string | null;
   onSelectTask?: (taskId: string) => void;
 }
@@ -28,7 +41,11 @@ function countRefs(bundle: ArtifactBundle): number {
   }, 0);
 }
 
-function bundleMatches(bundle: ArtifactBundle, task: TaskSummary | undefined, query: string): boolean {
+function latestReview(reviews: ReviewSummary[], taskId: string): ReviewSummary | undefined {
+  return reviews.filter((review) => review.taskId === taskId).at(-1);
+}
+
+function bundleMatches(bundle: ArtifactBundle, task: TaskSummary | undefined, review: ReviewSummary | undefined, query: string): boolean {
   if (!query) return true;
   const searchable = [
     bundle.bundleId,
@@ -38,15 +55,35 @@ function bundleMatches(bundle: ArtifactBundle, task: TaskSummary | undefined, qu
     task?.title,
     task?.status,
     task?.repo,
+    review?.evidence?.reasonCode,
+    review?.riskAssessment?.level,
+    ...(review?.evidence?.mustFix ?? []),
+    ...(review?.riskAssessment?.reasons ?? []),
     ...(bundle.changedFiles ?? []).map((file) => file.path),
     ...Object.keys(bundle.refs ?? {}),
   ].map(normalize).join(' ');
   return searchable.includes(query);
 }
 
+const ReviewEvidenceBadges: React.FC<{ review?: ReviewSummary }> = ({ review }) => {
+  const { t } = useTranslation();
+  const mustFix = review?.evidence?.mustFix ?? [];
+  const riskReasons = review?.riskAssessment?.reasons ?? [];
+  if (!review?.evidence?.reasonCode && !review?.riskAssessment?.level && mustFix.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-white/55">
+      {review?.evidence?.reasonCode && <span className="font-mono">{t('reasonCode')}: {review.evidence.reasonCode}</span>}
+      {review?.riskAssessment?.level && <span className="font-mono">{t('riskLevelLabel')}: {review.riskAssessment.level}</span>}
+      {mustFix.slice(0, 2).map((item) => <span key={item} className="break-all">{t('mustFix')}: {item}</span>)}
+      {riskReasons[0] && <span className="break-all">{t('riskReasons')}: {riskReasons[0]}</span>}
+    </div>
+  );
+};
+
 export const ArtifactWorkbench: React.FC<ArtifactWorkbenchProps> = ({
   bundles,
   tasks,
+  reviews = [],
   selectedTaskId,
   onSelectTask,
 }) => {
@@ -54,12 +91,13 @@ export const ArtifactWorkbench: React.FC<ArtifactWorkbenchProps> = ({
   const [query, setQuery] = React.useState('');
   const normalizedQuery = query.trim().toLowerCase();
   const taskById = React.useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
+  const reviewByTask = React.useMemo(() => new Map(tasks.map((task) => [task.id, latestReview(reviews, task.id)])), [reviews, tasks]);
   const filteredBundles = React.useMemo(() => {
     return bundles
-      .filter((bundle) => bundleMatches(bundle, taskById.get(bundle.taskId), normalizedQuery))
+      .filter((bundle) => bundleMatches(bundle, taskById.get(bundle.taskId), reviewByTask.get(bundle.taskId), normalizedQuery))
       .slice()
       .reverse();
-  }, [bundles, normalizedQuery, taskById]);
+  }, [bundles, normalizedQuery, reviewByTask, taskById]);
 
   return (
     <div className="p-4 space-y-4">
@@ -82,6 +120,7 @@ export const ArtifactWorkbench: React.FC<ArtifactWorkbenchProps> = ({
         <div className="grid grid-cols-1 gap-2">
           {filteredBundles.map((bundle) => {
             const task = taskById.get(bundle.taskId);
+            const review = reviewByTask.get(bundle.taskId);
             const active = selectedTaskId === bundle.taskId;
             return (
               <button
@@ -100,6 +139,7 @@ export const ArtifactWorkbench: React.FC<ArtifactWorkbenchProps> = ({
                   </div>
                 </div>
                 <div className="mt-2 text-xs text-white/60 break-all">{bundle.summary || t('noSummary')}</div>
+                <ReviewEvidenceBadges review={review} />
                 <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-white/45">
                   <span>{t('changedFiles')}: {(bundle.changedFiles ?? []).length}</span>
                   <span>{t('artifactRefs')}: {countRefs(bundle)}</span>
