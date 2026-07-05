@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M52 串行：把 Trae gateway 持久化 session-store 下沉到 automation-gateway-core。
+- [x] M52 串行：运行最终验证并补充 review 小结。
+
+## M52 Review 小结
+
+已在 `packages/automation-gateway-core` 新增共享持久化 session-store：`createPersistentAutomationSessionStore` 统一处理 session 文件读写、重启后非终态 session 标记 interrupted、TTL 清理、request fingerprint / target 解析和 public shape 裁剪。`scripts/lib/trae-automation-session-store.ts` 与 `packages/trae-beta-runtime/src/runtime/trae-automation-session-store.ts` 都改成薄 wrapper；脚本侧只保留本地时间格式和默认目录，packaged runtime 只保留兼容导出和默认目录。同步生成 `scripts/lib/trae-automation-session-store.js`。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 Trae gateway 去重，把持久化 session-store 主体从脚本侧和 packaged runtime 下沉到 `@tingrudeng/automation-gateway-core`；没有改变 session 文件路径、重启中断语义、release / markReleased、cached response、request fingerprint、TTL 或 public responseText 裁剪行为。安全检查通过，仍只读写本地 JSON session 文件，未新增 secret、外部网络调用、命令拼接、mock 成功路径或静默 fallback；无法解析的 session 文件继续显式回到空 store，非终态 session 继续标记为 `interrupted`。复杂度检查通过，新增 `session-store.ts`、`session-store-records.ts`、`session-store-types.ts` 均低于 300 行，两个 wrapper 均低于 40 行。Document-refresh: needed，原因：Trae gateway session-store 权威边界变化，已同步 README、TECH_DEBT、automation-gateway-core README 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-gateway-thin-adapter.test.ts --maxWorkers=1` 先失败于缺少 `packages/automation-gateway-core/src/session-store.ts`；`CI=true pnpm --filter @tingrudeng/automation-gateway-core test` 先失败于缺少 `createPersistentAutomationSessionStore` / `AutomationSessionStatus`。GREEN 后 `CI=true pnpm --filter @tingrudeng/automation-gateway-core test` 通过，4 个测试文件、14 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime test` 通过，19 个测试文件、174 个测试通过；非沙箱 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-automation-session-store.test.ts tests/modules/server/trae-automation-gateway-thin-adapter.test.ts tests/modules/server/trae-automation-gateway.test.ts --maxWorkers=1` 通过，3 个测试文件、49 个测试通过；`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json`、`CI=true pnpm exec tsc -p scripts/tsconfig.json`、`CI=true pnpm --filter @tingrudeng/automation-gateway-core typecheck`、`CI=true pnpm --filter @tingrudeng/trae-beta-runtime typecheck`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。首次非沙箱 `CI=true pnpm test` 中 `trae-automation-worker.test.ts` 一个全仓并发慢测 20 秒超时；隔离非沙箱复跑同文件 13 项通过；第二次非沙箱 `CI=true pnpm test` 通过，dispatcher 48 个测试文件、498 个测试通过。
+
+剩余风险：Trae gateway route/session/chat handler、HTTP JSON IO 和持久化 session-store 已共享；剩余 adapter 漂移主要在 debug logger 组装、driver 创建和发布前 dist / workspace 依赖同步。
+
 - [x] M51 串行：把 Trae gateway HTTP JSON IO / server wiring 下沉到 automation-gateway-core。
 - [x] M51 串行：运行最终验证并补充 review 小结。
 

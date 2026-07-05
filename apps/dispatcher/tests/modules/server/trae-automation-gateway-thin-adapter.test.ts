@@ -9,8 +9,12 @@ const repoRoot = path.resolve(
 );
 const scriptGatewayPath = path.join(repoRoot, "scripts/lib/trae-automation-gateway.ts");
 const packagedGatewayPath = path.join(repoRoot, "packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts");
+const scriptSessionStorePath = path.join(repoRoot, "scripts/lib/trae-automation-session-store.ts");
+const packagedSessionStorePath = path.join(repoRoot, "packages/trae-beta-runtime/src/runtime/trae-automation-session-store.ts");
 const coreGatewayPath = path.join(repoRoot, "packages/automation-gateway-core/src/gateway-handler.ts");
 const coreHttpServerPath = path.join(repoRoot, "packages/automation-gateway-core/src/gateway-http-server.ts");
+const coreSessionStorePath = path.join(repoRoot, "packages/automation-gateway-core/src/session-store.ts");
+const coreSessionStoreTypesPath = path.join(repoRoot, "packages/automation-gateway-core/src/session-store-types.ts");
 
 describe("trae automation gateway thin adapters", () => {
   it("keeps route and session handler logic in automation-gateway-core", () => {
@@ -43,5 +47,24 @@ describe("trae automation gateway thin adapters", () => {
     expect(packagedSource).not.toContain("function writeJson");
     expect(scriptSource).not.toContain("http.createServer");
     expect(packagedSource).not.toContain("http.createServer");
+  });
+
+  it("keeps persistent session-store logic in automation-gateway-core", () => {
+    const scriptSource = fs.readFileSync(scriptSessionStorePath, "utf8");
+    const packagedSource = fs.readFileSync(packagedSessionStorePath, "utf8");
+    const coreSource = fs.readFileSync(coreSessionStorePath, "utf8");
+    const coreTypesSource = fs.readFileSync(coreSessionStoreTypesPath, "utf8");
+
+    expect(coreSource).toContain("createPersistentAutomationSessionStore");
+    expect(coreSource).toContain("parseSessionRecord");
+    expect(coreTypesSource).toContain("Gateway restarted during execution");
+    expect(scriptSource).toContain("createPersistentAutomationSessionStore");
+    expect(packagedSource).toContain("createPersistentAutomationSessionStore");
+    expect(scriptSource).not.toContain("JSON.parse");
+    expect(packagedSource).not.toContain("JSON.parse");
+    expect(scriptSource).not.toContain("fs.writeFileSync");
+    expect(packagedSource).not.toContain("fs.writeFileSync");
+    expect(scriptSource).not.toContain("parseSessionRecord");
+    expect(packagedSource).not.toContain("parseSessionRecord");
   });
 });
