@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M22 串行：补齐 production cutover primary backend readiness gate。
+- [x] M22 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M22 Review 小结
+
+已把 `pnpm verify:shadow-cutover` 升级为生产 cutover 预检：除要求 shadow 已配置且零 drift 外，还要求 `RUNTIME_STATE_BACKEND=postgres` 与 `DISPATCHER_PRIMARY_POSTGRES_URL` 已配置；`check-shadow-drift.mjs` 新增 `--require-primary-backend` 和 `primaryBackend` 输出，`DISPATCHER_SHADOW_MODE=primary` 继续保留为明确拒绝的旧 shadow mode，避免误当主存储开关。
+
+Review Gate：finished。Spec 符合度通过，本轮把 cutover gate 从 shadow-only 扩展为 shadow + primary backend 双门禁；安全检查通过，未新增 secret 或隐式切主；复杂度检查局部通过，新增逻辑集中在 `check-shadow-drift.mjs`，测试覆盖 primary backend 未选择与已配置两条路径；Document-refresh: needed，原因：production cutover 预检语义变化，已同步 README、API endpoints、runtime-state query 契约、Stage 3 runbook 和技术债。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts tests/modules/execution/workflows.test.ts`、`env CI=true RUNTIME_STATE_BACKEND=postgres DISPATCHER_PRIMARY_POSTGRES_URL=postgres://example.invalid/forgeflow DISPATCHER_SHADOW_MODE=disabled DISPATCHER_QUEUE_SHADOW_MODE=disabled DISPATCHER_POSTGRES_URL= node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --require-primary-backend`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
+
+剩余风险：该预检验证配置与 drift 条件，不替代真实生产 Postgres 连通性、备份恢复、RTO/RPO、DNS/进程切换和回滚演练。
+
 - [x] M21 串行：补齐 `/api/query/*` Postgres primary snapshot reads。
 - [x] M21 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 

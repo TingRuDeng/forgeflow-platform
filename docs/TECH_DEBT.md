@@ -197,7 +197,7 @@ Desired direction:
 - 继续把 worker runtime 的主动 interrupt、resume payload 消费和 Console 表单化输入接入 `waiting_for_input` 主链
 - 继续补齐审查结果的批量筛选、复制链接和跨任务对比体验
 
-## 9. Shadow path has drift gate and reconciliation entry, but primary cutover is still deferred
+## 9. Shadow path has drift gate and reconciliation entry, but production cutover still needs an ops drill
 
 Current situation:
 
@@ -212,8 +212,8 @@ Current situation:
 - `scripts/check-shadow-drift.mjs <stateDir> --reconcile` replays current SQLite truth into the configured shadow projection / queue and checks drift again
 - `scripts/check-shadow-drift.mjs <stateDir> --record-alert` can append a `shadow_drift_detected` system event when drift is present
 - `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1` and `pnpm verify:shadow-drift:reconcile` provide an explicit automatic reconciliation cadence hook without changing the default read-only gate
-- `pnpm verify:shadow-cutover` is a strict production cutover preflight: shadow must be configured and zero-drift under `--max-mismatches 0 --max-delta 0`
-- `DISPATCHER_SHADOW_MODE=primary` is now explicitly rejected as `primary_store_not_implemented` until a real primary `RuntimeStateStore` exists
+- `pnpm verify:shadow-cutover` is a strict production cutover preflight: shadow must be configured and zero-drift under `--max-mismatches 0 --max-delta 0`, and the primary backend must be configured as `RUNTIME_STATE_BACKEND=postgres` with `DISPATCHER_PRIMARY_POSTGRES_URL`
+- `DISPATCHER_SHADOW_MODE=primary` is still explicitly rejected as `primary_store_not_implemented`; it is not the primary-store switch
 - `@forgeflow/dispatcher-store-postgres` now has primary snapshot primitives (`dispatcher_runtime_state`, JSONB load/save), and dispatcher HTTP routes plus `/api/query/*` use the async runtime-state path for state mutations / reads
 - `pnpm verify:stage3` 和 release workflow 都会执行 `pnpm verify:shadow-drift` 作为 rollout / release gate
 
