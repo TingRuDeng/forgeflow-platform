@@ -110,6 +110,7 @@ Desired direction:
 - `@tingrudeng/automation-gateway-core` 已提供共享 `createPersistentAutomationSessionStore`，统一处理 session 持久化、重启中断、TTL 清理、request fingerprint / target 解析和 public shape 裁剪
 - `@tingrudeng/automation-gateway-core` 已提供共享 Trae CDP / DOM driver，统一 target discovery、CDP session、DOM 表达式、response extraction、activity snapshot 和 final report completion 判断
 - `@tingrudeng/automation-gateway-core` 已提供共享 Trae clean relaunch 原语，统一 `.app` 名称解析、macOS app quit 和旧 CDP 端口 drain
+- `@tingrudeng/automation-gateway-core` 已提供共享 Trae launch target helper，统一 macOS `.app` 到 `Contents/MacOS/*` 可执行文件的解析规则
 - 脚本侧 `scripts/lib/trae-automation-gateway.ts` 与 packaged runtime `packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts` 都已委托共享 handler、共享 HTTP server adapter、共享 debug logger、共享 driver 创建规则和共享 DOM driver；脚本侧只通过 wrapper 保留旧的 plain-text response 兼容默认值
 - 脚本侧 `scripts/lib/trae-automation-session-store.ts` 与 packaged runtime `packages/trae-beta-runtime/src/runtime/trae-automation-session-store.ts` 都已委托共享 session-store，只保留默认目录、时间格式和类型兼容薄适配
 - 脚本侧已经对齐 packaged runtime 的持久化 session 解析、`POST /v1/chat` 元数据透传和结构化 debugLog 关键事件
@@ -329,6 +330,7 @@ Desired direction:
 - **runtime 包设置报告已落地（P2 完成）**：`pnpm report:runtime-packages:setup` 复用同一份 runtime package spec，只读查询 npm registry，输出每个包名、当前源码版本、package/version 发布状态、推荐发布顺序和 Trusted Publisher 配置要求；需要把缺口作为硬失败时可加 `-- --require-ready`。
 - **已发布 provider runtime smoke 已落地（P2 完成）**：`pnpm verify:runtime-packages:published-smoke` 会从 npm registry 安装当前源码版本的 `codex`、`gemini`、`trae` provider runtime，并校验 provider CLI bin、`--version` 和 `--help`；该命令要求所有 provider 包名和版本都已发布，适合作为发布后远端安装证据入口。
 - **Trae launcher clean relaunch 已下沉到共享 core（P2 完成）**：`@tingrudeng/automation-gateway-core` 现在提供 `prepareCleanRelaunch` / `quitExistingMacApp` / `waitForDebuggerPortToDrain` / `resolveMacAppName`，`scripts/run-trae-automation-launch.ts` 和 `@tingrudeng/trae-beta-runtime` 共用同一实现，避免源码调试脚本与 packaged runtime 的 clean relaunch 语义继续漂移。
+- **Trae `.app` launch target 解析已下沉到共享 core（P2 完成）**：`@tingrudeng/automation-gateway-core` 现在提供 `resolveMacAppBundleExecutable`，`scripts/lib/trae-launcher.ts` 和 `packages/trae-beta-runtime/src/runtime/trae-launcher.ts` 共用同一实现，避免 macOS `.app` executable 探测规则在源码脚本与 packaged runtime 之间漂移。
 
 仍存在的债务：
 
