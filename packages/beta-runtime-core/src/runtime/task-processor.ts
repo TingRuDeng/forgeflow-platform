@@ -47,6 +47,22 @@ interface SubmitCompletedResultInput {
   pullRequest: PullRequestInfo | null;
 }
 
+export interface SubmitFailedWorkerResultInput {
+  input: ProcessTaskAssignmentInput;
+  taskId?: string;
+  error: unknown;
+  maxRetries?: number;
+  retryDelayMs?: number;
+  onSubmitted?: (event: { taskId: string }) => void | Promise<void>;
+  onSubmitAttemptFailed?: (event: {
+    taskId: string;
+    attempt: number;
+    maxRetries: number;
+    error: string;
+  }) => void | Promise<void>;
+  onFallbackFailed?: (event: { taskId: string; error: string }) => void | Promise<void>;
+}
+
 export interface LiveWorkerTaskEvent {
   type: string;
   taskId?: string;
@@ -242,37 +258,49 @@ async function submitCompletedResult(submission: SubmitCompletedResultInput): Pr
 async function submitFailedResult(input: ProcessTaskAssignmentInput, taskId: string, error: unknown): Promise<void> {
   const errorMessage = error instanceof Error ? error.message : String(error);
   console.error(`task execution failed for ${taskId}:`, errorMessage);
+  await submitFailedWorkerResult({ input, taskId, error });
+}
+
+export async function submitFailedWorkerResult(request: SubmitFailedWorkerResultInput): Promise<void> {
+  const taskId = request.taskId ?? request.input.payload.task.id;
+  const errorMessage = request.error instanceof Error ? request.error.message : String(request.error);
   try {
     const failedResult = createFailedWorkerResult({
-      payload: input.payload,
-      workerId: input.workerId,
+      payload: request.input.payload,
+      workerId: request.input.workerId,
       errorMessage,
       generatedAt: nowIso(),
     });
-    const failedOutputDir = path.join(input.repoDir, ".worktrees", "failed", safeTaskDirName(taskId));
+    const failedOutputDir = path.join(request.input.repoDir, ".worktrees", "failed", safeTaskDirName(taskId));
     fs.mkdirSync(failedOutputDir, { recursive: true });
     writeWorkerResultFiles(failedOutputDir, failedResult, `ERROR: ${errorMessage}\n`);
-    await submitFailedResultWithRetry(input, failedResult, taskId);
+    await submitFailedResultWithRetry(request, failedResult, taskId);
   } catch (fallbackError) {
-    console.error(`failed to submit error result for ${taskId}:`, fallbackError instanceof Error ? fallbackError.message : String(fallbackError));
+    const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+    console.error(`failed to submit error result for ${taskId}:`, fallbackMessage);
+    await request.onFallbackFailed?.({ taskId, error: fallbackMessage });
   }
 }
 
-async function submitFailedResultWithRetry(input: ProcessTaskAssignmentInput, failedResult: WorkerResult, taskId: string): Promise<void> {
-  for (let attempt = 1; attempt <= SUBMIT_RESULT_MAX_RETRIES; attempt++) {
+async function submitFailedResultWithRetry(request: SubmitFailedWorkerResultInput, failedResult: WorkerResult, taskId: string): Promise<void> {
+  const maxRetries = request.maxRetries ?? SUBMIT_RESULT_MAX_RETRIES;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      await input.client.submitResult(input.workerId, {
-        ...buildWorkerProtocolEnvelope(input.payload),
+      await request.input.client.submitResult(request.input.workerId, {
+        ...buildWorkerProtocolEnvelope(request.input.payload),
         result: failedResult,
         changedFiles: [],
         pullRequest: null,
       });
       console.error(`submitted failed result for ${taskId} after catch`);
+      await request.onSubmitted?.({ taskId });
       return;
     } catch (submitError) {
-      console.error(`submitResult in catch attempt ${attempt} failed:`, submitError instanceof Error ? submitError.message : String(submitError));
-      if (attempt < SUBMIT_RESULT_MAX_RETRIES) {
-        await sleep(SUBMIT_RESULT_RETRY_DELAY_MS);
+      const error = submitError instanceof Error ? submitError.message : String(submitError);
+      console.error(`submitResult in catch attempt ${attempt} failed:`, error);
+      await request.onSubmitAttemptFailed?.({ taskId, attempt, maxRetries, error });
+      if (attempt < maxRetries) {
+        await sleep(request.retryDelayMs ?? SUBMIT_RESULT_RETRY_DELAY_MS);
       }
     }
   }

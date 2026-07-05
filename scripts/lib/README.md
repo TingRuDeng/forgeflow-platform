@@ -61,7 +61,7 @@ Several mainline dispatcher paths are now bridged into `apps/dispatcher/dist` ra
 
 - `dispatcher-server.js` bridges Trae route handling to `runtime-dispatcher-server.js`
 - `dispatcher-state.js` bridges state transitions to `runtime-state.js`
-- `worker-daemon.js` bridges the generic worker daemon cycle to `runtime-glue-dispatcher-client.js`; this directory still owns the live executor for worktree preparation, child worker execution, git delivery, PR creation, failure fallback, and cleanup
+- `worker-daemon.js` bridges the generic worker daemon cycle to `runtime-glue-dispatcher-client.js`; live executor and failed-result fallback now live in `packages/beta-runtime-core`, while this directory keeps bootstrap, logging, and metrics callbacks
 - `review-decision.js` bridges review submission logic to `runtime-glue-review-decision.js`
 - `review-memory.js` bridges lesson loading/extraction to `apps/dispatcher/dist/modules/server/review-memory.js`
 - `task-worktree.js` bridges worktree planning/reuse logic to `apps/dispatcher/dist/modules/server/task-worktree.js`

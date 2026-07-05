@@ -138,13 +138,51 @@ export function buildDryRunWorkerResult(payload: TaskPayload, outputDir: string,
 }
 
 export function createFailedWorkerResult(input: { payload: TaskPayload; workerId: string; errorMessage: string; generatedAt: string }): WorkerResult {
-  return createWorkerResult({
+  const workerResult = createWorkerResult({
     payload: input.payload,
     workerId: input.workerId,
     output: `ERROR: ${input.errorMessage}`,
     allPassed: false,
     generatedAt: input.generatedAt,
   });
+  workerResult.evidence = buildWorkerFailureEvidence(input.errorMessage);
+  return workerResult;
+}
+
+type WorkerFailureKind = "preflight" | "execution" | "verification" | "unknown";
+
+function buildWorkerFailureEvidence(errorMessage: string): NonNullable<WorkerResult["evidence"]> {
+  const classified = classifyWorkerFailure(errorMessage);
+  return {
+    failureType: classified.failureType,
+    failureSummary: errorMessage,
+    blockers: [{
+      kind: classified.failureType,
+      code: classified.code,
+      message: errorMessage,
+    }],
+    findings: [],
+  };
+}
+
+function classifyWorkerFailure(message: string): { failureType: WorkerFailureKind; code: string } {
+  const lowerMessage = message.toLowerCase();
+  if (/refusing to push to default branch|branchname not allowed by forgeflow_allowed_push_prefixes/.test(lowerMessage)) {
+    return { failureType: "preflight", code: "branch_protection_hit" };
+  }
+  if (/existing worktree already present|already checked out|failed to create worktree|failed to fetch origin|default branch ref|invalid git branch ref|invalid branchname/.test(lowerMessage)) {
+    return { failureType: "preflight", code: "workspace_prepare_failed" };
+  }
+  if (/operation not permitted|permission denied|sandbox|forbidden|not allowed|blocked by environment/.test(lowerMessage)) {
+    return { failureType: "preflight", code: "environment_blocked" };
+  }
+  if (/vitest|jest|pnpm test|typecheck|verification/.test(lowerMessage)) {
+    return { failureType: "verification", code: "verification_failed" };
+  }
+  if (/submitresult failed after|failed to push changes|push failed|push failure|could not read from remote repository|does not appear to be a git repository|failed to create pull request|pr create failed|dispatcher unavailable/.test(lowerMessage)) {
+    return { failureType: "execution", code: "delivery_failed" };
+  }
+  return { failureType: "execution", code: "execution_failed" };
 }
 
 function createWorkerResult(input: WorkerResultInput): WorkerResult {

@@ -53,6 +53,18 @@ export interface WorkerResult {
     reason?: string;
     prompt?: string;
   };
+  evidence?: {
+    failureType?: "preflight" | "execution" | "verification" | "unknown";
+    failureSummary?: string;
+    blockers?: Array<{
+      kind: "preflight" | "execution" | "verification" | "unknown";
+      code: string;
+      message: string;
+      details?: Record<string, unknown>;
+    }>;
+    findings?: unknown[];
+    artifacts?: Record<string, string>;
+  };
 }
 
 export interface PullRequestInfo {

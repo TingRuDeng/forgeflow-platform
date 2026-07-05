@@ -233,6 +233,12 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
           expect.objectContaining({
             result: expect.objectContaining({
               verification: expect.objectContaining({ allPassed: false }),
+              evidence: expect.objectContaining({
+                failureType: "execution",
+                blockers: expect.arrayContaining([
+                  expect.objectContaining({ code: "delivery_failed" }),
+                ]),
+              }),
             }),
           }),
         );

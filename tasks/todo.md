@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M29 串行：下沉 worker-daemon 失败回写到 beta-runtime-core adapter。
+- [x] M29 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M29 Review 小结
+
+已把脚本侧 `worker-daemon` 的失败 fallback result 构建、落盘、`submitResult` retry 和失败 evidence 分类下沉到 `packages/beta-runtime-core` 的 `submitFailedWorkerResult`；`scripts/lib/worker-daemon.ts` 现在只负责动态加载 runtime core，并通过回调上报日志、metrics 和 dispatcher event。共享失败 result 会写出 `worker-result.json`、`worker-verification.json` 和 raw output，push / PR / dispatcher 回写失败继续保留显式 `delivery_failed` 证据。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 worker-daemon 失败回写下沉，未改变 dispatcher 状态机或 worker result 提交协议；安全检查通过，未新增 secret、外部输入拼接、mock 成功路径或静默 fallback；复杂度检查通过，脚本侧删除重复分类与落盘逻辑，runtime core helper 保持单职责；Document-refresh: needed，原因：runtime 去重状态和剩余技术债边界变化，已同步 README、docs/README、scripts/lib/README 和 TECH_DEBT。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @tingrudeng/beta-runtime-core build`、`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core exec vitest run tests/worker-daemon.test.ts`、`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/run-worker-daemon.test.ts tests/modules/server/worker-daemon-helpers.test.ts`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core test`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。全量 `CI=true pnpm test` 在默认沙箱因 `listen EPERM 127.0.0.1` 和 `/Users/dengtingru/.forgeflow-trae-beta` 写权限失败；按同一命令非沙箱复跑通过，覆盖 24 个 workspace project，其中 dispatcher 45 个测试文件 / 483 个测试全部通过。
+
+剩余风险：脚本侧仍保留 beta-runtime-core dist bootstrap 与日志 / metrics callback；后续可继续收敛成 runtime core 的显式 adapter，降低源码仓 live 入口对本地 dist 新鲜度的依赖。
+
 - [x] M28 串行：补齐 Console 批量 merge 风险确认和失败明细。
 - [x] M28 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 
@@ -44,13 +57,13 @@ Review Gate：finished。Spec 符合度通过，本轮完成 worker 主动 HITL 
 
 ## M25 Review 小结
 
-已新增 `packages/beta-runtime-core/src/runtime/task-processor.ts:executeLiveWorkerTask`，把 worktree prepare/reset、assignment package materialize、child worker execution、changed files collection、commit/push、显式 opt-in PR 创建和 cleanup lifecycle 收敛到共享 runtime core；`scripts/lib/worker-daemon.ts` 改为动态加载 beta-runtime-core dist 并委托该 executor，脚本侧保留日志 / metrics、dispatcher failure fallback result 和本地 bootstrap。
+已新增 `packages/beta-runtime-core/src/runtime/task-processor.ts:executeLiveWorkerTask`，把 worktree prepare/reset、assignment package materialize、child worker execution、changed files collection、commit/push、显式 opt-in PR 创建和 cleanup lifecycle 收敛到共享 runtime core；`scripts/lib/worker-daemon.ts` 改为动态加载 beta-runtime-core dist 并委托该 executor。失败回写已在 M29 继续下沉，脚本侧当前只保留日志 / metrics callback 和本地 bootstrap。
 
 Review Gate：finished。Spec 符合度通过，本轮完成 worker-daemon live executor 主体下沉，脚本侧不再保留 worktree / child worker / commit / push / PR / cleanup 重型实现；安全检查通过，未新增 secret、mock 成功路径或静默降级，PR 创建仍需显式 opt-in，分支安全校验迁移到共享 runtime core；复杂度检查通过，新增 runtime core 文件均低于 300 行，`executeLiveWorkerTask` 已拆分为 prepare / run / report / finalize / cleanup helper，脚本历史大文件从 1072 行降到 731 行但仍作为后续债务保留；Document-refresh: needed，原因：worker-daemon live executor 权威边界变化，已同步 README、docs/README 和 TECH_DEBT。结论：通过。
 
 验证已通过：RED 阶段确认 `executeLiveWorkerTask` 缺失；GREEN 后通过 `CI=true pnpm --filter @tingrudeng/beta-runtime-core exec vitest run tests/worker-daemon.test.ts`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core test`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core typecheck`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core build`、`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/run-worker-daemon.test.ts tests/modules/server/worker-daemon-helpers.test.ts`、`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check`、非沙箱 `CI=true pnpm test`。
 
-剩余风险：脚本侧仍保留失败 fallback result、日志 / metrics 和 beta-runtime-core dist bootstrap；这部分需要后续收敛为显式 adapter，避免脚本长期承担 runtime-core 发布包外的兼容入口。
+剩余风险：该批次记录的失败 fallback result 已由 M29 下沉；脚本侧当前仍保留日志 / metrics callback 和 beta-runtime-core dist bootstrap。
 
 - [x] M24 串行：补齐 Console 审查队列批量 rework / block。
 - [x] M24 串行：运行最小充分验证、Review Gate 并补充 review 小结。
@@ -206,7 +219,7 @@ Review Gate：finished。Spec 符合度通过，完成本轮 runtime executor / 
 
 验证已通过：`CI=true pnpm --filter @tingrudeng/beta-runtime-core test`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core typecheck`、`CI=true pnpm --filter @tingrudeng/codex-beta-runtime test`、`CI=true pnpm --filter @tingrudeng/codex-beta-runtime typecheck`、`CI=true pnpm --filter @tingrudeng/gemini-beta-runtime test`、`CI=true pnpm --filter @tingrudeng/gemini-beta-runtime typecheck`、`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/run-worker-assignment.test.ts`、`CI=true pnpm exec tsc -p scripts/tsconfig.json`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`CI=true pnpm typecheck`、`git diff --check`。
 
-剩余风险：本轮收敛的是 assignment runner、verification 和 provider launch wrapper；`scripts/lib/worker-daemon.ts` 的 live executor 生命周期仍包含 worktree、child worker execution、commit/push、PR 创建、失败 fallback result 和 cleanup，后续继续下沉时需要单独规划。
+剩余风险：该批次记录的是当时状态；后续 M25 已下沉 live executor，M29 已下沉失败回写。脚本侧当前仍保留日志 / metrics callback 和 beta-runtime-core dist bootstrap。
 
 - [x] M12 串行：补齐 task-level terminationPolicy timeout 字段的运行时接入。
 - [x] M12 串行：运行最小充分验证、Review Gate 并补充 review 小结。

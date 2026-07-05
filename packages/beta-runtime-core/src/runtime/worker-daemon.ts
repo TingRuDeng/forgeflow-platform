@@ -6,7 +6,7 @@ import { resolvePackageRootDir, nowIso, sleep } from "./utils.js";
 import type { DispatcherClient, PullRequestInfo, TaskPayload } from "./types.js";
 
 export { createDispatcherClient } from "./dispatcher-client.js";
-export { buildWorkerProtocolEnvelope, executeLiveWorkerTask } from "./task-processor.js";
+export { buildWorkerProtocolEnvelope, executeLiveWorkerTask, submitFailedWorkerResult } from "./task-processor.js";
 export type { DispatcherClient, PullRequestInfo, TaskAssignment, TaskInfo, TaskPayload, WorkerResult } from "./types.js";
 
 export interface RunWorkerDaemonCycleInput {
