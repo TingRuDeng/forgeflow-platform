@@ -1,13 +1,18 @@
-import os from "node:os";
-
 import { createDispatcherClient } from "./dispatcher-client.js";
-import { executeLiveWorkerTask, processTaskAssignment } from "./task-processor.js";
-import { resolvePackageRootDir, nowIso, sleep } from "./utils.js";
+import { executeLiveWorkerTask, submitFailedWorkerResult } from "./task-processor.js";
+import { resolvePackageRootDir, sleep } from "./utils.js";
+import {
+  runSharedWorkerDaemonCycle,
+  type SharedWorkerDaemonCycleResult,
+  type TaskExecutionResult,
+} from "./worker-daemon-cycle.js";
 import type { DispatcherClient, PullRequestInfo, TaskPayload } from "./types.js";
 
 export { createDispatcherClient } from "./dispatcher-client.js";
 export { buildWorkerProtocolEnvelope, executeLiveWorkerTask, submitFailedWorkerResult } from "./task-processor.js";
 export { executeManagedWorkerTask } from "./managed-task-processor.js";
+export { runSharedWorkerDaemonCycle } from "./worker-daemon-cycle.js";
+export type { SharedWorkerDaemonCycleInput, SharedWorkerDaemonCycleResult, TaskExecutor, TaskExecutionResult } from "./worker-daemon-cycle.js";
 export type { DispatcherClient, PullRequestInfo, TaskAssignment, TaskInfo, TaskPayload, WorkerResult } from "./types.js";
 
 export interface RunWorkerDaemonCycleInput {
@@ -27,34 +32,52 @@ export type RunWorkerDaemonCycleResult =
   | { status: string; workerId: string }
   | { status: string; taskId: string; workerId: string; worktreeDir: string; outputDir: string; changedFiles: string[]; pullRequest: PullRequestInfo | null };
 
+async function executeAssignedTask(input: {
+  client: DispatcherClient;
+  packageRoot: string;
+  workerId: string;
+  repoDir: string;
+  payload: TaskPayload;
+  dryRunExecution: boolean;
+  at?: string;
+}): Promise<TaskExecutionResult> {
+  try {
+    return await executeLiveWorkerTask(input);
+  } catch (error) {
+    await submitFailedWorkerResult({
+      input,
+      taskId: input.payload.task.id,
+      error,
+    });
+    throw error;
+  }
+}
+
 export async function runWorkerDaemonCycle(input: RunWorkerDaemonCycleInput): Promise<RunWorkerDaemonCycleResult> {
   const client = input.client ?? createDispatcherClient(input.dispatcherUrl || "");
-  const at = input.at ?? nowIso();
-
-  await client.registerWorker({
+  const packageRoot = input.packageRoot ?? resolvePackageRootDir();
+  const summary: SharedWorkerDaemonCycleResult = await runSharedWorkerDaemonCycle({
+    client,
     workerId: input.workerId,
     pool: input.pool,
-    hostname: input.hostname ?? os.hostname(),
-    labels: input.labels ?? [],
+    hostname: input.hostname,
+    labels: input.labels,
     repoDir: input.repoDir,
-    at,
+    dryRunExecution: input.dryRunExecution,
+    at: input.at,
+    taskExecutor: {
+      executeTask: (_task, _assignment, payload) => executeAssignedTask({
+        client,
+        packageRoot,
+        workerId: input.workerId,
+        repoDir: input.repoDir,
+        payload,
+        dryRunExecution: Boolean(input.dryRunExecution),
+        at: input.at,
+      }),
+    },
   });
-  await client.heartbeat(input.workerId, { at });
-
-  const assigned = await client.claimTask(input.workerId, { at }) as TaskPayload | null;
-  if (!assigned || !assigned.assignment || !assigned.task) {
-    return { status: "idle", workerId: input.workerId };
-  }
-
-  return processTaskAssignment({
-    client,
-    packageRoot: input.packageRoot ?? resolvePackageRootDir(),
-    workerId: input.workerId,
-    repoDir: input.repoDir,
-    payload: assigned,
-    dryRunExecution: Boolean(input.dryRunExecution),
-    at,
-  });
+  return summary as RunWorkerDaemonCycleResult;
 }
 
 export interface RunWorkerDaemonInput extends RunWorkerDaemonCycleInput {

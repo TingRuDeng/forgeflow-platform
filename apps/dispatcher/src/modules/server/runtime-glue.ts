@@ -31,7 +31,6 @@ export type {
 export {
   createDispatcherHttpClient,
   createDispatcherStateDirClientFactory,
-  runWorkerDaemonCycle,
 } from "./runtime-glue-dispatcher-client.js";
 
 export type {
@@ -39,15 +38,18 @@ export type {
   DispatcherStateDirClient,
   CreateDispatcherHttpClientOptions,
   CreateDispatcherStateDirClientOptions,
+} from "./runtime-glue-dispatcher-client.js";
+
+export {
+  runWorkerDaemon,
+  runWorkerDaemonCycle,
+} from "./runtime-glue-worker-daemon-cycle.js";
+
+export type {
   CreateWorkerDaemonCycleOptions,
   TaskExecutor,
   TaskExecutionResult,
   WorkerDaemonCycleResult,
-} from "./runtime-glue-dispatcher-client.js";
-
-export { runWorkerDaemon } from "./runtime-glue-worker-daemon-cycle.js";
-
-export type {
   RunWorkerDaemonOptions,
 } from "./runtime-glue-worker-daemon-cycle.js";
 

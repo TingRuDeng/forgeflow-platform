@@ -40,6 +40,7 @@ const originalEnv = {
   DISPATCHER_API_TOKEN: process.env.DISPATCHER_API_TOKEN,
   GITHUB_TOKEN: process.env.GITHUB_TOKEN,
 };
+const workerDaemonSourcePath = path.resolve("src/runtime/worker-daemon.ts");
 
 function makeTempDir(prefix: string): string {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -159,6 +160,19 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
     restoreEnv();
+  });
+
+  describe("worker daemon runtime boundary", () => {
+    it("keeps the packaged worker daemon as a thin shared-cycle adapter", () => {
+      const source = fs.readFileSync(workerDaemonSourcePath, "utf8");
+
+      expect(source).toContain("./worker-daemon-cycle.js");
+      expect(source).not.toContain("client.registerWorker");
+      expect(source).not.toContain("client.heartbeat");
+      expect(source).not.toContain("client.claimTask");
+      expect(source).not.toContain("client.startTask");
+      expect(source).not.toContain("processTaskAssignment({");
+    });
   });
 
   for (const testCase of providerCases) {
