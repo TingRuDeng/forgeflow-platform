@@ -7,6 +7,8 @@ import type {
 } from "./task-processor.js";
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;
+export const DEFAULT_SUBMIT_RESULT_MAX_RETRIES = 3;
+export const DEFAULT_SUBMIT_RESULT_RETRY_DELAY_MS = 2_000;
 
 export interface ManagedWorkerTaskCallbacks {
   onHeartbeatFailed?: (event: { taskId: string; error: string }) => void | Promise<void>;
@@ -29,6 +31,16 @@ export interface ExecuteManagedWorkerTaskInput extends ExecuteLiveWorkerTaskInpu
     SubmitFailedWorkerResultInput,
     "onSubmitted" | "onSubmitAttemptFailed" | "onFallbackFailed"
   >;
+}
+
+export function resolveManagedWorkerTaskRetryPolicy(env: NodeJS.ProcessEnv = process.env): {
+  maxFailedResultRetries: number;
+  failedResultRetryDelayMs: number;
+} {
+  return {
+    maxFailedResultRetries: Number(env.WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES || DEFAULT_SUBMIT_RESULT_MAX_RETRIES),
+    failedResultRetryDelayMs: Number(env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS || DEFAULT_SUBMIT_RESULT_RETRY_DELAY_MS),
+  };
 }
 
 export async function executeManagedWorkerTask(input: ExecuteManagedWorkerTaskInput): Promise<TaskExecutionResult> {

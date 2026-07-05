@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M93 串行：把 worker daemon submitResult retry policy 下沉到 beta-runtime-core。
 - [x] M92 串行：让 Release workflow 在 provider runtime 发布后运行 published smoke。
 - [x] M91 串行：新增已发布 runtime 包 registry 安装 / CLI smoke。
 - [x] M90 串行：让 release workflow 复用通用 release package 检测脚本。
@@ -16,6 +17,16 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M93 Review 小结
+
+已把 worker daemon 的 submitResult retry policy 默认值和环境变量解析从 `scripts/lib/worker-daemon-task-executor.ts` 下沉到 `packages/beta-runtime-core/src/runtime/managed-task-processor.ts`，并通过 `packages/beta-runtime-core/src/runtime/worker-daemon.ts` 显式导出 `resolveManagedWorkerTaskRetryPolicy`。脚本侧 adapter 现在只负责组装本地 logger / metrics / artifact hooks 和运行时脚本路径，不再维护第二套 `SUBMIT_RESULT_MAX_RETRIES` / `SUBMIT_RESULT_RETRY_DELAY_MS` 默认值。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 runtime executor / launch 去重，只收敛 generic worker daemon submitResult retry policy 权威位置，不改变 dispatcher protocol、worker claim/start/submitResult 语义、失败回写、PR 创建或 worktree 生命周期。安全检查通过，未新增 secret、网络调用、shell 拼接、mock 成功路径或静默 fallback；环境变量覆盖仍显式透传。复杂度检查通过，触碰文件均低于 300 行，新增 helper 和测试保持短函数。Document-refresh: not-needed，原因：这是 runtime 内部权威边界去重，外部 operator 命令和协议文档没有变化。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @tingrudeng/beta-runtime-core build`；`CI=true pnpm --dir scripts/lib exec tsc -p tsconfig.json`；`CI=true pnpm --filter @tingrudeng/beta-runtime-core exec vitest run tests/worker-daemon.test.ts --maxWorkers=1`，1 个测试文件、14 个测试通过；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/worker-daemon-thin-adapter.test.ts tests/modules/server/run-worker-daemon.test.ts --maxWorkers=1`，2 个测试文件、12 个测试通过；`node --check scripts/lib/worker-daemon-task-executor.js`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。首次未带 `CI=true` 执行 pnpm build / scripts lib tsc 时，pnpm 因无 TTY 环境触发 modules purge 保护失败；按错误提示加 `CI=true` 复跑通过。
+
+剩余风险：generic worker daemon 的 submitResult retry policy 已收敛到 beta-runtime-core；Trae automation worker 仍有独立 submit result / phase event 路径，后续若要达到“所有 provider worker 完全同一 executor 核心”，仍需继续评估 Trae 是否能迁入 shared managed executor。
 
 ## M92 Review 小结
 
