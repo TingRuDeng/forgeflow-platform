@@ -106,15 +106,16 @@ Desired direction:
 - 两套实现都已经暴露 `POST /v1/sessions/:sessionId/release`
 - 两套实现都已经在 `POST /v1/sessions/prepare` 中创建会话，并在 prepare 成功后标记为 `running`
 - 脚本侧已经对齐 packaged runtime 的持久化 session 解析、`POST /v1/chat` 元数据透传和结构化 debugLog 关键事件
+- packaged runtime 已补齐脚本侧 `POST /v1/chat` 的 completed-session cache、running-session conflict、request fingerprint conflict、progress touch 和 soft-timeout 保持 running 语义
 
 影响：
 
 - 默认 session-store 路径、持久化解析和 chat 调用关键行为已经对齐
-- 由于源码脚本与 packaged runtime 仍是两套实现，后续修复仍可能只落到其中一套实现
+- 由于源码脚本与 packaged runtime 仍是两套实现，后续修复仍可能只落到其中一套实现；当前风险已经收窄到实现复用不足，而不是关键 session 语义缺失
 
 期望方向：
 
-- 继续减少重复实现，或把共享兼容测试扩展到所有 gateway 关键路由
+- 继续减少重复实现，优先把 chat / session handler 抽到共享 core，或让源码脚本 gateway 委托 packaged runtime
 
 ## 5. Stable agent-facing docs were previously concentrated in rule/nav docs but lacked a durable knowledge layer
 

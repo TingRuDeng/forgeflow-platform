@@ -47,6 +47,7 @@ interface AutomationDriver {
     chatMode?: string | null;
     responseRequiredPrefix: unknown;
     responseTimeoutMs: unknown;
+    onProgress?: (details: { responseDetected?: boolean }) => void;
   }) => Promise<AutomationSendPromptResult>;
 }
 
@@ -379,6 +380,7 @@ export async function handleTraeAutomationHttpRequest(
     }
 
     const sessionId = readOptionalString(body.sessionId);
+    let session: ReturnType<SessionStore["getInternal"]> = null;
     debugLog("chat.start", {
       sessionId,
       contentLength: content.length,
@@ -388,7 +390,31 @@ export async function handleTraeAutomationHttpRequest(
       responseTimeoutMs: typeof body.responseTimeoutMs === "number" ? body.responseTimeoutMs : null,
     });
     if (sessionStore && sessionId) {
-      sessionStore.touchActivity(sessionId);
+      session = sessionStore.getInternal(sessionId);
+      if (session && session.status === "completed" && session.responseText) {
+        return {
+          status: 200,
+          json: {
+            success: true,
+            code: "OK",
+            data: {
+              status: "ok",
+              response: { text: session.responseText },
+              cached: true,
+            },
+          },
+        };
+      }
+      if (session && session.status === "running") {
+        throw new ApiError("SESSION_CONFLICT", `Session ${sessionId} is already running`, 409);
+      }
+      if (session && session.requestFingerprint && session.requestFingerprint !== content) {
+        throw new ApiError("SESSION_CONFLICT", `Session ${sessionId} request fingerprint mismatch`, 409);
+      }
+    }
+
+    if (sessionStore && sessionId && session) {
+      sessionStore.markRunning(sessionId);
     }
 
     try {
@@ -401,6 +427,9 @@ export async function handleTraeAutomationHttpRequest(
         chatMode: typeof body.chatMode === "string" ? body.chatMode : null,
         responseRequiredPrefix: body.responseRequiredPrefix || null,
         responseTimeoutMs: body.responseTimeoutMs || null,
+        onProgress: sessionStore && sessionId ? (details) => {
+          sessionStore.touchActivity(sessionId, details);
+        } : undefined,
       });
 
       if (sessionStore && sessionId) {
