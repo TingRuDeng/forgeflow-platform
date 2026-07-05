@@ -29,7 +29,9 @@ describe("backup and restore runtime state", () => {
     fs.writeFileSync(path.join(stateDir, "runtime-state.db"), "db");
     fs.writeFileSync(path.join(stateDir, "runtime-state.db-wal"), "wal");
     fs.writeFileSync(path.join(stateDir, "runtime-state-shadow-status.json"), "{\"status\":\"failed\"}");
+    fs.writeFileSync(path.join(stateDir, "shadow-cutover-drill.json"), "{\"ok\":true}");
     fs.writeFileSync(path.join(stateDir, "shadow-cutover-approval.json"), "{\"approved\":true}");
+    fs.writeFileSync(path.join(stateDir, "shadow-cutover-ready.json"), "{\"ok\":true}");
     fs.writeFileSync(path.join(stateDir, "shadow-cutover-revocation.json"), "{\"revoked\":true}");
 
     const backup = backupRuntimeState({ stateDir, backupDir });
@@ -37,7 +39,9 @@ describe("backup and restore runtime state", () => {
       "runtime-state.db",
       "runtime-state.db-wal",
       "runtime-state-shadow-status.json",
+      "shadow-cutover-drill.json",
       "shadow-cutover-approval.json",
+      "shadow-cutover-ready.json",
       "shadow-cutover-revocation.json",
     ]);
 
@@ -46,14 +50,22 @@ describe("backup and restore runtime state", () => {
       "runtime-state.db",
       "runtime-state.db-wal",
       "runtime-state-shadow-status.json",
+      "shadow-cutover-drill.json",
       "shadow-cutover-approval.json",
+      "shadow-cutover-ready.json",
       "shadow-cutover-revocation.json",
     ]);
     expect(fs.readFileSync(path.join(restoreDir, "runtime-state-shadow-status.json"), "utf8")).toBe(
       "{\"status\":\"failed\"}",
     );
+    expect(fs.readFileSync(path.join(restoreDir, "shadow-cutover-drill.json"), "utf8")).toBe(
+      "{\"ok\":true}",
+    );
     expect(fs.readFileSync(path.join(restoreDir, "shadow-cutover-approval.json"), "utf8")).toBe(
       "{\"approved\":true}",
+    );
+    expect(fs.readFileSync(path.join(restoreDir, "shadow-cutover-ready.json"), "utf8")).toBe(
+      "{\"ok\":true}",
     );
     expect(fs.readFileSync(path.join(restoreDir, "shadow-cutover-revocation.json"), "utf8")).toBe(
       "{\"revoked\":true}",
