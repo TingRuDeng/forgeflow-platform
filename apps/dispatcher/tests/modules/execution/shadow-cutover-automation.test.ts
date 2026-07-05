@@ -105,6 +105,47 @@ describe("shadow cutover automation", () => {
     });
   }, 30_000);
 
+  it("writes a durable shadow reconciler status snapshot", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-reconciler-status-"));
+    const outputPath = path.join(stateDir, "evidence", "shadow-reconciler-status.json");
+    const result = spawnSync("node", [
+      shadowReconcilerScriptPath,
+      stateDir,
+      "--once",
+      "--interval-ms",
+      "1000",
+      "--output",
+      outputPath,
+    ], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "disabled",
+        DISPATCHER_QUEUE_SHADOW_MODE: "disabled",
+        DISPATCHER_POSTGRES_URL: "",
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const status = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+    expect(status).toMatchObject({
+      schemaVersion: "shadow-reconciler-status/v1",
+      ok: true,
+      mode: "once",
+      stateDir,
+      intervalMs: 1000,
+      runCount: 1,
+      failedRunCount: 0,
+    });
+    expect(status.lastRun.payload.reconciliation).toEqual({
+      requested: true,
+      attempted: false,
+      reason: "shadow_not_configured",
+    });
+  }, 30_000);
+
   it("passes strict cutover requirements through the shadow reconciler", () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-reconciler-strict-"));
     const result = spawnSync("node", [
