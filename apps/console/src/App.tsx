@@ -6,27 +6,10 @@ import { TaskDetailsPanel, TaskList, WorkerList } from './components/Lists';
 import { TerminalPanel } from './components/TerminalPanel';
 import { Panel } from './components/UI';
 import { ArtifactWorkbench } from './components/ArtifactWorkbench';
+import { ReviewQueue } from './components/ReviewQueue';
 import { useTranslation } from './lib/i18n';
-
-async function parseJsonResponse(res: Response) {
-  const text = await res.text();
-  if (!text.trim()) {
-    return null;
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-
-function extractResponseError(body: unknown, fallback: string) {
-  if (body && typeof body === 'object') {
-    const record = body as { message?: unknown; error?: unknown };
-    return String(record.message || record.error || fallback);
-  }
-  return fallback;
-}
+import { extractResponseError, parseJsonResponse } from './lib/http';
+import { postReviewDecision, type ReviewDecisionInput } from './lib/reviewDecision';
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -38,14 +21,6 @@ const fetcher = async (url: string) => {
   return body;
 };
 
-interface ReviewDecisionInput {
-  reasonCode?: string;
-  mustFix?: string[];
-  canRedrive?: boolean;
-  redriveStrategy?: string;
-  acknowledgeRisk?: boolean;
-}
-
 const App: React.FC = () => {
   const { t } = useTranslation();
   const { data, error, isLoading, mutate } = useSWR('/api/dashboard/snapshot', fetcher, {
@@ -55,6 +30,7 @@ const App: React.FC = () => {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   const [reviewingTaskId, setReviewingTaskId] = useState<string | null>(null);
+  const [bulkReviewingTaskIds, setBulkReviewingTaskIds] = useState<string[]>([]);
   const [updatingWorkerId, setUpdatingWorkerId] = useState<string | null>(null);
 
   const selectedTask = useMemo(() => {
@@ -184,29 +160,12 @@ const App: React.FC = () => {
 
     try {
       setReviewingTaskId(selectedTask.id);
-      const res = await fetch(`/api/reviews/${encodeURIComponent(selectedTask.id)}/decision`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          decision,
-          actor: 'console-ui',
-          notes: `${decision} from console UI`,
-          acknowledgeRisk: input.acknowledgeRisk,
-          evidence: {
-            reasonCode: input.reasonCode,
-            mustFix: input.mustFix,
-            canRedrive: input.canRedrive,
-            redriveStrategy: input.redriveStrategy,
-          },
-          at: new Date().toISOString(),
-        }),
+      await postReviewDecision({
+        taskId: selectedTask.id,
+        decision,
+        reviewInput: input,
+        notes: `${decision} from console UI`,
       });
-
-      if (!res.ok) {
-        const errorMessage = extractResponseError(await parseJsonResponse(res), 'Failed to submit review decision');
-        throw new Error(errorMessage);
-      }
-
       await mutate();
     } catch (err) {
       console.error(err);
@@ -214,6 +173,37 @@ const App: React.FC = () => {
       alert(`${t('reviewActionFailed')}: ${message}`);
     } finally {
       setReviewingTaskId(null);
+    }
+  };
+
+  const handleBulkReviewDecision = async (
+    decision: 'rework' | 'block',
+    taskIds: string[],
+    input: ReviewDecisionInput = {},
+  ) => {
+    if (taskIds.length === 0) return;
+
+    try {
+      setBulkReviewingTaskIds(taskIds);
+      const results = await Promise.allSettled(
+        taskIds.map((taskId) => postReviewDecision({
+          taskId,
+          decision,
+          reviewInput: input,
+          notes: `${decision} from console bulk review`,
+        })),
+      );
+      const failures = results.filter((result) => result.status === 'rejected');
+      await mutate();
+      if (failures.length > 0) {
+        throw new Error(`${failures.length} / ${taskIds.length} ${t('bulkReviewFailed')}`);
+      }
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : String(err);
+      alert(`${t('reviewActionFailed')}: ${message}`);
+    } finally {
+      setBulkReviewingTaskIds([]);
     }
   };
 
@@ -265,6 +255,17 @@ const App: React.FC = () => {
                   tasks={Array.isArray(data.tasks) ? data.tasks : []}
                   selectedTaskId={selectedTask?.id || null}
                   onSelectTask={setSelectedTaskId}
+                />
+              </Panel>
+
+              <Panel title={t('reviewQueue')}>
+                <ReviewQueue
+                  tasks={Array.isArray(data.tasks) ? data.tasks : []}
+                  reviews={Array.isArray(data.reviews) ? data.reviews : []}
+                  selectedTaskId={selectedTask?.id || null}
+                  submittingTaskIds={bulkReviewingTaskIds}
+                  onSelectTask={setSelectedTaskId}
+                  onBulkReviewDecision={handleBulkReviewDecision}
                 />
               </Panel>
 

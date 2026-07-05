@@ -142,10 +142,11 @@ describe('App dashboard loading', () => {
 
     renderApp();
 
-    fireEvent.change(await screen.findByLabelText(/原因码|reason code/i), {
+    const reasonInputs = await screen.findAllByLabelText(/原因码|reason code/i);
+    fireEvent.change(reasonInputs[0], {
       target: { value: 'needs_manual_review' },
     });
-    fireEvent.change(screen.getByLabelText(/必须修复|must fix/i), {
+    fireEvent.change(screen.getAllByLabelText(/必须修复|must fix/i)[0], {
       target: { value: '补齐协议测试\n更新发布说明' },
     });
     fireEvent.click(screen.getByLabelText(/确认风险|acknowledge risk/i));

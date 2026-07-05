@@ -188,14 +188,14 @@ Desired direction:
 - 代码审查和文档阅读时容易把 vNext 目标契约误读为当前已执行的 runtime 保护
 - 空 envelope / 无 active attempt 的 worker mutation 已被拒绝，历史夹具或迁移脚本必须先补 claim / attempt 语义
 - ArtifactBundle 已支持结构化 `trajectory` 和受限 `retainedContent`，dispatcher 会把 trajectory / retained diff / log / test result 写入本地 artifact store，并通过 manifest、retention 和 `/api/artifacts/:bundleId/files/:fileName` 支持按需读取
-- Console 任务详情可通过摘要 / 引用 / 正文 / 轨迹 tabs 查看审查证据，并可在 `review` 状态直接提交带 `reasonCode`、`mustFix[]`、重驱动策略和高风险确认的 `merge` / `rework` / `block` 决策
+- Console 任务详情可通过摘要 / 引用 / 正文 / 轨迹 tabs 查看审查证据，并可在 `review` 状态直接提交带 `reasonCode`、`mustFix[]`、重驱动策略和高风险确认的 `merge` / `rework` / `block` 决策；Console 审查队列支持对多个 `review` 任务批量提交共享证据的 `rework` / `block` 决策
 - HITL 当前已统一 dispatcher 状态语义，但 worker runtime 还没有主动发起 interrupt 或消费细粒度 resume UI 表单
 
 期望方向：
 
-- Console refs tab 已支持 artifact 引用复制、manifest 文件按需展开和下载；Artifact Review Workbench 已支持跨任务 artifact 筛选并可跳转到对应任务；后续继续补批量审查体验
+- Console refs tab 已支持 artifact 引用复制、manifest 文件按需展开和下载；Artifact Review Workbench 已支持跨任务 artifact 筛选并可跳转到对应任务；审查队列已支持批量 `rework` / `block`，后续继续补批量 merge 风险确认、跨任务对比和批量处理结果明细
 - 继续把 worker runtime 的主动 interrupt、resume payload 消费和 Console 表单化输入接入 `waiting_for_input` 主链
-- 继续补齐审查结果的批量筛选、复制链接、跨任务对比和批量处理体验
+- 继续补齐审查结果的批量 merge 风险确认、跨任务对比、批量处理结果明细和 artifact / review 证据联动
 
 ## 9. Shadow path has drift gate and reconciliation entry, but production cutover still needs an ops drill
 
