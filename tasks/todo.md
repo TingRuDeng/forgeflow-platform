@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M12 串行：补齐 task-level terminationPolicy timeout 字段的运行时接入。
+- [x] M12 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M12 Review 小结
+
+已补齐 task-level `terminationPolicy` timeout 字段的运行时接入：`attemptLeaseTimeoutMs` 会决定 claim / reuse attempt 时的 `leaseExpiresAt`；`heartbeatTimeoutMs` 会在该 task 的 running attempt 过期恢复链路中覆盖 worker offline 判定；`assignmentTimeoutMs` 会在未 claim 的 assigned task 回收中覆盖全局 assignment timeout。未配置 task-level 字段时仍保留原有全局参数和默认值。
+
+本轮按 TDD 执行：先新增 3 个 RED 测试并确认失败，失败分别指向默认 5 分钟 attempt lease、默认 heartbeat timeout 和未使用 task-level assignment timeout；再实现最小逻辑并确认 GREEN。Review Gate：finished。Spec 符合度通过；安全检查通过，未新增 secret、外部输入拼接、网络调用或静默 fallback；复杂度检查通过，改动集中在 timeout resolver 与调用点；Document-refresh: needed，原因：termination policy 的 timeout 字段从 schema-only 变为 runtime 生效，已同步 `TASK_ATTEMPT_MODEL.md` 和 `TECH_DEBT.md`。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state.test.ts tests/modules/server/runtime-state-sqlite.test.ts`、`CI=true pnpm --filter @forgeflow/dispatcher typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
+
+剩余风险：本轮只补齐 dispatcher runtime-state 的 task-level timeout 主链；如果未来要把同一策略暴露到外部 SDK 文档或 Console 表单，还需要单独做 API / UI 层体验设计。
+
 - [x] M11 串行：批次一，收敛 worker runtime 重复实现，优先统一 daemon cycle 与可发布 runtime 的核心行为。
 - [x] M11 串行：批次二，补齐 trajectory artifact 协议、落盘与读取体验。
 - [x] M11 串行：批次三，统一 HITL interrupt / resume 与 termination policy。

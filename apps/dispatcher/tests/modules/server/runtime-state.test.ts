@@ -1062,6 +1062,84 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
   });
 
+  it("uses task-level attempt lease timeout when creating an attempt", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-lease-policy",
+      pool: "codex",
+      hostname: "lease-policy-host",
+      labels: ["codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-05-12T13:00:00.000Z",
+    });
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "main",
+      requestedBy: "codex-control",
+      tasks: [{
+        id: "task-attempt-lease-policy",
+        title: "验证 attempt lease timeout",
+        pool: "codex",
+        branchName: "ai/codex/task-attempt-lease-policy",
+        verification: { mode: "run" },
+        terminationPolicy: {
+          attemptLeaseTimeoutMs: 30_000,
+        },
+      }],
+      packages: [{
+        taskId: "task-attempt-lease-policy",
+        assignment: {
+          taskId: "task-attempt-lease-policy",
+          workerId: null,
+          pool: "codex",
+          status: "pending",
+          branchName: "ai/codex/task-attempt-lease-policy",
+          repo: "TingRuDeng/openclaw-multi-agent-mvp",
+          defaultBranch: "main",
+        },
+      }],
+      createdAt: "2026-05-12T13:00:10.000Z",
+    });
+
+    const claimed = claimAssignedTaskForWorker(dispatch.state, {
+      workerId: "codex-lease-policy",
+      at: "2026-05-12T13:00:20.000Z",
+      heartbeatTimeoutMs: 60_000,
+    });
+
+    expect(claimed.state.taskAttempts[0]).toMatchObject({
+      taskId: "dispatch-1:task-attempt-lease-policy",
+      leaseExpiresAt: "2026-05-12T13:00:50.000Z",
+    });
+  });
+
+  it("uses task-level heartbeat timeout when expiring a running attempt", () => {
+    let state = createRunningAttemptState("task-heartbeat-policy", "codex-heartbeat-policy");
+    state = {
+      ...state,
+      tasks: state.tasks.map((task) => ({
+        ...task,
+        terminationPolicy: {
+          heartbeatTimeoutMs: 120_000,
+        },
+      })),
+      taskAttempts: state.taskAttempts.map((attempt) => ({
+        ...attempt,
+        leaseExpiresAt: "2026-05-12T13:02:00.000Z",
+      })),
+    };
+
+    state = reconcileRuntimeState(state, {
+      now: "2026-05-12T13:03:01.000Z",
+    });
+
+    expect(state.taskAttempts[0]).toMatchObject({
+      status: "expired",
+      failureCode: "attempt_lease_expired",
+    });
+    expect(state.tasks[0].status).toBe("ready");
+  });
+
   it("fails an expired running attempt when retry policy is exhausted", () => {
     let state = createRunningAttemptState("task-retry-exhausted", "codex-retry-worker");
     state = reconcileRuntimeState(state, {
@@ -1851,6 +1929,82 @@ describe("dispatcher runtime state (TypeScript)", () => {
       event.payload && typeof event.payload === "object" &&
       "from" in event.payload && "to" in event.payload &&
       event.payload.from === "assigned" && event.payload.to === "ready")).toBe(true);
+  });
+
+  it("uses task-level assignment timeout when requeueing an unclaimed assignment", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-policy-first",
+      pool: "codex",
+      hostname: "host-1",
+      labels: ["codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-03-16T16:00:00.000Z",
+    });
+    state = registerWorker(state, {
+      workerId: "codex-policy-second",
+      pool: "codex",
+      hostname: "host-2",
+      labels: ["codex"],
+      repoDir: "/repos/openclaw",
+      at: "2026-03-16T16:01:05.000Z",
+    });
+
+    const dispatch = createDispatch(state, {
+      repo: "TingRuDeng/openclaw-multi-agent-mvp",
+      defaultBranch: "master",
+      requestedBy: "codex-control",
+      tasks: [
+        {
+          id: "task-assignment-timeout-policy",
+          title: "验证 assignment timeout",
+          pool: "codex",
+          dependsOn: [],
+          branchName: "ai/codex/task-assignment-timeout-policy",
+          verification: { mode: "run" },
+          terminationPolicy: {
+            assignmentTimeoutMs: 30_000,
+          },
+        },
+      ],
+      packages: [
+        {
+          taskId: "task-assignment-timeout-policy",
+          assignment: {
+            taskId: "task-assignment-timeout-policy",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "ai/codex/task-assignment-timeout-policy",
+            commands: {
+              test: "echo ok",
+            },
+            repo: "TingRuDeng/openclaw-multi-agent-mvp",
+            defaultBranch: "master",
+          },
+          workerPrompt: "你是 codex-worker。",
+          contextMarkdown: "# Context",
+        },
+      ],
+      createdAt: "2026-03-16T16:00:10.000Z",
+    });
+    state = dispatch.state;
+
+    const firstClaim = claimAssignedTaskForWorker(state, {
+      workerId: "codex-policy-first",
+      at: "2026-03-16T16:01:20.000Z",
+    });
+    state = firstClaim.state;
+
+    expect(firstClaim.assignment).toBeNull();
+
+    const secondClaim = claimAssignedTaskForWorker(state, {
+      workerId: "codex-policy-second",
+      at: "2026-03-16T16:01:21.000Z",
+    });
+
+    expect(secondClaim.assignment?.task.id).toBe(dispatch.taskIds[0]);
+    expect(secondClaim.assignment?.assignment.workerId).toBe("codex-policy-second");
   });
 
   it("does not requeue a task that already moved to in_progress", () => {
