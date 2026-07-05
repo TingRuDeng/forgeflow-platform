@@ -44,7 +44,7 @@ ai_summary:
 - 用 `pnpm test`、`pnpm typecheck` 和 `git diff --check` 做常规交付验证。
 - 对运行入口事实，核对 `scripts/start-control-plane.sh`、`scripts/run-dispatcher-server.js`、`packages/forgeflow-dispatcher/README.md` 和 `packages/trae-beta-runtime/README.md`。
 
-forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都是受支持、并列的 worker 接入方式。源码中三者均有远程运行时包；npm registry 当前公开可安装的是 `@tingrudeng/codex-beta-runtime` 与 `@tingrudeng/trae-beta-runtime`，`@tingrudeng/gemini-beta-runtime` 仍需先完成 npm 包名和 Trusted Publisher 配置。说明：Trae automation 仍是最成熟的无人值守链路；`codex/gemini` worker daemon 的主循环、executor、launch builder 和失败回写已收敛到共享 runtime core，但 Gemini 远程包发布仍依赖外部 npm 配置（见 `docs/TECH_DEBT.md`）。
+forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主线以 `dispatcher` 为任务、分配、状态流转与审计记录的真相源；`codex-control` 等控制层负责编排；`codex`、`gemini`、`Trae` 都是受支持、并列的 worker 接入方式。源码中三者均有远程运行时包；npm registry 当前公开可安装的是 `@tingrudeng/codex-beta-runtime` 与 `@tingrudeng/trae-beta-runtime`，`@tingrudeng/gemini-beta-runtime` 仍需先完成 npm 包名和 Trusted Publisher 配置。说明：Trae automation 仍是最成熟的无人值守链路；`codex/gemini` worker daemon 的主循环、worker CLI、executor、launch builder 和失败回写已收敛到共享 runtime core，但 Gemini 远程包发布仍依赖外部 npm 配置（见 `docs/TECH_DEBT.md`）。
 
 ## 当前主线
 
@@ -53,7 +53,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - Phase 1 运行时合并到 TypeScript 已完成：`worker-daemon`、`review-decision`、`dispatcher-state`、`dispatcher-server` 主链现在都通过 `scripts/*.js` 入口桥接到 `apps/dispatcher/dist` 下的 TypeScript foundation；`review-memory` 和 `task-worktree` 也已下沉到 `apps/dispatcher`，`scripts/lib/*` 仅保留薄 bootstrap wrapper。
 - Phase 2 持久化切换主线已完成：dispatcher 默认真相源现在是 `.forgeflow-dispatcher/runtime-state.db`，基于 `node:sqlite` 落盘；只有显式传 `--persistence-backend json`（或设置 `RUNTIME_STATE_BACKEND=json`）时才回退到 JSON。
 - `scripts/*.js` 仍然是当前 live 入口与本地启动方式；它们现在主要承担 CLI、bootstrap、薄适配层与剩余脚本 glue，而不再单独承载整条 dispatcher 主链实现。
-- `dispatcher server` + `worker daemon` 的 `codex` / `gemini` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。源码层 worker-daemon 主循环、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到共享 runtime core；脚本侧 dist bootstrap 已收敛到 `scripts/lib/runtime-bootstrap.ts`，本地日志 / metrics hook 组装已拆到 `scripts/lib/worker-daemon-hooks.ts`，`worker-daemon` 只保留兼容入口和薄 adapter。
+- `dispatcher server` + `worker daemon` 的 `codex` / `gemini` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。源码层 worker-daemon 主循环、worker CLI、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到共享 runtime core；脚本侧 dist bootstrap 已收敛到 `scripts/lib/runtime-bootstrap.ts`，本地日志 / metrics hook 组装已拆到 `scripts/lib/worker-daemon-hooks.ts`，`worker-daemon` 只保留兼容入口和薄 adapter。
 - `.orchestrator` assignment package、本地执行脚本、结果回写与 review 决策链路仍然可用。
 - review memory 已有文件存储契约，并会在 dispatcher 创建 dispatch 时按 repo/scope/worker 条件注入上下文。
 - Trae 的首选无人值守路径是 `Trae automation gateway` + `Trae automation worker`。
