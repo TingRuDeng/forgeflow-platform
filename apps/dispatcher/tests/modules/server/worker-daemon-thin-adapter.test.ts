@@ -8,6 +8,7 @@ const repoRoot = path.resolve(
   "../../../../../",
 );
 const workerDaemonSourcePath = path.join(repoRoot, "scripts/lib/worker-daemon.ts");
+const workerDaemonHooksSourcePath = path.join(repoRoot, "scripts/lib/worker-daemon-hooks.ts");
 const runWorkerDaemonSourcePath = path.join(repoRoot, "scripts/run-worker-daemon.ts");
 const runtimeBootstrapSourcePath = path.join(repoRoot, "scripts/lib/runtime-bootstrap.ts");
 
@@ -19,6 +20,18 @@ describe("worker daemon thin adapter", () => {
     expect(source).not.toContain("function callStateDirDispatcher");
     expect(source).not.toContain("function readStateDirResponseJson");
     expect(source).not.toContain("setInterval");
+  });
+
+  it("keeps local logger and metrics hooks in a dedicated adapter", () => {
+    const workerDaemonSource = fs.readFileSync(workerDaemonSourcePath, "utf8");
+    const hookSource = fs.readFileSync(workerDaemonHooksSourcePath, "utf8");
+
+    expect(workerDaemonSource).not.toContain("recordTaskMetric");
+    expect(workerDaemonSource).not.toContain("logTaskCompleted");
+    expect(workerDaemonSource).not.toContain("logTaskFailed");
+    expect(workerDaemonSource).toContain("./worker-daemon-hooks.js");
+    expect(hookSource).toContain("buildManagedTaskCallbacks");
+    expect(hookSource).toContain("buildFailedResultCallbacks");
   });
 
   it("keeps dist bootstrap logic inside the explicit runtime bootstrap adapter", () => {

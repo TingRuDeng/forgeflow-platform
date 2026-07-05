@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M41 串行：把 worker daemon 本地 logger / metrics hook 组装拆成独立 adapter。
+- [x] M41 串行：运行最小充分验证并补充 review 小结。
+
+## M41 Review 小结
+
+已新增 `scripts/lib/worker-daemon-hooks.ts`，把 `worker-daemon` 的本地日志、metrics、失败 result fallback 事件回调和 cleanup 日志组装从主 adapter 中拆出；`scripts/lib/worker-daemon.ts` 现在只引用 hook adapter，并继续把 dispatcher client、daemon cycle、managed executor、live executor、失败回写和 dist bootstrap 委托给共享 runtime / bootstrap 模块。同步生成 `worker-daemon-hooks.js` 与更新后的 `worker-daemon.js`。
+
+Review Gate：finished。Spec 符合度通过，本轮只处理已确认 runtime 去重尾项：把 `worker-daemon` 本地 logger / metrics hook 组装拆成独立 adapter，没有改变 dispatcher client、claim/start/result、managed executor、live executor、失败回写或 dist bootstrap 语义；安全检查通过，未新增 secret、外部网络调用、命令拼接、mock 成功路径或静默 fallback；复杂度检查基本通过，新增 `worker-daemon-hooks.ts` 128 行，新增 helper 均低于 50 行，`worker-daemon.ts` 从 437 行继续下降但仍超过 300 行；Document-refresh: needed，原因：worker daemon adapter 边界变化，已同步 README、docs/README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/worker-daemon-thin-adapter.test.ts` 先失败于缺少 `scripts/lib/worker-daemon-hooks.ts`；GREEN 后同命令通过，3 个测试通过；受影响套件 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/worker-daemon-thin-adapter.test.ts tests/modules/server/run-worker-daemon.test.ts tests/modules/server/runtime-glue.test.ts` 通过，30 个测试通过；`CI=true pnpm --filter @tingrudeng/beta-runtime-core test` 通过，16 个测试通过；`CI=true pnpm exec tsc -p scripts/lib/tsconfig.json`、`CI=true pnpm exec tsc -p scripts/tsconfig.json`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：本轮继续降低 `worker-daemon.ts` 职责，但它仍超过 300 行，主要来自兼容类型、lazy dispatcher client 和 run loop adapter；Trae automation gateway 双实现仍需要后续继续收敛。
+
 - [x] M40 串行：为 shadow production cutover drill 增加可归档证据文件输出。
 - [x] M40 串行：运行最小充分验证并补充 review 小结。
 

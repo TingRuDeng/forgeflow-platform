@@ -287,7 +287,7 @@ vNext runtime reliability 推进：
   - 源码仓运行：`../scripts/start-control-plane.sh`
   - install-and-run runtime 包：`../packages/forgeflow-dispatcher/README.md`
 - `start-control-plane.sh` 现在默认把 dispatcher 绑定到 `127.0.0.1`；监听非 loopback 地址必须显式传 `FORGEFLOW_DISPATCHER_HOST` 或 `--host`。
-- `codex` / `gemini` 的 `worker daemon` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `../packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。worker-daemon 主循环、dispatcher client、assignment runner、managed executor、live executor 与失败回写已收敛到共享 runtime core，脚本侧 dist bootstrap 已收敛到 `../scripts/lib/runtime-bootstrap.ts`，剩余本地 hook 组装债务见 `TECH_DEBT.md`。
+- `codex` / `gemini` 的 `worker daemon` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `../packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。worker-daemon 主循环、dispatcher client、assignment runner、managed executor、live executor 与失败回写已收敛到共享 runtime core，脚本侧 dist bootstrap 已收敛到 `../scripts/lib/runtime-bootstrap.ts`，本地日志 / metrics hook 组装已拆到 `../scripts/lib/worker-daemon-hooks.ts`，剩余薄 adapter 债务见 `TECH_DEBT.md`。
 - `worker-daemon` / Trae runtime 现在只有在结果成功回写到 dispatcher 后才会对外呈现“完成”；`submitResult`、`git push`、自动 PR 创建失败都属于显式失败，而不是假完成。
 - `dependsOn` 现在进入 dispatcher 调度门控：依赖未满足时任务保持 `planned`，满足后自动解锁为 `ready`。
 - generic worker claim 已从副作用 GET 收口为显式 POST：
