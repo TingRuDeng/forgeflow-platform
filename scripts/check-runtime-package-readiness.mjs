@@ -123,29 +123,79 @@ function validatePackageDependencies(spec, packageJson, issues) {
   }
 }
 
-function queryNpmVersion(packageName, timeoutMs) {
+function queryNpmView(packageName, field, timeoutMs) {
   try {
-    const output = execFileSync("npm", ["view", packageName, "version"], {
+    const args = ["view", packageName, field];
+    if (field !== "version") {
+      args.push("--json");
+    }
+    const output = execFileSync("npm", args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: timeoutMs,
     });
-    return { status: "published", version: output.trim() };
+    return { status: "published", value: output.trim() };
   } catch (error) {
     const stderr = error?.stderr?.toString("utf8") ?? "";
     if (stderr.includes("E404")) {
-      return { status: "missing", version: "" };
+      return { status: "missing", value: "" };
     }
     if (error?.signal === "SIGTERM" || error?.code === "ETIMEDOUT") {
-      return { status: "error", version: "", error: `${packageName} npm view 查询超时` };
+      return { status: "error", value: "", error: `${packageName} npm view 查询超时` };
     }
-    return { status: "error", version: "", error: stderr.trim() || String(error) };
+    return { status: "error", value: "", error: stderr.trim() || String(error) };
+  }
+}
+
+function queryNpmVersion(packageName, timeoutMs) {
+  const result = queryNpmView(packageName, "version", timeoutMs);
+  return { ...result, version: result.value };
+}
+
+function queryNpmDependencies(packageName, timeoutMs) {
+  const result = queryNpmView(packageName, "dependencies", timeoutMs);
+  if (result.status !== "published") {
+    return { ...result, dependencies: {} };
+  }
+  if (!result.value) {
+    return { ...result, dependencies: {} };
+  }
+  try {
+    return { ...result, dependencies: JSON.parse(result.value) };
+  } catch (error) {
+    return { status: "error", value: result.value, dependencies: {}, error: `dependencies JSON 解析失败：${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+function buildExpectedPublishedDependencies(packageJson, workspaceVersions) {
+  const expected = {};
+  for (const [name, version] of Object.entries(packageJson.dependencies || {})) {
+    expected[name] = version === "workspace:*" ? workspaceVersions[name] : version;
+  }
+  return expected;
+}
+
+function validatePublishedDependencies(spec, packageJson, workspaceVersions, options, issues) {
+  if (!options.checkPublishedMetadata) {
+    return;
+  }
+  const packageName = `${spec.name}@${packageJson.version}`;
+  const result = queryNpmDependencies(packageName, options.registryTimeoutMs);
+  if (result.status !== "published") {
+    issues.push(`${packageName} published dependencies 查询失败：${result.error || result.status}`);
+    return;
+  }
+  const expected = buildExpectedPublishedDependencies(packageJson, workspaceVersions);
+  for (const [name, version] of Object.entries(expected)) {
+    if (result.dependencies?.[name] !== version) {
+      issues.push(`${packageName} published dependency ${name} 应为 ${version}，实际为 ${result.dependencies?.[name] ?? "<missing>"}`);
+    }
   }
 }
 
 function validateRegistry(spec, packageJson, options, issues, warnings) {
   if (!options.checkRegistry) {
-    return { status: "not_checked", version: "" };
+    return { status: "not_checked", version: "", versionStatus: "not_checked" };
   }
   const packageStatus = queryNpmVersion(spec.name, options.registryTimeoutMs);
   if (packageStatus.status !== "published") {
@@ -157,7 +207,7 @@ function validateRegistry(spec, packageJson, options, issues, warnings) {
     } else {
       warnings.push(message);
     }
-    return packageStatus;
+    return { ...packageStatus, versionStatus: packageStatus.status };
   }
   const versionStatus = queryNpmVersion(`${spec.name}@${packageJson.version}`, options.registryTimeoutMs);
   if (versionStatus.status !== "published") {
@@ -170,7 +220,7 @@ function validateRegistry(spec, packageJson, options, issues, warnings) {
       warnings.push(message);
     }
   }
-  return packageStatus;
+  return { ...packageStatus, versionStatus: versionStatus.status };
 }
 
 function main() {
@@ -178,12 +228,21 @@ function main() {
   const rootDir = path.resolve(typeof args.root === "string" ? args.root : process.cwd());
   const options = {
     checkRegistry: args["check-registry"] === true,
+    checkPublishedMetadata: args["check-published-metadata"] === true,
     requirePublished: args["require-published"] === true,
     registryTimeoutMs: parsePositiveInteger(args["registry-timeout-ms"], 15000),
   };
   const issues = [];
   const warnings = [];
   const rows = [];
+  const workspaceVersions = {};
+
+  for (const spec of RUNTIME_PACKAGES) {
+    const packageJson = readPackageJson(rootDir, spec.dir, issues);
+    if (packageJson?.name && packageJson?.version) {
+      workspaceVersions[packageJson.name] = packageJson.version;
+    }
+  }
 
   for (const spec of RUNTIME_PACKAGES) {
     const packageJson = readPackageJson(rootDir, spec.dir, issues);
@@ -194,6 +253,9 @@ function main() {
     validatePackageScripts(spec, packageJson, issues);
     validatePackageDependencies(spec, packageJson, issues);
     const registry = validateRegistry(spec, packageJson, options, issues, warnings);
+    if (registry.versionStatus === "published") {
+      validatePublishedDependencies(spec, packageJson, workspaceVersions, options, issues);
+    }
     rows.push({ name: spec.name, role: spec.role, version: packageJson.version, registry });
   }
 

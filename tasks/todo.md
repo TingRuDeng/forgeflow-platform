@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M87 串行：校验已发布 runtime 包依赖元数据是否与源码发布清单一致。
 - [x] M86 串行：让 release preflight 提前阻断未配置 npm 包名。
 - [x] M85 串行：为 runtime 包发布清单增加可复现 readiness gate。
 - [x] M84 串行：让 Console Artifact Workbench 支持跨任务 runtime event 搜索。
@@ -10,6 +11,18 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M87 Review 小结
+
+已扩展 `scripts/check-runtime-package-readiness.mjs`：新增 `--check-published-metadata`，会在显式 registry 检查时读取 `npm view <package>@<version> dependencies --json`，并把本地 package.json 中的 `workspace:*` 依赖按当前 workspace 版本重写后，与已发布包的依赖元数据对比。新增根命令 `pnpm verify:runtime-packages:published`，用于生产发布窗口强制校验 runtime 包名、当前本地版本和已发布依赖元数据。
+
+这能捕获一种关键漂移：包名和版本存在，但已发布包仍是旧形态，缺少本地源码当前要求的 `@tingrudeng/beta-runtime-core` / `@tingrudeng/automation-gateway-core` 依赖，从而导致远端安装包不能代表当前 runtime 去重后的实现。
+
+Review Gate：finished。Spec 符合度通过，本轮只扩展 runtime package readiness 的显式生产发布校验，不改变默认 CI 行为、release workflow 行为、runtime 代码或 npm 发布动作。安全检查通过，新增逻辑只执行 `npm view <package>@<version> dependencies --json` 只读查询；失败或元数据不匹配会显式报错，不做静默放行、mock 成功路径或写 registry。复杂度检查通过，`scripts/check-runtime-package-readiness.mjs` 283 行，仍低于 300 行；新增函数均短小，测试文件 204 行。Document-refresh: needed，原因：新增 `pnpm verify:runtime-packages:published` 生产发布门禁，已同步 README、docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/runtime-package-readiness.test.ts --maxWorkers=1` 通过，1 个测试文件、4 个测试通过；`node --check scripts/check-runtime-package-readiness.mjs`、`CI=true pnpm verify:runtime-packages`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。真实 registry 只读命令 `node scripts/check-runtime-package-readiness.mjs --check-registry --check-published-metadata --registry-timeout-ms 5000` 本轮因 npm registry 查询超时只输出 warning 并通过非硬门禁模式；生产硬门禁应使用 `pnpm verify:runtime-packages:published`。
+
+剩余风险：该门禁能发现已发布包依赖元数据漂移；真实 `@tingrudeng/beta-runtime-core` / `@tingrudeng/gemini-beta-runtime` 包名创建、Trusted Publisher 绑定和远端 smoke 仍需要外部 npm / 生产环境动作。
 
 ## M86 Review 小结
 
