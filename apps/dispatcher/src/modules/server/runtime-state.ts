@@ -31,6 +31,7 @@ import {
   evaluateDispatchQuality,
   resolveDispatchQualityConfig,
 } from "./dispatch-quality.js";
+import { validateResumePayloadAgainstSchema } from "./runtime-state-hitl.js";
 import { compareTimestampAsc, formatLocalTimestamp } from "../time.js";
 
 const defaultStore: RuntimeStateStore = sqliteStore;
@@ -3087,6 +3088,7 @@ export function resumeTaskFromInput(state: RuntimeState, input: ResumeTaskFromIn
   if (task.status !== "waiting_for_input") {
     throw new Error(`task not waiting for input: ${input.taskId}`);
   }
+  validateResumePayloadAgainstSchema(task.waitingForInput?.resumePayloadSchema, input.resumePayload);
 
   const at = input.at ?? nowIso();
   let nextState = appendTaskStatusChange(state, {

@@ -328,6 +328,9 @@ function classifyTaskCancellationError(error: unknown): number {
   if (message.startsWith("task not cancellable from state:")) {
     return 409;
   }
+  if (message.startsWith("resumePayload.")) {
+    return 400;
+  }
   return 500;
 }
 

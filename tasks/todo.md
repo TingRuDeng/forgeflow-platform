@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M73 串行：补齐 HITL resume payload 的 dispatcher 服务端 schema 校验。
 - [x] M72 串行：收口 `DISPATCHER_SHADOW_MODE=primary` 的生产 cutover 兼容语义。
 - [x] M71 串行：为结构化 trajectory 生成 `.traj` 回放文件。
 - [x] M70 串行：在 Console 任务详情展示 task-level termination policy。
@@ -18,6 +19,16 @@
 - [x] M56 串行：继续拆分共享 `trae-dom-driver.ts` 大文件，按 browser expressions / response collection / driver facade 收敛到 300 行以内。
 - [x] M57 串行：把 Codex/Gemini packaged runtime launch builder 下沉到 beta-runtime-core。
 - [x] M58 串行：让 generic assignment runner 产出可回放 trajectory artifact。
+
+## M73 Review 小结
+
+已新增 `runtime-state-hitl.ts`，把 `resumePayloadSchema` 从仅供 Console 渲染 / 校验的 UI 契约，提升为 dispatcher 状态机的服务端校验边界。`resumeTaskFromInput()` 现在会在任务处于 `waiting_for_input` 且保存了 schema 时，校验必填字段、类型、枚举、数字范围、数组长度和字符串数组枚举；非法恢复输入会保持任务在 `waiting_for_input`，HTTP `/api/tasks/:taskId/resume` 返回 `400`。这样 worker、Console、CLI 或直接 HTTP 调用都共享同一 HITL resume 语义。
+
+Review Gate：finished。Spec 符合度通过，本轮只补齐 HITL resume payload 在 dispatcher 服务端的 schema 校验，不改变 interrupt/checkpoint、lease 释放、resume 后重新 claim、Console 表单或 beta runtime assignment package 消费语义。安全检查通过，新增校验只检查已保存 schema 与入站 JSON object，不新增 secret、外部网络、shell 拼接、mock 成功路径或静默 fallback；非法 payload 会显式返回 `400` 并保持任务在 `waiting_for_input`。复杂度检查通过，新增 `runtime-state-hitl.ts` 107 行、`runtime-state-hitl.test.ts` 162 行、`dispatcher-server-hitl.test.ts` 142 行，均低于 300 行，helper 已拆分。Document-refresh: needed，原因：HITL resume API 边界从前端校验扩展为服务端契约校验，已同步 README、docs/README、API endpoints、Worker Protocol、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state-hitl.test.ts --maxWorkers=1` 先失败于测试夹具未使用 `createDispatch` 生成的内部 task id；修正后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state-hitl.test.ts tests/modules/server/dispatcher-server-hitl.test.ts --maxWorkers=1` 通过，2 个测试文件、3 个测试通过。受影响回归 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state.test.ts tests/modules/server/runtime-state-hitl.test.ts tests/modules/server/dispatcher-server-hitl.test.ts --maxWorkers=1` 通过，3 个测试文件、70 个测试通过。`CI=true pnpm --filter @forgeflow/dispatcher test tests/modules/server/dispatcher-server.test.ts` 在非沙箱复跑通过，66 个测试通过；沙箱内同测试的 listener 用例因 `listen EPERM 127.0.0.1` 超时，这是本地监听权限限制。最终验证 `CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：HITL resume schema 服务端校验已覆盖当前共享子集；嵌套对象、对象数组或跨字段依赖仍不在当前 worker 共享 schema 子集内。
 
 ## M72 Review 小结
 

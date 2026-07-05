@@ -117,7 +117,7 @@ POST /api/tasks/:taskId/attempts/:attemptId/result
 
 - `/api/workers/:workerId/start-task` 和 `/api/workers/:workerId/result` 在 claim 已创建 active attempt 后必须携带完整 v1 envelope。
 - 通用 worker start/result 会对照当前 active attempt 校验 worker、attemptId、leaseToken、protocolVersion、traceId 和 idempotencyKey。
-- 通用 worker result 可携带 `waitingForInput`，用于主动请求 dispatcher 进入 HITL 暂停；其中 `resumePayloadSchema` 可声明 `string` / `number` / `integer` / `boolean` / `array` 字段、枚举、textarea、范围、数组数量和必填项，供 Console 渲染结构化恢复表单并展示校验错误；dispatcher 会 checkpoint active attempt、释放 worker / leases，并等待后续 `resumePayload`。
+- 通用 worker result 可携带 `waitingForInput`，用于主动请求 dispatcher 进入 HITL 暂停；其中 `resumePayloadSchema` 可声明 `string` / `number` / `integer` / `boolean` / `array` 字段、枚举、textarea、范围、数组数量和必填项，供 Console 渲染结构化恢复表单并展示校验错误；dispatcher 会 checkpoint active attempt、释放 worker / leases，并在后续 `/api/tasks/:taskId/resume` 时按保存的 schema 校验 `resumePayload`。
 - `/api/trae/fetch-task` 会返回 `attempt_id`、`lease_token`、`protocol_version`、`trace_id` 和 `idempotency_key`，Trae runtime 会在 `/api/trae/start-task` 和 `/api/trae/submit-result` 回写时携带它们。
 - Trae start/result 会对照当前 active attempt 校验 worker、attemptId、leaseToken、protocolVersion、traceId 和 idempotencyKey。
 - 如果 worker 携带的 `attemptId` 已进入 `expired` / `failed` / `succeeded` / `cancelled` / `superseded` 等终态，dispatcher 会拒绝这次 stale 写入。

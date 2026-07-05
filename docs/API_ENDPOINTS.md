@@ -356,6 +356,7 @@ Current endpoint families:
     - `resumePayload`
     - `at`
   - Current dispatcher behavior:
+    - validates `resumePayload` against the task's stored `waitingForInput.resumePayloadSchema` when present, returning `400` for mismatched required fields, types, enums, numeric bounds, or array constraints
     - stores `resumePayload` on the task and assignment payload
     - appends `status_changed` and `task_resumed` events
     - leaves checkpointed attempts available for the next worker claim
