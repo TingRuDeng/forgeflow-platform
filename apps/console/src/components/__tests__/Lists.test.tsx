@@ -529,9 +529,12 @@ describe('ArtifactWorkbench', () => {
   it('filters artifacts across tasks and selects the owning task', async () => {
     const onSelectTask = vi.fn();
     const writeText = vi.fn();
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn(async (url: string) => ({
       ok: true,
-      text: async () => JSON.stringify({ fileName: 'diff.patch', content: 'workbench diff body' }),
+      text: async () => JSON.stringify({
+        fileName: url.includes('test-results') ? 'test-results.txt' : 'diff.patch',
+        content: url.includes('test-results') ? 'trajectory observation body' : 'workbench diff body',
+      }),
     }));
     vi.stubGlobal('navigator', {
       ...navigator,
@@ -656,6 +659,9 @@ describe('ArtifactWorkbench', () => {
     fireEvent.click(screen.getByRole('button', { name: /展开文件 diff|open file diff/i }));
     expect(await screen.findByText(/workbench diff body/i)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/artifacts/bundle-auth/files/diff.patch');
+    fireEvent.click(screen.getByRole('button', { name: /展开轨迹文件 1|open trajectory file 1/i }));
+    expect(await screen.findByText(/trajectory observation body/i)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/artifacts/bundle-auth/files/test-results.txt');
 
     fireEvent.change(screen.getByPlaceholderText(/筛选|filter/i), {
       target: { value: 'test_gap' },
