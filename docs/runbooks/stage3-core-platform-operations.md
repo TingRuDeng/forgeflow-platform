@@ -108,6 +108,8 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - 生产 cutover 前必须执行 `pnpm verify:shadow-cutover`，该命令要求 shadow 已配置、`--max-mismatches 0 --max-delta 0` 通过，并且 `RUNTIME_STATE_BACKEND=postgres` 与 `DISPATCHER_PRIMARY_POSTGRES_URL` 已配置；未配置 shadow 或 primary backend 时会失败
 - 生产 cutover 演练使用 `pnpm verify:shadow-cutover:drill`；它会依次运行 drift gate、`--reconcile --record-alert` 对账、strict cutover preflight，并输出每个 phase 的 `ok/statusCode/payload`
 - 变更窗口前必须归档 cutover drill 证据时，使用 `pnpm verify:shadow-cutover:drill:evidence`，它会把同一 payload 写入 `.forgeflow-dispatcher/shadow-cutover-drill.json`；自定义归档路径可直接调用 `node scripts/verify-shadow-cutover-drill.mjs <stateDir> --output <path>`
+- 归档 drill 证据后必须执行 `pnpm verify:shadow-cutover:approve`，该命令会校验证据里的 `cutover_preflight=cutover_ready` 并生成 `.forgeflow-dispatcher/shadow-cutover-approval.json`
+- `RUNTIME_STATE_BACKEND=postgres` 现在会在读写 primary snapshot 前校验 `shadow-cutover-approval.json`；自定义审批文件路径可设置 `DISPATCHER_PRIMARY_CUTOVER_APPROVAL_FILE`
 - 当前 `DISPATCHER_SHADOW_MODE=primary` 会被明确拒绝为 `primary_store_not_implemented`；不要把它作为生产切换开关，真正 primary store 开关是 `RUNTIME_STATE_BACKEND=postgres`
 - `@forgeflow/dispatcher-store-postgres` 已有 primary snapshot 表原语，dispatcher HTTP route 主链与 `/api/query/*` 已通过 async Postgres state path 读写 primary snapshot；完整生产切换仍需外部存储运维确认和真实生产变更窗口
 - `pnpm verify:stage3` 和 release workflow 会执行 `pnpm verify:shadow-drift`，shadow 配置存在且 drifted 时必须阻断 rollout / release
@@ -139,6 +141,7 @@ node scripts/verify-live-dispatcher-dr.mjs
 建议：
 
 - 发布前至少做一次 backup
+- backup / restore 会包含 `runtime-state-shadow-status.json` 和 `shadow-cutover-approval.json`，确保 shadow 健康状态与 cutover approval marker 可随运行时状态恢复
 - 每季度跑一次 `verify-stage3-dr`，它能证明源码级 SQLite WAL 备份恢复与 checksum 校验
 - 风险较高的 runtime 发布前跑一次 `verify-live-dispatcher-dr`，它能启动本地 live dispatcher、执行真实 HTTP 写入，并覆盖 SIGKILL 替换恢复、磁盘损坏后恢复和双 stateDir 多节点恢复一致性；它仍不替代真实生产 quorum / fencing / DNS 切流演练
 - 先切 read-only，再做 restore

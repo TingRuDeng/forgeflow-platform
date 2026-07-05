@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -27,6 +31,7 @@ vi.mock("@forgeflow/dispatcher-store-postgres", () => ({
 const originalBackend = process.env.RUNTIME_STATE_BACKEND;
 const originalPrimaryUrl = process.env.DISPATCHER_PRIMARY_POSTGRES_URL;
 const originalAuthMode = process.env.DISPATCHER_AUTH_MODE;
+const tmpRoots: string[] = [];
 
 function restoreEnv() {
   if (originalBackend === undefined) {
@@ -50,21 +55,37 @@ async function loadServerModule() {
   return import("../../../src/modules/server/dispatcher-server.js");
 }
 
+function makeApprovedStateDir(): string {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-dispatcher-postgres-"));
+  tmpRoots.push(stateDir);
+  fs.writeFileSync(path.join(stateDir, "shadow-cutover-approval.json"), JSON.stringify({
+    approved: true,
+    approvedAt: "2026-07-05T10:00:00.000Z",
+    evidenceSha256: "c".repeat(64),
+    cutoverReason: "cutover_ready",
+  }));
+  return stateDir;
+}
+
 describe("dispatcher server postgres backend", () => {
   afterEach(() => {
     restoreEnv();
     mocks.store.state = null;
     vi.clearAllMocks();
+    for (const root of tmpRoots.splice(0)) {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("persists route mutations through the async postgres state path", async () => {
     process.env.RUNTIME_STATE_BACKEND = "postgres";
     process.env.DISPATCHER_PRIMARY_POSTGRES_URL = "postgres://localhost/forgeflow";
     process.env.DISPATCHER_AUTH_MODE = "open";
+    const stateDir = makeApprovedStateDir();
     const { handleDispatcherHttpRequest } = await loadServerModule();
 
     const response = await handleDispatcherHttpRequest({
-      stateDir: "unused-state-dir",
+      stateDir,
       method: "POST",
       pathname: "/api/workers/register",
       body: {
@@ -105,22 +126,23 @@ describe("dispatcher server postgres backend", () => {
       leases: [{ id: "lease-1", resourceType: "assignment", resourceId: "task-1" }],
       artifactBundles: [{ bundleId: "bundle-1", taskId: "task-1", attemptId: "attempt-1", schemaVersion: "artifact-bundle-v1" }],
     };
+    const stateDir = makeApprovedStateDir();
     const { handleDispatcherHttpRequest } = await loadServerModule();
 
     const tasksResponse = await handleDispatcherHttpRequest({
-      stateDir: "unused-state-dir",
+      stateDir,
       method: "GET",
       pathname: "/api/query/tasks",
       internalCall: true,
     });
     const artifactsResponse = await handleDispatcherHttpRequest({
-      stateDir: "unused-state-dir",
+      stateDir,
       method: "GET",
       pathname: "/api/query/artifacts",
       internalCall: true,
     });
     const healthResponse = await handleDispatcherHttpRequest({
-      stateDir: "unused-state-dir",
+      stateDir,
       method: "GET",
       pathname: "/api/query/projection-health",
       internalCall: true,

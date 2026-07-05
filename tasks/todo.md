@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M47 串行：补齐 shadow production cutover approval marker 硬门禁。
+- [x] M47 串行：运行最小充分验证并补充 review 小结。
+
+## M47 Review 小结
+
+已为 production cutover 增加显式 approval marker：`pnpm verify:shadow-cutover:approve` 会读取 `.forgeflow-dispatcher/shadow-cutover-drill.json`，校验证据为 `cutover_preflight=cutover_ready` 后生成 `.forgeflow-dispatcher/shadow-cutover-approval.json`。`RUNTIME_STATE_BACKEND=postgres` 的 async primary snapshot load/save 会在连接 Postgres 前校验该 approval marker，缺失或非 cutover_ready 时直接拒绝。backup / restore 文件清单也已包含 `shadow-cutover-approval.json`，避免 DR 恢复后丢失 cutover 审批证据。
+
+Review Gate：finished。Spec 符合度通过，本轮推进 shadow 自动 reconciliation / production cutover 的收口项：新增 approval marker 生成脚本，并把 Postgres primary backend load/save 变成 approval-gated 操作；未改变 shadow drift gate、reconcile、drill preflight、Postgres snapshot 表结构或 HTTP API 路由语义。安全检查通过，approval 脚本只读取 operator 指定的 drill evidence，校验 `ok=true` 和 `cutover_preflight=cutover_ready` 后原子写入 approval JSON；runtime 在连接 Postgres 前校验 marker，未新增 secret、网络副作用、mock 成功路径或静默 fallback。复杂度检查通过，`runtime-state-postgres.ts` 80 行，`approve-shadow-cutover.mjs` 97 行；新增测试拆出 `shadow-cutover-approval.test.ts`，`shadow-drift.test.ts` 回落到 281 行。Document-refresh: needed，原因：production cutover 操作契约、backup/restore 文件清单和 docs 入口均发生变化，已同步 README、docs/README、API endpoints、runtime-state query contract、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state-postgres.test.ts` 先失败于缺少 approval gate，`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts --maxWorkers=1` 先失败于缺少 approval 脚本，`CI=true pnpm --filter @tingrudeng/forgeflow-dispatcher exec vitest run tests/backup.test.ts` 先失败于 backup 清单缺少 `shadow-cutover-approval.json`。GREEN 后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts tests/modules/execution/shadow-cutover-approval.test.ts tests/modules/execution/workflows.test.ts tests/modules/server/runtime-state-postgres.test.ts tests/modules/server/dispatcher-server-postgres.test.ts --maxWorkers=1` 通过，5 个测试文件、24 个测试通过；`CI=true pnpm --filter @tingrudeng/forgeflow-dispatcher test`、`CI=true pnpm --filter @forgeflow/dispatcher-store-postgres test`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`CI=true pnpm exec tsc -p scripts/tsconfig.json`、`git diff --check` 均通过。沙箱内 `CI=true pnpm test` 因 live dispatcher 监听 `127.0.0.1` 和 Trae session store 用户目录写入权限失败；按权限规则非沙箱复跑最终 `CI=true pnpm test` 通过，dispatcher 48 个测试文件、492 个测试通过。
+
+剩余风险：approval marker 只能证明本仓库 drill evidence 已归档并显式批准；真实生产切换仍依赖外部 Postgres、queue、变更窗口和回滚流程。
+
 - [x] M46 串行：把 `run-worker-assignment` Codex/Gemini launch builder 下沉到 beta-runtime-core。
 - [x] M46 串行：运行最小充分验证并补充 review 小结。
 

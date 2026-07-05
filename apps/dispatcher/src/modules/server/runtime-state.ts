@@ -72,14 +72,14 @@ export function saveRuntimeState(stateDir: string, state: RuntimeState): void {
 
 export async function loadRuntimeStateAsync(stateDir: string): Promise<RuntimeState> {
   if (isRuntimeStatePostgresBackend()) {
-    return loadRuntimeStateFromPostgres();
+    return loadRuntimeStateFromPostgres(stateDir);
   }
   return loadRuntimeState(stateDir);
 }
 
 export async function saveRuntimeStateAsync(stateDir: string, state: RuntimeState): Promise<void> {
   if (isRuntimeStatePostgresBackend()) {
-    await saveRuntimeStateToPostgres(state);
+    await saveRuntimeStateToPostgres(stateDir, state);
     return;
   }
   saveRuntimeState(stateDir, state);

@@ -7,6 +7,7 @@ const FILES = [
   "runtime-state.db-shm",
   "runtime-state.json",
   "runtime-state-shadow-status.json",
+  "shadow-cutover-approval.json",
 ];
 
 export function backupRuntimeState({ stateDir, backupDir }) {
