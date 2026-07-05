@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(__filename), "..");
 const checkShadowDriftScriptPath = path.join(repoRoot, "scripts", "check-shadow-drift.mjs");
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
+const STATUS_FILE_ENV = "DISPATCHER_SHADOW_RECONCILER_STATUS_FILE";
 
 function parsePositiveInteger(value, label) {
   const parsed = Number(value);
@@ -24,12 +26,12 @@ function parseNonNegativeInteger(value, label) {
   return Math.floor(parsed);
 }
 
-function parseArgs(argv) {
-  const stateDir = argv[0];
-  if (!stateDir) {
-    throw new Error("usage: node scripts/run-shadow-reconciler.mjs <stateDir> [--once] [--interval-ms n] [--max-runs n] [--require-configured] [--require-primary-backend] [--max-mismatches n] [--max-delta n]");
-  }
-  const options = {
+function usage() {
+  return "usage: node scripts/run-shadow-reconciler.mjs <stateDir> [--once] [--interval-ms n] [--max-runs n] [--output path] [--require-configured] [--require-primary-backend] [--max-mismatches n] [--max-delta n]";
+}
+
+function createDefaultOptions(stateDir) {
+  return {
     stateDir,
     once: false,
     intervalMs: DEFAULT_INTERVAL_MS,
@@ -38,43 +40,69 @@ function parseArgs(argv) {
     requirePrimaryBackend: false,
     maxMismatchCount: undefined,
     maxAbsoluteDelta: undefined,
+    outputPath: process.env[STATUS_FILE_ENV] || undefined,
   };
+}
+
+function readRequiredValue(argv, index, label) {
+  const value = argv[index + 1];
+  if (!value) {
+    throw new Error(`${label} requires a value`);
+  }
+  return { value, nextIndex: index + 1 };
+}
+
+function applyArg(options, argv, index) {
+  const arg = argv[index];
+  if (arg === "--once") {
+    options.once = true;
+    options.maxRuns = 1;
+    return index;
+  }
+  if (arg === "--interval-ms") {
+    const parsed = readRequiredValue(argv, index, arg);
+    options.intervalMs = parsePositiveInteger(parsed.value, arg);
+    return parsed.nextIndex;
+  }
+  if (arg === "--max-runs") {
+    const parsed = readRequiredValue(argv, index, arg);
+    options.maxRuns = parsePositiveInteger(parsed.value, arg);
+    return parsed.nextIndex;
+  }
+  if (arg === "--output") {
+    const parsed = readRequiredValue(argv, index, arg);
+    options.outputPath = parsed.value;
+    return parsed.nextIndex;
+  }
+  if (arg === "--require-configured") {
+    options.requireConfigured = true;
+    return index;
+  }
+  if (arg === "--require-primary-backend") {
+    options.requirePrimaryBackend = true;
+    return index;
+  }
+  if (arg === "--max-mismatches") {
+    const parsed = readRequiredValue(argv, index, arg);
+    options.maxMismatchCount = parseNonNegativeInteger(parsed.value, arg);
+    return parsed.nextIndex;
+  }
+  if (arg === "--max-delta") {
+    const parsed = readRequiredValue(argv, index, arg);
+    options.maxAbsoluteDelta = parseNonNegativeInteger(parsed.value, arg);
+    return parsed.nextIndex;
+  }
+  throw new Error(`unknown argument: ${arg}`);
+}
+
+function parseArgs(argv) {
+  const stateDir = argv[0];
+  if (!stateDir) {
+    throw new Error(usage());
+  }
+  const options = createDefaultOptions(stateDir);
   for (let index = 1; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === "--once") {
-      options.once = true;
-      options.maxRuns = 1;
-      continue;
-    }
-    if (arg === "--interval-ms") {
-      options.intervalMs = parsePositiveInteger(argv[index + 1], arg);
-      index += 1;
-      continue;
-    }
-    if (arg === "--max-runs") {
-      options.maxRuns = parsePositiveInteger(argv[index + 1], arg);
-      index += 1;
-      continue;
-    }
-    if (arg === "--require-configured") {
-      options.requireConfigured = true;
-      continue;
-    }
-    if (arg === "--require-primary-backend") {
-      options.requirePrimaryBackend = true;
-      continue;
-    }
-    if (arg === "--max-mismatches") {
-      options.maxMismatchCount = parseNonNegativeInteger(argv[index + 1], arg);
-      index += 1;
-      continue;
-    }
-    if (arg === "--max-delta") {
-      options.maxAbsoluteDelta = parseNonNegativeInteger(argv[index + 1], arg);
-      index += 1;
-      continue;
-    }
-    throw new Error(`unknown argument: ${arg}`);
+    index = applyArg(options, argv, index);
   }
   return options;
 }
@@ -119,6 +147,38 @@ function runReconciliationTick(options, runNumber) {
   };
 }
 
+function writeJsonAtomically(filePath, payload) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tempPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.tmp`);
+  fs.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`);
+  fs.renameSync(tempPath, filePath);
+}
+
+function buildStatusSnapshot(options, runs) {
+  const lastRun = runs[runs.length - 1];
+  const failedRuns = runs.filter((run) => run.statusCode !== 0).length;
+  return {
+    schemaVersion: "shadow-reconciler-status/v1",
+    ok: failedRuns === 0,
+    mode: options.once ? "once" : "loop",
+    stateDir: options.stateDir,
+    intervalMs: options.intervalMs,
+    maxRuns: Number.isFinite(options.maxRuns) ? options.maxRuns : null,
+    runCount: runs.length,
+    failedRunCount: failedRuns,
+    updatedAt: lastRun?.at ?? new Date().toISOString(),
+    lastRun,
+  };
+}
+
+function writeStatusSnapshot(options, runs) {
+  if (!options.outputPath) {
+    return;
+  }
+  writeJsonAtomically(options.outputPath, buildStatusSnapshot(options, runs));
+}
+
 function parsePayload(stdout) {
   try {
     return JSON.parse(stdout || "{}");
@@ -137,6 +197,7 @@ async function runReconciler(options) {
   for (let runNumber = 1; runNumber <= maxRuns; runNumber += 1) {
     const tick = runReconciliationTick(options, runNumber);
     runs.push(tick);
+    writeStatusSnapshot(options, runs);
     if (tick.statusCode !== 0 || runNumber >= maxRuns) {
       break;
     }
@@ -165,4 +226,4 @@ main().catch((error) => {
   process.exitCode = 1;
 });
 
-export { parseArgs, runReconciler, runReconciliationTick };
+export { buildStatusSnapshot, parseArgs, runReconciler, runReconciliationTick };
