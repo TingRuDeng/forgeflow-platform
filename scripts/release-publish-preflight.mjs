@@ -38,6 +38,7 @@ const packageDir = typeof args["package-dir"] === "string" ? args["package-dir"]
 const expectedRepo = typeof args["expected-repo"] === "string" ? args["expected-repo"] : "";
 const requireTrustedPublishing = args["require-trusted-publishing"] === true;
 const requirePackageExists = args["require-package-exists"] === true;
+const requirePublishedWorkspaceDeps = args["require-published-workspace-deps"] === true;
 
 if (!packageDir) {
   console.error("Error: --package-dir is required");
@@ -106,8 +107,13 @@ if (requireTrustedPublishing && !publishEnabled) {
 }
 
 function readPublishedPackageVersion(packageName) {
+  return readPublishedPackageTargetVersion(packageName, "");
+}
+
+function readPublishedPackageTargetVersion(packageName, version) {
+  const target = version ? `${packageName}@${version}` : packageName;
   try {
-    const output = execFileSync("npm", ["view", packageName, "version"], {
+    const output = execFileSync("npm", ["view", target, "version"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 15000,
@@ -119,10 +125,34 @@ function readPublishedPackageVersion(packageName) {
       return { status: "missing", version: "" };
     }
     if (error?.signal === "SIGTERM" || error?.code === "ETIMEDOUT") {
-      return { status: "error", version: "", error: `${packageName} npm view query timed out` };
+      return { status: "error", version: "", error: `${target} npm view query timed out` };
     }
     return { status: "error", version: "", error: stderr.trim() || String(error) };
   }
+}
+
+function readWorkspacePackageVersion(packageName) {
+  const packageSlug = packageName.split("/").pop();
+  if (!packageSlug) {
+    return { status: "missing", version: "" };
+  }
+  try {
+    const workspacePackage = JSON.parse(readFileSync(resolve(process.cwd(), "packages", packageSlug, "package.json"), "utf8"));
+    if (workspacePackage.name !== packageName) {
+      return { status: "missing", version: "" };
+    }
+    return { status: "found", version: workspacePackage.version };
+  } catch {
+    return { status: "missing", version: "" };
+  }
+}
+
+function workspaceDependencyEntries(pkg) {
+  return Object.entries({
+    ...(pkg.dependencies ?? {}),
+    ...(pkg.peerDependencies ?? {}),
+    ...(pkg.optionalDependencies ?? {}),
+  }).filter(([, version]) => typeof version === "string" && version.startsWith("workspace:"));
 }
 
 const publishedPackage = requirePackageExists
@@ -134,6 +164,23 @@ if (requirePackageExists && publishedPackage.status !== "published") {
     ? `${packageJson.name} must exist on npm before this workflow can publish. Create the package name and configure npm Trusted Publisher for repo ${expectedRepo} first.`
     : `${packageJson.name} npm package existence check failed: ${publishedPackage.error}`;
   issues.push(message);
+}
+
+if (requirePublishedWorkspaceDeps) {
+  for (const [dependencyName] of workspaceDependencyEntries(packageJson)) {
+    const workspaceVersion = readWorkspacePackageVersion(dependencyName);
+    if (workspaceVersion.status !== "found" || !workspaceVersion.version) {
+      issues.push(`${packageJson.name} depends on ${dependencyName} via workspace:* but no matching workspace package.json was found`);
+      continue;
+    }
+    const publishedDependency = readPublishedPackageTargetVersion(dependencyName, workspaceVersion.version);
+    if (publishedDependency.status !== "published") {
+      const reason = publishedDependency.status === "missing"
+        ? `${dependencyName}@${workspaceVersion.version} is not published`
+        : publishedDependency.error;
+      issues.push(`${packageJson.name} requires published workspace dependency ${dependencyName}@${workspaceVersion.version} before publish: ${reason}`);
+    }
+  }
 }
 
 const distTag = typeof packageJson.version === "string" && packageJson.version.includes("-") ? "beta" : "latest";

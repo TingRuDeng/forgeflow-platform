@@ -384,6 +384,7 @@ node scripts/release-package.js --package trae-beta-runtime --bump prerelease --
 - 只有 `.github/workflows/release.yml` 这一条正式发布链路，`packages/*/package.json` 变更不会再触发重复 workflow 并发发包。
 - 只有当 npm 已把当前仓库 `TingRuDeng/forgeflow-platform` 配置成 `@tingrudeng/*` 包的 Trusted Publisher，且仓库或组织变量 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 时，push 自动发包才会真正执行；否则 workflow 会成功结束并明确写出“已跳过自动发布”。
 - push 自动发布只会把 npm 上已经存在的包名纳入发布矩阵；全新包名会在 Actions summary 标记为 `自动发布等待 npm 包名配置`，先完成 npm 包名和 Trusted Publisher 配置后再由后续版本自动发布。
+- 手动发布和自动发布的 release preflight 会在 publish 前校验目标包名存在，并把当前 package.json 内 `workspace:*` 依赖解析为本地 workspace 版本，要求对应依赖版本已经发布；例如 provider runtime 会在 `@tingrudeng/beta-runtime-core@<本地版本>` 未发布时提前失败。
 - push 自动发布在 `npm publish` 前会先运行 `pnpm lint`、`pnpm docs:validate`、`pnpm typecheck`、`pnpm test` 和 `pnpm verify:shadow-drift`，避免 main 分支直接绕过常规验证发包。
 - release job 会先把 npm CLI 升到 `11.12.1`；npm Trusted Publishing 至少要求 `npm 11.5.1+`，不要再用 Node 自带的 npm 10.x 直接判断发布链是否可用。
 - `pnpm report:runtime-packages:setup` 会只读查询 npm registry，输出 runtime 包的 package/version 状态、发布顺序和 Trusted Publisher 配置要求；需要把缺口作为硬失败时可加 `-- --require-ready`。
