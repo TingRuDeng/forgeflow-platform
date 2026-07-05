@@ -8,7 +8,7 @@ export interface ArtifactTrajectorySummary {
   stepCount: number;
 }
 
-function sortedTrajectorySteps(bundle: ArtifactBundle): TrajectoryStep[] {
+export function sortedTrajectorySteps(bundle: ArtifactBundle): TrajectoryStep[] {
   return [...(bundle.trajectory?.steps ?? [])].sort((left, right) => left.sequence - right.sequence);
 }
 

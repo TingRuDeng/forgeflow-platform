@@ -4,6 +4,7 @@ import { useTranslation } from '@/lib/i18n';
 import type { ArtifactBundle } from './TaskTimeline';
 import { ArtifactWorkbenchRefs } from './ArtifactWorkbenchRefs';
 import { ArtifactWorkbenchTrajectory } from './ArtifactWorkbenchTrajectory';
+import { ArtifactWorkbenchTrajectoryComparison } from './ArtifactWorkbenchTrajectoryComparison';
 import { RuntimeEventWorkbench } from './RuntimeEventWorkbench';
 import { flattenTrajectorySearchTerms } from './artifactTrajectorySummaryModel';
 import { flattenArtifactRefs } from './artifactWorkbenchRefsModel';
@@ -206,6 +207,7 @@ export const ArtifactWorkbench: React.FC<ArtifactWorkbenchProps> = ({
       {filteredBundles.length > 0 ? (
         <div className="grid grid-cols-1 gap-2">
           <EvidenceComparison bundles={filteredBundles} reviewByTask={reviewByTask} taskById={taskById} />
+          <ArtifactWorkbenchTrajectoryComparison bundles={filteredBundles} taskById={taskById} onSelectTask={onSelectTask} />
           {filteredBundles.map((bundle) => {
             const task = taskById.get(bundle.taskId);
             const review = reviewByTask.get(bundle.taskId);
