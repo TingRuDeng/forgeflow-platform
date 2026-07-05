@@ -287,7 +287,7 @@ vNext runtime reliability 推进：
   - 源码仓运行：`../scripts/start-control-plane.sh`
   - install-and-run runtime 包：`../packages/forgeflow-dispatcher/README.md`
 - `start-control-plane.sh` 现在默认把 dispatcher 绑定到 `127.0.0.1`；监听非 loopback 地址必须显式传 `FORGEFLOW_DISPATCHER_HOST` 或 `--host`。
-- `codex` / `gemini` 的 `worker daemon` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `../packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。worker-daemon 主循环、worker CLI、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到 `@tingrudeng/beta-runtime-core`，dispatcher runtime-glue 与源码脚本复用同一个 shared daemon cycle，脚本侧 dist bootstrap 已收敛到 `../scripts/lib/runtime-bootstrap.ts`，本地日志 / metrics hook 组装已拆到 `../scripts/lib/worker-daemon-hooks.ts`；CI 和 release workflow 会运行 `pnpm verify:runtime-packages` 校验 runtime 包发布清单，并运行 `pnpm verify:runtime-packages:install` 本地打包 / 安装 codex、gemini、trae runtime tarball；`pnpm report:runtime-packages:setup` 会输出 npm 包名、当前版本、发布顺序和 Trusted Publisher 配置缺口；生产发布窗口可用 `pnpm verify:runtime-packages:published` 强制校验 npm registry 包名、版本和已发布依赖元数据；剩余边界是未发布包的外部 npm 配置和生产部署证据。
+- `codex` / `gemini` 的 `worker daemon` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `../packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。worker-daemon 主循环、worker CLI、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到 `@tingrudeng/beta-runtime-core`，dispatcher runtime-glue 与源码脚本复用同一个 shared daemon cycle，脚本侧 dist bootstrap 已收敛到 `../scripts/lib/runtime-bootstrap.ts`，本地日志 / metrics hook 组装已拆到 `../scripts/lib/worker-daemon-hooks.ts`；CI 和 release workflow 会运行 `pnpm verify:runtime-packages` 校验 runtime 包发布清单，并运行 `pnpm verify:runtime-packages:install` 本地打包 / 安装 codex、gemini、trae runtime tarball；`pnpm report:runtime-packages:setup` 会输出 npm 包名、当前版本、发布顺序和 Trusted Publisher 配置缺口；生产发布窗口可用 `pnpm verify:runtime-packages:published` 强制校验 npm registry 包名、版本和已发布依赖元数据，并用 `pnpm verify:runtime-packages:published-smoke` 从 registry 安装已发布 provider runtime 后验证 CLI；剩余边界是未发布包的外部 npm 配置和生产部署证据。
 - `worker-daemon` / Trae runtime 现在只有在结果成功回写到 dispatcher 后才会对外呈现“完成”；`submitResult`、`git push`、自动 PR 创建失败都属于显式失败，而不是假完成。
 - `dependsOn` 现在进入 dispatcher 调度门控：依赖未满足时任务保持 `planned`，满足后自动解锁为 `ready`。
 - generic worker claim 已从副作用 GET 收口为显式 POST：
@@ -332,6 +332,7 @@ vNext runtime reliability 推进：
   - CI 和 release workflow 会执行 `pnpm verify:runtime-packages:install`，在不访问 npm registry 的情况下本地打包并安装 runtime tarball，确认 provider 包不会泄漏 `workspace:*` 依赖且 CLI bin 可安装。
   - `pnpm report:runtime-packages:setup` 会只读查询 npm registry，输出 runtime 包 package/version 状态、发布顺序和 Trusted Publisher 绑定要求；发布窗口可加 `-- --require-ready` 把缺口转成硬失败。
   - 生产发布窗口可额外执行 `pnpm verify:runtime-packages:published`，校验 runtime 包名、当前本地版本和已发布依赖元数据是否与源码发布清单一致。
+  - 生产发布完成后可执行 `pnpm verify:runtime-packages:published-smoke`，从 registry 安装当前源码版本的 codex/gemini/trae provider runtime，并验证 CLI bin、`--version` 和 `--help`。
   - push 自动发布只发布 npm 上已存在包名的缺失版本；全新包名会进入 `自动发布等待 npm 包名配置` summary。
   - push 自动发布会先运行 lint、文档校验、typecheck、测试和 shadow drift gate，再执行 `npm publish`。
   - `@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 当前属于全新包名配置缺口，不应在配置完成前写成已公开安装入口。

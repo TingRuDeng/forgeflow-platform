@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M91 串行：新增已发布 runtime 包 registry 安装 / CLI smoke。
 - [x] M90 串行：让 release workflow 复用通用 release package 检测脚本。
 - [x] M89 串行：新增 runtime npm 包名 / Trusted Publisher 设置报告并共享 runtime package spec。
 - [x] M88 串行：新增 runtime tarball 本地打包 / 安装 smoke 门禁。
@@ -14,6 +15,16 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M91 Review 小结
+
+已新增 `scripts/verify-published-runtime-smoke.mjs` 和根命令 `pnpm verify:runtime-packages:published-smoke`。该命令读取当前源码版本的 codex/gemini/trae provider runtime，先用共享 npm registry helper 确认对应包名和版本已发布，再用临时 npm cache 从 registry 安装精确版本，校验 provider CLI bin 存在，并运行 `--version` 与 `--help`。默认可跳过未发布包并输出 warning；根命令带 `--require-published`，适合作为发布后远端安装 smoke 的硬门禁。
+
+Review Gate：finished。Spec 符合度通过，本轮只新增发布后 registry 安装 / CLI smoke，不改变 runtime 代码、release workflow、npm publish 行为或 worker 启动语义。安全检查通过，脚本只读查询 npm registry 并在临时目录执行 `npm install --ignore-scripts --no-audit --no-fund`，不读取 secret、不发布、不写 registry；缺失包名或版本在 hard mode 下显式失败。复杂度检查通过，新增脚本 183 行、测试 115 行，均低于 300 行。Document-refresh: needed，原因：新增生产发布后 provider runtime smoke 命令，已同步 README、docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`node --check scripts/verify-published-runtime-smoke.mjs`、`node --check scripts/lib/npm-registry-status.mjs` 通过；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/published-runtime-smoke.test.ts tests/modules/execution/runtime-package-install.test.ts tests/modules/execution/runtime-package-setup-report.test.ts --maxWorkers=1` 通过，3 个测试文件、7 个测试通过；真实 registry smoke `node scripts/verify-published-runtime-smoke.mjs --groups codex --require-published --registry-timeout-ms 5000` 通过，确认 `@tingrudeng/codex-beta-runtime@0.1.0-beta.2` 可安装且 CLI 可执行；真实 registry hard smoke `node scripts/verify-published-runtime-smoke.mjs --groups gemini --require-published --registry-timeout-ms 5000` 按预期失败为 `setup_required`。`CI=true pnpm verify:runtime-packages`、`CI=true pnpm verify:runtime-packages:install`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：published smoke 已具备仓库侧执行入口；完整目标仍需要 npm 侧创建 / 绑定 `@tingrudeng/beta-runtime-core` 与 `@tingrudeng/gemini-beta-runtime`，发布缺失版本后再跑全量 `pnpm verify:runtime-packages:published` 和 `pnpm verify:runtime-packages:published-smoke`。
 
 ## M90 Review 小结
 
