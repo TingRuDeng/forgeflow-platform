@@ -3,9 +3,10 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { discoverTraeTarget, getDebuggerVersion } from "./trae-cdp-discovery.js";
 import { prepareCleanRelaunch, quitExistingMacApp, resolveMacAppName, waitForDebuggerPortToDrain, } from "./trae-launcher-clean-relaunch.js";
+import { resolveMacAppBundleExecutable, } from "@tingrudeng/automation-gateway-core";
 export const DEFAULT_START_TIMEOUT_MS = Number(process.env.TRAE_CDP_START_TIMEOUT_MS || 15000);
 export const DEFAULT_REMOTE_DEBUGGING_PORT = Number(process.env.TRAE_REMOTE_DEBUGGING_PORT || 9222);
-export { prepareCleanRelaunch, quitExistingMacApp, resolveMacAppName, waitForDebuggerPortToDrain };
+export { prepareCleanRelaunch, quitExistingMacApp, resolveMacAppName, resolveMacAppBundleExecutable, waitForDebuggerPortToDrain };
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -29,35 +30,6 @@ export function parseLaunchArgs(value) {
 }
 export function hasRemoteDebuggingPortArg(args = []) {
     return args.some((arg) => /^--remote-debugging-port=/.test(arg));
-}
-export function resolveMacAppBundleExecutable(command, options = {}) {
-    const fsImpl = options.fsImpl || fs;
-    const pathImpl = options.pathImpl || path;
-    const platform = options.platform || process.platform;
-    const normalized = String(command || "").trim();
-    if (platform !== "darwin" || !normalized.toLowerCase().endsWith(".app") || !fsImpl.existsSync(normalized)) {
-        return normalized;
-    }
-    const directCandidate = pathImpl.join(normalized, "Contents", "MacOS", pathImpl.basename(normalized, ".app"));
-    if (fsImpl.existsSync(directCandidate)) {
-        return directCandidate;
-    }
-    const macOsDir = pathImpl.join(normalized, "Contents", "MacOS");
-    if (!fsImpl.existsSync(macOsDir)) {
-        return normalized;
-    }
-    for (const entryName of fsImpl.readdirSync(macOsDir)) {
-        const entryPath = pathImpl.join(macOsDir, entryName);
-        try {
-            if (fsImpl.statSync(entryPath).isFile()) {
-                return entryPath;
-            }
-        }
-        catch {
-            // 跳过不可读取条目，继续尝试其他可执行文件。
-        }
-    }
-    return normalized;
 }
 export function resolveTraeLaunchTarget(options = {}) {
     const env = options.env || process.env;
