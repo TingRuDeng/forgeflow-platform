@@ -113,8 +113,8 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - 最终切换前必须执行 `pnpm verify:shadow-cutover:ready`，该命令会输出 `strict_cutover_preflight` 与 `approval_evidence` 两个 phase，只有 strict preflight 和 approval evidence 同时通过才返回成功
 - 回滚或撤销生产切换窗口时执行 `pnpm verify:shadow-cutover:revoke`；该命令会把 approval marker 归档为 `shadow-cutover-approval.revoked-*.json`，并写入 `.forgeflow-dispatcher/shadow-cutover-revocation.json`
 - `RUNTIME_STATE_BACKEND=postgres` 现在会在读写 primary snapshot 前校验 `shadow-cutover-approval.json`，并重新读取 `evidencePath` 确认当前文件 SHA-256 与 approval 里的 `evidenceSha256` 匹配；自定义审批文件路径可设置 `DISPATCHER_PRIMARY_CUTOVER_APPROVAL_FILE`；如果存在 `shadow-cutover-revocation.json`，primary backend 会拒绝连接，直到重新完成 drill evidence 和 approval
-- 当前 `DISPATCHER_SHADOW_MODE=primary` 会被明确拒绝为 `primary_store_not_implemented`；不要把它作为生产切换开关，真正 primary store 开关是 `RUNTIME_STATE_BACKEND=postgres`
-- `@forgeflow/dispatcher-store-postgres` 已有 primary snapshot 表原语，dispatcher HTTP route 主链与 `/api/query/*` 已通过 async Postgres state path 读写 primary snapshot；完整生产切换仍需外部存储运维确认和真实生产变更窗口
+- `DISPATCHER_SHADOW_MODE=primary` 不是独立生产切换开关；只有 `RUNTIME_STATE_BACKEND=postgres` 和 `DISPATCHER_PRIMARY_POSTGRES_URL` 已配置时，它才作为切换后兼容状态通过 drift / cutover 检查。primary backend 未选择时会失败为 `primary_backend_not_selected`
+- `@forgeflow/dispatcher-store-postgres` 已有 primary snapshot 表原语，dispatcher HTTP route 主链与 `/api/query/*` 已通过 async Postgres state path 读写 primary snapshot；仓库内生产切换门禁已收口到 drill evidence、approval marker、ready gate、revocation marker 和 Postgres primary backend guard
 - `pnpm verify:stage3` 和 release workflow 会执行 `pnpm verify:shadow-drift`，shadow 配置存在且 drifted 时必须阻断 rollout / release
 - assignment delivery queue 影子计数合理
 
