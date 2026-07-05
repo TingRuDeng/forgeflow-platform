@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M89 串行：新增 runtime npm 包名 / Trusted Publisher 设置报告并共享 runtime package spec。
 - [x] M88 串行：新增 runtime tarball 本地打包 / 安装 smoke 门禁。
 - [x] M87 串行：校验已发布 runtime 包依赖元数据是否与源码发布清单一致。
 - [x] M86 串行：让 release preflight 提前阻断未配置 npm 包名。
@@ -12,6 +13,18 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M89 Review 小结
+
+已新增 `scripts/lib/runtime-package-specs.mjs`，把 runtime 包名、角色、provider bin、workspace 依赖和安装 smoke 分组从 readiness / install 两个脚本中抽为共享只读规格，避免后续 codex / gemini / trae 发布包清单继续漂移。`scripts/check-runtime-package-readiness.mjs` 和 `scripts/verify-runtime-package-install.mjs` 已改为复用该规格。
+
+已新增 `scripts/report-runtime-package-setup.mjs` 和根命令 `pnpm report:runtime-packages:setup`。该报告直接用 Node HTTPS 只读查询 npm registry，输出 Trusted Publisher 期望配置、runtime 包发布顺序、每个包名 / 当前源码版本的 package 和 version 状态，并在 `--require-ready` 下把缺失包名、未发布版本或 registry unknown 转为硬失败。测试使用显式 registry fixture，不依赖本地 npm 子进程、端口监听或真实 registry。
+
+Review Gate：finished。Spec 符合度通过，本轮只新增发布设置报告并去重 runtime package spec，不改变 worker runtime、dispatcher API、release publish 行为或 CI 默认发布矩阵。安全检查通过，报告默认只读查询 `https://registry.npmjs.org/`，不写 registry、不发布、不读取 secret；registry 失败会显式输出 `registry_unknown` 和错误原因，不做假成功。复杂度检查通过，新增报告脚本 236 行、共享规格 90 行，触碰脚本均低于 300 行。Document-refresh: needed，原因：新增 operator 发布设置报告入口并改变 runtime package spec 权威边界，已同步 README、docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`node --check scripts/lib/runtime-package-specs.mjs`、`node --check scripts/report-runtime-package-setup.mjs`、`node --check scripts/check-runtime-package-readiness.mjs`、`node --check scripts/verify-runtime-package-install.mjs` 通过；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/runtime-package-setup-report.test.ts tests/modules/execution/runtime-package-readiness.test.ts tests/modules/execution/runtime-package-install.test.ts --maxWorkers=1` 通过，3 个测试文件、9 个测试通过；`CI=true pnpm verify:runtime-packages`、`CI=true pnpm verify:runtime-packages:install`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。真实 registry 报告在普通沙箱下因 DNS 限制输出 `registry_unknown(getaddrinfo ENOTFOUND registry.npmjs.org)`；提升权限复跑 `node scripts/report-runtime-package-setup.mjs --registry-timeout-ms 5000` 通过，并确认 `@tingrudeng/beta-runtime-core` 与 `@tingrudeng/gemini-beta-runtime` 仍是 `setup_required`。
+
+剩余风险：报告能把 npm 包名 / Trusted Publisher 缺口变成可复现 operator 证据；它不能代替 npm 侧创建包名、绑定 Trusted Publisher、触发真实 Release workflow 和远端机器全局安装 smoke。
 
 ## M88 Review 小结
 

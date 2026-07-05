@@ -32,6 +32,7 @@
     "verify:runtime-packages": "node scripts/check-runtime-package-readiness.mjs",
     "verify:runtime-packages:published": "node scripts/check-runtime-package-readiness.mjs --check-registry --check-published-metadata --require-published",
     "verify:runtime-packages:install": "node scripts/verify-runtime-package-install.mjs",
+    "report:runtime-packages:setup": "node scripts/report-runtime-package-setup.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   },

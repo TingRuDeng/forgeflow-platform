@@ -5,37 +5,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const PACKAGE_SPECS = {
-  automation: {
-    dir: "packages/automation-gateway-core",
-    name: "@tingrudeng/automation-gateway-core",
-  },
-  betaCore: {
-    dir: "packages/beta-runtime-core",
-    name: "@tingrudeng/beta-runtime-core",
-  },
-  codex: {
-    bin: "forgeflow-codex-beta",
-    dir: "packages/codex-beta-runtime",
-    name: "@tingrudeng/codex-beta-runtime",
-  },
-  gemini: {
-    bin: "forgeflow-gemini-beta",
-    dir: "packages/gemini-beta-runtime",
-    name: "@tingrudeng/gemini-beta-runtime",
-  },
-  trae: {
-    bin: "forgeflow-trae-beta",
-    dir: "packages/trae-beta-runtime",
-    name: "@tingrudeng/trae-beta-runtime",
-  },
-};
-
-const GROUPS = {
-  codex: [PACKAGE_SPECS.betaCore, PACKAGE_SPECS.codex],
-  gemini: [PACKAGE_SPECS.betaCore, PACKAGE_SPECS.gemini],
-  trae: [PACKAGE_SPECS.automation, PACKAGE_SPECS.trae],
-};
+import {
+  RUNTIME_PACKAGE_GROUPS,
+  readJson,
+  readWorkspaceVersions,
+  rewriteWorkspaceDependencies,
+} from "./lib/runtime-package-specs.mjs";
 
 function parseArgs(argv) {
   const parsed = {};
@@ -65,57 +40,21 @@ function run(command, args, cwd, env = {}) {
   });
 }
 
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
-}
-
 function copyDir(source, target) {
   fs.cpSync(source, target, { recursive: true });
 }
 
 function resolveGroups(input) {
   if (!input) {
-    return Object.keys(GROUPS);
+    return Object.keys(RUNTIME_PACKAGE_GROUPS);
   }
   const names = input.split(",").map((name) => name.trim()).filter(Boolean);
   for (const name of names) {
-    if (!GROUPS[name]) {
+    if (!RUNTIME_PACKAGE_GROUPS[name]) {
       throw new Error(`unknown runtime install smoke group: ${name}`);
     }
   }
   return names;
-}
-
-function readWorkspaceVersions(rootDir) {
-  const versions = {};
-  const packagesDir = path.join(rootDir, "packages");
-  for (const entry of fs.readdirSync(packagesDir)) {
-    const packageJsonPath = path.join(packagesDir, entry, "package.json");
-    if (!fs.existsSync(packageJsonPath)) {
-      continue;
-    }
-    const packageJson = readJson(packageJsonPath);
-    if (packageJson.name && packageJson.version) {
-      versions[packageJson.name] = packageJson.version;
-    }
-  }
-  return versions;
-}
-
-function rewriteWorkspaceDependencies(packageJson, versions) {
-  const next = { ...packageJson };
-  const dependencies = { ...(packageJson.dependencies || {}) };
-  for (const [name, version] of Object.entries(dependencies)) {
-    if (version !== "workspace:*") {
-      continue;
-    }
-    if (!versions[name]) {
-      throw new Error(`${packageJson.name} cannot resolve workspace dependency ${name}`);
-    }
-    dependencies[name] = versions[name];
-  }
-  next.dependencies = dependencies;
-  return next;
 }
 
 function stagePackage(rootDir, tempDir, spec, versions) {
@@ -169,7 +108,7 @@ function assertInstalledPackage(installDir, spec) {
 }
 
 function verifyGroup(rootDir, tempDir, groupName, options) {
-  const specs = GROUPS[groupName];
+  const specs = RUNTIME_PACKAGE_GROUPS[groupName];
   if (!options.skipBuild) {
     buildPackages(rootDir, specs);
   }
