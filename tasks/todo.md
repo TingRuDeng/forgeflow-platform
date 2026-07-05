@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M24 串行：补齐 Console 审查队列批量 rework / block。
+- [x] M24 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M24 Review 小结
+
+已新增 Console `ReviewQueue`，只聚合 `review` 状态任务，支持多选任务并批量提交共享 `reasonCode`、`mustFix[]`、`canRedrive` 和 `redriveStrategy` 的 `rework` / `block` 决策；App 侧复用单任务 review decision API 路径，避免批量提交和单任务提交语义漂移。已同步 README、docs/README 和 TECH_DEBT，将剩余 Console 产品化风险收窄为批量 merge 风险确认、跨任务对比和批量结果明细。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 Console 审查工作台产品化中的批量 `rework` / `block`；安全检查通过，未新增 secret、mock 成功路径或静默降级，批量提交继续调用既有 review decision API，taskId 使用 `encodeURIComponent`；复杂度检查通过，`App.tsx` 292 行、`ReviewQueue.tsx` 230 行，新 helper 文件均低于 50 行；Document-refresh: needed，原因：Console 批量审查能力和剩余技术债边界变化，已同步 README、docs/README 与 TECH_DEBT。结论：通过。
+
+验证已通过：RED 阶段确认 `ReviewQueue` 缺失导致 Console 测试失败；GREEN 后通过 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx`、`CI=true pnpm --filter console test`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
+
+剩余风险：批量 merge 仍未开放，后续需要单独设计风险确认、逐项失败明细和跨任务证据对比，避免高风险合并被误批量执行。
+
 - [x] M23 串行：补齐 Console artifact 下载和跨任务筛选工作台。
 - [x] M23 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 

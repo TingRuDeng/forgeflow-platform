@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { TaskDetailsPanel, TaskList } from '../Lists';
 import { ArtifactWorkbench } from '../ArtifactWorkbench';
+import { ReviewQueue } from '../ReviewQueue';
 import { LanguageProvider } from '../../lib/i18n';
 
 // Mock Tasks
@@ -347,5 +348,56 @@ describe('ArtifactWorkbench', () => {
     fireEvent.click(screen.getByText(/Fix auth gate/i));
 
     expect(onSelectTask).toHaveBeenCalledWith('task-1');
+  });
+});
+
+describe('ReviewQueue', () => {
+  it('selects review tasks and submits a shared rework decision', () => {
+    const onBulkReviewDecision = vi.fn();
+
+    renderWithProviders(
+      <ReviewQueue
+        selectedTaskId="task-1"
+        tasks={[
+          { id: 'task-1', title: 'Fix auth gate', status: 'review', repo: 'owner/auth', branchName: 'codex/auth' },
+          { id: 'task-2', title: 'Update docs', status: 'review', repo: 'owner/docs', branchName: 'codex/docs' },
+          { id: 'task-3', title: 'Already merged', status: 'merged', repo: 'owner/app' },
+        ]}
+        reviews={[
+          {
+            taskId: 'task-1',
+            evidence: {
+              reasonCode: 'test_gap',
+              mustFix: ['补齐鉴权失败测试'],
+              canRedrive: true,
+              redriveStrategy: 'same_worker_continue',
+            },
+            riskAssessment: { level: 'needs_human_attention', reasons: ['auth touched'] },
+          },
+        ]}
+        onBulkReviewDecision={onBulkReviewDecision}
+      />
+    );
+
+    expect(screen.getByText(/Fix auth gate/i)).toBeInTheDocument();
+    expect(screen.getByText(/Update docs/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Already merged/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText(/选择任务 task-1|select task task-1/i));
+    fireEvent.click(screen.getByLabelText(/选择任务 task-2|select task task-2/i));
+    fireEvent.change(screen.getByLabelText(/原因码|reason code/i), {
+      target: { value: 'test_gap' },
+    });
+    fireEvent.change(screen.getByLabelText(/必须修复|must fix/i), {
+      target: { value: '补齐鉴权失败测试\n补齐文档回归测试' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /批量返工|bulk rework/i }));
+
+    expect(onBulkReviewDecision).toHaveBeenCalledWith('rework', ['task-1', 'task-2'], {
+      reasonCode: 'test_gap',
+      mustFix: ['补齐鉴权失败测试', '补齐文档回归测试'],
+      canRedrive: true,
+      redriveStrategy: 'same_worker_continue',
+    });
   });
 });
