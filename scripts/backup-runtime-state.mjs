@@ -8,6 +8,7 @@ const FILES = [
   "runtime-state.json",
   "runtime-state-shadow-status.json",
   "shadow-cutover-approval.json",
+  "shadow-cutover-revocation.json",
 ];
 
 export function backupRuntimeState({ stateDir, backupDir }) {

@@ -13,6 +13,7 @@ import type { RuntimeState } from "./runtime-state.js";
 const PRIMARY_POSTGRES_URL_ENV = "DISPATCHER_PRIMARY_POSTGRES_URL";
 const PRIMARY_CUTOVER_APPROVAL_FILE_ENV = "DISPATCHER_PRIMARY_CUTOVER_APPROVAL_FILE";
 const DEFAULT_PRIMARY_CUTOVER_APPROVAL_FILE = "shadow-cutover-approval.json";
+const DEFAULT_PRIMARY_CUTOVER_REVOCATION_FILE = "shadow-cutover-revocation.json";
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/i;
 
 function getPrimaryPostgresUrl(): string {
@@ -33,6 +34,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function validatePrimaryCutoverApprovalFile(stateDir: string): void {
+  const revocationPath = path.join(stateDir, DEFAULT_PRIMARY_CUTOVER_REVOCATION_FILE);
+  if (fs.existsSync(revocationPath)) {
+    throw new Error(`${DEFAULT_PRIMARY_CUTOVER_REVOCATION_FILE} blocks RUNTIME_STATE_BACKEND=postgres until a new cutover approval is generated`);
+  }
   const approvalPath = getPrimaryCutoverApprovalPath(stateDir);
   let approval: unknown;
   try {

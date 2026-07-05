@@ -86,5 +86,8 @@ describe("workflow quality gates", () => {
     expect(scripts["verify:shadow-cutover:approve"]).toBe(
       "node scripts/approve-shadow-cutover.mjs .forgeflow-dispatcher --evidence .forgeflow-dispatcher/shadow-cutover-drill.json",
     );
+    expect(scripts["verify:shadow-cutover:revoke"]).toBe(
+      "node scripts/revoke-shadow-cutover.mjs .forgeflow-dispatcher --reason operator_rollback",
+    );
   });
 });
