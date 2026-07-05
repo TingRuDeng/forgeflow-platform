@@ -9,6 +9,7 @@ import {
   RiskSection,
   type ReviewDecisionInput,
 } from './TaskReviewSections';
+import { TaskHitlSection } from './TaskHitlSection';
 
 interface Task {
   id: string;
@@ -22,6 +23,11 @@ interface Task {
   continueFromTaskId?: string;
   followUpOfTaskId?: string;
   lastAssignedWorkerId?: string;
+  waitingForInput?: {
+    requestedBy?: string;
+    reason?: string;
+    requestedAt?: string;
+  } | null;
 }
 
 interface Assignment {
@@ -88,7 +94,9 @@ interface TaskDetailsPanelProps {
   artifactBundles?: ArtifactBundle[];
   cancellingTaskId?: string | null;
   reviewingTaskId?: string | null;
+  resumingTaskId?: string | null;
   onCancel?: (task: Task) => void;
+  onResume?: (task: Task, resumePayload: Record<string, unknown>) => void;
   onReviewDecision?: (decision: 'merge' | 'rework' | 'block', input?: ReviewDecisionInput) => void;
 }
 
@@ -200,7 +208,9 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
   artifactBundles = [],
   cancellingTaskId,
   reviewingTaskId,
+  resumingTaskId,
   onCancel,
+  onResume,
   onReviewDecision,
 }) => {
   const { t } = useTranslation();
@@ -218,6 +228,11 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
     <aside className="border-t xl:border-t-0 xl:border-l border-white/10 bg-black/10 p-5 flex flex-col gap-5">
       <TaskHeader task={task} cancellingTaskId={cancellingTaskId} onCancel={onCancel} />
       <TaskMetadataGrid task={task} assignment={assignment} workerId={workerId} />
+      <TaskHitlSection
+        task={task}
+        resumingTaskId={resumingTaskId}
+        onResume={onResume ? (_hitlTask, resumePayload) => onResume(task, resumePayload) : undefined}
+      />
       <LineageSection task={task} parentTaskId={task.continueFromTaskId || task.followUpOfTaskId || null} />
       <RiskSection review={review} />
       <ReviewSection review={review} mustFix={mustFix} canRedriveValue={canRedriveValue} />

@@ -10,7 +10,10 @@ import type { PullRequestInfo, TaskPayload, WorkerResult } from "./types.js";
 
 export function materializeAssignmentPackage(worktreeDir: string, payload: TaskPayload): string {
   const assignmentDir = path.join(worktreeDir, ".orchestrator", "assignments", safeTaskDirName(payload.assignment.taskId));
-  writeJson(path.join(assignmentDir, "assignment.json"), payload.assignment);
+  writeJson(path.join(assignmentDir, "assignment.json"), {
+    ...payload.assignment,
+    resumePayload: payload.resumePayload ?? payload.assignment.resumePayload ?? null,
+  });
   fs.writeFileSync(path.join(assignmentDir, "worker-prompt.md"), payload.workerPrompt || "");
   fs.writeFileSync(path.join(assignmentDir, "context.md"), payload.contextMarkdown || "");
   return assignmentDir;

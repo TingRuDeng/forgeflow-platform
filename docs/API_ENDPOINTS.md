@@ -269,6 +269,8 @@ Current endpoint families:
     - `blockers[]`
     - `findings[]`
     - `artifacts`
+    - `waitingForInput`
+  - `result.waitingForInput` may include `requestedBy`, `reason`, and `prompt`; dispatcher treats it as a worker-initiated HITL interrupt, checkpoints the active attempt, releases worker / leases, and moves the task to `waiting_for_input` instead of `review` or `failed`.
   - `artifactBundle` may be provided as a top-level field; dispatcher validates ownership against the active attempt and stores the bundle summary, refs, and optional retained content.
 - `POST /api/workers/:workerId/events`
   - Best-effort worker telemetry path for control-plane metrics and audit hints.
@@ -354,6 +356,7 @@ Current endpoint families:
     - stores `resumePayload` on the task and assignment payload
     - appends `status_changed` and `task_resumed` events
     - leaves checkpointed attempts available for the next worker claim
+    - beta runtime materializes `resumePayload` into `.orchestrator/assignments/<task>/assignment.json` for the resumed worker process
 
 ### Trae-specific dispatcher endpoints
 

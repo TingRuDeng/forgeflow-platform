@@ -2620,6 +2620,130 @@ describe("dispatcher server", () => {
     expect(diffResponse.json.content).toBe("diff --git a/docs/test.md b/docs/test.md");
   });
 
+  it("worker result can request HITL input instead of moving directly to review", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "hitl-result-worker",
+        pool: "codex",
+        hostname: "test-host",
+        labels: ["test"],
+        repoDir: "/test",
+      },
+    });
+
+    const dispatchResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "TingRuDeng/forgeflow-platform",
+        defaultBranch: "main",
+        requestedBy: "codex-control",
+        tasks: [
+          {
+            id: "hitl-result-task",
+            title: "Need product input",
+            pool: "codex",
+            branchName: "ai/codex/hitl-result-task",
+            verification: { mode: "run" },
+          },
+        ],
+        packages: [
+          {
+            taskId: "hitl-result-task",
+            assignment: {
+              taskId: "hitl-result-task",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/hitl-result-task",
+              repo: "TingRuDeng/forgeflow-platform",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+    const taskId = dispatchResponse.json.taskIds[0];
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/hitl-result-worker/claim-task",
+      body: {},
+    });
+    const stateMod = await import(path.join(repoRoot, "scripts/lib/dispatcher-state.js"));
+    const attempt = stateMod.loadRuntimeState(stateDir).taskAttempts[0];
+    const envelope = {
+      attemptId: attempt.attemptId,
+      leaseToken: attempt.leaseToken,
+      protocolVersion: attempt.protocolVersion,
+      traceId: attempt.traceId,
+      idempotencyKey: attempt.idempotencyKey,
+    };
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/hitl-result-worker/start-task",
+      body: { taskId, ...envelope, at: "2026-07-05T10:00:01.000Z" },
+    });
+
+    const resultResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/hitl-result-worker/result",
+      body: {
+        ...envelope,
+        result: {
+          taskId,
+          workerId: "hitl-result-worker",
+          provider: "codex",
+          pool: "codex",
+          branchName: "ai/codex/hitl-result-task",
+          repo: "TingRuDeng/forgeflow-platform",
+          defaultBranch: "main",
+          mode: "run",
+          output: "Need product decision before continuing",
+          generatedAt: "2026-07-05T10:00:02.000Z",
+          verification: { allPassed: true, commands: [] },
+          waitingForInput: {
+            reason: "choose rollout scope",
+            prompt: "Ship narrow scope or full rollout?",
+          },
+        },
+        changedFiles: [],
+        pullRequest: null,
+      },
+    });
+
+    expect(resultResponse.status).toBe(200);
+    const snapshot = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dashboard/snapshot",
+      body: {},
+    });
+    const task = snapshot.json.tasks.find((candidate: { id: string }) => candidate.id === taskId);
+    const checkpointedAttempt = snapshot.json.taskAttempts.find((candidate: { taskId: string }) => candidate.taskId === taskId);
+    expect(task).toMatchObject({
+      status: "waiting_for_input",
+      waitingForInput: {
+        requestedBy: "hitl-result-worker",
+        reason: "choose rollout scope",
+      },
+    });
+    expect(checkpointedAttempt).toMatchObject({ status: "checkpointed" });
+    const review = snapshot.json.reviews.find((candidate: { taskId: string }) => candidate.taskId === taskId);
+    expect(review?.latestWorkerResult).toBeFalsy();
+  });
+
   it("submit_result with failed moves task to failed", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);

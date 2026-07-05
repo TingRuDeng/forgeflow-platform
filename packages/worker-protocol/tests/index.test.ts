@@ -71,6 +71,10 @@ describe("worker SDK payload helpers", () => {
           allPassed: true,
           commands: [],
         },
+        waitingForInput: {
+          reason: "choose rollout scope",
+          prompt: "Ship narrow scope or full rollout?",
+        },
       },
       changedFiles: ["src/index.ts"],
       pullRequest: null,
@@ -83,6 +87,9 @@ describe("worker SDK payload helpers", () => {
         taskId: "task-1",
         workerId: "worker-1",
         repo: "owner/repo",
+        waitingForInput: {
+          reason: "choose rollout scope",
+        },
       },
       changedFiles: ["src/index.ts"],
       pullRequest: null,

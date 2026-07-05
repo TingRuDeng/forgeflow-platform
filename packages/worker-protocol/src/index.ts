@@ -55,6 +55,11 @@ const WorkerResultBodySchema = z.object({
     commands: z.array(WorkerResultVerificationCommandSchema).default([]),
   }),
   evidence: z.unknown().optional(),
+  waitingForInput: z.object({
+    requestedBy: z.string().optional(),
+    reason: z.string().optional(),
+    prompt: z.string().optional(),
+  }).optional(),
 });
 
 const WorkerPullRequestSchema = z.object({

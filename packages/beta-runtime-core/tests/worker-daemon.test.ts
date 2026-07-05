@@ -311,7 +311,10 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
         const tempDir = makeTempDir(testCase.tempPrefix);
         const repoDir = createRepoWithOrigin(tempDir);
         const packageRoot = createFakePackageRoot(tempDir);
-        const payload = buildPayload(testCase, "task-live-executor");
+        const payload = {
+          ...buildPayload(testCase, "task-live-executor"),
+          resumePayload: { decision: "continue with narrow scope" },
+        };
         const client = createClient(payload);
 
         const result = await executeLiveWorkerTask({
@@ -326,6 +329,9 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
 
         expect(result.result.output).toBe("worker ok");
         expect(result.changedFiles).toContain("docs/");
+        expect(JSON.parse(fs.readFileSync(path.join(path.dirname(result.outputDir), "assignment.json"), "utf8"))).toMatchObject({
+          resumePayload: { decision: "continue with narrow scope" },
+        });
         expect(client.startTask).not.toHaveBeenCalled();
         expect(client.submitResult).not.toHaveBeenCalled();
       });

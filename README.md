@@ -72,7 +72,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - dispatch 创建任务时现在有服务端确定性质量门：默认 `warn` 模式下缺验收 / 缺 `allowedPaths` 边界，或命中受保护路径的 sensitive 任务会落 `dispatch_quality_flagged` 事件；`DISPATCHER_DISPATCH_QUALITY_MODE=enforce` 时会直接拒绝不合规任务创建。sensitive 任务即使全局关闭也强制要求验收，且不允许只用 catch-all 范围。
 - dispatcher 现在额外暴露只读 `GET /api/context`：一次性聚合控制层关心的 active 任务、review backlog（含确定性风险分级）、可 redrive 的 blocked 任务和带 traceId 的 recent events，支持 `since` / `eventLimit` 过滤，减少控制层多次拉取 snapshot/query。
 - dispatcher 现在会 canonicalize worker result 的 `taskId/workerId/pool/repo/defaultBranch/branchName/mode`，worker 只能上送 `output/verification/evidence` 等执行证据；不合法元数据会被拒绝。
-- dispatcher 任务状态机现在接上了 `cancelled`：控制面可通过 `POST /api/tasks/:taskId/cancel` 手动作废非终态任务，console 也提供了详情 drill-down 和作废按钮。
+- dispatcher 任务状态机现在接上了 `cancelled` 和 `waiting_for_input`：控制面可通过 `POST /api/tasks/:taskId/cancel` 手动作废非终态任务；worker result 可携带 `waitingForInput` 主动请求 HITL 暂停，dispatcher 会 checkpoint active attempt 并释放 worker / lease；console 详情页可提交 JSON `resumePayload` 恢复任务。
 - `worker-daemon` 不再把 `submitResult` 重试耗尽、`git push` 失败或自动 PR 创建失败记成“completed”；这些路径现在都会保留在显式 failed 语义里。
 - `worker-daemon` 子进程现在使用 env allowlist，而不是继承完整 `process.env`；自动 PR 创建也改成显式 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - `forgeflow-review-orchestrator` 现在补齐了阶段二控制层闭环：`dispatch/dispatch-task/watch/inspect/decide` 都支持 `--state-dir` 本地 dispatcher fallback；`watch --summary` 与 `inspect --summary` 统一输出 review/failure/redrive/progress/trace 摘要，并会附带结构化 `failureCode`。
