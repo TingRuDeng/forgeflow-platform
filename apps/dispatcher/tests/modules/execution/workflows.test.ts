@@ -82,9 +82,13 @@ describe("workflow quality gates", () => {
     expect(scripts["verify:stage3"]).toContain("pnpm verify:shadow-drift");
     expect(scripts["verify:shadow-drift"]).toBe("node scripts/check-shadow-drift.mjs .forgeflow-dispatcher");
     expect(scripts["verify:shadow-drift:reconcile"]).toBe("node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --reconcile --record-alert");
-    expect(scripts["verify:shadow-drift:reconciler"]).toBe("node scripts/run-shadow-reconciler.mjs .forgeflow-dispatcher");
+    expect(scripts["verify:shadow-drift:reconciler"]).toBe(
+      "node scripts/run-shadow-reconciler.mjs .forgeflow-dispatcher --output .forgeflow-dispatcher/shadow-reconciler-status.json",
+    );
     expect(scripts["verify:shadow-cutover"]).toBe("node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --require-configured --require-primary-backend --max-mismatches 0 --max-delta 0");
-    expect(scripts["verify:shadow-cutover:reconciler"]).toBe("node scripts/run-shadow-reconciler.mjs .forgeflow-dispatcher --require-configured --require-primary-backend --max-mismatches 0 --max-delta 0");
+    expect(scripts["verify:shadow-cutover:reconciler"]).toBe(
+      "node scripts/run-shadow-reconciler.mjs .forgeflow-dispatcher --output .forgeflow-dispatcher/shadow-reconciler-status.json --require-configured --require-primary-backend --max-mismatches 0 --max-delta 0",
+    );
     expect(scripts["verify:shadow-cutover:approve"]).toBe(
       "node scripts/approve-shadow-cutover.mjs .forgeflow-dispatcher --evidence .forgeflow-dispatcher/shadow-cutover-drill.json",
     );

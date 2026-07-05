@@ -103,7 +103,7 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher` 返回 `ok=true`
 - `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --max-mismatches 0 --max-delta 0` 可输出 `alert.level`；release / rollout gate 也可通过 `DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES` 与 `DISPATCHER_SHADOW_DRIFT_MAX_DELTA` 注入同一阈值
 - 如果 drift 来自 shadow projection / queue 落后，operator 可执行 `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --reconcile` 主动重放 SQLite truth 到 shadow 后复查
-- 生产巡检或定时任务可使用 `pnpm verify:shadow-drift:reconcile`，等价于显式 `--reconcile --record-alert`；需要长期运行的自动对账进程时使用 `pnpm verify:shadow-drift:reconciler`，它会周期性执行同一 reconciliation + alert 记录流程，并可通过 `run-shadow-reconciler.mjs --output <path>` 或 `DISPATCHER_SHADOW_RECONCILER_STATUS_FILE=<path>` 原子写入最近一轮 `shadow-reconciler-status/v1` 状态快照；生产切换窗口使用 `pnpm verify:shadow-cutover:reconciler`，让长期进程持续执行 strict cutover 条件：shadow 已配置、primary backend 已配置、零 drift；也可通过 `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1` 与 `DISPATCHER_SHADOW_DRIFT_RECORD_ALERT=1` 注入同一行为
+- 生产巡检或定时任务可使用 `pnpm verify:shadow-drift:reconcile`，等价于显式 `--reconcile --record-alert`；需要长期运行的自动对账进程时使用 `pnpm verify:shadow-drift:reconciler`，它会周期性执行同一 reconciliation + alert 记录流程，并默认原子写入 `.forgeflow-dispatcher/shadow-reconciler-status.json` 的最近一轮 `shadow-reconciler-status/v1` 状态快照；生产切换窗口使用 `pnpm verify:shadow-cutover:reconciler`，让长期进程持续执行 strict cutover 条件：shadow 已配置、primary backend 已配置、零 drift，并更新同一状态文件；也可通过 `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1` 与 `DISPATCHER_SHADOW_DRIFT_RECORD_ALERT=1` 注入同一行为
 - 如果需要把 drift 留作运行时告警证据，operator 可追加 `--record-alert` 写入 `shadow_drift_detected` system event
 - 生产 cutover 前必须执行 `pnpm verify:shadow-cutover`，该命令要求 shadow 已配置、`--max-mismatches 0 --max-delta 0` 通过，并且 `RUNTIME_STATE_BACKEND=postgres` 与 `DISPATCHER_PRIMARY_POSTGRES_URL` 已配置；未配置 shadow 或 primary backend 时会失败
 - 生产 cutover 演练使用 `pnpm verify:shadow-cutover:drill`；它会依次运行 drift gate、`--reconcile --record-alert` 对账、strict cutover preflight，并输出每个 phase 的 `ok/statusCode/payload`
@@ -145,7 +145,7 @@ node scripts/verify-live-dispatcher-dr.mjs
 建议：
 
 - 发布前至少做一次 backup
-- backup / restore 会包含 `runtime-state-shadow-status.json`、`shadow-cutover-drill.json`、`shadow-cutover-approval.json`、`shadow-cutover-ready.json` 和 `shadow-cutover-revocation.json`，确保 shadow 健康状态、cutover drill / ready evidence、approval marker 与 rollback revocation marker 可随运行时状态恢复
+- backup / restore 会包含 `runtime-state-shadow-status.json`、`shadow-reconciler-status.json`、`shadow-cutover-drill.json`、`shadow-cutover-approval.json`、`shadow-cutover-ready.json` 和 `shadow-cutover-revocation.json`，确保 shadow 健康状态、reconciler 最近状态、cutover drill / ready evidence、approval marker 与 rollback revocation marker 可随运行时状态恢复
 - 每季度跑一次 `verify-stage3-dr`，它能证明源码级 SQLite WAL 备份恢复与 checksum 校验
 - 风险较高的 runtime 发布前跑一次 `verify-live-dispatcher-dr`，它能启动本地 live dispatcher、执行真实 HTTP 写入，并覆盖 SIGKILL 替换恢复、磁盘损坏后恢复和双 stateDir 多节点恢复一致性；它仍不替代真实生产 quorum / fencing / DNS 切流演练
 - 先切 read-only，再做 restore

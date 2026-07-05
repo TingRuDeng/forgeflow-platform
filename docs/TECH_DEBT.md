@@ -212,6 +212,7 @@ Current situation:
 - `runtime-state-shadow.ts:readRuntimeStateShadowWriteStatus` exposes last shadow attempt status through `/api/dr/status`
 - shadow write status is also persisted to `runtime-state-shadow-status.json`
 - backup / restore scripts include `runtime-state-shadow-status.json`
+- backup / restore scripts include `shadow-reconciler-status.json`
 - backup / restore scripts include `shadow-cutover-drill.json`
 - backup / restore scripts include `shadow-cutover-approval.json`
 - backup / restore scripts include `shadow-cutover-ready.json`
@@ -221,7 +222,7 @@ Current situation:
 - `scripts/check-shadow-drift.mjs --max-mismatches <n> --max-delta <n>` emits a stable `alert` summary with `none` / `warning` / `critical` levels; rollout / release environments can also set `DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES` and `DISPATCHER_SHADOW_DRIFT_MAX_DELTA`
 - `scripts/check-shadow-drift.mjs <stateDir> --reconcile` replays current SQLite truth into the configured shadow projection / queue and checks drift again
 - `scripts/check-shadow-drift.mjs <stateDir> --record-alert` can append a `shadow_drift_detected` system event when drift is present
-- `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1`, `pnpm verify:shadow-drift:reconcile`, and long-running `pnpm verify:shadow-drift:reconciler` provide explicit automatic reconciliation cadence hooks without changing the default read-only gate; `run-shadow-reconciler.mjs --output <path>` or `DISPATCHER_SHADOW_RECONCILER_STATUS_FILE=<path>` writes a durable `shadow-reconciler-status/v1` latest-run snapshot for production monitors; `pnpm verify:shadow-cutover:reconciler` runs the same reconciler with `--require-configured --require-primary-backend --max-mismatches 0 --max-delta 0` for strict production cutover window 巡检
+- `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1`, `pnpm verify:shadow-drift:reconcile`, and long-running `pnpm verify:shadow-drift:reconciler` provide explicit automatic reconciliation cadence hooks without changing the default read-only gate; root reconciler scripts now write `.forgeflow-dispatcher/shadow-reconciler-status.json` as a durable `shadow-reconciler-status/v1` latest-run snapshot for production monitors; `pnpm verify:shadow-cutover:reconciler` runs the same reconciler with `--require-configured --require-primary-backend --max-mismatches 0 --max-delta 0` for strict production cutover window 巡检
 - `pnpm verify:shadow-cutover` is a strict production cutover preflight: shadow must be configured and zero-drift under `--max-mismatches 0 --max-delta 0`, and the primary backend must be configured as `RUNTIME_STATE_BACKEND=postgres` with `DISPATCHER_PRIMARY_POSTGRES_URL`
 - `pnpm verify:shadow-cutover:drill` runs drift gate, explicit reconcile + alert recording, and strict cutover preflight as one production rehearsal command; `pnpm verify:shadow-cutover:drill:evidence` writes the same phase payload to `.forgeflow-dispatcher/shadow-cutover-drill.json`
 - `pnpm verify:shadow-cutover:approve` validates archived drill evidence and writes `.forgeflow-dispatcher/shadow-cutover-approval.json`
@@ -238,7 +239,7 @@ Current situation:
 Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
-- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、长期 reconciler 入口、reconciler durable status snapshot、strict cutover reconciler 模式、strict cutover preflight、production cutover drill、cutover evidence file、primary approval marker、approval marker 独立校验、最终 ready 组合门禁、ready evidence primary backend guard、rollback revocation marker、Postgres primary snapshot 原语、primary-mode 兼容状态、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真实生产执行仍需要 operator 在变更窗口切换 `RUNTIME_STATE_BACKEND=postgres` / `DISPATCHER_PRIMARY_POSTGRES_URL` 并保留 evidence
+- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、长期 reconciler 入口、默认 reconciler durable status snapshot、strict cutover reconciler 模式、strict cutover preflight、production cutover drill、cutover evidence file、primary approval marker、approval marker 独立校验、最终 ready 组合门禁、ready evidence primary backend guard、rollback revocation marker、Postgres primary snapshot 原语、primary-mode 兼容状态、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真实生产执行仍需要 operator 在变更窗口切换 `RUNTIME_STATE_BACKEND=postgres` / `DISPATCHER_PRIMARY_POSTGRES_URL` 并保留 evidence
 
 Desired direction:
 

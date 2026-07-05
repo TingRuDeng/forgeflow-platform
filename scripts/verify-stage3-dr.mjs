@@ -9,6 +9,7 @@ import { restoreRuntimeState } from "./restore-runtime-state.mjs";
 const { DatabaseSync } = await import("node:sqlite");
 const WAL_SNAPSHOT_COUNT = 4;
 const CUTOVER_EVIDENCE_FILES = [
+  "shadow-reconciler-status.json",
   "shadow-cutover-drill.json",
   "shadow-cutover-approval.json",
   "shadow-cutover-ready.json",
