@@ -251,4 +251,30 @@ describe("shadow drift verification", () => {
     });
     expect(payload.phases[2].payload.cutover.reason).toBe("shadow_not_configured");
   }, 90_000);
+
+  it("writes production cutover drill evidence to an output file", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-cutover-drill-"));
+    const outputPath = path.join(stateDir, "evidence", "cutover-drill.json");
+    const result = spawnSync("node", [cutoverDrillScriptPath, stateDir, "--output", outputPath], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 90_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "disabled",
+        DISPATCHER_QUEUE_SHADOW_MODE: "disabled",
+        DISPATCHER_POSTGRES_URL: "",
+      },
+    });
+
+    expect(result.status).toBe(2);
+    const stdoutPayload = JSON.parse(result.stdout);
+    const evidencePayload = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+    expect(evidencePayload).toEqual(stdoutPayload);
+    expect(evidencePayload.phases.map((phase: { name: string }) => phase.name)).toEqual([
+      "drift_gate",
+      "reconciliation",
+      "cutover_preflight",
+    ]);
+  }, 90_000);
 });

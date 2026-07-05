@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,11 +19,18 @@ function parseNonNegativeInteger(value, label) {
 function parseArgs(argv) {
   const stateDir = argv[0];
   if (!stateDir) {
-    throw new Error("usage: node scripts/verify-shadow-cutover-drill.mjs <stateDir> [--max-mismatches n] [--max-delta n]");
+    throw new Error("usage: node scripts/verify-shadow-cutover-drill.mjs <stateDir> [--output path] [--max-mismatches n] [--max-delta n]");
   }
-  const options = { stateDir, maxMismatchCount: 0, maxAbsoluteDelta: 0 };
+  const options = { stateDir, maxMismatchCount: 0, maxAbsoluteDelta: 0, outputPath: undefined };
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index];
+    if (arg === "--output") {
+      const outputPath = argv[index + 1];
+      if (!outputPath) throw new Error("--output requires a path");
+      options.outputPath = outputPath;
+      index += 1;
+      continue;
+    }
     if (arg === "--max-mismatches" || arg === "--max-delta") {
       const value = parseNonNegativeInteger(argv[index + 1], arg);
       if (arg === "--max-mismatches") options.maxMismatchCount = value;
@@ -96,8 +104,22 @@ function printResult(result) {
   }
 }
 
+function writeEvidenceFile(outputPath, result) {
+  if (!outputPath) {
+    return;
+  }
+  const resolvedPath = path.resolve(outputPath);
+  fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+  const tempPath = `${resolvedPath}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+  fs.renameSync(tempPath, resolvedPath);
+}
+
 function main() {
-  printResult(runCutoverDrill(parseArgs(process.argv.slice(2))));
+  const options = parseArgs(process.argv.slice(2));
+  const result = runCutoverDrill(options);
+  writeEvidenceFile(options.outputPath, result);
+  printResult(result);
 }
 
 main();
