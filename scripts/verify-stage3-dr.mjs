@@ -8,6 +8,12 @@ import { restoreRuntimeState } from "./restore-runtime-state.mjs";
 
 const { DatabaseSync } = await import("node:sqlite");
 const WAL_SNAPSHOT_COUNT = 4;
+const CUTOVER_EVIDENCE_FILES = [
+  "shadow-cutover-drill.json",
+  "shadow-cutover-approval.json",
+  "shadow-cutover-ready.json",
+  "shadow-cutover-revocation.json",
+];
 
 function checksumSha256(content) {
   return crypto.createHash("sha256").update(content, "utf8").digest("hex");
@@ -79,6 +85,15 @@ function createWalBackedRuntimeStateDb(stateDir, snapshotCount) {
   };
 }
 
+function writeCutoverEvidenceFiles(stateDir) {
+  for (const fileName of CUTOVER_EVIDENCE_FILES) {
+    fs.writeFileSync(path.join(stateDir, fileName), `${JSON.stringify({
+      schemaVersion: "forgeflow-cutover-evidence-test/v1",
+      fileName,
+    })}\n`, "utf8");
+  }
+}
+
 function readRestoredRuntimeState(stateDir) {
   const db = new DatabaseSync(path.join(stateDir, "runtime-state.db"), { readOnly: true });
   try {
@@ -111,6 +126,7 @@ function main() {
   const stateDir = path.join(root, "state");
   const backupDir = path.join(root, "backup");
   const writer = createWalBackedRuntimeStateDb(stateDir, WAL_SNAPSHOT_COUNT);
+  writeCutoverEvidenceFiles(stateDir);
 
   let backup;
   try {
@@ -136,6 +152,14 @@ function main() {
   }
   if (!restore.restoredFiles.includes("runtime-state.db-wal")) {
     throw new Error("restore did not include runtime-state.db-wal");
+  }
+  for (const fileName of CUTOVER_EVIDENCE_FILES) {
+    if (!backup.copiedFiles.includes(fileName)) {
+      throw new Error(`backup did not include ${fileName}`);
+    }
+    if (!restore.restoredFiles.includes(fileName)) {
+      throw new Error(`restore did not include ${fileName}`);
+    }
   }
   if (restored.integrityCheck !== "ok") {
     throw new Error(`restored runtime-state.db integrity check failed: ${restored.integrityCheck}`);

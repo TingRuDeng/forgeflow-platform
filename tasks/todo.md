@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M75 串行：让 runtime backup / restore 保留 shadow cutover drill / ready evidence。
 - [x] M74 串行：补齐 shadow cutover ready 最终门禁 evidence 归档入口。
 - [x] M73 串行：补齐 HITL resume payload 的 dispatcher 服务端 schema 校验。
 - [x] M72 串行：收口 `DISPATCHER_SHADOW_MODE=primary` 的生产 cutover 兼容语义。
@@ -20,6 +21,16 @@
 - [x] M56 串行：继续拆分共享 `trae-dom-driver.ts` 大文件，按 browser expressions / response collection / driver facade 收敛到 300 行以内。
 - [x] M57 串行：把 Codex/Gemini packaged runtime launch builder 下沉到 beta-runtime-core。
 - [x] M58 串行：让 generic assignment runner 产出可回放 trajectory artifact。
+
+## M75 Review 小结
+
+已把 `shadow-cutover-drill.json` 和 `shadow-cutover-ready.json` 加入 `backup-runtime-state.mjs` / `restore-runtime-state.mjs` 的文件清单，并让 `verify-stage3-dr.mjs` 写入四类 cutover 文件后验证它们都被备份和恢复。这样 primary backend approval 依赖的 drill evidence、最终 ready gate evidence、approval marker 和 revocation marker 能随 runtime state 一起恢复。
+
+Review Gate：finished。Spec 符合度通过，本轮只扩展 runtime backup / restore 的 cutover evidence 文件范围，不改变 SQLite/WAL 备份、primary backend guard、approval 校验或 ready gate 语义。安全检查通过，脚本仍只复制固定文件名，不新增 secret、网络调用、shell 拼接、mock 成功路径或静默 fallback。复杂度检查通过，`backup-runtime-state.mjs` 51 行、`restore-runtime-state.mjs` 43 行、`verify-stage3-dr.mjs` 188 行，均低于 300 行。Document-refresh: needed，原因：备份恢复范围新增 cutover drill / ready evidence，已同步 runtime backup runbook、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`node scripts/verify-stage3-dr.mjs` 输出 `ok=true`，`copiedFiles` 和 `restoredFiles` 均包含 `shadow-cutover-drill.json`、`shadow-cutover-approval.json`、`shadow-cutover-ready.json`、`shadow-cutover-revocation.json`，同时 SQLite `integrityCheck=ok`、`snapshotCount=4`；`node --check scripts/backup-runtime-state.mjs`、`node --check scripts/restore-runtime-state.mjs`、`node --check scripts/verify-stage3-dr.mjs` 通过；`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：仓库内 backup / restore 已保留 cutover evidence；真实生产恢复仍需要 operator 确认备份目录安全保存，并在恢复后重新执行 ready / approval 检查。
 
 ## M74 Review 小结
 

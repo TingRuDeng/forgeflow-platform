@@ -212,7 +212,9 @@ Current situation:
 - `runtime-state-shadow.ts:readRuntimeStateShadowWriteStatus` exposes last shadow attempt status through `/api/dr/status`
 - shadow write status is also persisted to `runtime-state-shadow-status.json`
 - backup / restore scripts include `runtime-state-shadow-status.json`
+- backup / restore scripts include `shadow-cutover-drill.json`
 - backup / restore scripts include `shadow-cutover-approval.json`
+- backup / restore scripts include `shadow-cutover-ready.json`
 - backup / restore scripts include `shadow-cutover-revocation.json`
 - shadow write failures now append `shadow_write_failed` system events and feed metrics / SLO
 - `scripts/check-shadow-drift.mjs` compares SQLite expected counts with Postgres projection / queue shadow counts
