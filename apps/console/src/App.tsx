@@ -6,6 +6,7 @@ import { TaskDetailsPanel, TaskList, WorkerList } from './components/Lists';
 import { TerminalPanel } from './components/TerminalPanel';
 import { Panel } from './components/UI';
 import { ArtifactWorkbench } from './components/ArtifactWorkbench';
+import { DrStatusPanel } from './components/DrStatusPanel';
 import { ReviewQueue } from './components/ReviewQueue';
 import { useTranslation } from './lib/i18n';
 import { extractResponseError, parseJsonResponse } from './lib/http';
@@ -28,6 +29,10 @@ const App: React.FC = () => {
   const { data, error, isLoading, mutate } = useSWR('/api/dashboard/snapshot', fetcher, {
     refreshInterval: 4000,
     dedupingInterval: 2000,
+  });
+  const { data: drStatus } = useSWR('/api/dr/status', fetcher, {
+    refreshInterval: 10000,
+    dedupingInterval: 5000,
   });
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
@@ -221,6 +226,7 @@ const App: React.FC = () => {
         <div className="animate-fade-in">
           {/* Metrics Overview at the top */}
           <MetricsGrid stats={data.stats} metrics={data.metrics} />
+          <DrStatusPanel status={drStatus} />
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
             {/* Main Column: Tasks and Terminal */}

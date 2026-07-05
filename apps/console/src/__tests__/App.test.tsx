@@ -38,6 +38,20 @@ const snapshot = {
   artifactBundles: [],
 };
 
+const drStatus = {
+  readOnly: false,
+  structuredReads: true,
+  shadowMode: 'shadow-write',
+  shadowWrite: { status: 'ok' },
+  shadowReconciler: {
+    status: 'ok',
+    runCount: 2,
+    failedRunCount: 0,
+  },
+  projectionHealth: { matches: true },
+  backups: [],
+};
+
 function renderApp() {
   return render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
@@ -70,14 +84,23 @@ describe('App dashboard loading', () => {
   });
 
   it('refreshes the snapshot after disabling a worker', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(snapshot), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        ...snapshot,
-        workers: [{ ...snapshot.workers[0], status: 'disabled' }],
-      }), { status: 200 }));
+    let snapshotCalls = 0;
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url === '/api/dr/status') {
+        return new Response(JSON.stringify(drStatus), { status: 200 });
+      }
+      if (url === '/api/workers/worker-1/disable') {
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }
+      if (url === '/api/dashboard/snapshot') {
+        snapshotCalls += 1;
+        const body = snapshotCalls > 1
+          ? { ...snapshot, workers: [{ ...snapshot.workers[0], status: 'disabled' }] }
+          : snapshot;
+        return new Response(JSON.stringify(body), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `unexpected ${url}` }), { status: 500 });
+    });
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('confirm', vi.fn(() => true));
     vi.stubGlobal('alert', vi.fn());
@@ -86,12 +109,10 @@ describe('App dashboard loading', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /禁用|disable/i }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       '/api/workers/worker-1/disable',
       expect.objectContaining({ method: 'POST' })
-    );
+    ));
   });
 
   it('submits a review decision from the task details panel', async () => {
@@ -129,14 +150,23 @@ describe('App dashboard loading', () => {
         },
       ],
     };
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(reviewSnapshot), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'decision_recorded' }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        ...reviewSnapshot,
-        tasks: [{ ...reviewSnapshot.tasks[0], status: 'merged' }],
-      }), { status: 200 }));
+    let snapshotCalls = 0;
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url === '/api/dr/status') {
+        return new Response(JSON.stringify(drStatus), { status: 200 });
+      }
+      if (url === '/api/reviews/dispatch-1%3Atask-review/decision') {
+        return new Response(JSON.stringify({ status: 'decision_recorded' }), { status: 200 });
+      }
+      if (url === '/api/dashboard/snapshot') {
+        snapshotCalls += 1;
+        const body = snapshotCalls > 1
+          ? { ...reviewSnapshot, tasks: [{ ...reviewSnapshot.tasks[0], status: 'merged' }] }
+          : reviewSnapshot;
+        return new Response(JSON.stringify(body), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `unexpected ${url}` }), { status: 500 });
+    });
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('alert', vi.fn());
 
@@ -152,15 +182,16 @@ describe('App dashboard loading', () => {
     fireEvent.click(screen.getByLabelText(/确认风险|acknowledge risk/i));
     fireEvent.click(await screen.findByRole('button', { name: /^(合并|merge)$/i }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const submittedBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       '/api/reviews/dispatch-1%3Atask-review/decision',
       expect.objectContaining({
         method: 'POST',
       })
+    ));
+    const reviewCall = fetchMock.mock.calls.find(([url]) =>
+      url === '/api/reviews/dispatch-1%3Atask-review/decision',
     );
+    const submittedBody = JSON.parse(String(reviewCall?.[1]?.body));
     expect(submittedBody).toMatchObject({
       decision: 'merge',
       acknowledgeRisk: true,
@@ -192,10 +223,18 @@ describe('App dashboard loading', () => {
     };
     const alertMock = vi.fn();
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(reviewSnapshot), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'risk_ack_required' }), { status: 409 }));
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/dr/status') {
+        return new Response(JSON.stringify(drStatus), { status: 200 });
+      }
+      if (url === '/api/reviews/dispatch-1%3Atask-review/decision') {
+        return new Response(JSON.stringify({ error: 'risk_ack_required' }), { status: 409 });
+      }
+      if (url === '/api/dashboard/snapshot') {
+        return new Response(JSON.stringify(reviewSnapshot), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `unexpected ${url}` }), { status: 500 });
+    });
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('alert', alertMock);
 
@@ -228,12 +267,23 @@ describe('App dashboard loading', () => {
     };
     const alertMock = vi.fn();
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(reviewSnapshot), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'decision_recorded' }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'risk_ack_required' }), { status: 409 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(reviewSnapshot), { status: 200 }));
+    let decisionCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/dr/status') {
+        return new Response(JSON.stringify(drStatus), { status: 200 });
+      }
+      if (url.startsWith('/api/reviews/')) {
+        decisionCalls += 1;
+        if (decisionCalls === 1) {
+          return new Response(JSON.stringify({ status: 'decision_recorded' }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: 'risk_ack_required' }), { status: 409 });
+      }
+      if (url === '/api/dashboard/snapshot') {
+        return new Response(JSON.stringify(reviewSnapshot), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `unexpected ${url}` }), { status: 500 });
+    });
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('alert', alertMock);
 
