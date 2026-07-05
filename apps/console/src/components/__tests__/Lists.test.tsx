@@ -473,4 +473,39 @@ describe('ReviewQueue', () => {
       redriveStrategy: 'same_worker_continue',
     });
   });
+
+  it('requires risk acknowledgement before bulk merge risky review tasks', () => {
+    const onBulkReviewDecision = vi.fn();
+
+    renderWithProviders(
+      <ReviewQueue
+        tasks={[
+          { id: 'task-risky', title: 'Touch auth', status: 'review', repo: 'owner/auth' },
+          { id: 'task-safe', title: 'Update docs', status: 'review', repo: 'owner/docs' },
+        ]}
+        reviews={[
+          {
+            taskId: 'task-risky',
+            riskAssessment: { level: 'needs_human_attention', reasons: ['auth touched'] },
+          },
+          {
+            taskId: 'task-safe',
+            riskAssessment: { level: 'low', reasons: [] },
+          },
+        ]}
+        onBulkReviewDecision={onBulkReviewDecision}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText(/选择任务 task-risky|select task task-risky/i));
+    const mergeButton = screen.getByRole('button', { name: /批量合并|bulk merge/i });
+    expect(mergeButton).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText(/确认批量合并风险任务|acknowledge risky bulk merge tasks/i));
+    fireEvent.click(mergeButton);
+
+    expect(onBulkReviewDecision).toHaveBeenCalledWith('merge', ['task-risky'], expect.objectContaining({
+      acknowledgeRisk: true,
+    }));
+  });
 });

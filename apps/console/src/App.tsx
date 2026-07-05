@@ -179,7 +179,7 @@ const App: React.FC = () => {
   };
 
   const handleBulkReviewDecision = async (
-    decision: 'rework' | 'block',
+    decision: 'merge' | 'rework' | 'block',
     taskIds: string[],
     input: ReviewDecisionInput = {},
   ) => {
@@ -195,10 +195,14 @@ const App: React.FC = () => {
           notes: `${decision} from console bulk review`,
         })),
       );
-      const failures = results.filter((result) => result.status === 'rejected');
+      const failures = results.flatMap((result, index) => {
+        if (result.status !== 'rejected') return [];
+        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        return [`${taskIds[index]}: ${message}`];
+      });
       await mutate();
       if (failures.length > 0) {
-        throw new Error(`${failures.length} / ${taskIds.length} ${t('bulkReviewFailed')}`);
+        throw new Error(`${failures.length} / ${taskIds.length} ${t('bulkReviewFailed')}: ${failures.join('; ')}`);
       }
     } catch (err) {
       console.error(err);

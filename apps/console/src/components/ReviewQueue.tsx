@@ -36,6 +36,7 @@ interface ReviewDecisionInput {
   mustFix?: string[];
   canRedrive?: boolean;
   redriveStrategy?: string;
+  acknowledgeRisk?: boolean;
 }
 
 interface ReviewQueueProps {
@@ -45,7 +46,7 @@ interface ReviewQueueProps {
   submittingTaskIds?: string[];
   onSelectTask?: (taskId: string) => void;
   onBulkReviewDecision?: (
-    decision: 'rework' | 'block',
+    decision: 'merge' | 'rework' | 'block',
     taskIds: string[],
     input: ReviewDecisionInput,
   ) => void;
@@ -65,13 +66,20 @@ function buildDecisionInput(input: {
   mustFixText: string;
   canRedrive: boolean;
   redriveStrategy: string;
+  acknowledgeRisk: boolean;
 }): ReviewDecisionInput {
   return {
     reasonCode: input.reasonCode.trim() || undefined,
     mustFix: input.mustFixText.split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
     canRedrive: input.canRedrive,
     redriveStrategy: input.redriveStrategy,
+    ...(input.acknowledgeRisk ? { acknowledgeRisk: true } : {}),
   };
+}
+
+function isRiskyReview(review?: ReviewSummary): boolean {
+  const level = review?.riskAssessment?.level;
+  return Boolean(level && level !== 'low');
 }
 
 function WaitingInputQueue(props: {
@@ -138,12 +146,14 @@ function useReviewQueueModel(input: {
     mustFixText: '',
     canRedrive: true,
     redriveStrategy: 'same_worker_continue',
+    acknowledgeRisk: false,
   });
   const reviewTasks = React.useMemo(() => input.tasks.filter((task) => task.status === 'review'), [input.tasks]);
   const waitingInputTasks = React.useMemo(() => input.tasks.filter((task) => task.status === 'waiting_for_input'), [input.tasks]);
   const reviewByTask = React.useMemo(() => latestReviewByTask(input.reviews), [input.reviews]);
   const selectedIds = [...selected];
   const canSubmit = selectedIds.length > 0 && input.submittingTaskIds.length === 0 && Boolean(input.onBulkReviewDecision);
+  const riskSelectedCount = selectedIds.filter((taskId) => isRiskyReview(reviewByTask.get(taskId))).length;
 
   React.useEffect(() => {
     setSelected((current) => normalizeSelection(current, input.tasks));
@@ -155,11 +165,11 @@ function useReviewQueueModel(input: {
     else next.add(taskId);
     return next;
   });
-  const submit = (decision: 'rework' | 'block') => {
+  const submit = (decision: 'merge' | 'rework' | 'block') => {
     if (!canSubmit) return;
     input.onBulkReviewDecision?.(decision, selectedIds, buildDecisionInput(formValue));
   };
-  return { canSubmit, formValue, reviewByTask, reviewTasks, selected, selectedIds, submit, toggleTask, updateForm: setFormValue, waitingInputTasks };
+  return { canSubmit, formValue, reviewByTask, reviewTasks, riskSelectedCount, selected, selectedIds, submit, toggleTask, updateForm: setFormValue, waitingInputTasks };
 }
 
 export const ReviewQueue: React.FC<ReviewQueueProps> = ({
@@ -191,7 +201,13 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({
         onSelectTask={onSelectTask}
       />
 
-      <ReviewBulkForm value={model.formValue} canSubmit={model.canSubmit} onChange={model.updateForm} onSubmit={model.submit} />
+      <ReviewBulkForm
+        value={model.formValue}
+        canSubmit={model.canSubmit}
+        riskSelectedCount={model.riskSelectedCount}
+        onChange={model.updateForm}
+        onSubmit={model.submit}
+      />
     </div>
   );
 };

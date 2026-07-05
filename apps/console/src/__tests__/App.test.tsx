@@ -150,7 +150,7 @@ describe('App dashboard loading', () => {
       target: { value: '补齐协议测试\n更新发布说明' },
     });
     fireEvent.click(screen.getByLabelText(/确认风险|acknowledge risk/i));
-    fireEvent.click(await screen.findByRole('button', { name: /合并|merge/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^(合并|merge)$/i }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     const submittedBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
@@ -201,7 +201,7 @@ describe('App dashboard loading', () => {
 
     renderApp();
 
-    fireEvent.click(await screen.findByRole('button', { name: /合并|merge/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^(合并|merge)$/i }));
 
     await waitFor(() => expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('risk_ack_required')));
   });

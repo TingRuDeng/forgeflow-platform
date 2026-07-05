@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M28 串行：补齐 Console 批量 merge 风险确认和失败明细。
+- [x] M28 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M28 Review 小结
+
+已把 Console 审查队列的批量动作扩展为 `merge` / `rework` / `block` 三类：批量 merge 会检查已选任务的 `riskAssessment.level`，只要存在非 `low` 风险任务，就必须先勾选批量风险确认；提交时会把 `acknowledgeRisk` 透传到 dispatcher 的 review decision API。App 批量提交失败时现在会展示逐项 `taskId: error` 明细，避免只看到失败数量。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 Console 批量 merge 风险确认和失败明细；安全检查通过，未新增后端写路径、secret、外部网络调用、mock 成功路径或静默 fallback，服务端 merge gate 仍是最终权威；复杂度检查通过，`App.tsx` 300 行、`ReviewQueue.tsx` 213 行、`ReviewBulkForm.tsx` 111 行、`ReviewTaskList.tsx` 74 行，新增/修改组件文件均低于 300 行；Document-refresh: needed，原因：Console 审查队列批量 merge 能力变化，已同步 README、docs/README 和 TECH_DEBT。结论：通过。
+
+验证已通过：`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx src/__tests__/App.test.tsx`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
+
+剩余风险：批量处理结果明细当前通过 alert 展示；后续可升级为页面内结果列表，并继续补跨任务证据对比和 artifact / review 证据联动。
+
 - [x] M27 串行：在 Console 审查队列补 waiting-for-input 筛选入口。
 - [x] M27 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 
