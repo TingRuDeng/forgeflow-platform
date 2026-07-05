@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from '@/lib/i18n';
 
 interface Task {
@@ -156,7 +156,18 @@ export const FailureSection: React.FC<{ review?: Review | null; events: EventRec
   );
 };
 
-export const ReviewActions: React.FC<{
+function buildReviewActionsKey(task: Task, review?: Review | null): string {
+  const evidence = review?.evidence;
+  return [
+    task.id,
+    evidence?.reasonCode || '',
+    (evidence?.mustFix || []).join('\u001f'),
+    String(evidence?.canRedrive ?? true),
+    evidence?.redriveStrategy || '',
+  ].join('\u001e');
+}
+
+const ReviewActionsForm: React.FC<{
   task: Task;
   review?: Review | null;
   reviewingTaskId?: string | null;
@@ -168,20 +179,6 @@ export const ReviewActions: React.FC<{
   const [canRedrive, setCanRedrive] = useState(review?.evidence?.canRedrive ?? true);
   const [redriveStrategy, setRedriveStrategy] = useState(review?.evidence?.redriveStrategy || 'same_worker_continue');
   const [acknowledgeRisk, setAcknowledgeRisk] = useState(false);
-
-  useEffect(() => {
-    setReasonCode(review?.evidence?.reasonCode || '');
-    setMustFixText((review?.evidence?.mustFix || []).join('\n'));
-    setCanRedrive(review?.evidence?.canRedrive ?? true);
-    setRedriveStrategy(review?.evidence?.redriveStrategy || 'same_worker_continue');
-    setAcknowledgeRisk(false);
-  }, [
-    task.id,
-    review?.evidence?.reasonCode,
-    review?.evidence?.mustFix,
-    review?.evidence?.canRedrive,
-    review?.evidence?.redriveStrategy,
-  ]);
 
   if (task.status !== 'review' || !onReviewDecision) {
     return null;
@@ -285,3 +282,15 @@ export const ReviewActions: React.FC<{
     </Section>
   );
 };
+
+export const ReviewActions: React.FC<{
+  task: Task;
+  review?: Review | null;
+  reviewingTaskId?: string | null;
+  onReviewDecision?: (decision: 'merge' | 'rework' | 'block', input?: ReviewDecisionInput) => void;
+}> = (props) => (
+  <ReviewActionsForm
+    key={buildReviewActionsKey(props.task, props.review)}
+    {...props}
+  />
+);

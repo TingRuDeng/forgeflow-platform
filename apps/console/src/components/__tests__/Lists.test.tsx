@@ -231,6 +231,7 @@ describe('Task drill-down', () => {
                   action: 'pnpm test',
                   observation: '58 tests passed',
                   status: 'succeeded',
+                  artifactRef: 'artifact://att-001/test-results.txt',
                 },
               ],
             },
@@ -283,6 +284,9 @@ describe('Task drill-down', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /trajectory|轨迹/i }));
     expect(screen.getByText(/58 tests passed/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /展开轨迹文件|open trajectory file/i }));
+    expect(await screen.findByText(/artifact file body/i)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/artifacts/att-001/files/test-results.txt');
 
     fireEvent.click(screen.getByRole('button', { name: /作废任务|cancel task/i }));
 

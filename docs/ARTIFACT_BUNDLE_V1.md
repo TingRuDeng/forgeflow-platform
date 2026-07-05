@@ -105,7 +105,7 @@ runtime-state 只应保存 bundle 摘要、引用和受限正文片段。大型 
 - CLI 使用 `forgeflow-review-orchestrator artifact-get --bundle-id <id>` 获取 bundle，使用 `--file diff.patch` 读取正文文件。
 - Console 任务详情的 refs tab 可复制 `artifact://...` 引用，并通过 artifact 文件 API 按需展开 manifest 登记的 diff、log、test result 或 trajectory 文件正文。
 - Trae runtime 在拿到 `attempt_id` 后会随 submitResult 提交 minimal bundle。
-- Console 任务详情提供摘要、引用、正文和轨迹 tabs；轨迹 tab 按 step 展示 `trajectory.steps`。
+- Console 任务详情提供摘要、引用、正文和轨迹 tabs；轨迹 tab 按 step 展示 `trajectory.steps`，并可从 step 的 `artifactRef` 直接展开或下载 manifest 登记的观察文件。
 - Console 任务详情在任务处于 `review` 状态时可直接提交 `merge` / `rework` / `block` 审查决策，并携带 `reasonCode`、`mustFix[]`、`canRedrive`、`redriveStrategy` 和高风险合并的 `acknowledgeRisk`，和 attempt timeline / artifact summary 共处同一审查上下文。
 
 ## Review 展示

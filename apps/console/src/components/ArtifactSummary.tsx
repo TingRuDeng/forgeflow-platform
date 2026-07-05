@@ -1,6 +1,8 @@
 import React from 'react';
 import { Copy, Download, FileText } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { ArtifactTrajectory } from './ArtifactTrajectory';
+import { downloadTextFile, parseArtifactRef, readArtifactRefFile } from './artifactFileAccess';
 
 export interface ArtifactBundle {
   taskId: string;
@@ -38,23 +40,6 @@ export interface ArtifactBundle {
 
 type ArtifactTab = 'summary' | 'refs' | 'retained' | 'trajectory';
 
-interface ParsedArtifactRef {
-  bundleId: string;
-  fileName: string;
-}
-
-function parseArtifactRef(ref: string): ParsedArtifactRef | null {
-  const prefix = 'artifact://';
-  if (!ref.startsWith(prefix)) return null;
-  const refPath = ref.slice(prefix.length);
-  const separatorIndex = refPath.indexOf('/');
-  if (separatorIndex <= 0 || separatorIndex === refPath.length - 1) return null;
-  return {
-    bundleId: refPath.slice(0, separatorIndex),
-    fileName: refPath.slice(separatorIndex + 1),
-  };
-}
-
 function flattenRefs(refs: Array<[string, string | string[] | undefined]>) {
   return refs.flatMap(([key, value]) => {
     if (Array.isArray(value)) {
@@ -62,36 +47,6 @@ function flattenRefs(refs: Array<[string, string | string[] | undefined]>) {
     }
     return value ? [{ key, ref: value }] : [];
   });
-}
-
-async function readArtifactRefFile(ref: string): Promise<{ content: string; fileName: string }> {
-  const parsed = parseArtifactRef(ref);
-  if (!parsed) return { content: '', fileName: 'artifact.txt' };
-  const url = `/api/artifacts/${encodeURIComponent(parsed.bundleId)}/files/${encodeURIComponent(parsed.fileName)}`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  const text = await response.text();
-  try {
-    const parsedBody = JSON.parse(text) as { content?: unknown; fileName?: unknown };
-    return {
-      content: typeof parsedBody.content === 'string' ? parsedBody.content : text,
-      fileName: typeof parsedBody.fileName === 'string' ? parsedBody.fileName : parsed.fileName,
-    };
-  } catch {
-    return { content: text, fileName: parsed.fileName };
-  }
-}
-
-function downloadTextFile(fileName: string, content: string) {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
 }
 
 function removeRecordKey(record: Record<string, string>, key: string) {
@@ -258,34 +213,6 @@ const ArtifactRetainedContent: React.FC<{ entries: Array<[string, string | undef
         </div>
       )) : (
         <div className="text-sm text-white/45">{t('noRetainedContent')}</div>
-      )}
-    </div>
-  );
-};
-
-const ArtifactTrajectory: React.FC<{ bundle: ArtifactBundle }> = ({ bundle }) => {
-  const { t } = useTranslation();
-  const steps = [...(bundle.trajectory?.steps ?? [])].sort((a, b) => a.sequence - b.sequence);
-  return (
-    <div className="space-y-3">
-      {steps.length > 0 ? steps.map((step) => (
-        <div key={step.stepId || `${step.sequence}-${step.action}`} className="rounded-lg border border-white/10 bg-black/20 p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="font-mono text-xs text-cyan-200">{step.sequence}. {step.phase}</div>
-            <div className="text-xs uppercase tracking-wide text-white/55">{step.status}</div>
-          </div>
-          <div className="mt-2 text-sm text-white/85 break-all">{step.action}</div>
-          {step.observation && <div className="mt-1 text-xs text-white/60 break-all">{step.observation}</div>}
-          {(step.command || step.exitCode !== undefined || step.artifactRef) && (
-            <div className="mt-2 grid grid-cols-1 gap-1 text-xs text-white/50">
-              {step.command && <div><span className="font-mono">command</span>: <span className="break-all">{step.command}</span></div>}
-              {step.exitCode !== undefined && <div><span className="font-mono">exitCode</span>: {step.exitCode}</div>}
-              {step.artifactRef && <div><span className="font-mono">artifact</span>: <span className="break-all">{step.artifactRef}</span></div>}
-            </div>
-          )}
-        </div>
-      )) : (
-        <div className="text-sm text-white/45">{t('noTrajectory')}</div>
       )}
     </div>
   );

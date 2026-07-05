@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M44 串行：补齐 Console trajectory step artifactRef 可回放入口。
+- [x] M44 串行：运行最小充分验证并补充 review 小结。
+
+## M44 Review 小结
+
+已把 Console 任务详情里的 trajectory tab 从“只展示 step 文本”推进到可回放入口：当 `trajectory.steps[]` 带 `artifactRef` 时，审查者可以直接在对应 step 展开或下载 manifest 登记的观察文件。实现复用现有 `/api/artifacts/:bundleId/files/:fileName` 文件 API，不新增后端协议；同时把 artifact 文件读取 helper 和 `ArtifactTrajectory` 拆成独立组件，`ArtifactSummary.tsx` 降到 300 行以内。运行 Console lint 时发现既有 `ReviewActions` 在 effect 内同步 setState，会触发 React hooks 规则；本轮改为 key remount 初始化表单状态，保持原提交 payload 语义。
+
+Review Gate：finished。Spec 符合度通过，本轮推进可回放 trajectory 的 Console 操作入口，没有改变 ArtifactBundle schema、artifact store manifest 或 worker result 写入语义；安全检查通过，仍只允许读取 manifest 登记文件，前端复用既有 artifact 文件 API，未新增 secret、命令拼接、mock 成功路径或静默 fallback；复杂度检查通过，`ArtifactSummary.tsx` 258 行，新增 `ArtifactTrajectory.tsx` 105 行、`artifactFileAccess.ts` 46 行，`TaskReviewSections.tsx` 296 行；Document-refresh: needed，原因：Console trajectory 可回放能力变化，已同步 docs/README、ARTIFACT_BUNDLE_V1、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx` 失败于找不到“展开轨迹文件”按钮；GREEN 后同命令通过，16 个测试通过。最终验证 `CI=true pnpm --filter console lint`、`CI=true pnpm --filter console test`、`CI=true pnpm --filter console build`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check`、`CI=true pnpm test` 均通过。
+
+剩余风险：当前补齐的是 trajectory step 到 artifact 文件的直接回放入口；完整逐步播放、跨 step 状态 diff 和 timeline scrubber 仍是后续产品化项。
+
 - [x] M43 串行：把 Trae automation gateway route / session / chat handler 抽到共享 core。
 - [x] M43 串行：运行最小充分验证并补充 review 小结。
 
