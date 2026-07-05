@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M19 串行：补齐 Postgres primary runtime-state snapshot 包级原语。
+- [x] M19 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M19 Review 小结
+
+已在 `@forgeflow/dispatcher-store-postgres` 增加 Postgres primary runtime-state snapshot 原语：`ensurePrimaryRuntimeStateTables()` 创建 `dispatcher_runtime_state` 单行 JSONB snapshot 表，`savePrimaryRuntimeStateSnapshot()` 支持 upsert 当前 runtime state，`loadPrimaryRuntimeStateSnapshot()` 支持读取最新 truth snapshot。该能力目前是包级原语，不改变 dispatcher 默认 SQLite 主链。
+
+Review Gate：finished。Spec 符合度通过，本轮向真实 production cutover 推进了 Postgres primary store 底层读写能力；安全检查通过，未新增 secret、网络副作用或隐式切主，调用方必须显式传入 `PgClientLike`；复杂度检查通过，`packages/dispatcher-store-postgres/src/index.ts` 104 行、测试 74 行；Document-refresh: needed，原因：Postgres primary snapshot 原语状态和剩余 cutover 边界变化，已同步 runtime-state query 契约、Stage 3 runbook 和技术债。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher-store-postgres test`、`CI=true pnpm --filter @forgeflow/dispatcher-store-postgres typecheck`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
+
+剩余风险：dispatcher 主链仍是同步 `RuntimeStateStore` 接口，尚未接入异步 Postgres primary state path；真实 production cutover 仍未完成。
+
 - [x] M18 串行：补齐 primary cutover 硬门禁，拒绝未实现的 `DISPATCHER_SHADOW_MODE=primary`。
 - [x] M18 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 

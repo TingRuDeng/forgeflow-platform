@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { applyShadowProjection, readShadowProjectionCounts } from "../src/index.js";
+import {
+  applyShadowProjection,
+  loadPrimaryRuntimeStateSnapshot,
+  readShadowProjectionCounts,
+  savePrimaryRuntimeStateSnapshot,
+} from "../src/index.js";
 
 describe("dispatcher-store-postgres", () => {
   it("applies projection rows and updates metadata", async () => {
@@ -38,5 +43,32 @@ describe("dispatcher-store-postgres", () => {
 
     const counts = await readShadowProjectionCounts(client);
     expect(counts.dispatcher_tasks).toBe(2);
+  });
+
+  it("saves and loads the primary runtime state snapshot", async () => {
+    const storedState = {
+      version: 1,
+      sequence: 7,
+      updatedAt: "2026-07-05T10:00:00.000Z",
+      tasks: [{ id: "task-1" }],
+    };
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (sql.includes("SELECT payload_json")) {
+        return { rows: [{ payload_json: storedState }] };
+      }
+      return { rows: [], params };
+    });
+    const client = { query };
+
+    await savePrimaryRuntimeStateSnapshot(client, storedState);
+    const loaded = await loadPrimaryRuntimeStateSnapshot<typeof storedState>(client);
+
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("CREATE TABLE IF NOT EXISTS dispatcher_runtime_state"));
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO dispatcher_runtime_state"), [
+      7,
+      JSON.stringify(storedState),
+      "2026-07-05T10:00:00.000Z",
+    ]);
+    expect(loaded).toEqual(storedState);
   });
 });

@@ -158,7 +158,7 @@
 - `primary`
 
 当前主线只把 `shadow-write` 作为稳定用法写进主文档。
-`primary` 目前只是保留模式名，不是可启用的主存储能力；生产 cutover 预检会把它报告为 `primary_unsupported` / `primary_store_not_implemented`。
+`primary` 目前不是可启用的 dispatcher 主存储能力；生产 cutover 预检会把它报告为 `primary_unsupported` / `primary_store_not_implemented`。`@forgeflow/dispatcher-store-postgres` 已提供 primary snapshot 的包级 load/save 原语，但 dispatcher 主链仍需要 async state path 后才能接入。
 
 当前落地行为：
 
@@ -178,6 +178,7 @@
 - shadow 同步失败会通过 `/api/dr/status.shadowWrite` 暴露最后一次 durable health 状态，但不会阻断 SQLite 主链写入
 - Postgres 当前是 shadow projection / queue shadow，不是 primary runtime store
 - `DISPATCHER_SHADOW_MODE=primary` 不会把 Postgres 切为 truth source；当前 runtime 会拒绝该写入模式，避免把 shadow projection 误当主存储
+- Postgres primary snapshot 原语只提供底层表与 JSONB snapshot 读写，不改变 `loadRuntimeState()` / `saveRuntimeState()` 当前同步接口
 
 ## 7. Completion Signals
 
