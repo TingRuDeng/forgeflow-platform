@@ -30,6 +30,19 @@ export const TerminationPolicySchema = z.object({
   assignmentTimeoutMs: z.number().int().positive().optional(),
 }).default({});
 
+const ResumePayloadFieldSchema = z.object({
+  type: z.enum(["string", "number", "boolean"]).optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  enum: z.array(z.string()).optional(),
+  default: z.unknown().optional(),
+});
+
+export const ResumePayloadSchema = z.object({
+  properties: z.record(ResumePayloadFieldSchema).optional(),
+  required: z.array(z.string()).optional(),
+});
+
 export const TaskSchema = z.object({
   id: z.string().min(1),
   externalTaskId: z.string().min(1).optional(),
@@ -54,6 +67,7 @@ export const TaskSchema = z.object({
     requestedBy: z.string().min(1),
     reason: z.string().optional(),
     requestedAt: z.string().min(1),
+    resumePayloadSchema: ResumePayloadSchema.optional(),
   }).nullable().optional(),
   resumePayload: z.record(z.unknown()).nullable().optional(),
   status: TaskStatusSchema,

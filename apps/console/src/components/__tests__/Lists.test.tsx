@@ -340,6 +340,59 @@ describe('Task drill-down', () => {
       decision: 'ship narrow scope',
     });
   });
+
+  it('renders resume payload schema fields when worker requests structured input', () => {
+    const onResume = vi.fn();
+
+    renderWithProviders(
+      <TaskDetailsPanel
+        task={{
+          id: 'dispatch-1:schema-hitl',
+          title: 'Need deploy input',
+          status: 'waiting_for_input',
+          branchName: 'codex/hitl-schema',
+          repo: 'owner/repo',
+          pool: 'codex',
+          waitingForInput: {
+            requestedBy: 'codex-worker',
+            reason: 'choose rollout options',
+            requestedAt: '2026-07-05T10:00:00Z',
+            resumePayloadSchema: {
+              properties: {
+                decision: { type: 'string', title: 'Decision' },
+                rollout: { type: 'string', enum: ['narrow', 'full'], title: 'Rollout' },
+                acknowledgeRisk: { type: 'boolean', title: 'Acknowledge Risk' },
+              },
+              required: ['decision', 'rollout'],
+            },
+          },
+        }}
+        assignment={{
+          taskId: 'dispatch-1:schema-hitl',
+          repo: 'owner/repo',
+          pool: 'codex',
+        }}
+        onResume={onResume}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText(/Decision/i), {
+      target: { value: 'ship narrow scope' },
+    });
+    fireEvent.change(screen.getByLabelText(/Rollout/i), {
+      target: { value: 'narrow' },
+    });
+    fireEvent.click(screen.getByLabelText(/Acknowledge Risk/i));
+    fireEvent.click(screen.getByRole('button', { name: /恢复任务|resume task/i }));
+
+    expect(onResume).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'dispatch-1:schema-hitl',
+    }), {
+      decision: 'ship narrow scope',
+      rollout: 'narrow',
+      acknowledgeRisk: true,
+    });
+  });
 });
 
 describe('ArtifactWorkbench', () => {

@@ -74,6 +74,13 @@ describe("worker SDK payload helpers", () => {
         waitingForInput: {
           reason: "choose rollout scope",
           prompt: "Ship narrow scope or full rollout?",
+          resumePayloadSchema: {
+            properties: {
+              decision: { type: "string", title: "Decision" },
+              rollout: { type: "string", enum: ["narrow", "full"] },
+            },
+            required: ["decision", "rollout"],
+          },
         },
       },
       changedFiles: ["src/index.ts"],
@@ -89,6 +96,11 @@ describe("worker SDK payload helpers", () => {
         repo: "owner/repo",
         waitingForInput: {
           reason: "choose rollout scope",
+          resumePayloadSchema: {
+            properties: {
+              rollout: { type: "string", enum: ["narrow", "full"] },
+            },
+          },
         },
       },
       changedFiles: ["src/index.ts"],

@@ -14,6 +14,16 @@ export interface TaskSummary {
     requestedBy?: string;
     reason?: string;
     requestedAt?: string;
+    resumePayloadSchema?: {
+      properties?: Record<string, {
+        type?: 'string' | 'number' | 'boolean';
+        title?: string;
+        description?: string;
+        enum?: string[];
+        default?: unknown;
+      }>;
+      required?: string[];
+    };
   } | null;
 }
 

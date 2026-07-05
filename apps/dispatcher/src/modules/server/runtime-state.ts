@@ -152,6 +152,7 @@ export interface Task {
     requestedBy: string;
     reason?: string;
     requestedAt: string;
+    resumePayloadSchema?: ResumePayloadSchema;
   } | null;
   resumePayload?: Record<string, unknown> | null;
   status: TaskStatus;
@@ -159,6 +160,19 @@ export interface Task {
   lastAssignedWorkerId?: string | null;
   requestedBy: string;
   createdAt: string;
+}
+
+export interface ResumePayloadFieldSchema {
+  type?: "string" | "number" | "boolean";
+  title?: string;
+  description?: string;
+  enum?: string[];
+  default?: unknown;
+}
+
+export interface ResumePayloadSchema {
+  properties?: Record<string, ResumePayloadFieldSchema>;
+  required?: string[];
 }
 
 export interface Event {
@@ -433,6 +447,7 @@ export interface WorkerResult {
     requestedBy?: string;
     reason?: string;
     prompt?: string;
+    resumePayloadSchema?: ResumePayloadSchema;
   };
 }
 
@@ -468,6 +483,7 @@ export interface InterruptTaskForInputInput {
   taskId: string;
   actor: string;
   reason?: string;
+  resumePayloadSchema?: ResumePayloadSchema;
   at?: string;
 }
 
@@ -822,11 +838,52 @@ function normalizeWaitingForInput(value: unknown, workerId: string, fallbackReas
   }
   const reason = normalizeString(value.reason, fallbackReason).trim();
   const prompt = normalizeString(value.prompt).trim();
+  const resumePayloadSchema = normalizeResumePayloadSchema(value.resumePayloadSchema);
   return {
     requestedBy: normalizeString(value.requestedBy, workerId).trim() || workerId,
     reason: reason || fallbackReason || "worker requested input",
     ...(prompt ? { prompt } : {}),
+    ...(resumePayloadSchema ? { resumePayloadSchema } : {}),
   };
+}
+
+function normalizeResumePayloadSchema(value: unknown): ResumePayloadSchema | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const properties = normalizeResumePayloadProperties(value.properties);
+  const required = Array.isArray(value.required)
+    ? value.required.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : undefined;
+  return properties || required?.length ? { ...(properties ? { properties } : {}), ...(required?.length ? { required } : {}) } : undefined;
+}
+
+function normalizeResumePayloadProperties(value: unknown): Record<string, ResumePayloadFieldSchema> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value)
+    .map(([name, field]) => [name, normalizeResumePayloadField(field)] as const)
+    .filter((entry): entry is readonly [string, ResumePayloadFieldSchema] => Boolean(entry[1]));
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function normalizeResumePayloadField(value: unknown): ResumePayloadFieldSchema | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const field: ResumePayloadFieldSchema = {};
+  if (["string", "number", "boolean"].includes(String(value.type))) {
+    field.type = value.type as ResumePayloadFieldSchema["type"];
+  }
+  if (typeof value.title === "string") field.title = value.title;
+  if (typeof value.description === "string") field.description = value.description;
+  if (Array.isArray(value.enum)) {
+    const enumValues = value.enum.filter((item): item is string => typeof item === "string");
+    if (enumValues.length > 0) field.enum = enumValues;
+  }
+  if (value.default !== undefined) field.default = value.default;
+  return Object.keys(field).length ? field : undefined;
 }
 
 function resolveSourceTaskForFollowUp(state: RuntimeState, followUpOfTaskId: string) {
@@ -2613,6 +2670,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
       taskId: task.id,
       actor: canonicalResult.waitingForInput.requestedBy ?? input.workerId,
       reason: canonicalResult.waitingForInput.reason ?? canonicalResult.output,
+      resumePayloadSchema: canonicalResult.waitingForInput.resumePayloadSchema,
       at: canonicalResult.generatedAt,
     });
   }
@@ -2924,6 +2982,7 @@ function applyInterruptedTaskState(state: RuntimeState, input: {
   assignment: Assignment;
   actor: string;
   reason?: string;
+  resumePayloadSchema?: ResumePayloadSchema;
   at: string;
 }): RuntimeState {
   return {
@@ -2937,6 +2996,7 @@ function applyInterruptedTaskState(state: RuntimeState, input: {
         requestedBy: input.actor,
         reason: input.reason ?? "",
         requestedAt: input.at,
+        ...(input.resumePayloadSchema ? { resumePayloadSchema: input.resumePayloadSchema } : {}),
       },
     }),
     assignments: upsertAssignment(state.assignments, {
@@ -2963,6 +3023,7 @@ export function interruptTaskForInput(state: RuntimeState, input: InterruptTaskF
   }
 
   const at = input.at ?? nowIso();
+  const resumePayloadSchema = normalizeResumePayloadSchema(input.resumePayloadSchema);
   let nextState = appendTaskStatusChange(state, {
     taskId: input.taskId,
     from: task.status,
@@ -2976,6 +3037,7 @@ export function interruptTaskForInput(state: RuntimeState, input: InterruptTaskF
     payload: {
       actor: input.actor,
       reason: input.reason ?? "",
+      ...(resumePayloadSchema ? { resumePayloadSchema } : {}),
     },
   });
 
@@ -2984,6 +3046,7 @@ export function interruptTaskForInput(state: RuntimeState, input: InterruptTaskF
     assignment,
     actor: input.actor,
     reason: input.reason,
+    resumePayloadSchema,
     at,
   });
 

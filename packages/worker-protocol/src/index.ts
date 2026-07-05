@@ -39,6 +39,19 @@ const WorkerResultVerificationCommandSchema = z.object({
   output: z.string().optional(),
 });
 
+const ResumePayloadFieldSchema = z.object({
+  type: z.enum(["string", "number", "boolean"]).optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  enum: z.array(z.string()).optional(),
+  default: z.unknown().optional(),
+});
+
+const ResumePayloadSchema = z.object({
+  properties: z.record(ResumePayloadFieldSchema).optional(),
+  required: z.array(z.string()).optional(),
+});
+
 const WorkerResultBodySchema = z.object({
   taskId: NonEmptyStringSchema,
   workerId: NonEmptyStringSchema,
@@ -59,6 +72,7 @@ const WorkerResultBodySchema = z.object({
     requestedBy: z.string().optional(),
     reason: z.string().optional(),
     prompt: z.string().optional(),
+    resumePayloadSchema: ResumePayloadSchema.optional(),
   }).optional(),
 });
 

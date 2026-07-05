@@ -11,6 +11,14 @@ import {
 } from './TaskReviewSections';
 import { TaskHitlSection } from './TaskHitlSection';
 
+interface ResumePayloadFieldSchema {
+  type?: 'string' | 'number' | 'boolean';
+  title?: string;
+  description?: string;
+  enum?: string[];
+  default?: unknown;
+}
+
 interface Task {
   id: string;
   traceId?: string | null;
@@ -27,6 +35,10 @@ interface Task {
     requestedBy?: string;
     reason?: string;
     requestedAt?: string;
+    resumePayloadSchema?: {
+      properties?: Record<string, ResumePayloadFieldSchema>;
+      required?: string[];
+    };
   } | null;
 }
 

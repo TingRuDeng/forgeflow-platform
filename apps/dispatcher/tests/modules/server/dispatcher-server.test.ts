@@ -2716,6 +2716,13 @@ describe("dispatcher server", () => {
           waitingForInput: {
             reason: "choose rollout scope",
             prompt: "Ship narrow scope or full rollout?",
+            resumePayloadSchema: {
+              properties: {
+                decision: { type: "string", title: "Decision" },
+                rollout: { type: "string", enum: ["narrow", "full"], title: "Rollout" },
+              },
+              required: ["decision", "rollout"],
+            },
           },
         },
         changedFiles: [],
@@ -2737,6 +2744,13 @@ describe("dispatcher server", () => {
       waitingForInput: {
         requestedBy: "hitl-result-worker",
         reason: "choose rollout scope",
+        resumePayloadSchema: {
+          properties: {
+            decision: { type: "string", title: "Decision" },
+            rollout: { type: "string", enum: ["narrow", "full"], title: "Rollout" },
+          },
+          required: ["decision", "rollout"],
+        },
       },
     });
     expect(checkpointedAttempt).toMatchObject({ status: "checkpointed" });
