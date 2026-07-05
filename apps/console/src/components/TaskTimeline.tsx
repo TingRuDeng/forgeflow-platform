@@ -89,8 +89,13 @@ export const AttemptTimeline: React.FC<{ attempts: TaskAttempt[] }> = ({ attempt
 export const RuntimeEventList: React.FC<{ events: EventRecord[] }> = ({ events }) => {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
-  const hasOverflow = events.length > RUNTIME_EVENT_PREVIEW_LIMIT;
-  const visibleEvents = expanded ? events : events.slice(0, RUNTIME_EVENT_PREVIEW_LIMIT);
+  const [eventTypeFilter, setEventTypeFilter] = useState('all');
+  const eventTypes = [...new Set(events.map((event) => event.type).filter(Boolean))].sort();
+  const filteredEvents = eventTypeFilter === 'all'
+    ? events
+    : events.filter((event) => event.type === eventTypeFilter);
+  const hasOverflow = filteredEvents.length > RUNTIME_EVENT_PREVIEW_LIMIT;
+  const visibleEvents = expanded ? filteredEvents : filteredEvents.slice(0, RUNTIME_EVENT_PREVIEW_LIMIT);
 
   return (
     <section className="glass-card rounded-xl p-4">
@@ -99,20 +104,40 @@ export const RuntimeEventList: React.FC<{ events: EventRecord[] }> = ({ events }
           <div className="text-[11px] uppercase tracking-wide text-white/45">{t('runtimeEvents')}</div>
           {events.length > 0 && (
             <div className="mt-1 text-xs text-white/45">
-              {t('runtimeEventCount')}: <span className="font-mono">{visibleEvents.length} / {events.length}</span>
+              {t('runtimeEventCount')}: <span className="font-mono">{visibleEvents.length} / {filteredEvents.length}</span>
             </div>
           )}
         </div>
-        {hasOverflow && (
-          <button
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-2.5 py-1.5 text-xs font-semibold text-cyan-100 transition-colors hover:bg-cyan-400/20"
-          >
-            {expanded ? <ChevronsUp size={14} aria-hidden="true" /> : <ChevronsDown size={14} aria-hidden="true" />}
-            {expanded ? t('collapseRuntimeEvents') : t('showAllRuntimeEvents')}
-          </button>
-        )}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {eventTypes.length > 1 && (
+            <label className="flex items-center gap-2 text-xs text-white/55">
+              <span>{t('runtimeEventTypeFilter')}</span>
+              <select
+                value={eventTypeFilter}
+                onChange={(event) => {
+                  setEventTypeFilter(event.target.value);
+                  setExpanded(false);
+                }}
+                className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-xs text-white outline-none focus:border-cyan-300/60"
+              >
+                <option value="all">{t('allRuntimeEventTypes')}</option>
+                {eventTypes.map((eventType) => (
+                  <option key={eventType} value={eventType}>{eventType}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {hasOverflow && (
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-2.5 py-1.5 text-xs font-semibold text-cyan-100 transition-colors hover:bg-cyan-400/20"
+            >
+              {expanded ? <ChevronsUp size={14} aria-hidden="true" /> : <ChevronsDown size={14} aria-hidden="true" />}
+              {expanded ? t('collapseRuntimeEvents') : t('showAllRuntimeEvents')}
+            </button>
+          )}
+        </div>
       </div>
       <div className="space-y-3">
         {visibleEvents.length > 0 ? visibleEvents.map((event) => (
