@@ -36,6 +36,7 @@ export interface DispatcherStateDirClient {
   claimTask(workerId: string, payload?: { at?: string }): Promise<unknown>;
   startTask(workerId: string, payload: StartTaskPayload): Promise<unknown>;
   submitResult(workerId: string, payload: SubmitResultPayload): Promise<unknown>;
+  reportEvent(workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }): Promise<unknown>;
 }
 
 export interface CreateDispatcherHttpClientOptions {
@@ -67,6 +68,7 @@ export function createDispatcherHttpClient(
         method,
         headers: {
           "content-type": "application/json",
+          ...getDispatcherAuthHeader(),
         },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
@@ -159,6 +161,14 @@ export function createDispatcherHttpClient(
         payload,
       ) as Promise<unknown>;
     },
+
+    reportEvent(workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }): Promise<unknown> {
+      return call(
+        "POST",
+        `/api/workers/${encodeURIComponent(workerId)}/events`,
+        payload,
+      ) as Promise<unknown>;
+    },
   };
 }
 
@@ -169,7 +179,7 @@ export interface CreateDispatcherStateDirClientOptions {
     pathname: string;
     body?: unknown;
     internalCall?: boolean;
-  }) => { json: unknown } | Promise<{ json: unknown }>;
+  }) => { status?: number; json: unknown } | Promise<{ status?: number; json: unknown }>;
 }
 
 export function createDispatcherStateDirClientFactory(
@@ -180,71 +190,91 @@ export function createDispatcherStateDirClientFactory(
   return (stateDir: string): DispatcherStateDirClient => {
     return {
       async registerWorker(worker: WorkerRegistration): Promise<unknown> {
-        const response = await handleRequest({
+        return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "POST",
           pathname: "/api/workers/register",
           body: worker,
           internalCall: true,
-        });
-        return response.json;
+        }));
       },
 
       async heartbeat(workerId: string, payload: HeartbeatPayload): Promise<unknown> {
-        const response = await handleRequest({
+        return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "POST",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/heartbeat`,
           body: payload,
           internalCall: true,
-        });
-        return response.json;
+        }));
       },
 
       async getAssignedTask(workerId: string): Promise<unknown> {
-        const response = await handleRequest({
+        return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "GET",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/assigned-task`,
           internalCall: true,
-        });
-        return response.json;
+        }));
       },
 
       async claimTask(workerId: string, payload?: { at?: string }): Promise<unknown> {
-        const response = await handleRequest({
+        return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "POST",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/claim-task`,
           body: payload ?? {},
           internalCall: true,
-        });
-        return response.json;
+        }));
       },
 
       async startTask(workerId: string, payload: StartTaskPayload): Promise<unknown> {
-        const response = await handleRequest({
+        return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "POST",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/start-task`,
           body: payload,
           internalCall: true,
-        });
-        return response.json;
+        }));
       },
 
       async submitResult(workerId: string, payload: SubmitResultPayload): Promise<unknown> {
-        const response = await handleRequest({
+        return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "POST",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/result`,
           body: payload,
           internalCall: true,
-        });
-        return response.json;
+        }));
+      },
+
+      async reportEvent(workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }): Promise<unknown> {
+        return readStateDirResponseJson(await handleRequest({
+          stateDir,
+          method: "POST",
+          pathname: `/api/workers/${encodeURIComponent(workerId)}/events`,
+          body: payload,
+          internalCall: true,
+        }));
       },
     };
   };
+}
+
+function getDispatcherAuthHeader(): Record<string, string> {
+  const token = process.env.DISPATCHER_API_TOKEN;
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
+function readStateDirResponseJson(response: { status?: number; json: unknown }): unknown {
+  if (response.status !== undefined && response.status >= 400) {
+    const error = response.json && typeof response.json === "object" && "error" in response.json
+      ? String((response.json as { error?: unknown }).error)
+      : `dispatcher state-dir request failed: ${response.status}`;
+    throw new Error(error);
+  }
+  return response.json;
 }
 
 export interface CreateWorkerDaemonCycleOptions {
