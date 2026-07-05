@@ -109,6 +109,7 @@ Desired direction:
 - `@tingrudeng/automation-gateway-core` 已提供共享 `resolveAutomationGatewayDriver`，统一处理已注入 driver、automationOptions 透传和 gateway debug / driver debug 归一化
 - `@tingrudeng/automation-gateway-core` 已提供共享 `createPersistentAutomationSessionStore`，统一处理 session 持久化、重启中断、TTL 清理、request fingerprint / target 解析和 public shape 裁剪
 - `@tingrudeng/automation-gateway-core` 已提供共享 Trae CDP / DOM driver，统一 target discovery、CDP session、DOM 表达式、response extraction、activity snapshot 和 final report completion 判断
+- `@tingrudeng/automation-gateway-core` 已提供共享 Trae clean relaunch 原语，统一 `.app` 名称解析、macOS app quit 和旧 CDP 端口 drain
 - 脚本侧 `scripts/lib/trae-automation-gateway.ts` 与 packaged runtime `packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts` 都已委托共享 handler、共享 HTTP server adapter、共享 debug logger、共享 driver 创建规则和共享 DOM driver；脚本侧只通过 wrapper 保留旧的 plain-text response 兼容默认值
 - 脚本侧 `scripts/lib/trae-automation-session-store.ts` 与 packaged runtime `packages/trae-beta-runtime/src/runtime/trae-automation-session-store.ts` 都已委托共享 session-store，只保留默认目录、时间格式和类型兼容薄适配
 - 脚本侧已经对齐 packaged runtime 的持久化 session 解析、`POST /v1/chat` 元数据透传和结构化 debugLog 关键事件
@@ -327,7 +328,7 @@ Desired direction:
 - **release preflight 会提前阻断未配置包名和未发布 workspace 依赖（P2 完成）**：`release-publish-preflight.mjs --require-package-exists --require-published-workspace-deps` 会在手动发布和自动发布进入 typecheck / test / build / publish 前执行只读 `npm view <package> version`，并把当前 package.json 的 `workspace:*` 依赖解析为本地 workspace 版本后校验对应精确版本已发布。包名不存在、权限不足、registry 查询失败或 provider 依赖的 shared core 版本未发布时，workflow 会停在 preflight，避免在 `npm publish` PUT 阶段或发布后 smoke 才暴露依赖缺口。
 - **runtime 包设置报告已落地（P2 完成）**：`pnpm report:runtime-packages:setup` 复用同一份 runtime package spec，只读查询 npm registry，输出每个包名、当前源码版本、package/version 发布状态、推荐发布顺序和 Trusted Publisher 配置要求；需要把缺口作为硬失败时可加 `-- --require-ready`。
 - **已发布 provider runtime smoke 已落地（P2 完成）**：`pnpm verify:runtime-packages:published-smoke` 会从 npm registry 安装当前源码版本的 `codex`、`gemini`、`trae` provider runtime，并校验 provider CLI bin、`--version` 和 `--help`；该命令要求所有 provider 包名和版本都已发布，适合作为发布后远端安装证据入口。
-- **源码 Trae launcher clean relaunch 行为已与 packaged runtime 对齐（P2 完成）**：`scripts/run-trae-automation-launch.ts` / `.js` 现在支持 `--force-clean-launch`，并复用 `scripts/lib/trae-launcher-clean-relaunch.ts` 在 macOS 上先退出既有 Trae app、等待旧 CDP 端口释放，再拉起新进程；避免源码调试脚本与 `@tingrudeng/trae-beta-runtime` 的 clean relaunch 语义继续漂移。
+- **Trae launcher clean relaunch 已下沉到共享 core（P2 完成）**：`@tingrudeng/automation-gateway-core` 现在提供 `prepareCleanRelaunch` / `quitExistingMacApp` / `waitForDebuggerPortToDrain` / `resolveMacAppName`，`scripts/run-trae-automation-launch.ts` 和 `@tingrudeng/trae-beta-runtime` 共用同一实现，避免源码调试脚本与 packaged runtime 的 clean relaunch 语义继续漂移。
 
 仍存在的债务：
 

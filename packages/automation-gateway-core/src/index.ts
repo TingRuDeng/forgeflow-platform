@@ -73,4 +73,5 @@ export {
 export * from "./trae-automation-errors.js";
 export * from "./trae-cdp-client.js";
 export * from "./trae-cdp-discovery.js";
+export * from "./trae-clean-relaunch.js";
 export * from "./trae-dom-driver.js";

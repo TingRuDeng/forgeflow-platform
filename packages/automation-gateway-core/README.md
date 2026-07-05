@@ -1,17 +1,18 @@
 # @tingrudeng/automation-gateway-core
 
-Shared protocol helpers for ForgeFlow automation gateway runtimes.
+ForgeFlow automation gateway runtime 的共享协议与 Trae 自动化基础能力包。
 
-Current scope:
-- parse final report fields emitted by Trae automation tasks
-- detect template-marker reports before they are accepted as real output
-- validate whether a reported task id still matches the dispatcher task being processed
-- provide shared Trae automation gateway request handling, HTTP JSON IO, debug logging, driver creation rules, persistent session-store primitives, and Trae CDP / DOM driver helpers
+当前范围：
+- 解析 Trae automation task 输出的 final report 字段
+- 在接受真实输出前识别模板占位 report
+- 校验 report task id 是否仍匹配 dispatcher 正在处理的 task
+- 提供共享 Trae automation gateway request handler、HTTP JSON IO、debug logger、driver 创建规则、持久化 session-store 原语、Trae CDP / DOM driver helper
+- 提供共享 Trae clean relaunch 原语，包括 macOS `.app` 名称解析、退出既有 Trae app、等待旧 CDP 端口释放
 
-This package is intentionally small:
-- parsing, validation, gateway protocol, local JSON session-store helpers, and Trae browser automation driver helpers only
-- no worker lifecycle logic
-- suitable for reuse by both the packaged Trae runtime and any future gateway-side validation paths
+这个包刻意保持小范围：
+- 只包含解析、校验、gateway protocol、本地 JSON session-store helper、Trae browser automation driver helper 和 clean relaunch 原语
+- 不包含 worker lifecycle 逻辑
+- 适合同时被 packaged Trae runtime、源码调试脚本和后续 gateway-side validation path 复用
 
 ## Exports
 
@@ -21,6 +22,7 @@ import {
   createAutomationGatewayDebugLogger,
   createPersistentAutomationSessionStore,
   createTraeAutomationDriver,
+  prepareCleanRelaunch,
   resolveAutomationGatewayDriver,
   isEquivalentReportedTaskId,
   isPlaceholderTaskId,
@@ -28,7 +30,7 @@ import {
 } from "@tingrudeng/automation-gateway-core";
 ```
 
-## Repository-local usage
+## 仓库内用法
 
 ```bash
 pnpm --filter @tingrudeng/automation-gateway-core test
@@ -36,8 +38,8 @@ pnpm --filter @tingrudeng/automation-gateway-core typecheck
 pnpm --filter @tingrudeng/automation-gateway-core build
 ```
 
-## Notes
+## 说明
 
-- This is a library package, not a direct machine entrypoint.
-- The current primary consumer is `@tingrudeng/trae-beta-runtime`.
-- Release steps are documented in `PUBLISHING.md`.
+- 这是 library package，不是直接机器入口。
+- 当前主要 consumer 是 `@tingrudeng/trae-beta-runtime` 和仓库内 Trae 源码调试脚本。
+- 发布步骤见 `PUBLISHING.md`。

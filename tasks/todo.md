@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M98 串行：把 Trae clean relaunch 原语下沉到 automation-gateway-core 共享实现。
 - [x] M97 串行：收敛源码 Trae launcher clean relaunch 与 packaged runtime 行为。
 - [x] M96 串行：让 Console DR 面板展示 shadow reconciler 最近一轮对账证据。
 - [x] M95 串行：让 release preflight 发布前校验 workspace 依赖已发布。
@@ -21,6 +22,16 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M98 Review 小结
+
+已新增 `packages/automation-gateway-core/src/trae-clean-relaunch.ts`，把 `resolveMacAppName`、`quitExistingMacApp`、`waitForDebuggerPortToDrain` 和 `prepareCleanRelaunch` 作为唯一 clean relaunch 实现，并从 `automation-gateway-core` 统一导出。`scripts/lib/trae-launcher-clean-relaunch.ts` 已降为薄 re-export，`packages/trae-beta-runtime/src/runtime/trae-launcher.ts` 删除本地重复 helper 后改用共享 `prepareCleanRelaunch`。这样源码调试脚本与 packaged runtime 的 clean relaunch 不再只是行为一致，而是共用同一份共享 core 实现。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 runtime executor / launch 去重，只迁移 clean relaunch 原语，不改变 CLI 参数、launcher spawn 规则、gateway、worker、dispatcher API 或 session-store。安全检查通过，`osascript` 调用仍只针对解析出的 macOS app 名称，旧 CDP 端口未释放会显式抛错；未新增 secret、网络写入、mock 成功路径或静默 fallback。复杂度检查通过，`trae-clean-relaunch.ts` 100 行、测试 75 行、脚本 re-export 11 行、`scripts/lib/trae-launcher.ts` 仍为 300 行、packaged launcher 239 行。Document-refresh: needed，原因：`automation-gateway-core` 共享职责新增 clean relaunch 原语，已同步 README、TECH_DEBT、package README 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @tingrudeng/automation-gateway-core exec vitest run tests/trae-clean-relaunch.test.ts --maxWorkers=1`，1 个测试文件、4 个测试通过；`CI=true pnpm --filter @tingrudeng/automation-gateway-core typecheck`；`CI=true pnpm --filter @tingrudeng/automation-gateway-core build`；`CI=true pnpm --dir scripts/lib exec tsc -p tsconfig.json`；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/trae-launcher.test.ts --maxWorkers=1`，1 个测试文件、6 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime exec vitest run tests/trae-launcher.test.ts --maxWorkers=1`，1 个测试文件、2 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime typecheck`；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime build`；`CI=true pnpm typecheck`；`CI=true pnpm lint`；`CI=true pnpm docs:validate`；`python3 scripts/validate_docs.py . --profile generic`；`git diff --check`；提升权限运行 `CI=true pnpm test`，全量测试通过，其中 automation-gateway-core 7 个测试文件、23 个测试通过，dispatcher 60 个测试文件、548 个测试通过。
+
+剩余风险：clean relaunch 原语已彻底去重到 `automation-gateway-core`；Trae launch 的其它部分（`.app` executable 解析、spawn/wait debugger 编排）仍分别保留在 scripts launcher 和 packaged launcher 中，后续若要继续压缩 launch 重复，需要单独评估这些部分能否共享且不破坏源码脚本的 dist/bootstrap 边界。
 
 ## M97 Review 小结
 
