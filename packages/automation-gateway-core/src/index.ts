@@ -4,6 +4,10 @@ export {
 } from "./debug-log.js";
 
 export {
+  resolveAutomationGatewayDriver,
+} from "./driver-factory.js";
+
+export {
   ApiError,
   normalizeApiError,
 } from "./gateway-errors.js";
@@ -30,6 +34,10 @@ export type {
   AutomationGatewayDebugLogger,
   AutomationGatewayDebugLoggerOptions,
 } from "./debug-log.js";
+
+export type {
+  ResolveAutomationGatewayDriverOptions,
+} from "./driver-factory.js";
 
 export type {
   AutomationGatewayDriver,

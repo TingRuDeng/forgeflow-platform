@@ -1,10 +1,14 @@
-import { createAutomationGatewayDebugLogger, handleAutomationGatewayRequest, isAutomationGatewayDebugEnabled, startAutomationGatewayHttpServer, } from "@tingrudeng/automation-gateway-core";
+import { createAutomationGatewayDebugLogger, handleAutomationGatewayRequest, isAutomationGatewayDebugEnabled, resolveAutomationGatewayDriver, startAutomationGatewayHttpServer, } from "@tingrudeng/automation-gateway-core";
 import { createTraeAutomationDriver } from "./trae-dom-driver.js";
 import { normalizeAutomationError } from "./trae-automation-errors.js";
 import { createSessionStore, DEFAULT_STATE_DIR } from "./trae-automation-session-store.js";
 import { logger as scriptLogger } from "./logger.js";
 export async function handleTraeAutomationHttpRequest(input, options = {}) {
-    const automationDriver = (options.automationDriver || createTraeAutomationDriver(options.automationOptions || {}));
+    const automationDriver = resolveAutomationGatewayDriver({
+        automationDriver: options.automationDriver,
+        automationOptions: options.automationOptions,
+        createDriver: createTraeAutomationDriver,
+    });
     return handleAutomationGatewayRequest(input, {
         automationDriver,
         sessionStore: options.sessionStore || null,
@@ -26,14 +30,12 @@ export async function startTraeAutomationGateway(options = {}) {
     const stateDir = options.stateDir ?? DEFAULT_STATE_DIR;
     const debugEnabled = isAutomationGatewayDebugEnabled(options.debug);
     const debugLog = createAutomationGatewayDebugLogger(debugEnabled, options.logger || console);
-    const automationOptions = options.automationOptions || {};
-    const driverDebug = debugEnabled
-        || automationOptions.debug === true
-        || String(automationOptions.debug || "").trim() === "1";
-    const automationDriver = (options.automationDriver || createTraeAutomationDriver({
-        ...automationOptions,
-        debug: driverDebug,
-    }));
+    const automationDriver = resolveAutomationGatewayDriver({
+        automationDriver: options.automationDriver,
+        automationOptions: options.automationOptions,
+        createDriver: createTraeAutomationDriver,
+        debugEnabled,
+    });
     const sessionStore = options.sessionStore === null
         ? null
         : options.sessionStore || createSessionStore(stateDir);

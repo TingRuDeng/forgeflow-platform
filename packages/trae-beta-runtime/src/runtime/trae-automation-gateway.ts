@@ -4,6 +4,7 @@ import {
   createAutomationGatewayDebugLogger,
   handleAutomationGatewayRequest,
   isAutomationGatewayDebugEnabled,
+  resolveAutomationGatewayDriver,
   startAutomationGatewayHttpServer,
   type AutomationGatewayDriver,
   type NormalizedAutomationError,
@@ -64,8 +65,11 @@ export async function handleTraeAutomationHttpRequest(
   input: HttpRequestInput,
   options: HandleTraeAutomationHttpRequestOptions = {},
 ): Promise<{ status: number; json: ApiSuccessResponse<unknown> | ApiErrorResponse }> {
-  const automationDriver = (options.automationDriver
-    || createTraeAutomationDriver(options.automationOptions || {})) as AutomationGatewayDriver;
+  const automationDriver = resolveAutomationGatewayDriver({
+    automationDriver: options.automationDriver,
+    automationOptions: options.automationOptions,
+    createDriver: createTraeAutomationDriver as (driverOptions: Record<string, unknown>) => AutomationGatewayDriver,
+  });
   return handleAutomationGatewayRequest(input, {
     automationDriver,
     sessionStore: options.sessionStore || null,
@@ -95,15 +99,12 @@ export function startTraeAutomationGateway(
   const logger = options.logger || console;
   const debugEnabled = isAutomationGatewayDebugEnabled(options.debug);
   const debugLog = createAutomationGatewayDebugLogger(debugEnabled, logger);
-  const automationOptions = options.automationOptions || {};
-  const driverDebug = debugEnabled
-    || automationOptions.debug === true
-    || String(automationOptions.debug || "").trim() === "1";
-  const automationDriver = (options.automationDriver
-    || createTraeAutomationDriver({
-      ...automationOptions,
-      debug: driverDebug,
-    })) as AutomationGatewayDriver;
+  const automationDriver = resolveAutomationGatewayDriver({
+    automationDriver: options.automationDriver,
+    automationOptions: options.automationOptions,
+    createDriver: createTraeAutomationDriver as (driverOptions: Record<string, unknown>) => AutomationGatewayDriver,
+    debugEnabled,
+  });
   const sessionStore = options.sessionStore === null
     ? null
     : options.sessionStore || createSessionStore(stateDir);

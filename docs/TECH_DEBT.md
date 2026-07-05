@@ -99,15 +99,16 @@ Desired direction:
 - keep shadow mode / primary mode boundaries explicit
 - add stronger drift reporting and eventual cutover / rollback discipline before any primary-store switch
 
-## 4. Trae automation gateway handler、HTTP server、debug logger 和 session-store 已共享，剩余债务集中在外部 adapter 层
+## 4. Trae automation gateway handler、HTTP server、debug logger、driver 创建规则和 session-store 已共享，剩余债务集中在发布适配层
 
 已确认情况：
 
 - `@tingrudeng/automation-gateway-core` 已提供共享 `handleAutomationGatewayRequest`，统一处理 `GET /ready`、session 查询 / release / prepare 和 `POST /v1/chat`
 - `@tingrudeng/automation-gateway-core` 已提供共享 `startAutomationGatewayHttpServer`，统一处理 Node HTTP server、JSON body 读取、错误响应和 server close
 - `@tingrudeng/automation-gateway-core` 已提供共享 `createAutomationGatewayDebugLogger` 和 `isAutomationGatewayDebugEnabled`，统一处理 `TRAE_AUTOMATION_DEBUG` / `debug` 开关与 `[trae-gateway][debug]` 结构化日志格式
+- `@tingrudeng/automation-gateway-core` 已提供共享 `resolveAutomationGatewayDriver`，统一处理已注入 driver、automationOptions 透传和 gateway debug / driver debug 归一化
 - `@tingrudeng/automation-gateway-core` 已提供共享 `createPersistentAutomationSessionStore`，统一处理 session 持久化、重启中断、TTL 清理、request fingerprint / target 解析和 public shape 裁剪
-- 脚本侧 `scripts/lib/trae-automation-gateway.ts` 与 packaged runtime `packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts` 都已委托共享 handler、共享 HTTP server adapter 和共享 debug logger，只保留 driver adapter
+- 脚本侧 `scripts/lib/trae-automation-gateway.ts` 与 packaged runtime `packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts` 都已委托共享 handler、共享 HTTP server adapter、共享 debug logger 和共享 driver 创建规则，只保留具体 DOM driver factory 注入
 - 脚本侧 `scripts/lib/trae-automation-session-store.ts` 与 packaged runtime `packages/trae-beta-runtime/src/runtime/trae-automation-session-store.ts` 都已委托共享 session-store，只保留默认目录、时间格式和类型兼容薄适配
 - 脚本侧已经对齐 packaged runtime 的持久化 session 解析、`POST /v1/chat` 元数据透传和结构化 debugLog 关键事件
 - packaged runtime 已补齐脚本侧 `POST /v1/chat` 的 completed-session cache、running-session conflict、request fingerprint conflict、progress touch 和 soft-timeout 保持 running 语义
@@ -115,12 +116,12 @@ Desired direction:
 影响：
 
 - 默认 session-store 路径、持久化解析和 chat 调用关键行为已经对齐
-- route / session / chat 语义、HTTP JSON IO、debug logger 和持久化 session-store 已经集中到共享 core；后续 handler、request IO、debug 日志或 session 文件语义修复不应再分别修改脚本侧和 packaged runtime
-- 剩余漂移风险主要来自 adapter 层：driver 创建和发布前 dist / workspace 依赖同步
+- route / session / chat 语义、HTTP JSON IO、debug logger、driver 创建规则和持久化 session-store 已经集中到共享 core；后续 handler、request IO、debug 日志、driver debug 归一化或 session 文件语义修复不应再分别修改脚本侧和 packaged runtime
+- 剩余漂移风险主要来自发布适配层：发布前 dist / workspace 依赖同步，以及具体 DOM driver 本身在脚本侧和 packaged runtime 仍各自维护
 
 期望方向：
 
-- 后续继续收敛 adapter 层，优先把 driver 创建归一化为共享小模块，而不是重新在两侧扩写 route handler、HTTP request IO、debug logger 或 session-store 逻辑
+- 后续不要再在两侧扩写 route handler、HTTP request IO、debug logger、driver 创建规则或 session-store 逻辑；发布前重点验证 dist / workspace 依赖同步，并单独评估具体 DOM driver 是否需要进一步拆成共享包
 
 ## 5. Stable agent-facing docs were previously concentrated in rule/nav docs but lacked a durable knowledge layer
 
