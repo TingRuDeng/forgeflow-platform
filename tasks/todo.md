@@ -1,6 +1,17 @@
 # 当前项目审查修复任务
 
+- [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
 - [x] M76 串行：让 Postgres primary backend 强制校验 shadow cutover ready evidence。
+
+## M77 Review 小结
+
+已新增 dispatcher `primaryCutover` DR status：`/api/dr/status.primaryCutover` 会读取 approval marker、final ready evidence、revocation marker 和 primary backend 环境状态，返回 `unknown` / `ready` / `blocked` / `failed`。`ready` 要求 approval marker、archived drill evidence SHA-256 和 ready evidence 的 `approval_evidence` 完全匹配；revocation marker 存在时返回 `blocked`；证据损坏或不匹配时返回 `failed`。Console 首屏 DR 状态面板同步展示主库切换状态、审批证据、就绪证据、主库后端和撤销 / 错误原因。
+
+Review Gate：finished。Spec 符合度通过，本轮推进 shadow 自动 reconciliation / production cutover 的可观测收尾，只把已有 cutover evidence gate 暴露为只读 DR status 和 Console 信号，不改变 Postgres primary backend guard、approval / ready / revoke 脚本或真实切换开关。安全检查通过，新增 helper 只读取固定 evidence JSON、计算本地 SHA-256 并返回状态摘要，不暴露 `DISPATCHER_PRIMARY_POSTGRES_URL`，不新增 secret、外部网络、shell 拼接、mock 成功路径或静默 fallback。复杂度检查通过，新增 `runtime-state-primary-cutover.ts` 203 行，新增测试文件 128 / 42 行，Console 面板 159 行。Document-refresh: needed，原因：`/api/dr/status` payload 和 Console DR 面板能力变化，已同步 README、API endpoints、docs README、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state-primary-cutover.test.ts tests/modules/server/dispatcher-server-dr-status.test.ts --maxWorkers=1`，2 个测试文件、4 个测试通过；`CI=true pnpm --filter console exec vitest run src/components/__tests__/DrStatusPanel.test.tsx src/__tests__/App.test.tsx --maxWorkers=1`，2 个测试文件、7 个测试通过；`CI=true pnpm --filter console lint`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：仓库内 cutover evidence 已能通过 API 和 Console 审查；真实生产 cutover 仍需要 operator 在生产环境执行 drill / approval / ready evidence、配置 Postgres primary backend、切换进程环境并保留变更窗口证据。
 - [x] M75 串行：让 runtime backup / restore 保留 shadow cutover drill / ready evidence。
 - [x] M74 串行：补齐 shadow cutover ready 最终门禁 evidence 归档入口。
 - [x] M73 串行：补齐 HITL resume payload 的 dispatcher 服务端 schema 校验。

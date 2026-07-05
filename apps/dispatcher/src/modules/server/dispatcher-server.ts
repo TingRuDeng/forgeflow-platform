@@ -14,6 +14,7 @@ import {
   loadStructuredRuntimeStateAsync,
   readStructuredProjectionHealthAsync,
 } from "./runtime-state-query-store.js";
+import { readRuntimeStatePrimaryCutoverStatus } from "./runtime-state-primary-cutover.js";
 import { readPersistedRuntimeStateShadowReconcilerStatus } from "./runtime-state-shadow-health.js";
 import { getRuntimeStateShadowMode, readRuntimeStateShadowWriteStatus } from "./runtime-state-shadow.js";
 import {
@@ -1035,6 +1036,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
         shadowMode: getRuntimeStateShadowMode(),
         shadowWrite: readRuntimeStateShadowWriteStatus(stateDir),
         shadowReconciler: readPersistedRuntimeStateShadowReconcilerStatus(stateDir),
+        primaryCutover: readRuntimeStatePrimaryCutoverStatus(stateDir),
         projectionHealth: await readStructuredProjectionHealthAsync(stateDir),
         backups: listBackupManifests(stateDir),
       });
