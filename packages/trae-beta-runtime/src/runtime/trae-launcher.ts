@@ -1,15 +1,21 @@
 // @ts-nocheck
 import fs from "node:fs";
 import path from "node:path";
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
+
+import {
+  DEFAULT_CLEAN_RELAUNCH_DRAIN_TIMEOUT_MS,
+  prepareCleanRelaunch,
+  quitExistingMacApp,
+  resolveMacAppName,
+  waitForDebuggerPortToDrain,
+} from "@tingrudeng/automation-gateway-core";
 
 import { discoverTraeTarget, getDebuggerVersion } from "./trae-cdp-discovery.js";
 
 export const DEFAULT_START_TIMEOUT_MS = Number(process.env.TRAE_CDP_START_TIMEOUT_MS || 15000);
 export const DEFAULT_REMOTE_DEBUGGING_PORT = Number(process.env.TRAE_REMOTE_DEBUGGING_PORT || 9222);
-export const DEFAULT_CLEAN_RELAUNCH_DRAIN_TIMEOUT_MS = Number(
-  process.env.TRAE_CDP_CLEAN_RELAUNCH_DRAIN_TIMEOUT_MS || 5000,
-);
+export { DEFAULT_CLEAN_RELAUNCH_DRAIN_TIMEOUT_MS, quitExistingMacApp, resolveMacAppName, waitForDebuggerPortToDrain };
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -113,31 +119,6 @@ export function resolveTraeLaunchTarget(options = {}) {
   };
 }
 
-export function resolveMacAppName(bundlePath, options = {}) {
-  const pathImpl = options.pathImpl || path;
-  const platform = options.platform || process.platform;
-  const normalized = String(bundlePath || "").trim();
-  if (platform !== "darwin" || !normalized.toLowerCase().endsWith(".app")) {
-    return null;
-  }
-  return pathImpl.basename(normalized, ".app");
-}
-
-export async function quitExistingMacApp(options = {}) {
-  const execFileImpl = options.execFileImpl || execFile;
-  const sleepImpl = options.sleepImpl || sleep;
-  const appName = String(options.appName || "").trim();
-  if (!appName) {
-    return false;
-  }
-
-  await new Promise((resolve) => {
-    execFileImpl("osascript", ["-e", `tell application "${appName}" to quit`], () => resolve(undefined));
-  });
-  await sleepImpl(Number(options.postQuitDelayMs || 1000));
-  return true;
-}
-
 export async function waitForTraeDebugger(options = {}) {
   const discoverTarget = options.discoverTarget || discoverTraeTarget;
   const getVersion = options.getVersion || getDebuggerVersion;
@@ -164,24 +145,6 @@ export async function waitForTraeDebugger(options = {}) {
   }
 
   throw new Error(`Trae did not expose a debugger target within ${timeoutMs}ms`);
-}
-
-export async function waitForDebuggerPortToDrain(options = {}) {
-  const getVersion = options.getVersion || getDebuggerVersion;
-  const sleepImpl = options.sleepImpl || sleep;
-  const timeoutMs = Number(options.timeoutMs || DEFAULT_CLEAN_RELAUNCH_DRAIN_TIMEOUT_MS);
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      await getVersion({ port: options.port });
-      await sleepImpl(250);
-    } catch {
-      return;
-    }
-  }
-
-  throw new Error(`Existing Trae debugger endpoint on port ${options.port} did not drain within ${timeoutMs}ms`);
 }
 
 export async function launchTraeForAutomation(options = {}) {
@@ -219,22 +182,15 @@ export async function launchTraeForAutomation(options = {}) {
   }
 
   if (forceCleanLaunch && platform === "darwin") {
-    const appName = resolveMacAppName(target.bundlePath, { platform });
-    const quitExistingApp = options.quitExistingApp || quitExistingMacApp;
-    if (appName) {
-      await quitExistingApp({
-        appName,
-        bundlePath: target.bundlePath,
-        platform,
-        sleepImpl: options.sleepImpl,
-      });
-      await waitForDebuggerPortToDrain({
-        port: target.remoteDebuggingPort,
-        timeoutMs: options.cleanRelaunchDrainTimeoutMs,
-        getVersion: options.getVersion,
-        sleepImpl: options.sleepImpl,
-      });
-    }
+    await prepareCleanRelaunch({
+      bundlePath: target.bundlePath,
+      platform,
+      port: target.remoteDebuggingPort,
+      timeoutMs: options.cleanRelaunchDrainTimeoutMs,
+      getVersion: options.getVersion,
+      sleepImpl: options.sleepImpl,
+      quitExistingApp: options.quitExistingApp,
+    });
   }
 
   const child = spawnImpl(target.command, target.args, {
