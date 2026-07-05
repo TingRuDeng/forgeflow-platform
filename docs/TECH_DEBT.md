@@ -213,16 +213,17 @@ Current situation:
 - `scripts/check-shadow-drift.mjs <stateDir> --record-alert` can append a `shadow_drift_detected` system event when drift is present
 - `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1` and `pnpm verify:shadow-drift:reconcile` provide an explicit automatic reconciliation cadence hook without changing the default read-only gate
 - `pnpm verify:shadow-cutover` is a strict production cutover preflight: shadow must be configured and zero-drift under `--max-mismatches 0 --max-delta 0`
+- `DISPATCHER_SHADOW_MODE=primary` is now explicitly rejected as `primary_store_not_implemented` until a real primary `RuntimeStateStore` exists
 - `pnpm verify:stage3` 和 release workflow 都会执行 `pnpm verify:shadow-drift` 作为 rollout / release gate
 
 Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
-- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook 和 strict cutover preflight；真正 primary-store 切换仍需要生产阈值演练和外部存储运维确认
+- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、strict cutover preflight 和 primary-mode 硬拒绝；真正 primary-store 切换仍需要实现 Postgres-backed `RuntimeStateStore`、生产阈值演练和外部存储运维确认
 
 Desired direction:
 
-- run production threshold drills and require `pnpm verify:shadow-cutover` before any primary-store switch
+- implement a Postgres-backed primary `RuntimeStateStore`, then run production threshold drills and require `pnpm verify:shadow-cutover` before any primary-store switch
 - keep the event / metric / SLO contract stable while shadow remains best-effort
 
 ## 10. Live dispatcher DR drill covers local failure scenarios, but production cutover is still deferred
