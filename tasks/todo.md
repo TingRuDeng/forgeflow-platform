@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M90 串行：让 release workflow 复用通用 release package 检测脚本。
 - [x] M89 串行：新增 runtime npm 包名 / Trusted Publisher 设置报告并共享 runtime package spec。
 - [x] M88 串行：新增 runtime tarball 本地打包 / 安装 smoke 门禁。
 - [x] M87 串行：校验已发布 runtime 包依赖元数据是否与源码发布清单一致。
@@ -13,6 +14,18 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M90 Review 小结
+
+已新增 `scripts/lib/npm-registry-status.mjs`，把 npm registry package/version 状态查询、fixture 读取和 `setup_required` / `publish_version` / `registry_unknown` / `up_to_date` 分类抽成共享 helper。`scripts/report-runtime-package-setup.mjs` 已改为复用该 helper，并在 JSON 输出中移除完整 registry `versions` 元数据，只保留状态和当前版本。
+
+已新增 `scripts/detect-release-packages.mjs`，扫描 `packages/*/package.json` 中所有 `@tingrudeng/*` 包，用共享 registry helper 输出 `packages`、`newPackages`、`unknownPackages` 和逐包 action。`.github/workflows/release.yml` 的 `detect-changes` job 已改为运行该脚本并用 `jq` 读取 JSON 输出，不再在 workflow YAML 中维护第二套 `npm view` / grep / sed 分支逻辑。
+
+Review Gate：finished。Spec 符合度通过，本轮只收敛 release package 检测实现，不改变自动发布矩阵语义、手动发布 preflight、npm publish 或版本 bump 行为。安全检查通过，检测脚本只读查询 npm registry，不发布、不写 registry、不读取 secret；`--require-known` 会把 registry unknown 显式失败。复杂度检查通过，新增 `npm-registry-status.mjs` 102 行、`detect-release-packages.mjs` 105 行，触碰文件均低于 300 行。Document-refresh: not-needed，原因：这是 release workflow 内部实现去重，外部发布入口和 operator 命令没有变化。结论：通过。
+
+验证已通过：`node --check scripts/lib/npm-registry-status.mjs`、`node --check scripts/detect-release-packages.mjs`、`node --check scripts/report-runtime-package-setup.mjs` 通过；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/release-package-detect.test.ts tests/modules/execution/runtime-package-setup-report.test.ts tests/modules/execution/workflows.test.ts --maxWorkers=1` 通过，3 个测试文件、11 个测试通过；提升权限真实 registry 复跑 `node scripts/detect-release-packages.mjs --json --require-known --registry-timeout-ms 5000` 通过，输出 `newPackages=[beta-runtime-core@0.1.0-beta.1, gemini-beta-runtime@0.1.0-beta.2]`、`packages=[]`、`unknownPackages=[]`；`node scripts/report-runtime-package-setup.mjs --registry-timeout-ms 5000` 通过并继续标记这两个 runtime 包为 `setup_required`。`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：workflow 检测逻辑已去重，但真实发布仍取决于 npm 包名创建、Trusted Publisher 绑定和后续 Release workflow 执行。
 
 ## M89 Review 小结
 

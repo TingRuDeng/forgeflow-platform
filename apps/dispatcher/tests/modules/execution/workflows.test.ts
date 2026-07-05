@@ -72,17 +72,18 @@ describe("workflow quality gates", () => {
 
   it("keeps brand-new npm package names out of the automatic publish matrix", () => {
     const workflow = readWorkflow("release.yml");
-    const packageExistsIndex = workflow.indexOf('npm view "${pkg_name}" version');
-    const versionExistsIndex = workflow.indexOf('npm view "${pkg_name}@${local_version}" version');
+    const detectScriptIndex = workflow.indexOf("node scripts/detect-release-packages.mjs --json --require-known");
     const setupSummaryIndex = workflow.indexOf("publish-setup-required-summary:");
     const publishAutoIndex = workflow.indexOf("publish-auto:");
 
     expect(workflow).toContain("new-packages");
     expect(workflow).toContain("has-new-packages");
     expect(workflow).toContain("自动发布等待 npm 包名配置");
-    expect(packageExistsIndex).toBeGreaterThanOrEqual(0);
-    expect(versionExistsIndex).toBeGreaterThan(packageExistsIndex);
-    expect(setupSummaryIndex).toBeGreaterThan(packageExistsIndex);
+    expect(workflow).toContain("REPORT_JSON=\"$RUNNER_TEMP/release-packages.json\"");
+    expect(workflow).toContain("PACKAGES=$(jq -c '.packages' \"$REPORT_JSON\")");
+    expect(workflow).toContain("NEW_PACKAGES=$(jq -c '.newPackages' \"$REPORT_JSON\")");
+    expect(detectScriptIndex).toBeGreaterThanOrEqual(0);
+    expect(setupSummaryIndex).toBeGreaterThan(detectScriptIndex);
     expect(setupSummaryIndex).toBeLessThan(publishAutoIndex);
     expect(workflow.match(/--require-package-exists/g)?.length).toBe(2);
   });

@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
-import http from "node:http";
-import https from "node:https";
 import path from "node:path";
 
 import { RUNTIME_PACKAGES, readJson } from "./lib/runtime-package-specs.mjs";
+import {
+  decideRegistryAction,
+  parsePositiveInteger,
+  queryPackageRegistry,
+  readRegistryFixture,
+} from "./lib/npm-registry-status.mjs";
 
 const TRUSTED_PUBLISHER = {
   repository: "TingRuDeng/forgeflow-platform",
@@ -32,123 +36,39 @@ function parseArgs(argv) {
   return parsed;
 }
 
-function parsePositiveInteger(value, fallback) {
-  const parsed = Number(value ?? fallback);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function readFixture(filePath) {
-  if (!filePath) {
-    return null;
-  }
-  return readJson(path.resolve(filePath));
-}
-
-function requestRegistryDocument(packageName, options) {
-  const url = new URL(encodeURIComponent(packageName), options.registryUrl);
-  const client = url.protocol === "http:" ? http : https;
-  return new Promise((resolve) => {
-    const request = client.get(url, { headers: { Accept: "application/json" } }, (response) => {
-      const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
-      response.on("end", () => {
-        const body = Buffer.concat(chunks).toString("utf8");
-        resolve(parseRegistryResponse(packageName, response.statusCode, body));
-      });
-    });
-    request.setTimeout(options.timeoutMs, () => {
-      request.destroy(new Error(`${packageName} registry 查询超时`));
-    });
-    request.on("error", (error) => {
-      resolve({ status: "unknown", error: error.message });
-    });
-  });
-}
-
-function parseRegistryResponse(packageName, statusCode, body) {
-  if (statusCode === 404) {
-    return { status: "missing", version: "", versions: {} };
-  }
-  if (!statusCode || statusCode < 200 || statusCode >= 300) {
-    return { status: "unknown", version: "", error: `${packageName} registry HTTP ${statusCode}` };
-  }
-  try {
-    const parsed = JSON.parse(body);
-    return {
-      status: "published",
-      version: parsed["dist-tags"]?.latest ?? "",
-      versions: parsed.versions ?? {},
-    };
-  } catch (error) {
-    return { status: "unknown", version: "", error: `registry JSON 解析失败：${error.message}` };
-  }
-}
-
-async function queryPackage(spec, wantedVersion, options) {
-  const fixturePackage = options.fixture?.packages?.[spec.name];
-  const packageStatus = fixturePackage
-    ? readFixturePackage(fixturePackage)
-    : await requestRegistryDocument(spec.name, options);
-  const versionStatus = decideVersionStatus(packageStatus, wantedVersion);
-  return { packageStatus, versionStatus };
-}
-
-function readFixturePackage(fixturePackage) {
-  if (fixturePackage.status === "missing") {
-    return { status: "missing", version: "", versions: {} };
-  }
-  if (fixturePackage.status === "unknown") {
-    return { status: "unknown", version: "", error: fixturePackage.error || "fixture unknown" };
-  }
-  const versions = Object.fromEntries((fixturePackage.versions || []).map((version) => [version, {}]));
-  return { status: "published", version: fixturePackage.latest || fixturePackage.versions?.[0] || "", versions };
-}
-
-function decideVersionStatus(packageStatus, wantedVersion) {
-  if (packageStatus.status !== "published") {
-    return { status: "not_checked", version: "" };
-  }
-  if (packageStatus.versions?.[wantedVersion]) {
-    return { status: "published", version: wantedVersion };
-  }
-  return { status: "missing", version: "" };
-}
-
 async function readRuntimeRows(rootDir, options) {
   const rows = [];
   for (const spec of RUNTIME_PACKAGES) {
     const packageJson = readJson(path.join(rootDir, spec.dir, "package.json"));
-    const registry = await queryPackage(spec, packageJson.version, options);
+    const registry = await queryPackageRegistry({ name: spec.name, version: packageJson.version }, options);
     rows.push({ spec, version: packageJson.version, ...registry });
   }
   return rows;
 }
 
 function decideAction(row) {
-  if (row.packageStatus.status === "missing") {
-    return "setup_required";
-  }
-  if (row.packageStatus.status === "unknown") {
-    return "registry_unknown";
-  }
-  if (row.versionStatus.status === "missing") {
-    return "publish_version";
-  }
-  if (row.versionStatus.status === "unknown") {
-    return "registry_unknown";
-  }
-  if (row.versionStatus.status === "published") {
-    return "up_to_date";
-  }
-  return "not_checked";
+  return decideRegistryAction(row.packageStatus, row.versionStatus);
 }
 
 async function buildReport(rootDir, options) {
   const rows = (await readRuntimeRows(rootDir, options)).map((row) => ({
     ...row,
     action: decideAction(row),
-  }));
+  })).map(sanitizeRow);
   return { trustedPublisher: TRUSTED_PUBLISHER, releaseOrder: RUNTIME_PACKAGES.map((spec) => spec.name), rows };
+}
+
+function sanitizeRow(row) {
+  return {
+    ...row,
+    packageStatus: sanitizeStatus(row.packageStatus),
+    versionStatus: sanitizeStatus(row.versionStatus),
+  };
+}
+
+function sanitizeStatus(status) {
+  const { versions, ...rest } = status;
+  return rest;
 }
 
 function printTextReport(report) {
@@ -213,7 +133,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const rootDir = path.resolve(typeof args.root === "string" ? args.root : process.cwd());
   const options = {
-    fixture: readFixture(typeof args["registry-fixture"] === "string" ? args["registry-fixture"] : ""),
+    fixture: readRegistryFixture(typeof args["registry-fixture"] === "string" ? args["registry-fixture"] : ""),
     registryUrl: typeof args["registry-url"] === "string" ? args["registry-url"] : "https://registry.npmjs.org/",
     timeoutMs: parsePositiveInteger(args["registry-timeout-ms"], 15000),
   };
