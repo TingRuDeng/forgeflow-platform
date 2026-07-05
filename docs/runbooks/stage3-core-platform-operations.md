@@ -93,7 +93,7 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - SQLite 仍是真相源
 - shadow 写失败不会改变主链状态机写入结果
 - shadow 写状态会写入 `runtime-state-shadow-status.json`，重启后仍可通过 `/api/dr/status.shadowWrite` 查看；自动 reconciliation 最近状态会写入 `shadow-reconciler-status.json`，可通过 `/api/dr/status.shadowReconciler` 查看
-- Console 首屏 DR 状态面板会展示 `/api/dr/status` 的 shadow write、自动对账、primary cutover evidence、projection、backup 和 read-only / structured reads 摘要；cutover 前不需要单独跳出页面核对这些轻量状态
+- Console 首屏 DR 状态面板会展示 `/api/dr/status` 的 shadow write、自动对账、primary cutover / completion evidence、projection、backup 和 read-only / structured reads 摘要；cutover 前后不需要单独跳出页面核对这些轻量状态
 - drift / shadow 故障应通过告警和对账处理，而不是自动把任务判失败
 
 推荐巡检：
@@ -102,7 +102,7 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - Postgres shadow 已配置
 - `/api/dr/status.shadowWrite` 最近状态为 `ok`，或失败原因已被人工确认
 - `/api/dr/status.shadowReconciler` 最近状态为 `ok`，且 `failedRunCount` 为 0；若为 `unknown`，必须先启动 `pnpm verify:shadow-drift:reconciler` 或 `pnpm verify:shadow-cutover:reconciler` 生成状态证据
-- `/api/dr/status.primaryCutover.status` 在切换窗口前应为 `ready`；如果是 `unknown`，说明 approval / ready evidence 还未归档；如果是 `blocked`，说明 revocation marker 仍在；如果是 `failed`，说明 evidence 文件损坏或不匹配
+- `/api/dr/status.primaryCutover.status` 在切换窗口前应为 `ready`，切换后应为 `completed`；如果是 `unknown`，说明 approval / ready evidence 还未归档；如果是 `blocked`，说明 revocation marker 仍在；如果是 `failed`，说明 evidence 文件损坏、不匹配或 Postgres primary snapshot 不可读
 - `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher` 返回 `ok=true`
 - `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --max-mismatches 0 --max-delta 0` 可输出 `alert.level`；release / rollout gate 也可通过 `DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES` 与 `DISPATCHER_SHADOW_DRIFT_MAX_DELTA` 注入同一阈值
 - 如果 drift 来自 shadow projection / queue 落后，operator 可执行 `node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --reconcile` 主动重放 SQLite truth 到 shadow 后复查
@@ -115,10 +115,11 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - 切换窗口开始前必须执行 `pnpm verify:shadow-cutover:approval`，该命令会独立校验 approval marker 仍为 `cutover_ready`、归档 evidence SHA-256 未漂移，并确认不存在 `shadow-cutover-revocation.json`
 - 最终切换前必须执行 `pnpm verify:shadow-cutover:ready`，该命令会输出 `strict_cutover_preflight` 与 `approval_evidence` 两个 phase，只有 strict preflight 和 approval evidence 同时通过才返回成功
 - 需要归档最终切换前门禁证据时执行 `pnpm verify:shadow-cutover:ready:evidence`，它会把同一 payload 原子写入 `.forgeflow-dispatcher/shadow-cutover-ready.json`；自定义归档路径可直接调用 `node scripts/verify-shadow-cutover-ready.mjs <stateDir> --output <path>`
+- 切换进程环境到 `RUNTIME_STATE_BACKEND=postgres` 并完成至少一次 dispatcher primary snapshot 写入后，执行 `pnpm verify:shadow-cutover:complete:evidence` 归档 `.forgeflow-dispatcher/shadow-cutover-complete.json`；该命令会复核 ready evidence、primary backend 环境和 Postgres `dispatcher_runtime_state` snapshot 可读性
 - 回滚或撤销生产切换窗口时执行 `pnpm verify:shadow-cutover:revoke`；该命令会把 approval marker 归档为 `shadow-cutover-approval.revoked-*.json`，并写入 `.forgeflow-dispatcher/shadow-cutover-revocation.json`
 - `RUNTIME_STATE_BACKEND=postgres` 现在会在读写 primary snapshot 前校验 `shadow-cutover-approval.json` 与 `shadow-cutover-ready.json`，并重新读取 `evidencePath` 确认当前文件 SHA-256 与 approval 里的 `evidenceSha256` 匹配；ready evidence 必须包含通过的 `strict_cutover_preflight` 和与 approval marker 匹配的 `approval_evidence`。自定义审批文件路径可设置 `DISPATCHER_PRIMARY_CUTOVER_APPROVAL_FILE`，自定义 ready 文件路径可设置 `DISPATCHER_PRIMARY_CUTOVER_READY_FILE`；如果存在 `shadow-cutover-revocation.json`，primary backend 会拒绝连接，直到重新完成 drill evidence、approval 和 ready evidence
 - `DISPATCHER_SHADOW_MODE=primary` 不是独立生产切换开关；只有 `RUNTIME_STATE_BACKEND=postgres` 和 `DISPATCHER_PRIMARY_POSTGRES_URL` 已配置时，它才作为切换后兼容状态通过 drift / cutover 检查。primary backend 未选择时会失败为 `primary_backend_not_selected`
-- `@forgeflow/dispatcher-store-postgres` 已有 primary snapshot 表原语，dispatcher HTTP route 主链与 `/api/query/*` 已通过 async Postgres state path 读写 primary snapshot；仓库内生产切换门禁已收口到 drill evidence、approval marker、ready gate、revocation marker 和 Postgres primary backend guard
+- `@forgeflow/dispatcher-store-postgres` 已有 primary snapshot 表原语，dispatcher HTTP route 主链与 `/api/query/*` 已通过 async Postgres state path 读写 primary snapshot；仓库内生产切换门禁已收口到 drill evidence、approval marker、ready gate、completion evidence、revocation marker 和 Postgres primary backend guard
 - `pnpm verify:stage3` 和 release workflow 会执行 `pnpm verify:shadow-drift`，shadow 配置存在且 drifted 时必须阻断 rollout / release
 - assignment delivery queue 影子计数合理
 
@@ -148,7 +149,7 @@ node scripts/verify-live-dispatcher-dr.mjs
 建议：
 
 - 发布前至少做一次 backup
-- backup / restore 会包含 `runtime-state-shadow-status.json`、`shadow-reconciler-status.json`、`shadow-cutover-drill.json`、`shadow-cutover-approval.json`、`shadow-cutover-ready.json` 和 `shadow-cutover-revocation.json`，确保 shadow 健康状态、reconciler 最近状态、cutover drill / ready evidence、approval marker 与 rollback revocation marker 可随运行时状态恢复
+- backup / restore 会包含 `runtime-state-shadow-status.json`、`shadow-reconciler-status.json`、`shadow-cutover-drill.json`、`shadow-cutover-approval.json`、`shadow-cutover-ready.json`、`shadow-cutover-complete.json` 和 `shadow-cutover-revocation.json`，确保 shadow 健康状态、reconciler 最近状态、cutover drill / ready / completion evidence、approval marker 与 rollback revocation marker 可随运行时状态恢复
 - 每季度跑一次 `verify-stage3-dr`，它能证明源码级 SQLite WAL 备份恢复与 checksum 校验
 - 风险较高的 runtime 发布前跑一次 `verify-live-dispatcher-dr`，它能启动本地 live dispatcher、执行真实 HTTP 写入，并覆盖 SIGKILL 替换恢复、磁盘损坏后恢复和双 stateDir 多节点恢复一致性；它仍不替代真实生产 quorum / fencing / DNS 切流演练
 - 先切 read-only，再做 restore

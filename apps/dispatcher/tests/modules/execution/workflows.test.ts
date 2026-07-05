@@ -101,6 +101,12 @@ describe("workflow quality gates", () => {
     expect(scripts["verify:shadow-cutover:ready:evidence"]).toBe(
       "node scripts/verify-shadow-cutover-ready.mjs .forgeflow-dispatcher --output .forgeflow-dispatcher/shadow-cutover-ready.json",
     );
+    expect(scripts["verify:shadow-cutover:complete"]).toBe(
+      "node scripts/verify-shadow-cutover-complete.mjs .forgeflow-dispatcher",
+    );
+    expect(scripts["verify:shadow-cutover:complete:evidence"]).toBe(
+      "node scripts/verify-shadow-cutover-complete.mjs .forgeflow-dispatcher --output .forgeflow-dispatcher/shadow-cutover-complete.json",
+    );
     expect(scripts["verify:shadow-cutover:revoke"]).toBe(
       "node scripts/revoke-shadow-cutover.mjs .forgeflow-dispatcher --reason operator_rollback",
     );

@@ -1,6 +1,17 @@
 # 当前项目审查修复任务
 
+- [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M78 Review 小结
+
+已新增 `scripts/verify-shadow-cutover-complete.mjs`、`pnpm verify:shadow-cutover:complete` 和 `pnpm verify:shadow-cutover:complete:evidence`。该 post-cutover gate 会复核 final ready evidence、确认 `RUNTIME_STATE_BACKEND=postgres` 与 `DISPATCHER_PRIMARY_POSTGRES_URL` 已选中，并读取 Postgres `dispatcher_runtime_state` primary snapshot；成功后可把 `.forgeflow-dispatcher/shadow-cutover-complete.json` 作为切换完成证据归档。`/api/dr/status.primaryCutover` 现在会读取 completion evidence，证据存在且 primary snapshot phase 通过时从 `ready` 推进到 `completed`；Console DR 状态面板同步展示完成证据和 primary snapshot sequence。源码与 packaged backup / restore 都会保留 `shadow-cutover-complete.json`。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 shadow 自动 reconciliation / production cutover 收口，补齐的是切换后的 completion evidence，不改变 pre-switch approval / ready gate、Postgres primary backend guard、revocation guard 或真实切换开关。安全检查通过，completion 脚本不打印 Postgres URL，只输出 selected/configured、snapshot sequence 和计数摘要；不新增 secret、shell 拼接、mock 成功路径或静默 fallback，Postgres 不可读会显式失败。复杂度检查通过，新增脚本与测试均低于 300 行，触碰文件职责未扩大。Document-refresh: needed，原因：新增 cutover completion 命令、DR status completed 状态和备份范围，已同步 README、API endpoints、docs README、Stage 3 runbook、backup / restore runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state-primary-cutover.test.ts tests/modules/server/dispatcher-server-dr-status.test.ts tests/modules/execution/shadow-cutover-complete.test.ts tests/modules/execution/workflows.test.ts --maxWorkers=1`，4 个测试文件、13 个测试通过；`CI=true pnpm --filter console exec vitest run src/components/__tests__/DrStatusPanel.test.tsx src/__tests__/App.test.tsx --maxWorkers=1`，2 个测试文件、7 个测试通过；`CI=true pnpm --filter @tingrudeng/forgeflow-dispatcher exec vitest run tests/backup.test.ts --maxWorkers=1`，1 个测试通过；`node --check scripts/verify-shadow-cutover-complete.mjs` 通过。
+
+剩余风险：completion evidence 能证明已选中 Postgres primary backend 且 primary snapshot 可读；真实生产 cutover 仍需要 operator 在生产环境完成进程 / 流量切换、外部 Postgres 运维、备份保留和回滚演练。
 - [x] M76 串行：让 Postgres primary backend 强制校验 shadow cutover ready evidence。
 
 ## M77 Review 小结

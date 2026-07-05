@@ -8,10 +8,11 @@ const PRIMARY_CUTOVER_APPROVAL_FILE_ENV = "DISPATCHER_PRIMARY_CUTOVER_APPROVAL_F
 const PRIMARY_CUTOVER_READY_FILE_ENV = "DISPATCHER_PRIMARY_CUTOVER_READY_FILE";
 const DEFAULT_APPROVAL_FILE = "shadow-cutover-approval.json";
 const DEFAULT_READY_FILE = "shadow-cutover-ready.json";
+const DEFAULT_COMPLETE_FILE = "shadow-cutover-complete.json";
 const DEFAULT_REVOCATION_FILE = "shadow-cutover-revocation.json";
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/i;
 
-type CutoverStatus = "unknown" | "ready" | "blocked" | "failed";
+type CutoverStatus = "unknown" | "ready" | "completed" | "blocked" | "failed";
 
 type CutoverFileStatus = {
   exists: boolean;
@@ -29,6 +30,12 @@ type CutoverReadyStatus = CutoverFileStatus & {
   updatedAt: string | null;
 };
 
+type CutoverCompleteStatus = CutoverFileStatus & {
+  ok: boolean | null;
+  completedAt: string | null;
+  sequence: number | null;
+};
+
 type CutoverRevocationStatus = CutoverFileStatus & {
   revokedAt: string | null;
   reason: string | null;
@@ -42,6 +49,7 @@ export type RuntimeStatePrimaryCutoverStatus = {
   };
   approval: CutoverApprovalStatus;
   ready: CutoverReadyStatus;
+  complete: CutoverCompleteStatus;
   revocation: CutoverRevocationStatus;
   lastError: string | null;
 };
@@ -91,6 +99,14 @@ function phasePayload(payload: Record<string, unknown>, name: string): Record<st
     throw new Error(`${name} phase must pass`);
   }
   return isRecord(phase.payload) ? phase.payload : {};
+}
+
+function requiredPhase(payload: Record<string, unknown>, name: string): Record<string, unknown> {
+  const phase = findPhase(payload, name);
+  if (!phase || phase.ok !== true) {
+    throw new Error(`${name} phase must pass`);
+  }
+  return phase;
 }
 
 function resolveEvidencePath(approvalPath: string, evidencePath: unknown): string {
@@ -147,6 +163,30 @@ function validateReady(readyPath: string, approval: CutoverApprovalStatus): Cuto
   return { exists: true, path: path.resolve(readyPath), ok: true, updatedAt: fileUpdatedAt(readyPath) };
 }
 
+function validateComplete(completePath: string): CutoverCompleteStatus {
+  const complete = readJsonObject(completePath);
+  if (complete.ok !== true) {
+    throw new Error("cutover completion evidence must contain ok=true");
+  }
+  requiredPhase(complete, "ready_evidence");
+  requiredPhase(complete, "primary_backend");
+  const snapshot = requiredPhase(complete, "primary_snapshot");
+  const payload = isRecord(snapshot.payload) ? snapshot.payload : {};
+  if (payload.connected !== true || payload.hasSnapshot !== true) {
+    throw new Error("cutover completion primary_snapshot must be connected and contain a snapshot");
+  }
+  const sequence = typeof payload.sequence === "number" && Number.isFinite(payload.sequence)
+    ? payload.sequence
+    : null;
+  return {
+    exists: true,
+    path: path.resolve(completePath),
+    ok: true,
+    completedAt: asNullableString(complete.completedAt),
+    sequence,
+  };
+}
+
 function readRevocation(revocationPath: string): CutoverRevocationStatus {
   if (!fs.existsSync(revocationPath)) {
     return { exists: false, path: path.resolve(revocationPath), revokedAt: null, reason: null };
@@ -167,9 +207,11 @@ function readRevocation(revocationPath: string): CutoverRevocationStatus {
 export function readRuntimeStatePrimaryCutoverStatus(stateDir: string): RuntimeStatePrimaryCutoverStatus {
   const approvalPath = resolvedFilePath(stateDir, PRIMARY_CUTOVER_APPROVAL_FILE_ENV, DEFAULT_APPROVAL_FILE);
   const readyPath = resolvedFilePath(stateDir, PRIMARY_CUTOVER_READY_FILE_ENV, DEFAULT_READY_FILE);
+  const completePath = path.join(stateDir, DEFAULT_COMPLETE_FILE);
   const revocation = readRevocation(path.join(stateDir, DEFAULT_REVOCATION_FILE));
   const missingApproval = !fs.existsSync(approvalPath);
   const missingReady = !fs.existsSync(readyPath);
+  const missingComplete = !fs.existsSync(completePath);
   const base = {
     primaryBackend: {
       selected: process.env[RUNTIME_STATE_BACKEND_ENV] === "postgres",
@@ -183,6 +225,7 @@ export function readRuntimeStatePrimaryCutoverStatus(stateDir: string): RuntimeS
       evidenceSha256: null,
     },
     ready: { exists: !missingReady, path: path.resolve(readyPath), ok: null, updatedAt: null },
+    complete: { exists: !missingComplete, path: path.resolve(completePath), ok: null, completedAt: null, sequence: null },
     revocation,
   };
   if (revocation.exists) {
@@ -195,7 +238,11 @@ export function readRuntimeStatePrimaryCutoverStatus(stateDir: string): RuntimeS
   try {
     const approval = validateApproval(approvalPath);
     const ready = validateReady(readyPath, approval);
-    return { ...base, status: "ready", approval, ready, lastError: null };
+    if (missingComplete) {
+      return { ...base, status: "ready", approval, ready, lastError: null };
+    }
+    const complete = validateComplete(completePath);
+    return { ...base, status: "completed", approval, ready, complete, lastError: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { ...base, status: "failed", lastError: message };
