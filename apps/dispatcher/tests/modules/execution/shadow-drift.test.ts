@@ -10,6 +10,7 @@ const repoRoot = path.resolve(
   "../../../../../",
 );
 const checkShadowDriftScriptPath = path.join(repoRoot, "scripts/check-shadow-drift.mjs");
+const cutoverDrillScriptPath = path.join(repoRoot, "scripts/verify-shadow-cutover-drill.mjs");
 
 describe("shadow drift verification", () => {
   it("reports not_configured when shadow Postgres is disabled", () => {
@@ -220,4 +221,34 @@ describe("shadow drift verification", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES must be a non-negative number");
   }, 30_000);
+
+  it("runs the production cutover drill as drift, reconcile, and strict preflight phases", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-cutover-drill-"));
+    const result = spawnSync("node", [cutoverDrillScriptPath, stateDir], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 90_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "disabled",
+        DISPATCHER_QUEUE_SHADOW_MODE: "disabled",
+        DISPATCHER_POSTGRES_URL: "",
+      },
+    });
+
+    expect(result.status).toBe(2);
+    const payload = JSON.parse(result.stdout);
+    expect(payload.ok).toBe(false);
+    expect(payload.phases.map((phase: { name: string }) => phase.name)).toEqual([
+      "drift_gate",
+      "reconciliation",
+      "cutover_preflight",
+    ]);
+    expect(payload.phases[1].payload.reconciliation).toEqual({
+      requested: true,
+      attempted: false,
+      reason: "shadow_not_configured",
+    });
+    expect(payload.phases[2].payload.cutover.reason).toBe("shadow_not_configured");
+  }, 90_000);
 });

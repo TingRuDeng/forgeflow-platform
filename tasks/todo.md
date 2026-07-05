@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M32 串行：新增 shadow production cutover drill 编排入口。
+- [x] M32 串行：运行最小充分验证并补充 review 小结。
+
+## M32 Review 小结
+
+已新增 `scripts/verify-shadow-cutover-drill.mjs` 和 `pnpm verify:shadow-cutover:drill`，把生产 cutover 演练收敛为三阶段结构化输出：drift gate、`--reconcile --record-alert` 对账、strict `--require-configured --require-primary-backend --max-mismatches 0 --max-delta 0` preflight。未配置 shadow / primary backend 时脚本会 fail-closed，并保留每个 phase 的 `statusCode` 和 payload，方便变更窗口前归档证据。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 shadow production cutover drill 的命令化编排，没有改变默认只读 drift gate 或隐式切主；安全检查通过，未新增 secret、外部网络副作用、mock 成功路径或静默 fallback，脚本在 shadow / primary 未配置时 fail-closed；复杂度检查通过，新增脚本 105 行，函数均低于 50 行，测试文件 254 行；Document-refresh: needed，原因：新增 production cutover drill 命令和 Stage 3 运行边界，已同步 README、docs/README、API endpoints、runtime-state query 契约、Stage 3 runbook、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `shadow-drift.test.ts` 先因缺少脚本失败；GREEN 后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts` 通过，9 个测试通过；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/shadow-drift.test.ts tests/modules/execution/workflows.test.ts` 通过，14 个测试通过；`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：该 drill 验证 drift / reconcile / strict preflight 编排，不替代真实生产 Postgres 连通性、外部备份恢复、DNS 切流、回滚和变更窗口人工确认。
+
 - [x] M31 串行：把 HITL resume 升级为 schema 驱动表单并保留 JSON fallback。
 - [x] M31 串行：运行最小充分验证并补充 review 小结。
 

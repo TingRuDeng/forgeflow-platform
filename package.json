@@ -17,6 +17,7 @@
     "verify:shadow-drift": "node scripts/check-shadow-drift.mjs .forgeflow-dispatcher",
     "verify:shadow-drift:reconcile": "node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --reconcile --record-alert",
     "verify:shadow-cutover": "node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --require-configured --require-primary-backend --max-mismatches 0 --max-delta 0",
+    "verify:shadow-cutover:drill": "node scripts/verify-shadow-cutover-drill.mjs .forgeflow-dispatcher",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   },
