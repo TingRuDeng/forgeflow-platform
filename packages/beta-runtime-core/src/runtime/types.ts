@@ -1,5 +1,6 @@
 export interface TaskAssignment {
   taskId: string;
+  workerId?: string | null;
   branchName: string;
   defaultBranch: string;
   pool: string;
@@ -42,6 +43,7 @@ export interface WorkerResult {
       command: string;
       exitCode: number;
       output: string;
+      timedOut?: boolean;
     }>;
   };
 }

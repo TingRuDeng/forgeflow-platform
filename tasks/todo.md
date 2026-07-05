@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M13 串行：下沉 `run-worker-assignment` 共享执行核心，减少 root / codex / gemini runtime 重复实现。
+- [x] M13 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M13 Review 小结
+
+已把 root `scripts/run-worker-assignment.ts`、`@tingrudeng/codex-beta-runtime` 和 `@tingrudeng/gemini-beta-runtime` 的 assignment 执行重复实现下沉到 `packages/beta-runtime-core/src/runtime/run-worker-assignment.ts`、`run-worker-assignment-cli.ts` 与 `run-worker-assignment-types.ts`。共享核心现在统一负责 prompt 拼接、assignment 读取、verification shell / nvm 包装、执行 timeout、workspace dependency symlink、worker-result / raw output / verification 文件写入；root 脚本只保留 dispatcher runtime factory bootstrap，Codex/Gemini 包只保留 provider CLI launch wrapper。新增共享 runner 测试覆盖 dry-run 与真实 launch / verification / result 写入，provider wrapper 测试锁定 Codex/Gemini launch argv。
+
+Review Gate：finished。Spec 符合度通过，完成本轮 runtime executor / launch 去重的第一批可合并改动；安全检查通过，未新增 secret、凭据硬编码、网络副作用或无依据静默 fallback；复杂度检查通过，拆分后新增/修改的 runner 文件均低于 300 行；Document-refresh: needed，原因：worker runtime 去重状态发生变化，已同步 `docs/TECH_DEBT.md`。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @tingrudeng/beta-runtime-core test`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core typecheck`、`CI=true pnpm --filter @tingrudeng/codex-beta-runtime test`、`CI=true pnpm --filter @tingrudeng/codex-beta-runtime typecheck`、`CI=true pnpm --filter @tingrudeng/gemini-beta-runtime test`、`CI=true pnpm --filter @tingrudeng/gemini-beta-runtime typecheck`、`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/run-worker-assignment.test.ts`、`CI=true pnpm exec tsc -p scripts/tsconfig.json`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`CI=true pnpm typecheck`、`git diff --check`。
+
+剩余风险：本轮收敛的是 assignment runner、verification 和 provider launch wrapper；`scripts/lib/worker-daemon.ts` 的 live executor 生命周期仍包含 worktree、child worker execution、commit/push、PR 创建、失败 fallback result 和 cleanup，后续继续下沉时需要单独规划。
+
 - [x] M12 串行：补齐 task-level terminationPolicy timeout 字段的运行时接入。
 - [x] M12 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 
