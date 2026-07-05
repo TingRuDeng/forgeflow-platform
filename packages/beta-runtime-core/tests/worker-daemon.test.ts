@@ -173,6 +173,7 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
       expect(source).not.toContain("client.startTask");
       expect(source).not.toContain("processTaskAssignment({");
     });
+
   });
 
   for (const testCase of providerCases) {

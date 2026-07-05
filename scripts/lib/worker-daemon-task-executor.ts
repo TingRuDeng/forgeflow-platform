@@ -17,6 +17,10 @@ import {
 } from "./worker-daemon-types.js";
 
 interface BetaRuntimeCoreBridge {
+  resolveManagedWorkerTaskRetryPolicy: (env?: NodeJS.ProcessEnv) => {
+    maxFailedResultRetries: number;
+    failedResultRetryDelayMs: number;
+  };
   executeManagedWorkerTask: (input: {
     client: DispatcherClient;
     packageRoot: string;
@@ -70,19 +74,8 @@ interface BetaRuntimeCoreBridge {
   }) => Promise<void>;
 }
 
-const SUBMIT_RESULT_MAX_RETRIES = 3;
-const SUBMIT_RESULT_RETRY_DELAY_MS = 2_000;
-
 async function bootstrapBetaRuntimeCore(): Promise<BetaRuntimeCoreBridge> {
   return importWorkerDaemonRuntime<BetaRuntimeCoreBridge>();
-}
-
-function getSubmitResultMaxRetries(): number {
-  return Number(process.env.WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES || SUBMIT_RESULT_MAX_RETRIES);
-}
-
-function getSubmitResultRetryDelayMs(): number {
-  return Number(process.env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS || SUBMIT_RESULT_RETRY_DELAY_MS);
 }
 
 export function buildClaimedTaskPayload(task: unknown, assignment: unknown, assigned: unknown): TaskPayload {
@@ -102,6 +95,7 @@ export async function executeClaimedTask(input: ProcessTaskAssignmentInput): Pro
 }> {
   const betaRuntime = await bootstrapBetaRuntimeCore();
   const taskId = input.payload.task.id;
+  const retryPolicy = betaRuntime.resolveManagedWorkerTaskRetryPolicy(process.env);
   return betaRuntime.executeManagedWorkerTask({
     client: input.client,
     packageRoot: input.repoRoot,
@@ -117,8 +111,7 @@ export async function executeClaimedTask(input: ProcessTaskAssignmentInput): Pro
     runtimeScriptCwd: input.repoRoot,
     reportEvent: (event) => reportWorkerEventBestEffort(input.client, input.workerId, event),
     onCleanupError: (cleanupError) => logCleanupError(taskId, cleanupError),
-    maxFailedResultRetries: getSubmitResultMaxRetries(),
-    failedResultRetryDelayMs: getSubmitResultRetryDelayMs(),
+    ...retryPolicy,
     callbacks: buildManagedTaskCallbacks(input),
     failedResultCallbacks: buildFailedResultCallbacks(input, taskId),
   });
@@ -127,12 +120,13 @@ export async function executeClaimedTask(input: ProcessTaskAssignmentInput): Pro
 export async function submitFailedClaimedTaskResult(input: ProcessTaskAssignmentInput, errorMessage: string): Promise<void> {
   const taskId = input.payload.task.id;
   const betaRuntime = await bootstrapBetaRuntimeCore();
+  const retryPolicy = betaRuntime.resolveManagedWorkerTaskRetryPolicy(process.env);
   await betaRuntime.submitFailedWorkerResult({
     input,
     taskId,
     error: errorMessage,
-    maxRetries: getSubmitResultMaxRetries(),
-    retryDelayMs: getSubmitResultRetryDelayMs(),
+    maxRetries: retryPolicy.maxFailedResultRetries,
+    retryDelayMs: retryPolicy.failedResultRetryDelayMs,
     ...buildFailedResultCallbacks(input, taskId),
   });
 }

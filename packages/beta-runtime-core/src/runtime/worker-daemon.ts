@@ -10,7 +10,12 @@ import type { DispatcherClient, PullRequestInfo, TaskPayload } from "./types.js"
 
 export { createDispatcherClient } from "./dispatcher-client.js";
 export { buildWorkerProtocolEnvelope, executeLiveWorkerTask, submitFailedWorkerResult } from "./task-processor.js";
-export { executeManagedWorkerTask } from "./managed-task-processor.js";
+export {
+  DEFAULT_SUBMIT_RESULT_MAX_RETRIES,
+  DEFAULT_SUBMIT_RESULT_RETRY_DELAY_MS,
+  executeManagedWorkerTask,
+  resolveManagedWorkerTaskRetryPolicy,
+} from "./managed-task-processor.js";
 export { runSharedWorkerDaemonCycle } from "./worker-daemon-cycle.js";
 export type { SharedWorkerDaemonCycleInput, SharedWorkerDaemonCycleResult, TaskExecutor, TaskExecutionResult } from "./worker-daemon-cycle.js";
 export type { DispatcherClient, PullRequestInfo, TaskAssignment, TaskInfo, TaskPayload, WorkerResult } from "./types.js";

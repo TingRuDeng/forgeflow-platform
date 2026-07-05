@@ -38,6 +38,21 @@ describe("worker daemon thin adapter", () => {
     expect(hookSource).toContain("buildFailedResultCallbacks");
   });
 
+  it("keeps submit-result retry policy in beta-runtime-core", () => {
+    const taskExecutorSource = fs.readFileSync(workerDaemonTaskExecutorSourcePath, "utf8");
+    const runtimeWorkerDaemonSource = fs.readFileSync(path.join(repoRoot, "packages/beta-runtime-core/src/runtime/worker-daemon.ts"), "utf8");
+    const managedTaskSource = fs.readFileSync(path.join(repoRoot, "packages/beta-runtime-core/src/runtime/managed-task-processor.ts"), "utf8");
+
+    expect(taskExecutorSource).not.toContain("const SUBMIT_RESULT_MAX_RETRIES");
+    expect(taskExecutorSource).not.toContain("const SUBMIT_RESULT_RETRY_DELAY_MS");
+    expect(taskExecutorSource).not.toContain("getSubmitResultMaxRetries");
+    expect(taskExecutorSource).not.toContain("getSubmitResultRetryDelayMs");
+    expect(taskExecutorSource).toContain("resolveManagedWorkerTaskRetryPolicy");
+    expect(runtimeWorkerDaemonSource).toContain("resolveManagedWorkerTaskRetryPolicy");
+    expect(managedTaskSource).toContain("DEFAULT_SUBMIT_RESULT_MAX_RETRIES");
+    expect(managedTaskSource).toContain("DEFAULT_SUBMIT_RESULT_RETRY_DELAY_MS");
+  });
+
   it("keeps dist bootstrap logic inside the explicit runtime bootstrap adapter", () => {
     const workerDaemonSource = fs.readFileSync(workerDaemonSourcePath, "utf8");
     const runWorkerDaemonSource = fs.readFileSync(runWorkerDaemonSourcePath, "utf8");
