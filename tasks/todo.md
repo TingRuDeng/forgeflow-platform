@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M14 串行：补齐结构化可回放 trajectory schema、持久化和 Console 展示。
+- [x] M14 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M14 Review 小结
+
+已把 ArtifactBundle 的 trajectory 从可选 refs / retainedContent 字符串提升为结构化 `artifact-trajectory/v1` 字段，step 支持 `sequence`、`phase`、`action`、`observation`、`status`、`command`、`exitCode` 和 `artifactRef`。`packages/result-contracts` 与 `packages/worker-protocol` 已同步 schema；dispatcher 在 worker 未显式提交 trajectory 时，会根据 verification commands 生成默认可回放步骤；artifact store 会把结构化 trajectory 写入 `trajectory.json` 并更新 refs；SQLite projection 新增 `trajectory_json` roundtrip；Console 任务详情新增“轨迹 / Trajectory”tab，按步骤展示 action、observation、status 和命令证据。
+
+Review Gate：finished。Spec 符合度通过，覆盖了结构化 schema、持久化、默认生成和 Console 展示；安全检查通过，未新增 secret、外部网络调用、路径穿越入口或静默 fallback；复杂度检查通过，`TaskTimeline.tsx` 仍低于 300 行，新增 schema / artifact store 改动保持局部；Document-refresh: needed，原因：ArtifactBundle 字段、SQLite projection、Console 展示和 API 描述发生变化，已同步 `ARTIFACT_BUNDLE_V1.md`、`API_ENDPOINTS.md`、`DATABASE_SCHEMA.md`、`README.md` 与 `TECH_DEBT.md`。结论：通过。
+
+验证已通过：RED 阶段确认 `@forgeflow/result-contracts`、`@forgeflow/worker-protocol`、dispatcher artifact / SQLite、Console 测试均失败；GREEN 后通过 `CI=true pnpm --filter @forgeflow/result-contracts test`、`CI=true pnpm --filter @forgeflow/worker-protocol test`、`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state.test.ts tests/modules/server/runtime-state-sqlite.test.ts tests/modules/server/artifact-store.test.ts`、`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx`、`CI=true pnpm --filter @forgeflow/result-contracts typecheck`、`CI=true pnpm --filter @forgeflow/worker-protocol typecheck`、`CI=true pnpm --filter @forgeflow/dispatcher typecheck`、`CI=true pnpm --filter console build`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`CI=true pnpm typecheck`、`git diff --check`。
+
+剩余风险：本轮提供的是 attempt 级结构化可回放轨迹，默认生成来源是 verification commands；如果后续要达到完整 thought / action / observation 原始流，需要各 worker runtime 在执行过程中主动产出更细粒度 step。
+
 - [x] M13 串行：下沉 `run-worker-assignment` 共享执行核心，减少 root / codex / gemini runtime 重复实现。
 - [x] M13 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 

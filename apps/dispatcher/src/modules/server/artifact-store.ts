@@ -80,7 +80,9 @@ function retainedEntries(bundle: ArtifactBundle): Array<[RetainedContentKey, str
   const content = bundle.retainedContent ?? {};
   return (Object.keys(RETAINED_FILE_NAMES) as RetainedContentKey[])
     .flatMap((key) => {
-      const value = content[key];
+      const value = key === "trajectory" && bundle.trajectory
+        ? JSON.stringify(bundle.trajectory, null, 2)
+        : content[key];
       return typeof value === "string" && value.length > 0 ? [[key, value]] : [];
     });
 }

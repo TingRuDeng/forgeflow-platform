@@ -1102,6 +1102,24 @@ function normalizeArtifactChangedFiles(changedFiles: string[] | undefined): Arti
   }));
 }
 
+function buildWorkerResultTrajectory(result: WorkerResult): ArtifactBundle["trajectory"] | undefined {
+  const steps = result.verification.commands.map((command, index) => ({
+    sequence: index + 1,
+    phase: "verification" as const,
+    action: command.command,
+    observation: command.output,
+    status: command.exitCode === 0 ? "succeeded" as const : "failed" as const,
+    exitCode: command.exitCode,
+  }));
+  if (steps.length === 0) {
+    return undefined;
+  }
+  return {
+    schemaVersion: "artifact-trajectory/v1",
+    steps,
+  };
+}
+
 function buildArtifactBundle(input: {
   task: Task;
   attempt: TaskAttempt;
@@ -1122,6 +1140,7 @@ function buildArtifactBundle(input: {
       structuredReport: `artifact://${input.attempt.attemptId}/result.json`,
     },
     ...rawBundle,
+    trajectory: rawBundle?.trajectory ?? buildWorkerResultTrajectory(input.result),
     bundleId: rawBundle?.bundleId ?? `${input.attempt.attemptId}:artifact-bundle`,
     summary: rawBundle?.summary ?? input.result.output,
     branch: rawBundle?.branch ?? input.task.branchName,

@@ -268,6 +268,26 @@ export const ArtifactChangedFileSchema = z.object({
   deletions: z.number().int().nonnegative().optional(),
 });
 
+export const ArtifactTrajectoryStepSchema = z.object({
+  stepId: z.string().optional(),
+  sequence: z.number().int().nonnegative(),
+  phase: z.enum(["preflight", "action", "observation", "verification", "result", "cleanup"]),
+  action: NonEmptyStringSchema,
+  observation: z.string().optional(),
+  status: z.enum(["pending", "running", "succeeded", "failed", "skipped", "unknown"]),
+  startedAt: z.string().optional(),
+  endedAt: z.string().optional(),
+  command: z.string().optional(),
+  cwd: z.string().optional(),
+  exitCode: z.number().int().optional(),
+  artifactRef: z.string().optional(),
+});
+
+export const ArtifactTrajectorySchema = z.object({
+  schemaVersion: z.literal("artifact-trajectory/v1"),
+  steps: z.array(ArtifactTrajectoryStepSchema).default([]),
+});
+
 export const ArtifactBundleSchema = z.object({
   bundleId: z.string().optional(),
   taskId: NonEmptyStringSchema,
@@ -287,6 +307,7 @@ export const ArtifactBundleSchema = z.object({
     structuredReport: z.string().optional(),
     trajectory: z.string().optional(),
   }),
+  trajectory: ArtifactTrajectorySchema.optional(),
   testResults: z.array(z.object({
     name: NonEmptyStringSchema,
     status: z.enum(["passed", "failed", "skipped", "unknown"]),
@@ -327,5 +348,7 @@ export type RuntimeLeaseState = z.infer<typeof RuntimeLeaseStateSchema>;
 export type RuntimeLease = z.infer<typeof RuntimeLeaseSchema>;
 export type RuntimeEvent = z.infer<typeof RuntimeEventSchema>;
 export type ArtifactChangedFile = z.infer<typeof ArtifactChangedFileSchema>;
+export type ArtifactTrajectoryStep = z.infer<typeof ArtifactTrajectoryStepSchema>;
+export type ArtifactTrajectory = z.infer<typeof ArtifactTrajectorySchema>;
 export type ArtifactBundle = z.infer<typeof ArtifactBundleSchema>;
 export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;

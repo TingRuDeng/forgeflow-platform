@@ -120,6 +120,30 @@ describe("ArtifactBundleSchema", () => {
     expect(bundle.refs.trajectory).toBe("artifact://attempt-1/trajectory.json");
   });
 
+  it("accepts structured replayable trajectory steps", () => {
+    const bundle = ArtifactBundleSchema.parse({
+      schemaVersion: "artifact-bundle/v1",
+      taskId: "task-1",
+      attemptId: "attempt-1",
+      changedFiles: [],
+      refs: {},
+      trajectory: {
+        schemaVersion: "artifact-trajectory/v1",
+        steps: [
+          {
+            sequence: 1,
+            phase: "action",
+            action: "edit file",
+            observation: "src/index.ts updated",
+            status: "succeeded",
+          },
+        ],
+      },
+    });
+
+    expect(bundle.trajectory?.steps[0]?.action).toBe("edit file");
+  });
+
   it("rejects artifact bundles without attempt ownership", () => {
     const result = ArtifactBundleSchema.safeParse({
       schemaVersion: "artifact-bundle/v1",

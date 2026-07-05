@@ -366,12 +366,12 @@ Current role of those tables:
 - they are dispatcher-owned structured projections
 - they support `/api/query/*`, structured reads, and projection health checks
 - `task_attempts` 保存 vNext synthetic attempt projection，authoritative truth 仍以 snapshot 的 `taskAttempts[]` 为准
-- `artifact_bundles` 保存 vNext ArtifactBundle 摘要、refs projection 和可选 retained diff / log / test result / trajectory 正文片段
+- `artifact_bundles` 保存 vNext ArtifactBundle 摘要、refs projection、`trajectory_json` 和可选 retained diff / log / test result / trajectory 正文片段
 - they do not replace `snapshots` as the runtime truth source
 
 Artifact 文件正文不进入 SQLite 表：
 
-- dispatcher 会把 `retainedContent.diff`、`retainedContent.logs`、`retainedContent.testResults`、`retainedContent.trajectory` 写入 `${stateDir}/artifacts/<bundle-dir>/`
+- dispatcher 会把结构化 `trajectory` 或 `retainedContent.trajectory`，以及 `retainedContent.diff`、`retainedContent.logs`、`retainedContent.testResults` 写入 `${stateDir}/artifacts/<bundle-dir>/`
 - 每个 bundle 目录包含 `manifest.json`，用于登记可读取的文件名、ref 和字节数
 - 本地 artifact store 的 bundle retention 由 `DISPATCHER_ARTIFACT_RETENTION_MAX_BUNDLES` 控制，默认 100
 - SQLite `artifact_bundles.refs_json` 保存指向这些文件的 `artifact://<bundleId>/<fileName>` 引用

@@ -184,6 +184,7 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
       pull_request_url TEXT,
       changed_files_json TEXT NOT NULL,
       refs_json TEXT NOT NULL,
+      trajectory_json TEXT,
       retained_content_json TEXT,
       test_results_json TEXT,
       risk_notes_json TEXT NOT NULL,
@@ -270,6 +271,7 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
       metadata_json TEXT
     );
   `);
+  ensureColumn(db, "artifact_bundles", "trajectory_json", "TEXT");
   ensureColumn(db, "artifact_bundles", "retained_content_json", "TEXT");
   ensureColumn(db, "reviews", "risk_assessment_json", "TEXT");
   ensureColumn(db, "tasks", "termination_policy_json", "TEXT");
@@ -511,8 +513,8 @@ function rewriteStructuredProjection(
     const insertArtifactBundle = db.prepare(`
       INSERT INTO artifact_bundles (
         bundle_id, task_id, attempt_id, schema_version, summary, branch, commit_sha, pull_request_url,
-        changed_files_json, refs_json, retained_content_json, test_results_json, risk_notes_json, next_actions_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        changed_files_json, refs_json, trajectory_json, retained_content_json, test_results_json, risk_notes_json, next_actions_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bundle of state.artifactBundles ?? []) {
       insertArtifactBundle.run(
@@ -526,6 +528,7 @@ function rewriteStructuredProjection(
         bundle.pullRequestUrl ?? null,
         asJson(bundle.changedFiles),
         asJson(bundle.refs),
+        asJson(bundle.trajectory ?? null),
         asJson(bundle.retainedContent ?? null),
         asJson(bundle.testResults ?? null),
         asJson(bundle.riskNotes ?? []),
@@ -825,6 +828,7 @@ export function readStructuredRuntimeState(stateDir: string): RuntimeState {
       pullRequestUrl: row.pull_request_url ?? undefined,
       changedFiles: fromJson(row.changed_files_json, []),
       refs: fromJson(row.refs_json, {}),
+      trajectory: fromJson(row.trajectory_json, undefined),
       retainedContent: fromJson(row.retained_content_json, undefined),
       testResults: fromJson(row.test_results_json, undefined),
       riskNotes: fromJson(row.risk_notes_json, []),

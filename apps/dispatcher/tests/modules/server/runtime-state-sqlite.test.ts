@@ -358,6 +358,18 @@ describe("runtime-state-sqlite", () => {
           commit: "abc123",
           changedFiles: [{ path: "src/index.ts", changeType: "modified" as const }],
           refs: { structuredReport: "artifact://attempt/result.json" },
+          trajectory: {
+            schemaVersion: "artifact-trajectory/v1" as const,
+            steps: [
+              {
+                sequence: 1,
+                phase: "verification" as const,
+                action: "pnpm test",
+                observation: "tests passed",
+                status: "succeeded" as const,
+              },
+            ],
+          },
           retainedContent: {
             diff: "diff --git a/src/index.ts b/src/index.ts",
             logs: "pnpm test passed",
@@ -380,6 +392,18 @@ describe("runtime-state-sqlite", () => {
       retainedContent: {
         diff: "diff --git a/src/index.ts b/src/index.ts",
         logs: "pnpm test passed",
+      },
+      trajectory: {
+        schemaVersion: "artifact-trajectory/v1",
+        steps: [
+          {
+            sequence: 1,
+            phase: "verification",
+            action: "pnpm test",
+            observation: "tests passed",
+            status: "succeeded",
+          },
+        ],
       },
     });
 

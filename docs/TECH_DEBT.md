@@ -178,7 +178,7 @@ Desired direction:
 - dispatcher start/result mutation 已强制完整 v1 envelope，并会拒绝缺少 active attempt、缺字段或携带历史终态 `attemptId` 的 stale result
 - 通用 dispatcher worker start/result 会校验 `protocolVersion`、`traceId` 和 `idempotencyKey` 与 active attempt 一致
 - Trae 兼容主链的 `fetch-task` / `start-task` / `submit-result` 已回显并校验 `protocolVersion`、`traceId`、`idempotencyKey`、`attemptId` 和 `leaseToken`
-- dispatcher runtime state 已有 `artifactBundles[]`，SQLite `artifact_bundles` projection 会保存 ArtifactBundle 摘要、refs 和可选 retainedContent 正文片段
+- dispatcher runtime state 已有 `artifactBundles[]`，SQLite `artifact_bundles` projection 会保存 ArtifactBundle 摘要、refs、结构化 trajectory 和可选 retainedContent 正文片段
 - reconcile 支持 `maxTaskAttempts` retry policy，默认仍是 2 次 attempt
 - task-level `terminationPolicy.maxAttempts`、`attemptLeaseTimeoutMs`、`heartbeatTimeoutMs`、`assignmentTimeoutMs` 已接入 retry / lease / offline / assignment 回收主链
 
@@ -186,8 +186,8 @@ Desired direction:
 
 - 代码审查和文档阅读时容易把 vNext 目标契约误读为当前已执行的 runtime 保护
 - 空 envelope / 无 active attempt 的 worker mutation 已被拒绝，历史夹具或迁移脚本必须先补 claim / attempt 语义
-- ArtifactBundle 已支持受限 `retainedContent`，dispatcher 会把 retained diff / log / test result / trajectory 写入本地 artifact store，并通过 manifest、retention 和 `/api/artifacts/:bundleId/files/:fileName` 支持按需读取
-- Console 任务详情可通过摘要 / 引用 / 正文 tabs 查看审查证据，并可在 `review` 状态直接提交带 `reasonCode`、`mustFix[]`、重驱动策略和高风险确认的 `merge` / `rework` / `block` 决策
+- ArtifactBundle 已支持结构化 `trajectory` 和受限 `retainedContent`，dispatcher 会把 trajectory / retained diff / log / test result 写入本地 artifact store，并通过 manifest、retention 和 `/api/artifacts/:bundleId/files/:fileName` 支持按需读取
+- Console 任务详情可通过摘要 / 引用 / 正文 / 轨迹 tabs 查看审查证据，并可在 `review` 状态直接提交带 `reasonCode`、`mustFix[]`、重驱动策略和高风险确认的 `merge` / `rework` / `block` 决策
 
 期望方向：
 

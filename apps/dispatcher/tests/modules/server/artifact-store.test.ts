@@ -31,11 +31,22 @@ function createBundle(bundleId: string, createdAt: string): ArtifactBundle {
     refs: {
       structuredReport: "artifact://attempt-1/result.json",
     },
+    trajectory: {
+      schemaVersion: "artifact-trajectory/v1",
+      steps: [
+        {
+          sequence: 1,
+          phase: "action",
+          action: "edit",
+          observation: "docs/smoke.md changed",
+          status: "succeeded",
+        },
+      ],
+    },
     retainedContent: {
       diff: "diff --git a/src/a.ts b/src/a.ts",
       logs: "pnpm test passed",
       testResults: "1 passed",
-      trajectory: JSON.stringify([{ action: "edit", observation: "docs/smoke.md changed" }]),
     },
     riskNotes: [],
     nextActions: [],
@@ -67,7 +78,15 @@ describe("artifact store", () => {
       "trajectory.json",
     ]);
     expect(readArtifactStoreFile(stateDir, "bundle-1", "diff.patch")).toBe("diff --git a/src/a.ts b/src/a.ts");
-    expect(readArtifactStoreFile(stateDir, "bundle-1", "trajectory.json")).toContain("docs/smoke.md changed");
+    expect(JSON.parse(readArtifactStoreFile(stateDir, "bundle-1", "trajectory.json"))).toMatchObject({
+      schemaVersion: "artifact-trajectory/v1",
+      steps: [
+        {
+          action: "edit",
+          observation: "docs/smoke.md changed",
+        },
+      ],
+    });
   });
 
   it("rejects artifact file path traversal", () => {

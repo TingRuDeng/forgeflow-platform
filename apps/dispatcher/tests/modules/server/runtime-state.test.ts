@@ -931,7 +931,13 @@ describe("dispatcher runtime state (TypeScript)", () => {
         generatedAt: "2026-05-12T13:01:00.000Z",
         verification: {
           allPassed: true,
-          commands: [],
+          commands: [
+            {
+              command: "pnpm test",
+              exitCode: 0,
+              output: "tests passed",
+            },
+          ],
         },
       },
       changedFiles: ["src/index.ts"],
@@ -953,6 +959,19 @@ describe("dispatcher runtime state (TypeScript)", () => {
       taskId,
       attemptId: attempt.attemptId,
       bundleId: `${attempt.attemptId}:artifact-bundle`,
+      trajectory: {
+        schemaVersion: "artifact-trajectory/v1",
+        steps: [
+          {
+            sequence: 1,
+            phase: "verification",
+            action: "pnpm test",
+            observation: "tests passed",
+            status: "succeeded",
+            exitCode: 0,
+          },
+        ],
+      },
     });
     expect(state.taskAttempts[0]?.artifactBundleId).toBe(`${attempt.attemptId}:artifact-bundle`);
 
