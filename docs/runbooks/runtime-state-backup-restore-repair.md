@@ -15,6 +15,7 @@
 - `.forgeflow-dispatcher/shadow-cutover-drill.json`
 - `.forgeflow-dispatcher/shadow-cutover-approval.json`
 - `.forgeflow-dispatcher/shadow-cutover-ready.json`
+- `.forgeflow-dispatcher/shadow-cutover-complete.json`
 - `.forgeflow-dispatcher/shadow-cutover-revocation.json`
 - 可选：
   - `.forgeflow-dispatcher/runtime-state.db-wal`
@@ -35,7 +36,7 @@ node scripts/backup-runtime-state.mjs \
 
 - 复制 `runtime-state.db`
 - 如果存在，也会复制 `runtime-state-shadow-status.json` 和 `shadow-reconciler-status.json`
-- 如果存在，也会复制 `shadow-cutover-drill.json` / `shadow-cutover-approval.json` / `shadow-cutover-ready.json` / `shadow-cutover-revocation.json`
+- 如果存在，也会复制 `shadow-cutover-drill.json` / `shadow-cutover-approval.json` / `shadow-cutover-ready.json` / `shadow-cutover-complete.json` / `shadow-cutover-revocation.json`
 - 如果存在，也会复制 `runtime-state.db-wal` / `runtime-state.db-shm`
 - 生成 manifest，写出备份时间和复制文件列表
 

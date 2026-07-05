@@ -89,8 +89,33 @@ describe("runtime-state-primary-cutover", () => {
       evidenceSha256: evidence.evidenceSha256,
     });
     expect(status.ready).toMatchObject({ exists: true, ok: true });
+    expect(status.complete.exists).toBe(false);
     expect(status.revocation.exists).toBe(false);
     expect(status.lastError).toBeNull();
+  });
+
+  it("reports completed when post-cutover completion evidence exists", () => {
+    const stateDir = makeStateDir();
+    writeCutoverEvidence(stateDir);
+    writeJson(path.join(stateDir, "shadow-cutover-complete.json"), {
+      ok: true,
+      completedAt: "2026-07-06T03:00:00.000Z",
+      phases: [
+        { name: "ready_evidence", ok: true, payload: { ok: true } },
+        { name: "primary_backend", ok: true, payload: { reason: "primary_backend_configured" } },
+        { name: "primary_snapshot", ok: true, payload: { connected: true, hasSnapshot: true, sequence: 42 } },
+      ],
+    });
+
+    const status = readRuntimeStatePrimaryCutoverStatus(stateDir);
+
+    expect(status.status).toBe("completed");
+    expect(status.complete).toMatchObject({
+      exists: true,
+      ok: true,
+      completedAt: "2026-07-06T03:00:00.000Z",
+      sequence: 42,
+    });
   });
 
   it("reports blocked when revocation marker exists", () => {

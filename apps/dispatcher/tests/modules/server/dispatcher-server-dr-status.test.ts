@@ -36,6 +36,7 @@ describe("dispatcher server dr status", () => {
       status: "unknown",
       approval: { exists: false },
       ready: { exists: false },
+      complete: { exists: false },
       revocation: { exists: false },
     });
   });

@@ -229,23 +229,25 @@ Current situation:
 - `pnpm verify:shadow-cutover:approval` independently verifies the approval marker, archived evidence SHA-256, and absence of `.forgeflow-dispatcher/shadow-cutover-revocation.json`
 - `pnpm verify:shadow-cutover:ready` combines strict cutover preflight and approval evidence verification into the final pre-switch gate
 - `pnpm verify:shadow-cutover:ready:evidence` archives that final pre-switch gate payload to `.forgeflow-dispatcher/shadow-cutover-ready.json`
+- `pnpm verify:shadow-cutover:complete` verifies post-switch readiness evidence, selected Postgres primary backend, and readable `dispatcher_runtime_state` primary snapshot
+- `pnpm verify:shadow-cutover:complete:evidence` archives that post-switch verification to `.forgeflow-dispatcher/shadow-cutover-complete.json`
 - Postgres primary backend refuses to connect unless `shadow-cutover-ready.json` exists, has `ok=true`, records a passed `strict_cutover_preflight`, and has `approval_evidence` matching the approval marker path, drill evidence path, and SHA-256
 - `pnpm verify:shadow-cutover:revoke` archives the approval marker and writes `.forgeflow-dispatcher/shadow-cutover-revocation.json` for rollback / aborted change windows
 - `RUNTIME_STATE_BACKEND=postgres` refuses primary snapshot load/save until `shadow-cutover-approval.json` exists, has `approved=true`, records `cutoverReason=cutover_ready`, points to archived drill evidence through `evidencePath`, the current evidence file SHA-256 matches `evidenceSha256`, and `shadow-cutover-ready.json` confirms the final strict preflight + approval evidence gate; it also refuses primary snapshot load/save when `shadow-cutover-revocation.json` exists
 - `DISPATCHER_SHADOW_MODE=primary` is accepted only as a post-cutover compatibility state when `RUNTIME_STATE_BACKEND=postgres` and `DISPATCHER_PRIMARY_POSTGRES_URL` are configured; without that primary backend it fails as `primary_backend_not_selected`
 - `@forgeflow/dispatcher-store-postgres` now has primary snapshot primitives (`dispatcher_runtime_state`, JSONB load/save), and dispatcher HTTP routes plus `/api/query/*` use the async runtime-state path for state mutations / reads
-- `/api/dr/status.primaryCutover` now summarizes approval marker, final ready evidence, revocation marker, primary backend selection, and evidence mismatch failures for Console / operator review
+- `/api/dr/status.primaryCutover` now summarizes approval marker, final ready evidence, post-cutover completion evidence, revocation marker, primary backend selection, and evidence mismatch failures for Console / operator review
 - `pnpm verify:stage3` 和 release workflow 都会执行 `pnpm verify:shadow-drift` 作为 rollout / release gate
 
 Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
-- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、长期 reconciler 入口、默认 reconciler durable status snapshot、strict cutover reconciler 模式、strict cutover preflight、production cutover drill、cutover evidence file、primary approval marker、approval marker 独立校验、最终 ready 组合门禁、ready evidence primary backend guard、rollback revocation marker、Postgres primary snapshot 原语、primary-mode 兼容状态、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真实生产执行仍需要 operator 在变更窗口切换 `RUNTIME_STATE_BACKEND=postgres` / `DISPATCHER_PRIMARY_POSTGRES_URL` 并保留 evidence
-- Console 首屏已展示 `/api/dr/status` 的 shadow write、shadow reconciler、primary cutover evidence、projection、backup、read-only 和 structured reads 摘要，reviewer 可以在同一工作台看到 cutover 前轻量状态
+- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、长期 reconciler 入口、默认 reconciler durable status snapshot、strict cutover reconciler 模式、strict cutover preflight、production cutover drill、cutover evidence file、primary approval marker、approval marker 独立校验、最终 ready 组合门禁、post-cutover completion evidence、ready evidence primary backend guard、rollback revocation marker、Postgres primary snapshot 原语、primary-mode 兼容状态、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真实生产执行仍需要 operator 在变更窗口切换 `RUNTIME_STATE_BACKEND=postgres` / `DISPATCHER_PRIMARY_POSTGRES_URL` 并保留 evidence
+- Console 首屏已展示 `/api/dr/status` 的 shadow write、shadow reconciler、primary cutover / completion evidence、projection、backup、read-only 和 structured reads 摘要，reviewer 可以在同一工作台看到 cutover 前后轻量状态
 
 Desired direction:
 
-- require `pnpm verify:shadow-cutover:drill:evidence`, `pnpm verify:shadow-cutover:approve`, `pnpm verify:shadow-cutover:approval`, and `pnpm verify:shadow-cutover:ready:evidence` before any primary-store switch, then retain `.forgeflow-dispatcher/shadow-cutover-drill.json`, `.forgeflow-dispatcher/shadow-cutover-approval.json`, and `.forgeflow-dispatcher/shadow-cutover-ready.json` as change evidence; use `pnpm verify:shadow-cutover:revoke` to retain rollback evidence when aborting or reverting a cutover window
+- require `pnpm verify:shadow-cutover:drill:evidence`, `pnpm verify:shadow-cutover:approve`, `pnpm verify:shadow-cutover:approval`, and `pnpm verify:shadow-cutover:ready:evidence` before any primary-store switch; require `pnpm verify:shadow-cutover:complete:evidence` after the primary switch has written a Postgres snapshot; retain `.forgeflow-dispatcher/shadow-cutover-drill.json`, `.forgeflow-dispatcher/shadow-cutover-approval.json`, `.forgeflow-dispatcher/shadow-cutover-ready.json`, and `.forgeflow-dispatcher/shadow-cutover-complete.json` as change evidence; use `pnpm verify:shadow-cutover:revoke` to retain rollback evidence when aborting or reverting a cutover window
 - keep the event / metric / SLO contract stable while shadow remains best-effort
 
 ## 10. Live dispatcher DR drill covers local failure scenarios, but production cutover is still deferred

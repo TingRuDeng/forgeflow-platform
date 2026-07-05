@@ -20,7 +20,7 @@ type ProjectionHealth = {
 };
 
 type PrimaryCutover = {
-  status?: 'unknown' | 'ready' | 'blocked' | 'failed';
+  status?: 'unknown' | 'ready' | 'completed' | 'blocked' | 'failed';
   primaryBackend?: {
     selected?: boolean;
     configured?: boolean;
@@ -30,6 +30,10 @@ type PrimaryCutover = {
   };
   ready?: {
     exists?: boolean;
+  };
+  complete?: {
+    exists?: boolean;
+    sequence?: number | null;
   };
   revocation?: {
     exists?: boolean;
@@ -56,7 +60,7 @@ function statusTone(status?: string, isOk = false): string {
   if (status === 'unknown' || status === 'skipped') {
     return 'border-amber-400/40 bg-amber-500/10 text-amber-100';
   }
-  if (isOk || status === 'ok' || status === 'matched' || status === 'ready') {
+  if (isOk || status === 'ok' || status === 'matched' || status === 'ready' || status === 'completed') {
     return 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100';
   }
   return 'border-white/10 bg-white/5 text-white/70';
@@ -128,6 +132,10 @@ export const DrStatusPanel: React.FC<{ status?: DrStatus | null }> = ({ status }
             <div className="mt-1">{primaryCutoverStatus}</div>
             <div className="mt-1 text-white/60">
               {t('approvalEvidence')}: {formatBoolean(status.primaryCutover?.approval?.exists, t('yes'), t('no'))} · {t('readyEvidence')}: {formatBoolean(status.primaryCutover?.ready?.exists, t('yes'), t('no'))}
+            </div>
+            <div className="mt-1 text-white/60">
+              {t('completionEvidence')}: {formatBoolean(status.primaryCutover?.complete?.exists, t('yes'), t('no'))}
+              {typeof status.primaryCutover?.complete?.sequence === 'number' ? ` · ${t('sequence')}: ${status.primaryCutover.complete.sequence}` : ''}
             </div>
             <div className="mt-1 text-white/60">
               {t('primaryBackend')}: {formatBoolean(status.primaryCutover?.primaryBackend?.selected && status.primaryCutover?.primaryBackend?.configured, t('yes'), t('no'))}

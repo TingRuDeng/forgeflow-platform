@@ -13,6 +13,7 @@ const CUTOVER_EVIDENCE_FILES = [
   "shadow-cutover-drill.json",
   "shadow-cutover-approval.json",
   "shadow-cutover-ready.json",
+  "shadow-cutover-complete.json",
   "shadow-cutover-revocation.json",
 ];
 

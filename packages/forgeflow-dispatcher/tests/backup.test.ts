@@ -33,6 +33,7 @@ describe("backup and restore runtime state", () => {
     fs.writeFileSync(path.join(stateDir, "shadow-cutover-drill.json"), "{\"ok\":true}");
     fs.writeFileSync(path.join(stateDir, "shadow-cutover-approval.json"), "{\"approved\":true}");
     fs.writeFileSync(path.join(stateDir, "shadow-cutover-ready.json"), "{\"ok\":true}");
+    fs.writeFileSync(path.join(stateDir, "shadow-cutover-complete.json"), "{\"ok\":true}");
     fs.writeFileSync(path.join(stateDir, "shadow-cutover-revocation.json"), "{\"revoked\":true}");
 
     const backup = backupRuntimeState({ stateDir, backupDir });
@@ -44,6 +45,7 @@ describe("backup and restore runtime state", () => {
       "shadow-cutover-drill.json",
       "shadow-cutover-approval.json",
       "shadow-cutover-ready.json",
+      "shadow-cutover-complete.json",
       "shadow-cutover-revocation.json",
     ]);
 
@@ -56,6 +58,7 @@ describe("backup and restore runtime state", () => {
       "shadow-cutover-drill.json",
       "shadow-cutover-approval.json",
       "shadow-cutover-ready.json",
+      "shadow-cutover-complete.json",
       "shadow-cutover-revocation.json",
     ]);
     expect(fs.readFileSync(path.join(restoreDir, "runtime-state-shadow-status.json"), "utf8")).toBe(
@@ -71,6 +74,9 @@ describe("backup and restore runtime state", () => {
       "{\"approved\":true}",
     );
     expect(fs.readFileSync(path.join(restoreDir, "shadow-cutover-ready.json"), "utf8")).toBe(
+      "{\"ok\":true}",
+    );
+    expect(fs.readFileSync(path.join(restoreDir, "shadow-cutover-complete.json"), "utf8")).toBe(
       "{\"ok\":true}",
     );
     expect(fs.readFileSync(path.join(restoreDir, "shadow-cutover-revocation.json"), "utf8")).toBe(

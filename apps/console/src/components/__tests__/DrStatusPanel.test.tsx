@@ -31,10 +31,11 @@ describe('DrStatusPanel', () => {
             failedRunCount: 0,
           },
           primaryCutover: {
-            status: 'ready',
+            status: 'completed',
             primaryBackend: { selected: true, configured: true },
             approval: { exists: true },
             ready: { exists: true },
+            complete: { exists: true, sequence: 42 },
             revocation: { exists: false },
           },
           projectionHealth: { matches: true },
@@ -48,6 +49,7 @@ describe('DrStatusPanel', () => {
     expect(screen.getAllByText(/自动对账/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/主库切换/i)).toBeInTheDocument();
     expect(screen.getByText(/审批证据: 是 · 就绪证据: 是/i)).toBeInTheDocument();
+    expect(screen.getByText(/完成证据: 是 · 序列: 42/i)).toBeInTheDocument();
     expect(screen.getByText(/主库后端: 是/i)).toBeInTheDocument();
     expect(screen.getByText(/运行次数: 4 · 失败: 0/i)).toBeInTheDocument();
     expect(screen.getByText(/匹配 · 备份: 1/i)).toBeInTheDocument();
@@ -71,6 +73,7 @@ describe('DrStatusPanel', () => {
             primaryBackend: { selected: false, configured: false },
             approval: { exists: true },
             ready: { exists: true },
+            complete: { exists: false },
             revocation: { exists: true, reason: 'operator_rollback' },
             lastError: 'shadow cutover revocation marker exists',
           },
