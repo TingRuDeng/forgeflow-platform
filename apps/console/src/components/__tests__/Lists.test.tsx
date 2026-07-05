@@ -392,6 +392,39 @@ describe('ArtifactWorkbench', () => {
 });
 
 describe('ReviewQueue', () => {
+  it('surfaces waiting-for-input tasks and keeps them out of bulk review selection', () => {
+    const onSelectTask = vi.fn();
+
+    renderWithProviders(
+      <ReviewQueue
+        selectedTaskId="task-hitl"
+        tasks={[
+          {
+            id: 'task-hitl',
+            title: 'Need rollout input',
+            status: 'waiting_for_input',
+            repo: 'owner/app',
+            waitingForInput: {
+              requestedBy: 'codex-worker',
+              reason: 'choose rollout scope',
+            },
+          },
+          { id: 'task-review', title: 'Ready for review', status: 'review', repo: 'owner/app' },
+        ]}
+        onSelectTask={onSelectTask}
+      />
+    );
+
+    expect(screen.getByText(/等待人工输入|waiting for human input/i)).toBeInTheDocument();
+    expect(screen.getByText(/Need rollout input/i)).toBeInTheDocument();
+    expect(screen.getByText(/choose rollout scope/i)).toBeInTheDocument();
+    expect(screen.getByText(/已选|selected/i).textContent).toMatch(/0 \/ 1/);
+
+    fireEvent.click(screen.getByText(/Need rollout input/i));
+
+    expect(onSelectTask).toHaveBeenCalledWith('task-hitl');
+  });
+
   it('selects review tasks and submits a shared rework decision', () => {
     const onBulkReviewDecision = vi.fn();
 
