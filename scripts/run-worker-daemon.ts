@@ -1,24 +1,7 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
-import path from "node:path";
-import { execSync } from "node:child_process";
-
+import { ensureDispatcherRuntimeBridgeDist } from "./lib/runtime-bootstrap.js";
 import { runWorkerDaemon } from "./lib/worker-daemon.js";
-
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-const distPath = path.join(repoRoot, "apps/dispatcher/dist/modules/server/runtime-glue-dispatcher-client.js");
-
-function ensureDispatcherDist(): void {
-  if (fs.existsSync(distPath)) {
-    return;
-  }
-  console.error("Bootstrapping dispatcher dist...");
-  execSync("pnpm --dir apps/dispatcher run build", {
-    cwd: repoRoot,
-    stdio: "inherit",
-  });
-}
 
 interface ParsedArgs {
   pollIntervalMs: number;
@@ -115,7 +98,7 @@ Usage:
 }
 
 async function main(): Promise<void> {
-  ensureDispatcherDist();
+  ensureDispatcherRuntimeBridgeDist();
 
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {

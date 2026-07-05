@@ -1,10 +1,11 @@
-import fs from "node:fs";
 import path from "node:path";
-import { execSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
 
 import { handleDispatcherHttpRequest } from "./dispatcher-server.js";
 import { formatLocalTimestamp } from "./time.js";
+import {
+  importDispatcherRuntimeBridge,
+  importWorkerDaemonRuntime,
+} from "./runtime-bootstrap.js";
 import {
   logger,
   createChildLogger,
@@ -13,23 +14,6 @@ import {
   logTaskFailed,
 } from "./logger.js";
 import { recordTaskMetric } from "./metrics.js";
-
-function resolveDispatcherDist(): { repoRoot: string; distPath: string } {
-  const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-  const distPath = path.join(repoRoot, "apps/dispatcher/dist/modules/server/runtime-glue-dispatcher-client.js");
-  return { repoRoot, distPath };
-}
-
-function ensureDispatcherDist(): void {
-  const { repoRoot, distPath } = resolveDispatcherDist();
-  if (fs.existsSync(distPath)) {
-    return;
-  }
-  execSync("pnpm --dir apps/dispatcher run build", {
-    cwd: repoRoot,
-    stdio: "inherit",
-  });
-}
 
 interface DispatcherClientBridge {
   createDispatcherHttpClient: (options: { dispatcherUrl: string }) => DispatcherClient;
@@ -64,12 +48,7 @@ interface DispatcherClientBridge {
 }
 
 async function bootstrapDispatcherBridge(): Promise<DispatcherClientBridge> {
-  const { repoRoot, distPath } = resolveDispatcherDist();
-  if (!fs.existsSync(distPath)) {
-    ensureDispatcherDist();
-  }
-  const distDir = path.join(repoRoot, "apps/dispatcher/dist");
-  return import(path.join(distDir, "modules/server/runtime-glue-dispatcher-client.js")) as Promise<DispatcherClientBridge>;
+  return importDispatcherRuntimeBridge<DispatcherClientBridge>();
 }
 
 interface BetaRuntimeCoreBridge {
@@ -148,29 +127,8 @@ interface BetaRuntimeCoreBridge {
   }) => Promise<void>;
 }
 
-function resolveBetaRuntimeCoreDist(): { repoRoot: string; distPath: string } {
-  const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-  const distPath = path.join(repoRoot, "packages/beta-runtime-core/dist/runtime/worker-daemon.js");
-  return { repoRoot, distPath };
-}
-
-function ensureBetaRuntimeCoreDist(): void {
-  const { repoRoot, distPath } = resolveBetaRuntimeCoreDist();
-  if (fs.existsSync(distPath)) {
-    return;
-  }
-  execSync("pnpm --filter @tingrudeng/beta-runtime-core build", {
-    cwd: repoRoot,
-    stdio: "inherit",
-  });
-}
-
 async function bootstrapBetaRuntimeCore(): Promise<BetaRuntimeCoreBridge> {
-  const { distPath } = resolveBetaRuntimeCoreDist();
-  if (!fs.existsSync(distPath)) {
-    ensureBetaRuntimeCoreDist();
-  }
-  return import(pathToFileURL(distPath).href) as Promise<BetaRuntimeCoreBridge>;
+  return importWorkerDaemonRuntime<BetaRuntimeCoreBridge>();
 }
 
 function nowIso(): string {
