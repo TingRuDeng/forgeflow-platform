@@ -59,7 +59,7 @@ Command notes:
 - `start` runs the dispatcher in the foreground
 - `doctor` validates config, auth expectations, state-dir writability, and optional local `/health`
 - `status` prints configured base URL and best-effort local health reachability
-- `backup` copies `runtime-state.db`, WAL/SHM sidecars, and `runtime-state.json` rescue files when present
+- `backup` copies `runtime-state.db`, WAL/SHM sidecars, `runtime-state.json` rescue files, shadow status, and cutover evidence files when present
 - `restore` copies those files back into the configured `stateDir`
 
 ## Authentication
