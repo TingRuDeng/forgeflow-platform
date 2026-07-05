@@ -64,38 +64,11 @@ jobs:
       - name: Detect packages needing release
         id: detect
         run: |
-          PACKAGES='[]'
-          NEW_PACKAGES='[]'
-          
-          for pkg_dir in packages/*/; do
-            pkg_name=$(node -p "require('./${pkg_dir}package.json').name")
-            local_version=$(node -p "require('./${pkg_dir}package.json').version")
-            
-            if [[ "$pkg_name" == @tingrudeng/* ]]; then
-              package_view_log="$RUNNER_TEMP/npm-view-package.log"
-              version_view_log="$RUNNER_TEMP/npm-view-version.log"
-
-              if npm view "${pkg_name}" version >"$package_view_log" 2>&1; then
-                if npm view "${pkg_name}@${local_version}" version >"$version_view_log" 2>&1; then
-                  echo "✓ $pkg_name@$local_version already exists on npm -> up to date"
-                elif grep -q "E404" "$version_view_log"; then
-                  echo "📦 $pkg_name@$local_version is not published yet -> NEEDS RELEASE"
-                  pkg_short=$(echo "$pkg_name" | sed 's/@tingrudeng\///')
-                  PACKAGES=$(echo "$PACKAGES" | jq -c --arg name "$pkg_short" --arg version "$local_version" '. += [{"name": $name, "version": $version}]')
-                else
-                  cat "$version_view_log"
-                  exit 1
-                fi
-              elif grep -q "E404" "$package_view_log"; then
-                echo "⚠️ $pkg_name does not exist on npm yet -> PACKAGE SETUP REQUIRED"
-                pkg_short=$(echo "$pkg_name" | sed 's/@tingrudeng\///')
-                NEW_PACKAGES=$(echo "$NEW_PACKAGES" | jq -c --arg name "$pkg_short" --arg version "$local_version" '. += [{"name": $name, "version": $version}]')
-              else
-                cat "$package_view_log"
-                exit 1
-              fi
-            fi
-          done
+          REPORT_JSON="$RUNNER_TEMP/release-packages.json"
+          node scripts/detect-release-packages.mjs --json --require-known > "$REPORT_JSON"
+          jq -r '.rows[] | "- \(.name)@\(.version) action=\(.action)"' "$REPORT_JSON"
+          PACKAGES=$(jq -c '.packages' "$REPORT_JSON")
+          NEW_PACKAGES=$(jq -c '.newPackages' "$REPORT_JSON")
           
           echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
           echo "new-packages=$NEW_PACKAGES" >> $GITHUB_OUTPUT
