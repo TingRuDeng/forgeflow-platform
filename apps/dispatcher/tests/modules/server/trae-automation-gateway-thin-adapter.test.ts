@@ -13,6 +13,7 @@ const scriptSessionStorePath = path.join(repoRoot, "scripts/lib/trae-automation-
 const packagedSessionStorePath = path.join(repoRoot, "packages/trae-beta-runtime/src/runtime/trae-automation-session-store.ts");
 const coreGatewayPath = path.join(repoRoot, "packages/automation-gateway-core/src/gateway-handler.ts");
 const coreHttpServerPath = path.join(repoRoot, "packages/automation-gateway-core/src/gateway-http-server.ts");
+const coreDebugLogPath = path.join(repoRoot, "packages/automation-gateway-core/src/debug-log.ts");
 const coreSessionStorePath = path.join(repoRoot, "packages/automation-gateway-core/src/session-store.ts");
 const coreSessionStoreTypesPath = path.join(repoRoot, "packages/automation-gateway-core/src/session-store-types.ts");
 
@@ -47,6 +48,24 @@ describe("trae automation gateway thin adapters", () => {
     expect(packagedSource).not.toContain("function writeJson");
     expect(scriptSource).not.toContain("http.createServer");
     expect(packagedSource).not.toContain("http.createServer");
+  });
+
+  it("keeps gateway debug logger wiring in automation-gateway-core", () => {
+    const scriptSource = fs.readFileSync(scriptGatewayPath, "utf8");
+    const packagedSource = fs.readFileSync(packagedGatewayPath, "utf8");
+    const coreDebugSource = fs.readFileSync(coreDebugLogPath, "utf8");
+
+    expect(coreDebugSource).toContain("createAutomationGatewayDebugLogger");
+    expect(coreDebugSource).toContain("isAutomationGatewayDebugEnabled");
+    expect(coreDebugSource).toContain("[trae-gateway][debug]");
+    expect(scriptSource).toContain("createAutomationGatewayDebugLogger");
+    expect(packagedSource).toContain("createAutomationGatewayDebugLogger");
+    expect(scriptSource).toContain("isAutomationGatewayDebugEnabled");
+    expect(packagedSource).toContain("isAutomationGatewayDebugEnabled");
+    expect(scriptSource).not.toContain("function createDebugLogger");
+    expect(packagedSource).not.toContain("function createDebugLogger");
+    expect(scriptSource).not.toContain("function isDebugEnabled");
+    expect(packagedSource).not.toContain("function isDebugEnabled");
   });
 
   it("keeps persistent session-store logic in automation-gateway-core", () => {
