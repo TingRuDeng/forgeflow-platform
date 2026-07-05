@@ -181,6 +181,8 @@ export const RuntimeEventTypeSchema = z.enum([
   "review_decided",
   "task_redriven",
   "task_cancelled",
+  "task_interrupted",
+  "task_resumed",
   "policy_evaluated",
   "status_changed",
 ]);

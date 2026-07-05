@@ -93,6 +93,8 @@ Top-level collections currently include:
 - `submit_result_retry_failed`
 - `attempt_expired`
 - `task_redriven`
+- `task_interrupted`
+- `task_resumed`
 - `delivery_failed`
 - `worktree_cleanup_failed`
 - `session_interrupted`
@@ -274,6 +276,12 @@ Current enforced ownership path verified in code:
 - `session`（仅 continuation 或 follow-up 任务存在会话锚点时）
 
 `runtime-state.ts` task claim 会获取 `assignment` / `repo` / `branch` lease；存在 `continueFromTaskId` 或 `followUpOfTaskId` 时还会获取 `session` lease。释放路径覆盖 result、cancel、review decision、worker offline 和 reconcile 回收。该约束不覆盖 dispatcher 外部直接操作同一 repo、branch 或 Trae session store 的脚本。
+
+HITL interrupt/resume 字段：
+
+- `tasks.waiting_for_input_json` 保存 `waitingForInput`，包括 requestedBy、reason、requestedAt
+- `tasks.resume_payload_json` 保存 resume 时写入的 `resumePayload`
+- `waiting_for_input` 是非终态任务状态；resume 后任务回到 `ready`
 
 ## 3. Review Memory Store
 

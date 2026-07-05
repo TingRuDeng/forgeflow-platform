@@ -332,6 +332,27 @@ Current endpoint families:
     - returns `404` when the task or assignment does not exist
     - frees the bound worker when the task was still assigned or running
     - appends both `status_changed` and `task_cancelled` events
+- `POST /api/tasks/:taskId/interrupt`
+  - Moves an interruptible task to `waiting_for_input`.
+  - Current request body may include:
+    - `actor`
+    - `reason`
+    - `at`
+  - Current dispatcher behavior:
+    - supports `ready` / `assigned` / `in_progress` / `blocked`
+    - releases worker / assignment / repo / branch / session leases when present
+    - marks the active attempt as `checkpointed`
+    - appends `status_changed` and `task_interrupted` events
+- `POST /api/tasks/:taskId/resume`
+  - Moves a `waiting_for_input` task back to `ready`.
+  - Current request body may include:
+    - `actor`
+    - `resumePayload`
+    - `at`
+  - Current dispatcher behavior:
+    - stores `resumePayload` on the task and assignment payload
+    - appends `status_changed` and `task_resumed` events
+    - leaves checkpointed attempts available for the next worker claim
 
 ### Trae-specific dispatcher endpoints
 

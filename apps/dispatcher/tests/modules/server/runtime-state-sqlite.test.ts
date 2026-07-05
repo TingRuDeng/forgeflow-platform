@@ -343,6 +343,39 @@ describe("runtime-state-sqlite", () => {
     });
   });
 
+  it("preserves HITL waiting state and resume payload in the structured sqlite projection", () => {
+    const stateDir = makeTempDir();
+    const state = {
+      ...createTestState(),
+      tasks: createTestState().tasks.map((task) => ({
+        ...task,
+        status: "waiting_for_input" as const,
+        waitingForInput: {
+          requestedBy: "codex-control",
+          reason: "need product decision",
+          requestedAt: "2026-04-08T10:10:04.000Z",
+        },
+        resumePayload: {
+          decision: "ship narrow scope",
+        },
+      })),
+    };
+
+    saveRuntimeState(stateDir, state);
+
+    const structured = sqliteStore.readStructuredRuntimeState(stateDir);
+    expect(structured.tasks[0]).toMatchObject({
+      status: "waiting_for_input",
+      waitingForInput: {
+        requestedBy: "codex-control",
+        reason: "need product decision",
+      },
+      resumePayload: {
+        decision: "ship narrow scope",
+      },
+    });
+  });
+
   it("writes artifact bundles to the structured sqlite projection", () => {
     const stateDir = makeTempDir();
     const state = {

@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M15 串行：补齐 dispatcher 级 HITL interrupt/resume 基础协议。
+- [x] M15 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M15 Review 小结
+
+已新增 dispatcher 级 HITL interrupt/resume 基础协议：`waiting_for_input` 成为非终态 task / assignment 状态；`interruptTaskForInput()` 会把 `ready` / `assigned` / `in_progress` / `blocked` 任务暂停为 `waiting_for_input`，释放 worker 与 task resource leases，并把 active attempt 标记为 `checkpointed`；`resumeTaskFromInput()` 会保存 `resumePayload`，把任务恢复到 `ready`，并让下一次 claim 能拿到 resume payload。HTTP 新增 `POST /api/tasks/:taskId/interrupt` 与 `POST /api/tasks/:taskId/resume`；SQLite projection 保存 `waiting_for_input_json` 与 `resume_payload_json`；Console 状态 badge 和 i18n 已支持 `waiting_for_input`。
+
+Review Gate：finished。Spec 符合度通过，覆盖 dispatcher 状态函数、HTTP API、SQLite roundtrip、状态枚举和 Console 状态展示；安全检查通过，未新增 secret、外部网络调用、路径访问或静默 fallback；复杂度检查通过，HITL 核心函数已拆分 helper，导出函数保持短流程；Document-refresh: needed，原因：任务状态机、HTTP API、SQLite projection 和技术债状态发生变化，已同步 `STATE_MACHINE.md`、`API_ENDPOINTS.md`、`DATABASE_SCHEMA.md`、`README.md` 与 `TECH_DEBT.md`。结论：通过。
+
+验证已通过：RED 阶段确认 `interruptTaskForInput` 缺失、HTTP interrupt 路由返回 404；GREEN 后通过 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state.test.ts tests/modules/server/runtime-state-sqlite.test.ts tests/modules/server/dispatcher-server.test.ts`（默认沙箱因既有 auth middleware listener 用例 `listen EPERM 127.0.0.1` 失败后，按同命令非沙箱重跑通过，152 tests passed）、`CI=true pnpm --filter @forgeflow/worker-protocol test`、`CI=true pnpm --filter @forgeflow/task-schema test`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
+
+剩余风险：本轮实现 dispatcher 级统一状态和 API；worker runtime 尚未主动发起 interrupt，也没有 Console 表单化输入 / resume payload 编辑体验，后续需要继续把 worker 主动暂停和 UI 操作接入这条主链。
+
 - [x] M14 串行：补齐结构化可回放 trajectory schema、持久化和 Console 展示。
 - [x] M14 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 
