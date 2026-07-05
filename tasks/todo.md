@@ -1,11 +1,22 @@
 # 当前项目审查修复任务
 
+- [x] M83 串行：把 packaged worker daemon cycle 收敛到 beta-runtime-core shared cycle。
 - [x] M82 串行：让 Console runtime events 支持按事件类型筛选。
 - [x] M81 串行：让 Console 任务详情 runtime events 支持完整展开。
 - [x] M80 串行：把 Codex/Gemini packaged worker CLI 下沉到 beta-runtime-core。
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M83 Review 小结
+
+已把 `packages/beta-runtime-core/src/runtime/worker-daemon-cycle.ts` 设为 generic worker daemon 的唯一主循环实现。`packages/beta-runtime-core/src/runtime/worker-daemon.ts` 现在只负责 provider package root、live executor 和失败 result fallback adapter；`apps/dispatcher/src/modules/server/runtime-glue-worker-daemon-cycle.ts` 也改为复用同一个 shared cycle，`apps/dispatcher/src/modules/server/runtime-glue-dispatcher-client.ts` 只保留 HTTP / state-dir dispatcher client plumbing 和兼容 re-export。旧 `packages/beta-runtime-core/src/runtime/task-processor.ts:processTaskAssignment` 已删除，避免 packaged runtime 继续维护第二套 register / heartbeat / claim / start / completed submitResult retry 路径。
+
+Review Gate：finished。Spec 符合度通过，本轮只收敛 generic Codex/Gemini worker daemon 主循环，不改变 live executor、assignment runner、provider launch builder、Trae worker 或 dispatcher HTTP 协议语义。安全检查通过，未新增 secret、外部网络、shell 拼接、mock 成功路径或静默 fallback；completed submitResult retry 和 delivery_failed 事件统一由 shared cycle 负责。复杂度检查通过，新增 `worker-daemon-cycle.ts` 230 行，拆分后的 dispatcher client / cycle adapter、packaged daemon adapter 和 task processor 均低于 300 行。Document-refresh: needed，原因：worker daemon 主循环权威边界变化，已同步 README、docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @tingrudeng/beta-runtime-core exec vitest run tests/worker-daemon.test.ts --maxWorkers=1` 先失败于 packaged worker daemon 仍缺少 `./worker-daemon-cycle.js` adapter 且保留旧主循环；GREEN 后 `CI=true pnpm --filter @tingrudeng/beta-runtime-core test -- --maxWorkers=1` 通过，4 个测试文件、24 个测试通过。`CI=true pnpm --filter @forgeflow/dispatcher build` 通过。`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-glue.test.ts tests/modules/server/run-worker-daemon.test.ts tests/modules/server/worker-daemon-thin-adapter.test.ts --maxWorkers=1` 通过，3 个测试文件、31 个测试通过。`CI=true pnpm --filter @tingrudeng/codex-beta-runtime test -- tests/runtime-wrapper.test.ts tests/cli.test.ts --maxWorkers=1` 通过，2 个测试文件、4 个测试通过。`CI=true pnpm --filter @tingrudeng/gemini-beta-runtime test -- tests/runtime-wrapper.test.ts tests/cli.test.ts --maxWorkers=1` 通过，2 个测试文件、5 个测试通过。`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。默认沙箱下全量 `CI=true pnpm test` 因本地 HTTP server 监听 `127.0.0.1` 报 `listen EPERM`；非沙箱第一次复跑只剩 `trae-automation-worker.test.ts` 首个 prompt 测试 20s 偶发超时，隔离复跑该文件 13/13 通过，第二次非沙箱全量 `CI=true pnpm test` 通过，24 个 workspace project 完成，其中 dispatcher 54 个测试文件、527 个测试通过。
+
+剩余风险：本轮收敛的是 generic Codex/Gemini worker daemon cycle；Trae automation worker 和 automation gateway 仍有自身协议适配，但不再与 generic worker daemon 共享这条主循环。完整生产部署仍需要已发布 runtime 包、固定版本和 CI 发布证据。
 
 ## M82 Review 小结
 
@@ -886,7 +897,7 @@ Review Gate：finished。Spec 符合度通过，四个已确认批次均有代�
 
 验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-glue.test.ts tests/modules/server/run-worker-daemon.test.ts tests/modules/server/artifact-store.test.ts tests/modules/server/runtime-state.test.ts tests/modules/server/runtime-state-sqlite.test.ts tests/modules/execution/shadow-drift.test.ts`、`CI=true pnpm --filter @forgeflow/result-contracts test`、`CI=true pnpm --filter @forgeflow/worker-protocol test`、`CI=true pnpm --filter @forgeflow/task-schema test`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 -m py_compile scripts/validate_docs.py`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check`。全量 `CI=true pnpm test` 在默认沙箱下先因 `listen EPERM 127.0.0.1` 与写入 `~/.forgeflow-trae-beta` 权限受限失败；按同一命令在非沙箱环境重跑后通过，覆盖 24 个 workspace project，其中 dispatcher 43 个测试文件 / 461 个测试全部通过。
 
-剩余风险：task-level termination policy 当前只实际接入 `maxAttempts`，`attemptLeaseTimeoutMs`、`heartbeatTimeoutMs`、`assignmentTimeoutMs` 已进入 schema 但尚未接入对应超时调度逻辑；worker daemon 去重已收敛脚本主循环，但 `packages/beta-runtime-core` 仍保留自己的 runtime 实现路径，后续若继续追求单一实现还需要单独规划；shadow drift env gate 是 release / rollout 可配置阈值，不等于后台自动 reconciliation。
+剩余风险：task-level termination policy 当前只实际接入 `maxAttempts`，`attemptLeaseTimeoutMs`、`heartbeatTimeoutMs`、`assignmentTimeoutMs` 已进入 schema 但尚未接入对应超时调度逻辑；M83 已把 generic worker daemon 主循环进一步收敛为 beta-runtime-core shared cycle；shadow drift env gate 是 release / rollout 可配置阈值，不等于后台自动 reconciliation。
 
 - [x] M10 串行：修复 `@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 与 dispatcher v1 claim/envelope/token 协议漂移，并补协议测试。
 - [x] M10 串行：修复 `runtime-glue-dispatcher-client` 的 worker cycle envelope 类型与测试，避免旧 payload 被测试固化。

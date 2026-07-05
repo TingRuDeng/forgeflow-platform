@@ -91,6 +91,7 @@ export interface DispatcherClient {
   claimTask: (workerId: string, payload?: { at?: string }) => Promise<TaskPayload | null>;
   startTask: (workerId: string, payload: WorkerProtocolEnvelope & { taskId: string; at: string }) => Promise<unknown>;
   submitResult: (workerId: string, payload: WorkerProtocolEnvelope & { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }) => Promise<unknown>;
+  reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }) => Promise<unknown>;
 }
 
 export interface ProcessTaskAssignmentInput {

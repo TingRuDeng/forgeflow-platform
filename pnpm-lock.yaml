@@ -166,6 +166,9 @@ importers:
       '@forgeflow/task-schema':
         specifier: workspace:*
         version: link:../../packages/task-schema
+      '@tingrudeng/beta-runtime-core':
+        specifier: workspace:*
+        version: link:../../packages/beta-runtime-core
       zod:
         specifier: ^3.24.2
         version: 3.25.76

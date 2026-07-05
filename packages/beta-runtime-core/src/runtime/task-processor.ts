@@ -17,7 +17,6 @@ import {
 } from "./task-output.js";
 import type { PullRequestInfo, ProcessTaskAssignmentInput, TaskPayload, WorkerProtocolEnvelope, WorkerResult } from "./types.js";
 
-const HEARTBEAT_INTERVAL_MS = 10_000;
 const SUBMIT_RESULT_MAX_RETRIES = 3;
 const SUBMIT_RESULT_RETRY_DELAY_MS = 2_000;
 
@@ -34,17 +33,6 @@ interface LiveWorkerTaskContext {
   worktreeDir: string;
   assignmentDir: string;
   outputDir: string;
-}
-
-interface TaskSummaryInput extends TaskExecutionResult {
-  input: ProcessTaskAssignmentInput;
-}
-
-interface SubmitCompletedResultInput {
-  input: ProcessTaskAssignmentInput;
-  result: WorkerResult;
-  changedFiles: string[];
-  pullRequest: PullRequestInfo | null;
 }
 
 export interface SubmitFailedWorkerResultInput {
@@ -87,45 +75,6 @@ export function buildWorkerProtocolEnvelope(payload: TaskPayload): WorkerProtoco
     traceId: payload.traceId,
     idempotencyKey: payload.idempotencyKey,
   };
-}
-
-export async function processTaskAssignment(input: ProcessTaskAssignmentInput): Promise<{
-  status: string;
-  taskId: string;
-  workerId: string;
-  worktreeDir: string;
-  outputDir: string;
-  changedFiles: string[];
-  pullRequest: PullRequestInfo | null;
-}> {
-  const taskId = input.payload.task.id;
-  const stopHeartbeat = startTaskHeartbeat(input, taskId);
-  try {
-    await input.client.startTask(input.workerId, {
-      taskId,
-      ...buildWorkerProtocolEnvelope(input.payload),
-      at: input.at ?? nowIso(),
-    });
-    const result = await executeLiveWorkerTask(input);
-    stopHeartbeat();
-    await submitCompletedResult({ input, ...result });
-    return buildTaskSummary({ input, ...result });
-  } catch (error) {
-    stopHeartbeat();
-    await submitFailedResult(input, taskId, error);
-    throw error;
-  }
-}
-
-function startTaskHeartbeat(input: ProcessTaskAssignmentInput, taskId: string): () => void {
-  const intervalId = setInterval(async () => {
-    try {
-      await input.client.heartbeat(input.workerId, { at: nowIso() });
-    } catch (error) {
-      console.error(`heartbeat failed for task ${taskId}:`, error instanceof Error ? error.message : String(error));
-    }
-  }, HEARTBEAT_INTERVAL_MS);
-  return () => clearInterval(intervalId);
 }
 
 export async function executeLiveWorkerTask(input: ExecuteLiveWorkerTaskInput): Promise<TaskExecutionResult> {
@@ -229,38 +178,6 @@ async function cleanupLiveWorkerTask(
   }
 }
 
-async function submitCompletedResult(submission: SubmitCompletedResultInput): Promise<void> {
-  const { input } = submission;
-  let lastError: string | null = null;
-  for (let attempt = 1; attempt <= SUBMIT_RESULT_MAX_RETRIES; attempt++) {
-    try {
-      await input.client.submitResult(input.workerId, {
-        ...buildWorkerProtocolEnvelope(input.payload),
-        result: submission.result,
-        changedFiles: submission.changedFiles,
-        pullRequest: submission.pullRequest,
-      });
-      lastError = null;
-      break;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-      console.error(`submitResult attempt ${attempt}/${SUBMIT_RESULT_MAX_RETRIES} failed for task ${input.payload.task.id}:`, lastError);
-      if (attempt < SUBMIT_RESULT_MAX_RETRIES) {
-        await sleep(SUBMIT_RESULT_RETRY_DELAY_MS);
-      }
-    }
-  }
-  if (lastError) {
-    console.error(`all submitResult retries failed for task ${input.payload.task.id}, worker may need manual recovery:`, lastError);
-  }
-}
-
-async function submitFailedResult(input: ProcessTaskAssignmentInput, taskId: string, error: unknown): Promise<void> {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  console.error(`task execution failed for ${taskId}:`, errorMessage);
-  await submitFailedWorkerResult({ input, taskId, error });
-}
-
 export async function submitFailedWorkerResult(request: SubmitFailedWorkerResultInput): Promise<void> {
   const taskId = request.taskId ?? request.input.payload.task.id;
   const errorMessage = request.error instanceof Error ? request.error.message : String(request.error);
@@ -304,16 +221,4 @@ async function submitFailedResultWithRetry(request: SubmitFailedWorkerResultInpu
       }
     }
   }
-}
-
-function buildTaskSummary(summary: TaskSummaryInput) {
-  return {
-    status: "completed",
-    taskId: summary.input.payload.task.id,
-    workerId: summary.input.workerId,
-    worktreeDir: summary.worktreeDir,
-    outputDir: summary.outputDir,
-    changedFiles: summary.changedFiles,
-    pullRequest: summary.pullRequest,
-  };
 }

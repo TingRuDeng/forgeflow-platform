@@ -14,6 +14,7 @@
     "@forgeflow/provider-registry": "workspace:*",
     "@forgeflow/result-contracts": "workspace:*",
     "@forgeflow/task-schema": "workspace:*",
+    "@tingrudeng/beta-runtime-core": "workspace:*",
     "zod": "^3.24.2"
   }
 }
