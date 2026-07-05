@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M34 串行：补齐 Console Artifact Workbench 跨任务证据对比摘要。
+- [x] M34 串行：运行最小充分验证并补充 review 小结。
+
+## M34 Review 小结
+
+已把 Artifact Workbench 的 review evidence 联动继续推进为跨任务证据对比摘要：当筛选结果包含多个 artifact bundle 时，工作台会按最新 review 汇总 `reasonCode` 和 `riskAssessment.level` 的计数，帮助审查者先判断当前结果集的风险分布，再进入具体任务详情。该摘要只读取 dashboard snapshot 里已有的 `reviews` 和 `artifactBundles`，不新增后端写路径。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 Console Artifact Workbench 跨任务证据对比摘要，并保持点击任务、按 evidence 筛选和 review evidence badge 原行为；安全检查通过，仅读取前端已有 `reviews` / `artifactBundles` 数据，未新增 secret、后端写路径、外部网络调用、mock 成功路径或静默 fallback；复杂度检查通过，`ArtifactWorkbench.tsx` 190 行，新增 helper / component 均低于 50 行，既有 `Lists.test.tsx` 和 `i18n.tsx` 已超过 300 行但本轮只做最小增量，不在本次 UI 行为收口中拆分集中式测试和文案表；Document-refresh: needed，原因：Console 审查工作台证据对比能力发生变化，已同步 README、docs/README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx` 先失败于未展示 `证据对比`；GREEN 后 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx` 通过，15 个测试通过；修复断言歧义后 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx` 再次通过，15 个测试通过；`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx src/__tests__/App.test.tsx` 通过，20 个测试通过；`CI=true pnpm --filter console test` 通过，29 个测试通过；`CI=true pnpm --filter console build`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：当前补齐的是计数摘要，不是并排 diff 详情；跨任务 artifact / review 并排详情和证据差异高亮仍保留为后续产品化项。
+
 - [x] M33 串行：把 Console Artifact Workbench 接上 review evidence 联动。
 - [x] M33 串行：运行最小充分验证并补充 review 小结。
 

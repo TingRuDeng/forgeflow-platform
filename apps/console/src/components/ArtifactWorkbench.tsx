@@ -65,6 +65,36 @@ function bundleMatches(bundle: ArtifactBundle, task: TaskSummary | undefined, re
   return searchable.includes(query);
 }
 
+function countValues(values: Array<string | null | undefined>): Array<[string, number]> {
+  const counts = new Map<string, number>();
+  values.filter(Boolean).forEach((value) => {
+    const key = String(value);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  return [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+}
+
+const EvidenceComparison: React.FC<{
+  bundles: ArtifactBundle[];
+  reviewByTask: Map<string, ReviewSummary | undefined>;
+}> = ({ bundles, reviewByTask }) => {
+  const { t } = useTranslation();
+  if (bundles.length < 2) return null;
+  const reviews = bundles.map((bundle) => reviewByTask.get(bundle.taskId));
+  const reasonCounts = countValues(reviews.map((review) => review?.evidence?.reasonCode));
+  const riskCounts = countValues(reviews.map((review) => review?.riskAssessment?.level));
+  if (reasonCounts.length === 0 && riskCounts.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/15 p-3">
+      <div className="text-[11px] uppercase tracking-wide text-white/45">{t('artifactEvidenceComparison')}</div>
+      <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-white/60">
+        {reasonCounts.map(([reason, count]) => <span key={`reason-${reason}`} className="font-mono">{reason} {count}</span>)}
+        {riskCounts.map(([risk, count]) => <span key={`risk-${risk}`} className="font-mono">{risk} {count}</span>)}
+      </div>
+    </div>
+  );
+};
+
 const ReviewEvidenceBadges: React.FC<{ review?: ReviewSummary }> = ({ review }) => {
   const { t } = useTranslation();
   const mustFix = review?.evidence?.mustFix ?? [];
@@ -118,6 +148,7 @@ export const ArtifactWorkbench: React.FC<ArtifactWorkbenchProps> = ({
 
       {filteredBundles.length > 0 ? (
         <div className="grid grid-cols-1 gap-2">
+          <EvidenceComparison bundles={filteredBundles} reviewByTask={reviewByTask} />
           {filteredBundles.map((bundle) => {
             const task = taskById.get(bundle.taskId);
             const review = reviewByTask.get(bundle.taskId);
