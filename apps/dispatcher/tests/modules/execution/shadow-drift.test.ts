@@ -118,6 +118,30 @@ describe("shadow drift verification", () => {
     });
   }, 30_000);
 
+  it("fails cutover readiness when primary mode is not implemented", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-drift-"));
+    const result = spawnSync("node", [checkShadowDriftScriptPath, stateDir, "--require-configured"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "primary",
+        DISPATCHER_QUEUE_SHADOW_MODE: "primary",
+        DISPATCHER_POSTGRES_URL: "postgres://example.invalid/forgeflow",
+      },
+    });
+
+    expect(result.status).toBe(2);
+    const payload = JSON.parse(result.stdout);
+    expect(payload.drift.status).toBe("primary_unsupported");
+    expect(payload.cutover).toEqual({
+      required: true,
+      ready: false,
+      reason: "primary_store_not_implemented",
+    });
+  }, 30_000);
+
   it("rejects invalid environment threshold values", () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-drift-"));
     const result = spawnSync("node", [checkShadowDriftScriptPath, stateDir], {

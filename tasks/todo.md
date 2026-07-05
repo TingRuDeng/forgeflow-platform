@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M18 串行：补齐 primary cutover 硬门禁，拒绝未实现的 `DISPATCHER_SHADOW_MODE=primary`。
+- [x] M18 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M18 Review 小结
+
+已补齐 primary cutover 硬门禁：`DISPATCHER_SHADOW_MODE=primary` 在当前没有 Postgres-backed primary `RuntimeStateStore` 时会被明确拒绝为 `primary_store_not_implemented`；shadow health / drift 会输出 `primary_unsupported`，`verify:shadow-cutover` 不会把 primary 模式误判为可切换。同步把 `runtime-state-shadow.ts` 拆分为 `runtime-state-shadow-drift.ts` 与 `runtime-state-shadow-snapshot.ts`，保留原模块导出路径，降低主文件职责和行数。
+
+Review Gate：finished。Spec 符合度通过，本轮没有把 production cutover 伪装成已支持，而是补齐误启用 primary 的硬失败边界；安全检查通过，未新增 secret、外部写副作用或静默 fallback，primary 模式会显式失败；复杂度检查通过，`runtime-state-shadow.ts` 降至 213 行，新增 drift / snapshot 文件均低于 300 行；Document-refresh: needed，原因：primary 模式语义、cutover gate 失败原因和技术债边界发生变化，已同步 runtime-state query 契约、Stage 3 runbook、API 文档与技术债。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-state-shadow-health.test.ts tests/modules/execution/shadow-drift.test.ts tests/modules/execution/workflows.test.ts`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
+
+剩余风险：真实 production primary-store cutover 仍未完成；下一步必须实现 Postgres-backed `RuntimeStateStore` 的 load/save truth source 或明确把目标收口为 shadow-only rollout。
+
 - [x] M17 串行：补齐 shadow 自动 reconciliation cadence 入口和 production cutover 预检。
 - [x] M17 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 

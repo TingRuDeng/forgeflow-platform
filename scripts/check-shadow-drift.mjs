@@ -92,10 +92,13 @@ function buildReconciliationStatus(requested, attempted, reason) {
 
 function buildCutoverStatus(requireConfigured, health, drift) {
   if (!requireConfigured) {
-    return { required: false, ready: drift.status !== "drifted", reason: "not_required" };
+    return { required: false, ready: drift.status !== "drifted" && drift.status !== "primary_unsupported", reason: "not_required" };
   }
   if (!health.configured) {
     return { required: true, ready: false, reason: "shadow_not_configured" };
+  }
+  if (drift.status === "primary_unsupported") {
+    return { required: true, ready: false, reason: "primary_store_not_implemented" };
   }
   if (drift.status === "drifted") {
     return { required: true, ready: false, reason: "shadow_drifted" };
@@ -161,7 +164,7 @@ async function checkShadowDrift(options) {
   }
   const cutover = buildCutoverStatus(options.requireConfigured, result.health, result.drift);
   return {
-    ok: result.drift.status !== "drifted" && cutover.ready,
+    ok: result.drift.status !== "drifted" && result.drift.status !== "primary_unsupported" && cutover.ready,
     stateDir: options.stateDir,
     drift: result.drift,
     alert: result.alert,

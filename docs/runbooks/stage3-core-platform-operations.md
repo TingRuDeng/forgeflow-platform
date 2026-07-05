@@ -106,6 +106,7 @@ export DISPATCHER_QUEUE_SHADOW_MODE=shadow-write
 - 生产巡检或定时任务可使用 `pnpm verify:shadow-drift:reconcile`，等价于显式 `--reconcile --record-alert`；也可通过 `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1` 与 `DISPATCHER_SHADOW_DRIFT_RECORD_ALERT=1` 注入同一行为
 - 如果需要把 drift 留作运行时告警证据，operator 可追加 `--record-alert` 写入 `shadow_drift_detected` system event
 - 生产 cutover 前必须执行 `pnpm verify:shadow-cutover`，该命令要求 shadow 已配置并且 `--max-mismatches 0 --max-delta 0` 通过；未配置 shadow 时会失败，而不是把 `not_configured` 当成可切换状态
+- 当前 `DISPATCHER_SHADOW_MODE=primary` 会被明确拒绝为 `primary_store_not_implemented`；不要把它作为生产切换开关
 - `pnpm verify:stage3` 和 release workflow 会执行 `pnpm verify:shadow-drift`，shadow 配置存在且 drifted 时必须阻断 rollout / release
 - assignment delivery queue 影子计数合理
 

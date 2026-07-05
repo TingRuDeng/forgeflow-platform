@@ -2,18 +2,24 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { RuntimeStateShadowWriteStatus } from "../../../src/modules/server/runtime-state-shadow.js";
 import {
   evaluateRuntimeStateShadowDriftAlert,
   summarizeRuntimeStateShadowDrift,
+  syncRuntimeStateShadow,
 } from "../../../src/modules/server/runtime-state-shadow.js";
+import { createEmptyRuntimeState } from "../../../src/modules/server/runtime-state.js";
 import {
   readPersistedRuntimeStateShadowWriteStatus,
   selectRuntimeStateShadowWriteStatus,
   SHADOW_WRITE_STATUS_FILE,
 } from "../../../src/modules/server/runtime-state-shadow-health.js";
+
+const originalShadowMode = process.env.DISPATCHER_SHADOW_MODE;
+const originalQueueShadowMode = process.env.DISPATCHER_QUEUE_SHADOW_MODE;
+const originalPostgresUrl = process.env.DISPATCHER_POSTGRES_URL;
 
 function status(input: Partial<RuntimeStateShadowWriteStatus>): RuntimeStateShadowWriteStatus {
   return {
@@ -28,6 +34,24 @@ function status(input: Partial<RuntimeStateShadowWriteStatus>): RuntimeStateShad
     ...input,
   };
 }
+
+afterEach(() => {
+  if (originalShadowMode === undefined) {
+    delete process.env.DISPATCHER_SHADOW_MODE;
+  } else {
+    process.env.DISPATCHER_SHADOW_MODE = originalShadowMode;
+  }
+  if (originalQueueShadowMode === undefined) {
+    delete process.env.DISPATCHER_QUEUE_SHADOW_MODE;
+  } else {
+    process.env.DISPATCHER_QUEUE_SHADOW_MODE = originalQueueShadowMode;
+  }
+  if (originalPostgresUrl === undefined) {
+    delete process.env.DISPATCHER_POSTGRES_URL;
+  } else {
+    process.env.DISPATCHER_POSTGRES_URL = originalPostgresUrl;
+  }
+});
 
 describe("runtime-state-shadow-health", () => {
   it("keeps the live running status instead of showing a stale persisted failure", () => {
@@ -73,6 +97,7 @@ describe("runtime-state-shadow-health", () => {
       mode: "shadow-write",
       queueMode: "shadow-write",
       configured: true,
+      primarySupported: false,
       projectionCounts: { dispatcher_tasks: 1 },
       queueCounts: { assignment_delivery: 1 },
       expectedCounts: { dispatcher_tasks: 1 },
@@ -88,6 +113,7 @@ describe("runtime-state-shadow-health", () => {
       mode: "shadow-write",
       queueMode: "shadow-write",
       configured: true,
+      primarySupported: false,
       projectionCounts: { dispatcher_tasks: 0 },
       queueCounts: { assignment_delivery: 2 },
       expectedCounts: { dispatcher_tasks: 1 },
@@ -106,6 +132,7 @@ describe("runtime-state-shadow-health", () => {
       mode: "shadow-write",
       queueMode: "shadow-write",
       configured: true,
+      primarySupported: false,
       projectionCounts: { dispatcher_tasks: 0, dispatcher_events: 7 },
       queueCounts: { assignment_delivery: 0 },
       expectedCounts: { dispatcher_tasks: 3, dispatcher_events: 1 },
@@ -123,5 +150,31 @@ describe("runtime-state-shadow-health", () => {
       mismatchCount: 3,
       absoluteDelta: 11,
     });
+  });
+
+  it("marks primary mode as unsupported until a primary store exists", () => {
+    const drift = summarizeRuntimeStateShadowDrift({
+      mode: "primary",
+      queueMode: "primary",
+      configured: true,
+      primarySupported: false,
+      projectionCounts: { dispatcher_tasks: 1 },
+      queueCounts: { assignment_delivery: 1 },
+      expectedCounts: { dispatcher_tasks: 1 },
+      expectedQueueCounts: { assignment_delivery: 1 },
+    });
+
+    expect(drift).toMatchObject({
+      status: "primary_unsupported",
+      projectionMatches: false,
+    });
+  });
+
+  it("rejects primary mode writes instead of silently shadow-writing", async () => {
+    process.env.DISPATCHER_SHADOW_MODE = "primary";
+    process.env.DISPATCHER_QUEUE_SHADOW_MODE = "primary";
+    process.env.DISPATCHER_POSTGRES_URL = "postgres://example.invalid/forgeflow";
+
+    await expect(syncRuntimeStateShadow(createEmptyRuntimeState())).rejects.toThrow("primary_store_not_implemented");
   });
 });
