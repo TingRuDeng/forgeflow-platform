@@ -18,6 +18,43 @@ export interface ResolveMacAppBundleExecutableOptions {
   platform?: string;
 }
 
+export interface ResolveTraeLaunchTargetOptions {
+  defaultRemoteDebuggingPort?: number | string;
+  env?: Record<string, string | undefined>;
+  fsImpl?: TraeLaunchTargetFs;
+  pathImpl?: TraeLaunchTargetPath;
+  platform?: string;
+  remoteDebuggingPort?: number | string;
+  traeArgs?: string | string[];
+  traeBin?: string;
+  projectPath?: string;
+}
+
+export interface TraeLaunchTarget {
+  bundlePath: string;
+  command: string;
+  args: string[];
+  projectPath: string;
+  remoteDebuggingPort: number;
+}
+
+export function parseLaunchArgs(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (!value) {
+    return [];
+  }
+  return String(value)
+    .split(" ")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export function hasRemoteDebuggingPortArg(args: string[] = []): boolean {
+  return args.some((arg) => /^--remote-debugging-port=/.test(arg));
+}
+
 export function resolveMacAppBundleExecutable(command: string, options: ResolveMacAppBundleExecutableOptions = {}): string {
   const fsImpl = options.fsImpl || (fs as TraeLaunchTargetFs);
   const pathImpl = options.pathImpl || (path as TraeLaunchTargetPath);
@@ -49,4 +86,47 @@ export function resolveMacAppBundleExecutable(command: string, options: ResolveM
   }
 
   return normalized;
+}
+
+export function resolveTraeLaunchTarget(options: ResolveTraeLaunchTargetOptions = {}): TraeLaunchTarget {
+  const env = options.env || process.env;
+  const fsImpl = options.fsImpl || (fs as TraeLaunchTargetFs);
+  const pathImpl = options.pathImpl || (path as TraeLaunchTargetPath);
+  const remoteDebuggingPort = Number(
+    options.remoteDebuggingPort || env.TRAE_REMOTE_DEBUGGING_PORT || options.defaultRemoteDebuggingPort || 9222,
+  );
+
+  const configuredCommand = String(options.traeBin || env.TRAE_BIN || "").trim();
+  if (!configuredCommand) {
+    throw new Error("TRAE_BIN or --trae-bin is required");
+  }
+
+  const projectPath = String(options.projectPath || env.TRAE_PROJECT_PATH || "").trim();
+  if (!projectPath) {
+    throw new Error("TRAE_PROJECT_PATH or --project-path is required");
+  }
+  if (!fsImpl.existsSync(projectPath)) {
+    throw new Error(`project path does not exist: ${projectPath}`);
+  }
+
+  const command = resolveMacAppBundleExecutable(configuredCommand, {
+    fsImpl,
+    pathImpl,
+    platform: options.platform || process.platform,
+  });
+  const args = parseLaunchArgs(options.traeArgs || env.TRAE_ARGS || "");
+  if (!hasRemoteDebuggingPortArg(args)) {
+    args.push(`--remote-debugging-port=${remoteDebuggingPort}`);
+  }
+  if (!args.includes(projectPath)) {
+    args.push(projectPath);
+  }
+
+  return {
+    bundlePath: configuredCommand,
+    command,
+    args,
+    projectPath,
+    remoteDebuggingPort,
+  };
 }
