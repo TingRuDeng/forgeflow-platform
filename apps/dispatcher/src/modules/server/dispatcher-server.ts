@@ -14,6 +14,7 @@ import {
   loadStructuredRuntimeStateAsync,
   readStructuredProjectionHealthAsync,
 } from "./runtime-state-query-store.js";
+import { readPersistedRuntimeStateShadowReconcilerStatus } from "./runtime-state-shadow-health.js";
 import { getRuntimeStateShadowMode, readRuntimeStateShadowWriteStatus } from "./runtime-state-shadow.js";
 import {
   beginTaskForWorker,
@@ -1033,6 +1034,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
         structuredReads: useStructuredReads(),
         shadowMode: getRuntimeStateShadowMode(),
         shadowWrite: readRuntimeStateShadowWriteStatus(stateDir),
+        shadowReconciler: readPersistedRuntimeStateShadowReconcilerStatus(stateDir),
         projectionHealth: await readStructuredProjectionHealthAsync(stateDir),
         backups: listBackupManifests(stateDir),
       });
