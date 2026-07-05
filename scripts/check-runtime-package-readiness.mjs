@@ -4,43 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const RUNTIME_PACKAGES = [
-  {
-    dir: "packages/automation-gateway-core",
-    name: "@tingrudeng/automation-gateway-core",
-    role: "trae-support-core",
-    dependencies: [],
-  },
-  {
-    dir: "packages/beta-runtime-core",
-    name: "@tingrudeng/beta-runtime-core",
-    role: "codex-gemini-support-core",
-    dependencies: [],
-  },
-  {
-    bin: "forgeflow-codex-beta",
-    dir: "packages/codex-beta-runtime",
-    name: "@tingrudeng/codex-beta-runtime",
-    role: "codex-remote-runtime",
-    dependencies: ["@tingrudeng/beta-runtime-core"],
-    rewriteScript: "node ../../scripts/rewrite-workspace-deps.mjs package.json",
-  },
-  {
-    bin: "forgeflow-gemini-beta",
-    dir: "packages/gemini-beta-runtime",
-    name: "@tingrudeng/gemini-beta-runtime",
-    role: "gemini-remote-runtime",
-    dependencies: ["@tingrudeng/beta-runtime-core"],
-    rewriteScript: "node ../../scripts/rewrite-workspace-deps.mjs package.json",
-  },
-  {
-    bin: "forgeflow-trae-beta",
-    dir: "packages/trae-beta-runtime",
-    name: "@tingrudeng/trae-beta-runtime",
-    role: "trae-remote-runtime",
-    dependencies: ["@tingrudeng/automation-gateway-core"],
-  },
-];
+import { RUNTIME_PACKAGES, readWorkspaceVersions } from "./lib/runtime-package-specs.mjs";
 
 function parseArgs(argv) {
   const parsed = {};
@@ -235,14 +199,7 @@ function main() {
   const issues = [];
   const warnings = [];
   const rows = [];
-  const workspaceVersions = {};
-
-  for (const spec of RUNTIME_PACKAGES) {
-    const packageJson = readPackageJson(rootDir, spec.dir, issues);
-    if (packageJson?.name && packageJson?.version) {
-      workspaceVersions[packageJson.name] = packageJson.version;
-    }
-  }
+  const workspaceVersions = readWorkspaceVersions(rootDir);
 
   for (const spec of RUNTIME_PACKAGES) {
     const packageJson = readPackageJson(rootDir, spec.dir, issues);
