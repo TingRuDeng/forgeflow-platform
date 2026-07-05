@@ -1,5 +1,5 @@
 import React from 'react';
-import { Copy, FileText } from 'lucide-react';
+import { Copy, Download, FileText } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 
 export interface ArtifactBundle {
@@ -64,13 +64,34 @@ function flattenRefs(refs: Array<[string, string | string[] | undefined]>) {
   });
 }
 
-async function readArtifactRefFile(ref: string): Promise<string> {
+async function readArtifactRefFile(ref: string): Promise<{ content: string; fileName: string }> {
   const parsed = parseArtifactRef(ref);
-  if (!parsed) return '';
+  if (!parsed) return { content: '', fileName: 'artifact.txt' };
   const url = `/api/artifacts/${encodeURIComponent(parsed.bundleId)}/files/${encodeURIComponent(parsed.fileName)}`;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  return response.text();
+  const text = await response.text();
+  try {
+    const parsedBody = JSON.parse(text) as { content?: unknown; fileName?: unknown };
+    return {
+      content: typeof parsedBody.content === 'string' ? parsedBody.content : text,
+      fileName: typeof parsedBody.fileName === 'string' ? parsedBody.fileName : parsed.fileName,
+    };
+  } catch {
+    return { content: text, fileName: parsed.fileName };
+  }
+}
+
+function downloadTextFile(fileName: string, content: string) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function removeRecordKey(record: Record<string, string>, key: string) {
@@ -132,7 +153,8 @@ const ArtifactRefRow: React.FC<{
   copied: boolean;
   onCopy: (ref: string) => void;
   onOpen: (ref: string) => void;
-}> = ({ entry, openedFile, error, copied, onCopy, onOpen }) => {
+  onDownload: (ref: string) => void;
+}> = ({ entry, openedFile, error, copied, onCopy, onOpen, onDownload }) => {
   const { t } = useTranslation();
   const parsed = parseArtifactRef(entry.ref);
   const copyLabel = copied ? t('copied') : t('copyArtifactRef');
@@ -148,9 +170,14 @@ const ArtifactRefRow: React.FC<{
             <Copy size={14} aria-hidden="true" />
           </IconButton>
           {parsed && (
-            <IconButton label={t('openArtifactFile')} onClick={() => onOpen(entry.ref)}>
-              <FileText size={14} aria-hidden="true" />
-            </IconButton>
+            <>
+              <IconButton label={t('openArtifactFile')} onClick={() => onOpen(entry.ref)}>
+                <FileText size={14} aria-hidden="true" />
+              </IconButton>
+              <IconButton label={t('downloadArtifactFile')} onClick={() => onDownload(entry.ref)}>
+                <Download size={14} aria-hidden="true" />
+              </IconButton>
+            </>
           )}
         </div>
       </div>
@@ -177,8 +204,20 @@ const ArtifactRefs: React.FC<{ refs: Array<[string, string | string[] | undefine
   };
 
   const handleOpen = (ref: string) => {
-    readArtifactRefFile(ref).then((text) => {
-      setOpenedFiles((current) => ({ ...current, [ref]: text }));
+    readArtifactRefFile(ref).then((file) => {
+      setOpenedFiles((current) => ({ ...current, [ref]: file.content }));
+      setErrorRefs((current) => removeRecordKey(current, ref));
+    }).catch((error: unknown) => {
+      setErrorRefs((current) => ({
+        ...current,
+        [ref]: error instanceof Error ? error.message : t('artifactFileLoadFailed'),
+      }));
+    });
+  };
+
+  const handleDownload = (ref: string) => {
+    readArtifactRefFile(ref).then((file) => {
+      downloadTextFile(file.fileName, file.content);
       setErrorRefs((current) => removeRecordKey(current, ref));
     }).catch((error: unknown) => {
       setErrorRefs((current) => ({
@@ -199,6 +238,7 @@ const ArtifactRefs: React.FC<{ refs: Array<[string, string | string[] | undefine
           copied={copiedRef === entry.ref}
           onCopy={(ref) => void handleCopy(ref)}
           onOpen={handleOpen}
+          onDownload={handleDownload}
         />
       )) : (
         <div className="text-sm text-white/45">{t('noArtifactRefs')}</div>

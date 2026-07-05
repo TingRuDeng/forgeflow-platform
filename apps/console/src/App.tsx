@@ -5,6 +5,7 @@ import { MetricsGrid } from './components/MetricsGrid';
 import { TaskDetailsPanel, TaskList, WorkerList } from './components/Lists';
 import { TerminalPanel } from './components/TerminalPanel';
 import { Panel } from './components/UI';
+import { ArtifactWorkbench } from './components/ArtifactWorkbench';
 import { useTranslation } from './lib/i18n';
 
 async function parseJsonResponse(res: Response) {
@@ -256,6 +257,15 @@ const App: React.FC = () => {
                     onReviewDecision={handleReviewDecision}
                   />
                 </div>
+              </Panel>
+
+              <Panel title={t('artifactWorkbench')}>
+                <ArtifactWorkbench
+                  bundles={Array.isArray(data.artifactBundles) ? data.artifactBundles : []}
+                  tasks={Array.isArray(data.tasks) ? data.tasks : []}
+                  selectedTaskId={selectedTask?.id || null}
+                  onSelectTask={setSelectedTaskId}
+                />
               </Panel>
 
               <TerminalPanel events={data.events} />

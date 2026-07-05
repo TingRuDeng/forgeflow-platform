@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M23 串行：补齐 Console artifact 下载和跨任务筛选工作台。
+- [x] M23 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M23 Review 小结
+
+已把 Console artifact 体验从单任务 refs 展开推进到审查工作台：`ArtifactSummary` 支持读取真实 artifact file API 的 `content` 字段并下载 manifest 文件；新增 `ArtifactWorkbench`，支持按任务、仓库、摘要、文件和 ref 跨任务筛选 artifact bundle，并可点击跳转到对应任务详情。
+
+Review Gate：finished。Spec 符合度通过，本轮补齐 Console 审查工作台产品化中的下载和跨任务筛选；安全检查通过，下载只读取既有 `/api/artifacts/:bundleId/files/:fileName` API，仍使用 `encodeURIComponent`，未新增外部网络或路径拼接入口；复杂度检查通过，新组件职责单一且低于 300 行；Document-refresh: needed，原因：Console artifact 能力和技术债状态变化，已同步 `docs/TECH_DEBT.md`。结论：通过。
+
+验证已通过：`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
+
+剩余风险：Console 仍未提供跨任务批量审查动作、批量 reason code / must-fix 编辑和批量提交决策。
+
 - [x] M22 串行：补齐 production cutover primary backend readiness gate。
 - [x] M22 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 

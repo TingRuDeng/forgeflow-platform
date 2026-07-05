@@ -2,6 +2,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { TaskDetailsPanel, TaskList } from '../Lists';
+import { ArtifactWorkbench } from '../ArtifactWorkbench';
 import { LanguageProvider } from '../../lib/i18n';
 
 // Mock Tasks
@@ -22,6 +23,7 @@ const renderWithProviders = (ui: React.ReactElement) => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('TaskList Pagination', () => {
@@ -120,9 +122,18 @@ describe('Task drill-down', () => {
     const onReviewDecision = vi.fn();
     const fetchMock = vi.fn(async () => ({
       ok: true,
-      text: async () => 'artifact file body',
+      text: async () => JSON.stringify({ fileName: 'diff.patch', content: 'artifact file body' }),
     }));
     vi.stubGlobal('fetch', fetchMock);
+    const appendChild = vi.spyOn(document.body, 'appendChild');
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const createObjectUrl = vi.fn(() => 'blob:artifact');
+    const revokeObjectUrl = vi.fn();
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: createObjectUrl,
+      revokeObjectURL: revokeObjectUrl,
+    });
 
     renderWithProviders(
       <TaskDetailsPanel
@@ -257,6 +268,13 @@ describe('Task drill-down', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /展开文件|open file/i })[0]);
     expect(await screen.findByText(/artifact file body/i)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/artifacts/att-001/files/diff.patch');
+    fireEvent.click(screen.getAllByRole('button', { name: /下载文件|download file/i })[0]);
+    expect(await screen.findByText(/artifact file body/i)).toBeInTheDocument();
+    expect(createObjectUrl).toHaveBeenCalled();
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:artifact');
+    expect(appendChild).toHaveBeenCalledWith(expect.objectContaining({
+      download: 'diff.patch',
+    }));
 
     fireEvent.click(screen.getByRole('tab', { name: /retained|正文/i }));
     expect(screen.getByText(/diff --git a\/src\/auth.ts b\/src\/auth.ts/i)).toBeInTheDocument();
@@ -280,5 +298,54 @@ describe('Task drill-down', () => {
       reasonCode: 'test_gap',
       redriveStrategy: 'same_worker_continue',
     }));
+  });
+});
+
+describe('ArtifactWorkbench', () => {
+  it('filters artifacts across tasks and selects the owning task', () => {
+    const onSelectTask = vi.fn();
+
+    renderWithProviders(
+      <ArtifactWorkbench
+        selectedTaskId="task-2"
+        onSelectTask={onSelectTask}
+        tasks={[
+          { id: 'task-1', title: 'Fix auth gate', status: 'review', repo: 'owner/auth' },
+          { id: 'task-2', title: 'Update docs', status: 'merged', repo: 'owner/docs' },
+        ]}
+        bundles={[
+          {
+            taskId: 'task-1',
+            bundleId: 'bundle-auth',
+            attemptId: 'attempt-auth',
+            summary: 'auth diff ready',
+            changedFiles: [{ path: 'src/auth.ts' }],
+            refs: { diff: 'artifact://bundle-auth/diff.patch' },
+          },
+          {
+            taskId: 'task-2',
+            bundleId: 'bundle-docs',
+            attemptId: 'attempt-docs',
+            summary: 'docs updated',
+            changedFiles: [{ path: 'docs/README.md' }],
+            refs: { report: 'artifact://bundle-docs/report.md' },
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText(/docs updated/i)).toBeInTheDocument();
+    expect(screen.getByText(/auth diff ready/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/筛选|filter/i), {
+      target: { value: 'auth' },
+    });
+
+    expect(screen.getByText(/auth diff ready/i)).toBeInTheDocument();
+    expect(screen.queryByText(/docs updated/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/Fix auth gate/i));
+
+    expect(onSelectTask).toHaveBeenCalledWith('task-1');
   });
 });
