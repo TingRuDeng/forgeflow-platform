@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M88 串行：新增 runtime tarball 本地打包 / 安装 smoke 门禁。
 - [x] M87 串行：校验已发布 runtime 包依赖元数据是否与源码发布清单一致。
 - [x] M86 串行：让 release preflight 提前阻断未配置 npm 包名。
 - [x] M85 串行：为 runtime 包发布清单增加可复现 readiness gate。
@@ -11,6 +12,18 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M88 Review 小结
+
+已新增 `scripts/verify-runtime-package-install.mjs` 和根命令 `pnpm verify:runtime-packages:install`。该命令会按 `codex`、`gemini`、`trae` 三组 runtime 包执行本地 tarball smoke：构建相关包，在临时 staging package.json 中把 `workspace:*` 依赖重写为当前 workspace 版本，使用临时 npm cache 执行 `npm pack` 和 `npm install --ignore-scripts`，然后校验 provider CLI bin 已安装、安装后的 package 依赖不再包含 `workspace:*`。CI 与 release workflow 已接入该门禁。
+
+这补上了 registry 之外的发布形态证明：即使 npm 包名尚未创建，也能在仓库内验证即将发布的 tarball 可被 npm 安装，并且 codex/gemini provider runtime 会携带可解析的 `@tingrudeng/beta-runtime-core` 版本依赖。
+
+Review Gate：finished。Spec 符合度通过，本轮新增的是本地 tarball 打包 / 安装 smoke，不改变 runtime 代码、发布版本、npm publish 行为或默认运行路径。安全检查通过，脚本只读取源码包、复制到临时 staging 目录、使用临时 npm cache 执行 `npm pack` / `npm install --ignore-scripts`；不访问 registry、不写源码 package.json、不发布、不引入 secret 或静默成功路径。复杂度检查通过，`scripts/verify-runtime-package-install.mjs` 210 行、新增测试 98 行，函数均短小。Document-refresh: needed，原因：新增 CI / release 级 runtime tarball 安装门禁，已同步 README、docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/runtime-package-install.test.ts tests/modules/execution/workflows.test.ts --maxWorkers=1` 通过，2 个测试文件、8 个测试通过；`CI=true pnpm verify:runtime-packages:install` 通过，codex / gemini / trae 三组 runtime tarball 均本地安装成功；`node --check scripts/verify-runtime-package-install.mjs`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。RED 阶段曾因 npm 使用全局 cache 中 root-owned 文件导致 `npm pack` EPERM，已修为每组 smoke 使用临时 `NPM_CONFIG_CACHE`，避免开发机全局 npm 状态影响验证。
+
+剩余风险：本地 tarball 安装 smoke 能证明发布包形态可安装；它不等于 npm registry 真实发布，也不覆盖远端机器的 dispatcher / provider credential / 网络连通性 smoke。`@tingrudeng/beta-runtime-core` 与 `@tingrudeng/gemini-beta-runtime` 仍需外部 npm 包名和 Trusted Publisher 配置。
 
 ## M87 Review 小结
 

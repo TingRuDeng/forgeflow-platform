@@ -158,6 +158,9 @@ jobs:
       - name: Verify runtime package readiness
         run: pnpm verify:runtime-packages
 
+      - name: Verify runtime package install smoke
+        run: pnpm verify:runtime-packages:install
+
       - name: Run tests
         run: pnpm --filter @tingrudeng/${{ inputs.package }}... --if-present test
 
@@ -361,6 +364,9 @@ jobs:
 
       - name: Verify runtime package readiness
         run: pnpm verify:runtime-packages
+
+      - name: Verify runtime package install smoke
+        run: pnpm verify:runtime-packages:install
 
       - name: Run tests
         run: pnpm --filter @tingrudeng/${{ matrix.package.name }}... --if-present test

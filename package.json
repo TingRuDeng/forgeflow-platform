@@ -31,6 +31,7 @@
     "verify:shadow-cutover:revoke": "node scripts/revoke-shadow-cutover.mjs .forgeflow-dispatcher --reason operator_rollback",
     "verify:runtime-packages": "node scripts/check-runtime-package-readiness.mjs",
     "verify:runtime-packages:published": "node scripts/check-runtime-package-readiness.mjs --check-registry --check-published-metadata --require-published",
+    "verify:runtime-packages:install": "node scripts/verify-runtime-package-install.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   },
