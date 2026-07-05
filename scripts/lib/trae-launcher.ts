@@ -3,9 +3,15 @@ import path from "node:path";
 import { spawn, ChildProcess } from "node:child_process";
 
 import { discoverTraeTarget, getDebuggerVersion, DiscoverTraeTargetResult, DebuggerVersion } from "./trae-cdp-discovery.js";
-
+import {
+  prepareCleanRelaunch,
+  quitExistingMacApp,
+  resolveMacAppName,
+  waitForDebuggerPortToDrain,
+} from "./trae-launcher-clean-relaunch.js";
 export const DEFAULT_START_TIMEOUT_MS = Number(process.env.TRAE_CDP_START_TIMEOUT_MS || 15000);
 export const DEFAULT_REMOTE_DEBUGGING_PORT = Number(process.env.TRAE_REMOTE_DEBUGGING_PORT || 9222);
+export { prepareCleanRelaunch, quitExistingMacApp, resolveMacAppName, waitForDebuggerPortToDrain };
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -67,7 +73,7 @@ export function resolveMacAppBundleExecutable(command: string, options: ResolveM
         return entryPath;
       }
     } catch {
-      // ignore and keep scanning
+      // 跳过不可读取条目，继续尝试其他可执行文件。
     }
   }
 
@@ -86,6 +92,7 @@ export interface ResolveTraeLaunchTargetOptions {
 }
 
 export interface TraeLaunchTarget {
+  bundlePath: string;
   command: string;
   args: string[];
   projectPath: string;
@@ -125,6 +132,7 @@ export function resolveTraeLaunchTarget(options: ResolveTraeLaunchTargetOptions 
   }
 
   return {
+    bundlePath: configuredCommand,
     command,
     args,
     projectPath,
@@ -174,6 +182,9 @@ export async function waitForTraeDebugger(options: WaitForTraeDebuggerOptions = 
 export interface LaunchTraeForAutomationOptions extends ResolveTraeLaunchTargetOptions {
   spawnImpl?: typeof spawn;
   titleContains?: string[];
+  forceCleanLaunch?: boolean;
+  cleanRelaunchDrainTimeoutMs?: number | string;
+  quitExistingApp?: typeof quitExistingMacApp;
   preferExisting?: boolean;
   waitForTarget?: boolean;
   timeoutMs?: number | string;
@@ -189,12 +200,30 @@ export interface LaunchTraeResult extends TraeLaunchTarget {
   debuggerInfo: { version: DebuggerVersion; target: DiscoverTraeTargetResult['target'] | null };
   reusedExisting: boolean;
 }
-
+function buildLaunchResult(
+  target: TraeLaunchTarget,
+  titleContains: string[],
+  debuggerInfo: LaunchTraeResult["debuggerInfo"],
+  reusedExisting: boolean,
+): LaunchTraeResult {
+  return {
+    bundlePath: target.bundlePath,
+    command: target.command,
+    args: target.args,
+    projectPath: target.projectPath,
+    remoteDebuggingPort: target.remoteDebuggingPort,
+    titleContains,
+    debuggerInfo,
+    reusedExisting,
+  };
+}
 export async function launchTraeForAutomation(options: LaunchTraeForAutomationOptions = {}): Promise<LaunchTraeResult> {
   const spawnImpl = options.spawnImpl || spawn;
   const titleContains = options.titleContains || [path.basename(String(options.projectPath || "").trim())].filter(Boolean);
   const target = resolveTraeLaunchTarget(options);
-  const preferExisting = options.preferExisting !== false;
+  const platform = options.platform || process.platform;
+  const forceCleanLaunch = options.forceCleanLaunch === true;
+  const preferExisting = !forceCleanLaunch && options.preferExisting !== false;
 
   if (preferExisting) {
     try {
@@ -208,18 +237,21 @@ export async function launchTraeForAutomation(options: LaunchTraeForAutomationOp
         sleepImpl: options.sleepImpl,
       });
 
-      return {
-        command: target.command,
-        args: target.args,
-        projectPath: target.projectPath,
-        remoteDebuggingPort: target.remoteDebuggingPort,
-        titleContains,
-        debuggerInfo: existingDebuggerInfo,
-        reusedExisting: true,
-      };
+      return buildLaunchResult(target, titleContains, existingDebuggerInfo, true);
     } catch {
-      // No reusable debugger target available; fall back to spawning a new Trae process.
+      // 没有可复用调试目标时，继续拉起新的 Trae 进程。
     }
+  }
+  if (forceCleanLaunch && platform === "darwin") {
+    await prepareCleanRelaunch({
+      bundlePath: target.bundlePath,
+      platform,
+      port: target.remoteDebuggingPort,
+      timeoutMs: options.cleanRelaunchDrainTimeoutMs,
+      getVersion: options.getVersion,
+      sleepImpl: options.sleepImpl,
+      quitExistingApp: options.quitExistingApp,
+    });
   }
 
   const child = spawnImpl(target.command, target.args, {
@@ -235,6 +267,16 @@ export async function launchTraeForAutomation(options: LaunchTraeForAutomationOp
     child.unref();
   }
 
+  const debuggerInfo = await waitForSpawnedDebugger(child, target, titleContains, options);
+  return buildLaunchResult(target, titleContains, debuggerInfo, false);
+}
+
+async function waitForSpawnedDebugger(
+  child: ChildProcess,
+  target: TraeLaunchTarget,
+  titleContains: string[],
+  options: LaunchTraeForAutomationOptions,
+): Promise<LaunchTraeResult["debuggerInfo"]> {
   const debuggerPromise = waitForTraeDebugger({
     port: target.remoteDebuggingPort,
     titleContains,
@@ -254,15 +296,5 @@ export async function launchTraeForAutomation(options: LaunchTraeForAutomationOp
     throw new Error(`Failed to launch Trae: ${spawnError.message || String(spawnError)}`);
   }
 
-  const debuggerInfo = await debuggerPromise;
-
-  return {
-    command: target.command,
-    args: target.args,
-    projectPath: target.projectPath,
-    remoteDebuggingPort: target.remoteDebuggingPort,
-    titleContains,
-    debuggerInfo,
-    reusedExisting: false,
-  };
+  return debuggerPromise;
 }

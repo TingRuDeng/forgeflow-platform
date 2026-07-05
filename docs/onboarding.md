@@ -390,6 +390,7 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 补充：
 
 - `start gateway` 默认启用 session store，并将会话状态落在 `~/.forgeflow-trae-beta/sessions/sessions.json`。
+- 源码脚本 `run-trae-automation-launch.js --force-clean-launch` 与 packaged runtime 一样，会先退出既有 macOS Trae app 并等待旧 CDP 端口释放，再拉起新进程。
 - Trae worker 的软超时恢复依赖这份会话状态；如需改目录，可在 gateway 启动时传 `--state-dir /abs/path/to/state-dir`。
 - `forgeflow-trae-beta doctor` 会输出 dispatcher/gateway/CDP 连通性检查（标记为 optional），用于快速排查部署连通性问题。
 
@@ -399,7 +400,8 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 node scripts/run-trae-automation-launch.js \
   --trae-bin /Applications/Trae.app \
   --project-path /abs/path/to/repo \
-  --remote-debugging-port 9222
+  --remote-debugging-port 9222 \
+  --force-clean-launch
 
 node scripts/run-trae-automation-gateway.js \
   --host 127.0.0.1 \

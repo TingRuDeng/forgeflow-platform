@@ -147,4 +147,98 @@ describe("trae launcher", () => {
       fs.rmSync(projectPath, { recursive: true, force: true });
     }
   });
+
+  it("attempts to quit an existing macOS Trae app before a clean relaunch", async () => {
+    const mod = await import(launcherModulePath);
+    const spawnImpl = vi.fn(() => ({
+      pid: 12345,
+      unref: vi.fn(),
+      once: vi.fn(),
+    }));
+    const quitExistingApp = vi.fn(async () => undefined);
+    const discoverTarget = vi.fn(async () => ({
+      version: { Browser: "Trae/1.0" },
+      target: { id: "target-clean", title: "project", url: "https://trae.ai/chat" },
+    }));
+    const getVersion = vi.fn().mockRejectedValue(new Error("fetch failed"));
+    const fsImpl = {
+      existsSync(input: string) {
+        return input === "/Applications/Trae CN.app"
+          || input === "/Applications/Trae CN.app/Contents/MacOS/Trae CN"
+          || input === "/tmp/project";
+      },
+      readdirSync: () => [],
+      statSync: () => ({ isFile: () => true }),
+    };
+
+    await mod.launchTraeForAutomation({
+      traeBin: "/Applications/Trae CN.app",
+      projectPath: "/tmp/project",
+      remoteDebuggingPort: 9333,
+      forceCleanLaunch: true,
+      platform: "darwin",
+      spawnImpl,
+      quitExistingApp,
+      discoverTarget,
+      getVersion,
+      sleepImpl: vi.fn(async () => undefined),
+      fsImpl,
+    });
+
+    expect(quitExistingApp).toHaveBeenCalledWith(expect.objectContaining({
+      appName: "Trae CN",
+      bundlePath: "/Applications/Trae CN.app",
+      platform: "darwin",
+    }));
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "/Applications/Trae CN.app/Contents/MacOS/Trae CN",
+      expect.arrayContaining(["--remote-debugging-port=9333", "/tmp/project"]),
+      expect.any(Object),
+    );
+  });
+
+  it("waits for the previous debugger port to disappear before clean relaunch spawn", async () => {
+    const mod = await import(launcherModulePath);
+    const spawnImpl = vi.fn(() => ({
+      pid: 12345,
+      unref: vi.fn(),
+      once: vi.fn(),
+    }));
+    const quitExistingApp = vi.fn(async () => undefined);
+    const getVersion = vi.fn()
+      .mockResolvedValueOnce({ Browser: "Trae/1.0" })
+      .mockRejectedValueOnce(new Error("fetch failed"));
+    const discoverTarget = vi.fn(async () => ({
+      version: { Browser: "Trae/1.0" },
+      target: { id: "target-clean", title: "project", url: "https://trae.ai/chat" },
+    }));
+    const sleepImpl = vi.fn(async () => undefined);
+    const fsImpl = {
+      existsSync(input: string) {
+        return input === "/Applications/Trae CN.app"
+          || input === "/Applications/Trae CN.app/Contents/MacOS/Trae CN"
+          || input === "/tmp/project";
+      },
+      readdirSync: () => [],
+      statSync: () => ({ isFile: () => true }),
+    };
+
+    await mod.launchTraeForAutomation({
+      traeBin: "/Applications/Trae CN.app",
+      projectPath: "/tmp/project",
+      remoteDebuggingPort: 9333,
+      forceCleanLaunch: true,
+      platform: "darwin",
+      spawnImpl,
+      quitExistingApp,
+      discoverTarget,
+      getVersion,
+      sleepImpl,
+      fsImpl,
+    });
+
+    expect(getVersion).toHaveBeenCalledTimes(2);
+    expect(getVersion.mock.invocationCallOrder[0]).toBeLessThan(spawnImpl.mock.invocationCallOrder[0]);
+    expect(sleepImpl).toHaveBeenCalled();
+  });
 });
