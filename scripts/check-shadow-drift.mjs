@@ -5,6 +5,16 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(__filename), "..");
 const shadowDistPath = path.join(repoRoot, "apps", "dispatcher", "dist", "modules", "server", "runtime-state-shadow.js");
+const MAX_MISMATCHES_ENV = "DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES";
+const MAX_DELTA_ENV = "DISPATCHER_SHADOW_DRIFT_MAX_DELTA";
+
+function parseNonNegativeInteger(value, label) {
+  const parsed = Number(value);
+  if (value === undefined || value === "" || !Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${label} must be a non-negative number`);
+  }
+  return Math.floor(parsed);
+}
 
 function parseArgs(argv) {
   const stateDir = argv[0];
@@ -30,21 +40,26 @@ function parseArgs(argv) {
     }
     if (arg === "--max-mismatches" || arg === "--max-delta") {
       const rawValue = argv[index + 1];
-      const value = Number(rawValue);
-      if (!rawValue || !Number.isFinite(value) || value < 0) {
-        throw new Error(`${arg} must be a non-negative number`);
-      }
+      const value = parseNonNegativeInteger(rawValue, arg);
       if (arg === "--max-mismatches") {
-        options.maxMismatchCount = Math.floor(value);
+        options.maxMismatchCount = value;
       } else {
-        options.maxAbsoluteDelta = Math.floor(value);
+        options.maxAbsoluteDelta = value;
       }
       index += 1;
       continue;
     }
     throw new Error(`unknown argument: ${arg}`);
   }
-  return options;
+  return {
+    ...options,
+    maxMismatchCount: options.maxMismatchCount ?? (
+      process.env[MAX_MISMATCHES_ENV] ? parseNonNegativeInteger(process.env[MAX_MISMATCHES_ENV], MAX_MISMATCHES_ENV) : undefined
+    ),
+    maxAbsoluteDelta: options.maxAbsoluteDelta ?? (
+      process.env[MAX_DELTA_ENV] ? parseNonNegativeInteger(process.env[MAX_DELTA_ENV], MAX_DELTA_ENV) : undefined
+    ),
+  };
 }
 
 async function loadDispatcherModules() {

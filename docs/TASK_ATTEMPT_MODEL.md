@@ -55,7 +55,7 @@ ai_summary:
 - SQLite structured projection 会写入并读取 `task_attempts`。
 - worker start/result 写入必须携带完整 v1 envelope；dispatcher 会校验 `attemptId`、`leaseToken`、`protocolVersion`、`traceId` 和 `idempotencyKey` 必须匹配当前 active attempt。
 - Trae `fetch-task` 会创建或复用 active attempt，并把 `attempt_id` / `lease_token` / `protocol_version` / `trace_id` / `idempotency_key` 返回给 runtime；Trae runtime 在 start/result 回写时会继续携带这些字段。
-- reconcile 支持 `maxTaskAttempts` retry policy；未配置时默认最多 2 次 attempt。
+- reconcile 支持 `maxTaskAttempts` retry policy；task-level `terminationPolicy.maxAttempts` 优先于 reconcile 调用方传入的全局 `maxTaskAttempts`，未配置时默认最多 2 次 attempt。
 
 尚未实现：
 

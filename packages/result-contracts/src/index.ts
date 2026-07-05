@@ -100,11 +100,13 @@ export const ArtifactBundleSchema = z.object({
     screenshots: z.array(z.string()).optional(),
     terminalTranscript: z.string().optional(),
     structuredReport: z.string().optional(),
+    trajectory: z.string().optional(),
   }),
   retainedContent: z.object({
     diff: z.string().optional(),
     logs: z.string().optional(),
     testResults: z.string().optional(),
+    trajectory: z.string().optional(),
   }).optional(),
   testResults: z.array(z.object({
     name: z.string().min(1),

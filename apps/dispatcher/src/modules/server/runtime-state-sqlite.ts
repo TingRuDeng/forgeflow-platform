@@ -140,6 +140,7 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
       branch_name TEXT NOT NULL,
       target_worker_id TEXT,
       verification_json TEXT NOT NULL,
+      termination_policy_json TEXT,
       chat_mode TEXT,
       continuation_mode TEXT,
       continue_from_task_id TEXT,
@@ -271,6 +272,7 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
   `);
   ensureColumn(db, "artifact_bundles", "retained_content_json", "TEXT");
   ensureColumn(db, "reviews", "risk_assessment_json", "TEXT");
+  ensureColumn(db, "tasks", "termination_policy_json", "TEXT");
 }
 
 function persistRuntimeStateSnapshot(db: InstanceType<typeof DatabaseSync>, state: RuntimeState): RuntimeState {
@@ -445,9 +447,9 @@ function rewriteStructuredProjection(
     const insertTask = db.prepare(`
       INSERT INTO tasks (
         id, external_task_id, trace_id, repo, default_branch, title, pool, allowed_paths_json, acceptance_json, depends_on_json,
-        branch_name, target_worker_id, verification_json, chat_mode, continuation_mode, continue_from_task_id, follow_up_of_task_id,
+        branch_name, target_worker_id, verification_json, termination_policy_json, chat_mode, continuation_mode, continue_from_task_id, follow_up_of_task_id,
         worker_change_reason, status, assigned_worker_id, last_assigned_worker_id, requested_by, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const task of state.tasks) {
       insertTask.run(
@@ -464,6 +466,7 @@ function rewriteStructuredProjection(
         task.branchName,
         task.targetWorkerId ?? null,
         asJson(task.verification),
+        asJson(task.terminationPolicy ?? null),
         task.chatMode ?? null,
         task.continuationMode ?? null,
         task.continueFromTaskId ?? null,
@@ -770,6 +773,7 @@ export function readStructuredRuntimeState(stateDir: string): RuntimeState {
       branchName: row.branch_name,
       targetWorkerId: row.target_worker_id ?? null,
       verification: fromJson(row.verification_json, { mode: "run" }),
+      terminationPolicy: fromJson(row.termination_policy_json, undefined),
       chatMode: row.chat_mode ?? undefined,
       continuationMode: row.continuation_mode ?? undefined,
       continueFromTaskId: row.continue_from_task_id ?? null,

@@ -56,7 +56,8 @@ ai_summary:
     }
   ],
   "refs": {
-    "diff": "artifact://attempt-1/diff.patch"
+    "diff": "artifact://attempt-1/diff.patch",
+    "trajectory": "artifact://attempt-1/trajectory.json"
   }
 }
 ```
@@ -66,8 +67,8 @@ ai_summary:
 - `summary`：worker 对本次 attempt 的简要说明。
 - `branch` / `commit` / `pullRequestUrl`：代码交付定位。
 - `changedFiles`：用于 review 和风险提示的变更摘要。
-- `refs`：指向 diff、logs、tests、screenshots、terminal transcript 或 structured report。
-- `retainedContent`：可选的短正文片段，目前支持 `diff`、`logs`、`testResults`，用于 Console / review 快速查看。
+- `refs`：指向 diff、logs、tests、screenshots、terminal transcript、structured report 或 trajectory。
+- `retainedContent`：可选的短正文片段，目前支持 `diff`、`logs`、`testResults`、`trajectory`，用于 Console / review 快速查看。
 - `testResults`：结构化测试结果摘要。
 - `riskNotes`：worker 主动提示的风险。
 - `nextActions`：建议的后续动作。
@@ -80,15 +81,15 @@ runtime-state 只应保存 bundle 摘要、引用和受限正文片段。大型 
 
 - `RuntimeState.artifactBundles[]` 保存 bundle 摘要、refs 和可选 `retainedContent`。
 - SQLite structured projection 使用 `artifact_bundles` 表承载查询投影，并保存 `retained_content_json`。
-- dispatcher HTTP 写入 worker result 或 Trae submit-result 时，会把 `retainedContent.diff`、`retainedContent.logs`、`retainedContent.testResults` 落到 `${stateDir}/artifacts/<bundle-dir>/`。
-- artifact store 使用 `manifest.json` 作为文件索引，当前文件名分别是 `diff.patch`、`session.log`、`test-results.txt`。
+- dispatcher HTTP 写入 worker result 或 Trae submit-result 时，会把 `retainedContent.diff`、`retainedContent.logs`、`retainedContent.testResults`、`retainedContent.trajectory` 落到 `${stateDir}/artifacts/<bundle-dir>/`。
+- artifact store 使用 `manifest.json` 作为文件索引，当前文件名分别是 `diff.patch`、`session.log`、`test-results.txt`、`trajectory.json`。
 - `DISPATCHER_ARTIFACT_RETENTION_MAX_BUNDLES` 可限制本地 artifact store 保留的最新 bundle 数，默认保留 100 个 bundle。
 - `TaskAttempt.artifactBundleId` 指向当前 attempt 的 bundle。
 - `/api/artifacts/:bundleId` 可按 bundleId 获取单个 bundle。
 - `/api/artifacts/:bundleId/files/:fileName` 可按需读取 manifest 登记的 artifact 文件正文。
 - CLI 使用 `forgeflow-review-orchestrator artifact-get --bundle-id <id>` 获取 bundle，使用 `--file diff.patch` 读取正文文件。
 - Trae runtime 在拿到 `attempt_id` 后会随 submitResult 提交 minimal bundle。
-- Console 任务详情提供摘要、引用和正文 tabs；正文 tab 展示 `retainedContent` 中的 diff / logs / testResults。
+- Console 任务详情提供摘要、引用和正文 tabs；正文 tab 展示 `retainedContent` 中的 diff / logs / testResults / trajectory。
 - Console 任务详情在任务处于 `review` 状态时可直接提交 `merge` / `rework` / `block` 审查决策，并携带 `reasonCode`、`mustFix[]`、`canRedrive`、`redriveStrategy` 和高风险合并的 `acknowledgeRisk`，和 attempt timeline / artifact summary 共处同一审查上下文。
 
 ## Review 展示

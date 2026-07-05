@@ -69,6 +69,7 @@ export interface DispatcherWorkerClient {
   claimTask(workerId: string, payload?: { at?: string }): Promise<AssignedTaskResponse>;
   startTask(workerId: string, payload: StartTaskPayload): Promise<unknown>;
   submitResult(workerId: string, payload: SubmitResultPayload): Promise<unknown>;
+  reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }) => Promise<unknown>;
 }
 
 export interface AssignedTaskResponse {

@@ -111,6 +111,10 @@ describe("Runtime convergence schemas", () => {
       verification: {
         mode: "run",
       },
+      terminationPolicy: {
+        maxAttempts: 1,
+        heartbeatTimeoutMs: 60_000,
+      },
       chatMode: "new",
       continuationMode: "fresh",
       continueFromTaskId: "task-0",

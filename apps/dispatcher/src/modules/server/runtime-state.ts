@@ -108,6 +108,12 @@ export interface Task {
   verification: {
     mode: "run" | "review";
   };
+  terminationPolicy?: {
+    maxAttempts?: number;
+    attemptLeaseTimeoutMs?: number;
+    heartbeatTimeoutMs?: number;
+    assignmentTimeoutMs?: number;
+  };
   chatMode?: string;
   continuationMode?: string;
   continueFromTaskId?: string | null;
@@ -275,6 +281,7 @@ export interface CreateDispatchInput {
     verification?: {
       mode: "run" | "review";
     };
+    terminationPolicy?: Task["terminationPolicy"];
     chatMode?: string;
     continuationMode?: string;
     continueFromTaskId?: string | null;
@@ -1380,8 +1387,8 @@ function resolveAssignmentTimeoutMs(options: ReconcileOptions = {}): number {
   return options.assignmentTimeoutMs ?? 5 * 60_000;
 }
 
-function resolveMaxTaskAttempts(options: ReconcileOptions = {}): number {
-  const configured = Math.floor(options.maxTaskAttempts ?? DEFAULT_MAX_TASK_ATTEMPTS);
+function resolveMaxTaskAttempts(options: ReconcileOptions = {}, task?: Task): number {
+  const configured = Math.floor(task?.terminationPolicy?.maxAttempts ?? options.maxTaskAttempts ?? DEFAULT_MAX_TASK_ATTEMPTS);
   return configured > 0 ? configured : DEFAULT_MAX_TASK_ATTEMPTS;
 }
 
@@ -1656,7 +1663,7 @@ function reconcileExpiredRunningAttempts(state: RuntimeState, options: Reconcile
       },
     });
     const attemptsForTask = (nextState.taskAttempts ?? []).filter((candidate) => candidate.taskId === task.id).length;
-    nextState = attemptsForTask < resolveMaxTaskAttempts(options)
+    nextState = attemptsForTask < resolveMaxTaskAttempts(options, task)
       ? markTaskReadyForRetry(nextState, { task, assignment, worker, attempt, at })
       : markTaskFailedAfterRetries(nextState, { task, assignment, worker, at });
   }
@@ -1945,6 +1952,7 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
       branchName: taskInput.branchName,
       targetWorkerId,
       verification: taskInput.verification ?? { mode: "run" },
+      terminationPolicy: taskInput.terminationPolicy,
       chatMode: taskInput.chatMode ?? "new_chat",
       continuationMode: taskInput.continuationMode,
       continueFromTaskId: taskInput.continueFromTaskId ?? null,

@@ -13,6 +13,8 @@ import { formatLocalTimestamp } from "../time.js";
 const HEARTBEAT_TIMEOUT_MS = 5_000;
 const HEARTBEAT_MAX_RETRIES = 3;
 const HEARTBEAT_RETRY_DELAY_MS = 1_000;
+const SUBMIT_RESULT_MAX_RETRIES = 3;
+const SUBMIT_RESULT_RETRY_DELAY_MS = 2_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -254,13 +256,15 @@ export interface CreateWorkerDaemonCycleOptions {
 }
 
 export interface TaskExecutor {
-  executeTask(task: unknown, assignment: unknown): Promise<TaskExecutionResult>;
+  executeTask(task: unknown, assignment: unknown, assigned: AssignedTaskResponse): Promise<TaskExecutionResult>;
 }
 
 export interface TaskExecutionResult {
   result: unknown;
   changedFiles: string[];
   pullRequest: { number: number; url: string; headBranch: string; baseBranch: string } | null;
+  worktreeDir?: string;
+  outputDir?: string;
 }
 
 export interface WorkerDaemonCycleResult {
@@ -285,6 +289,75 @@ function buildWorkerProtocolEnvelope(assigned: AssignedTaskResponse) {
     traceId: assigned.traceId,
     idempotencyKey: assigned.idempotencyKey,
   };
+}
+
+function getSubmitResultMaxRetries(): number {
+  return Number(process.env.WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES || SUBMIT_RESULT_MAX_RETRIES);
+}
+
+function getSubmitResultRetryDelayMs(): number {
+  return Number(process.env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS || SUBMIT_RESULT_RETRY_DELAY_MS);
+}
+
+async function reportWorkerEventBestEffort(
+  client: DispatcherWorkerClient,
+  workerId: string,
+  payload: { type: string; taskId?: string; payload?: unknown; at?: string },
+): Promise<void> {
+  if (typeof client.reportEvent !== "function") {
+    return;
+  }
+  try {
+    await client.reportEvent(workerId, {
+      ...payload,
+      at: payload.at ?? nowIso(),
+    });
+  } catch {
+    // 事件回报是诊断增强，不能遮蔽主链 submitResult 的真实失败。
+  }
+}
+
+async function submitResultWithRetry(input: {
+  client: DispatcherWorkerClient;
+  workerId: string;
+  taskId: string;
+  payload: SubmitResultPayload;
+}): Promise<void> {
+  const maxRetries = getSubmitResultMaxRetries();
+  const retryDelayMs = getSubmitResultRetryDelayMs();
+  let lastError: string | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+    try {
+      await input.client.submitResult(input.workerId, input.payload);
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      await reportWorkerEventBestEffort(input.client, input.workerId, {
+        type: "submit_result_retry_failed",
+        taskId: input.taskId,
+        payload: {
+          attempt,
+          maxRetries,
+          error: lastError,
+        },
+      });
+      if (attempt < maxRetries) {
+        await sleep(retryDelayMs);
+      }
+    }
+  }
+
+  await reportWorkerEventBestEffort(input.client, input.workerId, {
+    type: "delivery_failed",
+    taskId: input.taskId,
+    payload: {
+      stage: "submit_result",
+      error: lastError,
+      failureCode: "delivery_failed",
+    },
+  });
+  throw new Error(`submitResult failed after ${maxRetries} attempts: ${lastError}`);
 }
 
 export async function runWorkerDaemonCycle(
@@ -324,7 +397,7 @@ export async function runWorkerDaemonCycle(
 
   let executionResult: TaskExecutionResult;
   if (input.taskExecutor) {
-    executionResult = await input.taskExecutor.executeTask(assigned.task, assigned.assignment);
+    executionResult = await input.taskExecutor.executeTask(assigned.task, assigned.assignment, assigned);
   } else if (input.dryRunExecution) {
     executionResult = {
       result: { dryRun: true, taskId },
@@ -335,17 +408,24 @@ export async function runWorkerDaemonCycle(
     throw new Error("taskExecutor is required when dryRunExecution is false");
   }
 
-  await client.submitResult(input.workerId, {
-    ...envelope,
-    result: executionResult.result,
-    changedFiles: executionResult.changedFiles,
-    pullRequest: executionResult.pullRequest,
+  await submitResultWithRetry({
+    client,
+    workerId: input.workerId,
+    taskId,
+    payload: {
+      ...envelope,
+      result: executionResult.result,
+      changedFiles: executionResult.changedFiles,
+      pullRequest: executionResult.pullRequest,
+    },
   });
 
   return {
     status: "completed",
     workerId: input.workerId,
     taskId,
+    worktreeDir: executionResult.worktreeDir,
+    outputDir: executionResult.outputDir,
     changedFiles: executionResult.changedFiles,
     pullRequest: executionResult.pullRequest,
   };

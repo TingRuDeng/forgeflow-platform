@@ -12,6 +12,7 @@ const RETAINED_FILE_NAMES = {
   diff: "diff.patch",
   logs: "session.log",
   testResults: "test-results.txt",
+  trajectory: "trajectory.json",
 } as const;
 
 type RetainedContentKey = keyof typeof RETAINED_FILE_NAMES;

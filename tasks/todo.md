@@ -1,5 +1,21 @@
 # 当前项目审查修复任务
 
+- [x] M11 串行：批次一，收敛 worker runtime 重复实现，优先统一 daemon cycle 与可发布 runtime 的核心行为。
+- [x] M11 串行：批次二，补齐 trajectory artifact 协议、落盘与读取体验。
+- [x] M11 串行：批次三，统一 HITL interrupt / resume 与 termination policy。
+- [x] M11 串行：批次四，完善 shadow / DR 产品化门禁与 Console 审查工作台体验。
+- [x] M11 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M11 Review 小结
+
+已按四个批次完成本轮深度审查后的收敛优化：worker daemon 脚本侧主循环改为复用 dispatcher runtime-glue 的 `runWorkerDaemonCycle`，脚本侧只保留真实 worktree / worker 执行器与失败结果 fallback，并删除旧 `processTaskAssignment` 重复主循环；ArtifactBundle 协议、worker-protocol、artifact store、Console retained content 与文档已补齐 `trajectory` 引用和 retained 正文落盘；task schema、runtime-state 和 SQLite projection 已支持 task-level `terminationPolicy.maxAttempts`，并在 reconcile 过期 attempt 时优先使用任务级终止策略；shadow drift gate 已支持 `DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES` 与 `DISPATCHER_SHADOW_DRIFT_MAX_DELTA` 环境变量，runbook / API 文档同步到 release / rollout gate 用法。
+
+Review Gate：finished。Spec 符合度通过，四个已确认批次均有代码、测试与文档落点；安全检查通过，未新增真实 secret、凭据硬编码或无依据静默降级，新增 shadow drift 环境变量会校验为非负数；复杂度检查通过，本轮未引入新的跨模块大重构，脚本侧还删除了旧重复函数；Document-refresh: needed，原因：协议、artifact、termination policy、shadow gate 行为发生变化，已同步对应契约、runbook 和技术债文档。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/runtime-glue.test.ts tests/modules/server/run-worker-daemon.test.ts tests/modules/server/artifact-store.test.ts tests/modules/server/runtime-state.test.ts tests/modules/server/runtime-state-sqlite.test.ts tests/modules/execution/shadow-drift.test.ts`、`CI=true pnpm --filter @forgeflow/result-contracts test`、`CI=true pnpm --filter @forgeflow/worker-protocol test`、`CI=true pnpm --filter @forgeflow/task-schema test`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 -m py_compile scripts/validate_docs.py`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check`。全量 `CI=true pnpm test` 在默认沙箱下先因 `listen EPERM 127.0.0.1` 与写入 `~/.forgeflow-trae-beta` 权限受限失败；按同一命令在非沙箱环境重跑后通过，覆盖 24 个 workspace project，其中 dispatcher 43 个测试文件 / 461 个测试全部通过。
+
+剩余风险：task-level termination policy 当前只实际接入 `maxAttempts`，`attemptLeaseTimeoutMs`、`heartbeatTimeoutMs`、`assignmentTimeoutMs` 已进入 schema 但尚未接入对应超时调度逻辑；worker daemon 去重已收敛脚本主循环，但 `packages/beta-runtime-core` 仍保留自己的 runtime 实现路径，后续若继续追求单一实现还需要单独规划；shadow drift env gate 是 release / rollout 可配置阈值，不等于后台自动 reconciliation。
+
 - [x] M10 串行：修复 `@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 与 dispatcher v1 claim/envelope/token 协议漂移，并补协议测试。
 - [x] M10 串行：修复 `runtime-glue-dispatcher-client` 的 worker cycle envelope 类型与测试，避免旧 payload 被测试固化。
 - [x] M10 串行：收紧 release 自动发布门禁，避免 push 到 main 后绕过 CI 直接发布 npm 包。

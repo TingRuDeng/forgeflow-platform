@@ -69,4 +69,23 @@ describe("shadow drift verification", () => {
       reason: "shadow_not_configured",
     });
   }, 30_000);
+
+  it("rejects invalid environment threshold values", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-drift-"));
+    const result = spawnSync("node", [checkShadowDriftScriptPath, stateDir], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "disabled",
+        DISPATCHER_QUEUE_SHADOW_MODE: "disabled",
+        DISPATCHER_POSTGRES_URL: "",
+        DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES: "not-a-number",
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES must be a non-negative number");
+  }, 30_000);
 });

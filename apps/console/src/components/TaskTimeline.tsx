@@ -26,6 +26,7 @@ export interface ArtifactBundle {
     diff?: string;
     logs?: string;
     testResults?: string;
+    trajectory?: string;
   };
   riskNotes?: string[];
   nextActions?: string[];

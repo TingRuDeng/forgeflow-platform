@@ -285,6 +285,7 @@ export const ArtifactBundleSchema = z.object({
     screenshots: z.array(z.string()).optional(),
     terminalTranscript: z.string().optional(),
     structuredReport: z.string().optional(),
+    trajectory: z.string().optional(),
   }),
   testResults: z.array(z.object({
     name: NonEmptyStringSchema,

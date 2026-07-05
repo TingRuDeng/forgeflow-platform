@@ -171,7 +171,7 @@ Current endpoint families:
   - Compares snapshot-derived counts with the SQLite structured projection tables.
 - `GET /api/artifacts/:bundleId`
   - Returns one persisted ArtifactBundle by `bundleId`.
-  - Returned bundles may include refs plus optional retained diff / log / test result snippets.
+  - Returned bundles may include refs plus optional retained diff / log / test result / trajectory snippets.
   - Returns `404 artifact_not_found` when the bundle is unknown.
 - `GET /api/artifacts/:bundleId/files/:fileName`
   - Returns one artifact store file as `{ bundleId, fileName, content }`.
@@ -197,7 +197,7 @@ Current endpoint families:
     - `backups`
   - `shadowWrite` 会合并 stateDir 下的 `runtime-state-shadow-status.json`，因此 dispatcher 重启后仍能显示最后一次 shadow 写入结果。
   - Shadow projection / queue count drift 通过 `node scripts/check-shadow-drift.mjs <stateDir>` 做 operator check；该检查需要异步访问 Postgres，因此不塞进同步 `/api/dr/status` handler。
-  - `check-shadow-drift.mjs` 支持 `--max-mismatches` / `--max-delta` 输出 alert 摘要，支持 `--reconcile` 主动重放 shadow，支持 `--record-alert` 写入 `shadow_drift_detected` system event。
+  - `check-shadow-drift.mjs` 支持 `--max-mismatches` / `--max-delta` 或环境变量 `DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES` / `DISPATCHER_SHADOW_DRIFT_MAX_DELTA` 输出 alert 摘要，支持 `--reconcile` 主动重放 shadow，支持 `--record-alert` 写入 `shadow_drift_detected` system event。
 
 ### Structured reads, read-only, and shadow modes
 

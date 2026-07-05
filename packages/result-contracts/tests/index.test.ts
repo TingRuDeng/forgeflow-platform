@@ -402,6 +402,7 @@ describe("ArtifactBundleSchema", () => {
         diff: "diff --git a/src/index.ts b/src/index.ts",
         logs: "pnpm test passed",
         testResults: "58 tests passed",
+        trajectory: JSON.stringify([{ action: "pnpm test", observation: "58 tests passed" }]),
       },
     });
 
@@ -409,6 +410,7 @@ describe("ArtifactBundleSchema", () => {
       diff: "diff --git a/src/index.ts b/src/index.ts",
       logs: "pnpm test passed",
       testResults: "58 tests passed",
+      trajectory: JSON.stringify([{ action: "pnpm test", observation: "58 tests passed" }]),
     });
   });
 
