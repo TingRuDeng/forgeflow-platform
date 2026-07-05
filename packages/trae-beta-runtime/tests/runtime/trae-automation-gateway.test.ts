@@ -146,6 +146,132 @@ describe("runtime/trae-automation-gateway", () => {
     expect(sessionStore.getInternal("chat-session")?.responseText).toBe("Final reply");
   });
 
+  it("returns cached response for a completed session without sending the prompt again", async () => {
+    const { handleTraeAutomationHttpRequest } = await import("../../src/runtime/trae-automation-gateway.js");
+    const sessionStore = createSessionStore(tempDir);
+    sessionStore.create({ sessionId: "cached-session" });
+    sessionStore.markCompleted("cached-session", { responseText: "Cached reply" });
+    const automationDriver = {
+      sendPrompt: vi.fn(async () => ({
+        status: "ok",
+        response: { text: "Fresh reply" },
+      })),
+    };
+
+    const result = await handleTraeAutomationHttpRequest(
+      {
+        method: "POST",
+        pathname: "/v1/chat",
+        body: {
+          content: "Summarize the repository",
+          sessionId: "cached-session",
+        },
+      },
+      {
+        automationDriver: automationDriver as never,
+        sessionStore,
+      },
+    );
+
+    expect(result.status).toBe(200);
+    expect((result.json as { data: { cached?: boolean; response?: { text?: string } } }).data.cached).toBe(true);
+    expect((result.json as { data: { response?: { text?: string } } }).data.response?.text).toBe("Cached reply");
+    expect(automationDriver.sendPrompt).not.toHaveBeenCalled();
+  });
+
+  it("rejects chat reuse while the session is already running", async () => {
+    const { handleTraeAutomationHttpRequest } = await import("../../src/runtime/trae-automation-gateway.js");
+    const sessionStore = createSessionStore(tempDir);
+    sessionStore.create({ sessionId: "running-session" });
+    sessionStore.markRunning("running-session");
+    const automationDriver = {
+      sendPrompt: vi.fn(async () => ({ status: "ok" })),
+    };
+
+    await expect(handleTraeAutomationHttpRequest(
+      {
+        method: "POST",
+        pathname: "/v1/chat",
+        body: {
+          content: "Summarize the repository",
+          sessionId: "running-session",
+        },
+      },
+      {
+        automationDriver: automationDriver as never,
+        sessionStore,
+      },
+    )).rejects.toMatchObject({
+      code: "SESSION_CONFLICT",
+      statusCode: 409,
+    });
+    expect(automationDriver.sendPrompt).not.toHaveBeenCalled();
+  });
+
+  it("rejects chat reuse when the request fingerprint does not match", async () => {
+    const { handleTraeAutomationHttpRequest } = await import("../../src/runtime/trae-automation-gateway.js");
+    const sessionStore = createSessionStore(tempDir);
+    sessionStore.create({
+      sessionId: "fingerprint-session",
+      requestFingerprint: "original prompt",
+    });
+    const automationDriver = {
+      sendPrompt: vi.fn(async () => ({ status: "ok" })),
+    };
+
+    await expect(handleTraeAutomationHttpRequest(
+      {
+        method: "POST",
+        pathname: "/v1/chat",
+        body: {
+          content: "changed prompt",
+          sessionId: "fingerprint-session",
+        },
+      },
+      {
+        automationDriver: automationDriver as never,
+        sessionStore,
+      },
+    )).rejects.toMatchObject({
+      code: "SESSION_CONFLICT",
+      statusCode: 409,
+    });
+    expect(automationDriver.sendPrompt).not.toHaveBeenCalled();
+  });
+
+  it("passes progress updates into the session store during POST /v1/chat", async () => {
+    const { handleTraeAutomationHttpRequest } = await import("../../src/runtime/trae-automation-gateway.js");
+    const sessionStore = createSessionStore(tempDir);
+    sessionStore.create({ sessionId: "progress-session" });
+    const automationDriver = {
+      sendPrompt: vi.fn(async ({ onProgress }: { onProgress?: (details: { responseDetected?: boolean }) => void }) => {
+        onProgress?.({ responseDetected: true });
+        return {
+          status: "ok",
+          response: { text: "Final reply" },
+        };
+      }),
+    };
+
+    const result = await handleTraeAutomationHttpRequest(
+      {
+        method: "POST",
+        pathname: "/v1/chat",
+        body: {
+          content: "Summarize the repository",
+          sessionId: "progress-session",
+        },
+      },
+      {
+        automationDriver: automationDriver as never,
+        sessionStore,
+      },
+    );
+
+    expect(result.status).toBe(200);
+    expect(sessionStore.get("progress-session")?.responseDetected).toBe(true);
+  });
+
   it("emits debug events for chat requests when debug logger is provided", async () => {
     const { handleTraeAutomationHttpRequest } = await import("../../src/runtime/trae-automation-gateway.js");
     const sessionStore = createSessionStore(tempDir);
@@ -260,7 +386,7 @@ describe("runtime/trae-automation-gateway", () => {
       code: "AUTOMATION_RESPONSE_TIMEOUT",
     });
     const session = sessionStore.get("timeout-session");
-    expect(session?.status).toBe(SessionStatus.PREPARED);
+    expect(session?.status).toBe(SessionStatus.RUNNING);
     expect(session?.error).toBeNull();
   });
 
@@ -292,7 +418,7 @@ describe("runtime/trae-automation-gateway", () => {
 
     expect(result.status).toBe(502);
     const session = sessionStore.get("timeout-msg-session");
-    expect(session?.status).toBe(SessionStatus.PREPARED);
+    expect(session?.status).toBe(SessionStatus.RUNNING);
     expect(session?.error).toBeNull();
   });
 

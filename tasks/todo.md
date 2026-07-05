@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M42 串行：把 packaged Trae automation gateway 补齐脚本侧 chat session 语义。
+- [x] M42 串行：运行最小充分验证并补充 review 小结。
+
+## M42 Review 小结
+
+已把 `packages/trae-beta-runtime/src/runtime/trae-automation-gateway.ts` 的 `POST /v1/chat` session 处理补齐到脚本侧既有语义：completed session 直接返回 cached response；running session 拒绝重复提交；`requestFingerprint` 不一致时拒绝复用；发送前把既有 session 标记为 `running`；driver `onProgress` 会回写 `responseDetected`。soft-timeout 仍不把 session 标记 failed，但会保持 `running`，便于后续轮询或恢复。
+
+Review Gate：finished。Spec 符合度通过，本轮按 Trae gateway 去重计划推进 packaged runtime 行为收敛，补齐脚本侧已有的 chat session 保护语义，没有改变 HTTP route 名称、session store 文件格式或 release / prepare 语义；安全检查通过，未新增 secret、外部网络调用、命令拼接、mock 成功路径或静默 fallback，冲突场景会显式抛出 `SESSION_CONFLICT`；复杂度检查局部通过，新增逻辑集中在 `POST /v1/chat` 分支，新增测试覆盖关键差异，既有 gateway 源文件和测试文件仍超过 300 行但本轮未扩大职责边界；Document-refresh: needed，原因：Trae gateway 漂移边界变化，已同步 TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @tingrudeng/trae-beta-runtime exec vitest run tests/runtime/trae-automation-gateway.test.ts` 先失败于缺少 cached / conflict / fingerprint / progress / timeout-running 语义；GREEN 后同命令通过，15 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime test` 通过，19 个测试文件、174 个测试通过；`CI=true pnpm --filter @tingrudeng/trae-beta-runtime typecheck`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。
+
+剩余风险：本轮把 packaged runtime 行为向脚本侧对齐，继续降低漂移风险；源码脚本 gateway 与 packaged runtime 仍是两套实现，后续还应继续抽共享 handler 或让脚本侧委托 packaged runtime。
+
 - [x] M41 串行：把 worker daemon 本地 logger / metrics hook 组装拆成独立 adapter。
 - [x] M41 串行：运行最小充分验证并补充 review 小结。
 
