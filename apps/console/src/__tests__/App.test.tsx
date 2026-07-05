@@ -85,7 +85,8 @@ describe('App dashboard loading', () => {
 
   it('refreshes the snapshot after disabling a worker', async () => {
     let snapshotCalls = 0;
-    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      void init;
       if (url === '/api/dr/status') {
         return new Response(JSON.stringify(drStatus), { status: 200 });
       }
@@ -151,7 +152,8 @@ describe('App dashboard loading', () => {
       ],
     };
     let snapshotCalls = 0;
-    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      void init;
       if (url === '/api/dr/status') {
         return new Response(JSON.stringify(drStatus), { status: 200 });
       }

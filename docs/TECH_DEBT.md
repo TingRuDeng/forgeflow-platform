@@ -234,13 +234,14 @@ Current situation:
 - `RUNTIME_STATE_BACKEND=postgres` refuses primary snapshot load/save until `shadow-cutover-approval.json` exists, has `approved=true`, records `cutoverReason=cutover_ready`, points to archived drill evidence through `evidencePath`, the current evidence file SHA-256 matches `evidenceSha256`, and `shadow-cutover-ready.json` confirms the final strict preflight + approval evidence gate; it also refuses primary snapshot load/save when `shadow-cutover-revocation.json` exists
 - `DISPATCHER_SHADOW_MODE=primary` is accepted only as a post-cutover compatibility state when `RUNTIME_STATE_BACKEND=postgres` and `DISPATCHER_PRIMARY_POSTGRES_URL` are configured; without that primary backend it fails as `primary_backend_not_selected`
 - `@forgeflow/dispatcher-store-postgres` now has primary snapshot primitives (`dispatcher_runtime_state`, JSONB load/save), and dispatcher HTTP routes plus `/api/query/*` use the async runtime-state path for state mutations / reads
+- `/api/dr/status.primaryCutover` now summarizes approval marker, final ready evidence, revocation marker, primary backend selection, and evidence mismatch failures for Console / operator review
 - `pnpm verify:stage3` 和 release workflow 都会执行 `pnpm verify:shadow-drift` 作为 rollout / release gate
 
 Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
 - shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、长期 reconciler 入口、默认 reconciler durable status snapshot、strict cutover reconciler 模式、strict cutover preflight、production cutover drill、cutover evidence file、primary approval marker、approval marker 独立校验、最终 ready 组合门禁、ready evidence primary backend guard、rollback revocation marker、Postgres primary snapshot 原语、primary-mode 兼容状态、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真实生产执行仍需要 operator 在变更窗口切换 `RUNTIME_STATE_BACKEND=postgres` / `DISPATCHER_PRIMARY_POSTGRES_URL` 并保留 evidence
-- Console 首屏已展示 `/api/dr/status` 的 shadow write、shadow reconciler、projection、backup、read-only 和 structured reads 摘要，reviewer 可以在同一工作台看到 cutover 前轻量状态
+- Console 首屏已展示 `/api/dr/status` 的 shadow write、shadow reconciler、primary cutover evidence、projection、backup、read-only 和 structured reads 摘要，reviewer 可以在同一工作台看到 cutover 前轻量状态
 
 Desired direction:
 
