@@ -44,6 +44,7 @@ import {
   prepareTaskWorktree,
   safeTaskDirName,
 } from "./task-worktree.js";
+import { submitResultLifecycle } from "./submit-result-lifecycle.js";
 
 const DEFAULT_POLL_INTERVAL_MS = Number(process.env.TRAE_AUTOMATION_POLL_INTERVAL_MS || 5000);
 const DEFAULT_ERROR_BACKOFF_MS = Number(process.env.TRAE_AUTOMATION_ERROR_BACKOFF_MS || 5000);
@@ -1060,23 +1061,31 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       phaseEvents: phaseEventsForTask(task.task_id),
     });
 
-    await emitPhaseEvent("submit_result_start", {
-      status,
-      sessionId,
-      pushStatus: parsed.github.pushStatus,
-    }, task.task_id);
-    debugLog("dispatcher.submit_result.start", {
+    await submitResultLifecycle({
       taskId: task.task_id,
-      status,
       sessionId,
-      filesChangedCount: parsed.filesChanged.length,
-      hasCommit: Boolean(parsed.github.commitSha),
-      pushStatus: parsed.github.pushStatus,
-      conclusionType: parsed.conclusionType,
-      hasEnvironmentEvidence: Boolean(parsed.environmentEvidence),
-    });
-    try {
-      await dispatcherClient.submitResult({
+      status,
+      emitPhaseEvent,
+      debugLog,
+      submitResult: dispatcherClient.submitResult,
+      promoteToIdle: () => heartbeat.promoteToIdle(),
+      releaseSession: releaseTaskSession,
+      startPayload: {
+        status,
+        sessionId,
+        pushStatus: parsed.github.pushStatus,
+      },
+      startDebug: {
+        taskId: task.task_id,
+        status,
+        sessionId,
+        filesChangedCount: parsed.filesChanged.length,
+        hasCommit: Boolean(parsed.github.commitSha),
+        pushStatus: parsed.github.pushStatus,
+        conclusionType: parsed.conclusionType,
+        hasEnvironmentEvidence: Boolean(parsed.environmentEvidence),
+      },
+      request: {
         taskId: task.task_id,
         ...buildAttemptLeaseInput(task),
         status,
@@ -1087,13 +1096,9 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         github: parsed.github,
         ...(evidence ? { evidence } : {}),
         ...(artifactBundle ? { artifactBundle } : {}),
-      });
-      await emitPhaseEvent("submit_result_done", { status, sessionId }, task.task_id);
-      debugLog("dispatcher.submit_result.done", { taskId: task.task_id, status });
-    } finally {
-      heartbeat.promoteToIdle();
-      await releaseTaskSession(sessionId);
-    }
+      },
+      donePayload: { status, sessionId },
+    });
     return status;
   }
 
@@ -1132,22 +1137,30 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       phaseEvents: phaseEventsForTask(task.task_id),
     });
 
-    await emitPhaseEvent("submit_result_start", {
-      status: "failed",
-      sessionId,
-      failureCode: classified.blocker.code,
-      phase,
-    }, task.task_id);
-    debugLog("dispatcher.submit_result.start", {
+    await submitResultLifecycle({
       taskId: task.task_id,
-      status: "failed",
       sessionId,
-      summary: error.message,
-      failureType: classified.failureType,
-      failureCode: classified.blocker.code,
-    });
-    try {
-      await dispatcherClient.submitResult({
+      status: "failed",
+      emitPhaseEvent,
+      debugLog,
+      submitResult: dispatcherClient.submitResult,
+      promoteToIdle: () => heartbeat.promoteToIdle(),
+      releaseSession: releaseTaskSession,
+      startPayload: {
+        status: "failed",
+        sessionId,
+        failureCode: classified.blocker.code,
+        phase,
+      },
+      startDebug: {
+        taskId: task.task_id,
+        status: "failed",
+        sessionId,
+        summary: error.message,
+        failureType: classified.failureType,
+        failureCode: classified.blocker.code,
+      },
+      request: {
         taskId: task.task_id,
         ...buildAttemptLeaseInput(task),
         status: "failed",
@@ -1165,17 +1178,13 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         },
         evidence,
         ...(artifactBundle ? { artifactBundle } : {}),
-      });
-      await emitPhaseEvent("submit_result_done", {
+      },
+      donePayload: {
         status: "failed",
         failureCode: classified.blocker.code,
         phase,
-      }, task.task_id);
-      debugLog("dispatcher.submit_result.done", { taskId: task.task_id, status: "failed" });
-    } finally {
-      heartbeat.promoteToIdle();
-      await releaseTaskSession(sessionId);
-    }
+      },
+    });
   }
 
   function classifyPreStartFailure(error: Error): string {
