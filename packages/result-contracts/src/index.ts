@@ -83,6 +83,26 @@ export const ArtifactChangedFileSchema = z.object({
   deletions: z.number().int().nonnegative().optional(),
 });
 
+export const ArtifactTrajectoryStepSchema = z.object({
+  stepId: z.string().min(1).optional(),
+  sequence: z.number().int().nonnegative(),
+  phase: z.enum(["preflight", "action", "observation", "verification", "result", "cleanup"]),
+  action: z.string().min(1),
+  observation: z.string().optional(),
+  status: z.enum(["pending", "running", "succeeded", "failed", "skipped", "unknown"]),
+  startedAt: z.string().optional(),
+  endedAt: z.string().optional(),
+  command: z.string().optional(),
+  cwd: z.string().optional(),
+  exitCode: z.number().int().optional(),
+  artifactRef: z.string().optional(),
+});
+
+export const ArtifactTrajectorySchema = z.object({
+  schemaVersion: z.literal("artifact-trajectory/v1"),
+  steps: z.array(ArtifactTrajectoryStepSchema).default([]),
+});
+
 export const ArtifactBundleSchema = z.object({
   bundleId: z.string().min(1).optional(),
   taskId: z.string().min(1),
@@ -102,6 +122,7 @@ export const ArtifactBundleSchema = z.object({
     structuredReport: z.string().optional(),
     trajectory: z.string().optional(),
   }),
+  trajectory: ArtifactTrajectorySchema.optional(),
   retainedContent: z.object({
     diff: z.string().optional(),
     logs: z.string().optional(),
@@ -144,4 +165,6 @@ export type ReviewReasonCode = z.infer<typeof ReviewReasonCodeSchema>;
 export type WorkerEvidence = z.infer<typeof WorkerEvidenceSchema>;
 export type ReviewDecisionEvidence = z.infer<typeof ReviewDecisionEvidenceSchema>;
 export type ArtifactChangedFile = z.infer<typeof ArtifactChangedFileSchema>;
+export type ArtifactTrajectoryStep = z.infer<typeof ArtifactTrajectoryStepSchema>;
+export type ArtifactTrajectory = z.infer<typeof ArtifactTrajectorySchema>;
 export type ArtifactBundle = z.infer<typeof ArtifactBundleSchema>;

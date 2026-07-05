@@ -164,14 +164,14 @@ Current endpoint families:
 - `GET /api/query/leases`
   - Returns structured lease projection rows from the SQLite query store.
 - `GET /api/query/artifacts`
-  - Returns structured ArtifactBundle projection rows from the SQLite query store, including refs and optional retained content.
+  - Returns structured ArtifactBundle projection rows from the SQLite query store, including refs, optional trajectory, and optional retained content.
 - `GET /api/query/dashboard-snapshot`
   - Builds dashboard snapshot from the structured query store path.
 - `GET /api/query/projection-health`
   - Compares snapshot-derived counts with the SQLite structured projection tables.
 - `GET /api/artifacts/:bundleId`
   - Returns one persisted ArtifactBundle by `bundleId`.
-  - Returned bundles may include refs plus optional retained diff / log / test result / trajectory snippets.
+  - Returned bundles may include refs plus optional structured trajectory and retained diff / log / test result / trajectory snippets.
   - Returns `404 artifact_not_found` when the bundle is unknown.
 - `GET /api/artifacts/:bundleId/files/:fileName`
   - Returns one artifact store file as `{ bundleId, fileName, content }`.

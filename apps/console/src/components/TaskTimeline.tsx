@@ -22,6 +22,23 @@ export interface ArtifactBundle {
   summary?: string;
   changedFiles?: Array<{ path?: string; changeType?: string }>;
   refs?: Record<string, string | string[] | undefined>;
+  trajectory?: {
+    schemaVersion: 'artifact-trajectory/v1';
+    steps: Array<{
+      stepId?: string;
+      sequence: number;
+      phase: string;
+      action: string;
+      observation?: string;
+      status: string;
+      startedAt?: string;
+      endedAt?: string;
+      command?: string;
+      cwd?: string;
+      exitCode?: number;
+      artifactRef?: string;
+    }>;
+  };
   retainedContent?: {
     diff?: string;
     logs?: string;
@@ -32,7 +49,7 @@ export interface ArtifactBundle {
   nextActions?: string[];
 }
 
-type ArtifactTab = 'summary' | 'refs' | 'retained';
+type ArtifactTab = 'summary' | 'refs' | 'retained' | 'trajectory';
 
 interface EventRecord {
   taskId: string;
@@ -183,6 +200,34 @@ const ArtifactRetainedContent: React.FC<{ entries: Array<[string, string | undef
   );
 };
 
+const ArtifactTrajectory: React.FC<{ bundle: ArtifactBundle }> = ({ bundle }) => {
+  const { t } = useTranslation();
+  const steps = [...(bundle.trajectory?.steps ?? [])].sort((a, b) => a.sequence - b.sequence);
+  return (
+    <div className="space-y-3">
+      {steps.length > 0 ? steps.map((step) => (
+        <div key={step.stepId || `${step.sequence}-${step.action}`} className="rounded-lg border border-white/10 bg-black/20 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-mono text-xs text-cyan-200">{step.sequence}. {step.phase}</div>
+            <div className="text-xs uppercase tracking-wide text-white/55">{step.status}</div>
+          </div>
+          <div className="mt-2 text-sm text-white/85 break-all">{step.action}</div>
+          {step.observation && <div className="mt-1 text-xs text-white/60 break-all">{step.observation}</div>}
+          {(step.command || step.exitCode !== undefined || step.artifactRef) && (
+            <div className="mt-2 grid grid-cols-1 gap-1 text-xs text-white/50">
+              {step.command && <div><span className="font-mono">command</span>: <span className="break-all">{step.command}</span></div>}
+              {step.exitCode !== undefined && <div><span className="font-mono">exitCode</span>: {step.exitCode}</div>}
+              {step.artifactRef && <div><span className="font-mono">artifact</span>: <span className="break-all">{step.artifactRef}</span></div>}
+            </div>
+          )}
+        </div>
+      )) : (
+        <div className="text-sm text-white/45">{t('noTrajectory')}</div>
+      )}
+    </div>
+  );
+};
+
 export const ArtifactSummary: React.FC<{ bundles: ArtifactBundle[] }> = ({ bundles }) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = React.useState<ArtifactTab>('summary');
@@ -200,12 +245,12 @@ export const ArtifactSummary: React.FC<{ bundles: ArtifactBundle[] }> = ({ bundl
       {latestBundle ? (
         <>
           <div className="flex gap-2" role="tablist" aria-label={t('artifactSummary')}>
-            {(['summary', 'refs', 'retained'] as const).map((tab) => (
+            {(['summary', 'refs', 'retained', 'trajectory'] as const).map((tab) => (
               <ArtifactTabButton
                 key={tab}
                 tab={tab}
                 activeTab={activeTab}
-                label={tab === 'summary' ? t('summary') : tab === 'refs' ? t('artifactRefs') : t('artifactRetainedContent')}
+                label={tab === 'summary' ? t('summary') : tab === 'refs' ? t('artifactRefs') : tab === 'retained' ? t('artifactRetainedContent') : t('artifactTrajectory')}
                 onSelect={setActiveTab}
               />
             ))}
@@ -213,6 +258,7 @@ export const ArtifactSummary: React.FC<{ bundles: ArtifactBundle[] }> = ({ bundl
           {activeTab === 'summary' && <ArtifactSummaryDetails bundle={latestBundle} />}
           {activeTab === 'refs' && <ArtifactRefs refs={refs} />}
           {activeTab === 'retained' && <ArtifactRetainedContent entries={retainedEntries} />}
+          {activeTab === 'trajectory' && <ArtifactTrajectory bundle={latestBundle} />}
         </>
       ) : (
         <div className="text-sm text-white/45">{t('noArtifacts')}</div>

@@ -414,6 +414,41 @@ describe("ArtifactBundleSchema", () => {
     });
   });
 
+  it("parses structured replayable trajectory steps", () => {
+    const bundle = ArtifactBundleSchema.parse({
+      taskId: "task-1",
+      attemptId: "attempt-1",
+      schemaVersion: "artifact-bundle/v1",
+      changedFiles: [],
+      refs: {},
+      trajectory: {
+        schemaVersion: "artifact-trajectory/v1",
+        steps: [
+          {
+            sequence: 1,
+            phase: "verification",
+            action: "pnpm test",
+            observation: "58 tests passed",
+            status: "succeeded",
+            command: "pnpm test",
+            cwd: "/repo",
+            exitCode: 0,
+            artifactRef: "artifact://attempt-1/test-results.txt",
+          },
+        ],
+      },
+    });
+
+    expect(bundle.trajectory?.steps[0]).toMatchObject({
+      sequence: 1,
+      phase: "verification",
+      action: "pnpm test",
+      observation: "58 tests passed",
+      status: "succeeded",
+      exitCode: 0,
+    });
+  });
+
   it("rejects artifact bundles without attempt ownership", () => {
     expect(() => ArtifactBundleSchema.parse({
       taskId: "task-1",

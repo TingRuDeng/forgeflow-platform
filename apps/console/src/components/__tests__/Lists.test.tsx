@@ -201,6 +201,18 @@ describe('Task drill-down', () => {
               diff: 'artifact://att-001/diff.patch',
               logs: 'artifact://att-001/session.log',
             },
+            trajectory: {
+              schemaVersion: 'artifact-trajectory/v1',
+              steps: [
+                {
+                  sequence: 1,
+                  phase: 'verification',
+                  action: 'pnpm test',
+                  observation: '58 tests passed',
+                  status: 'succeeded',
+                },
+              ],
+            },
             retainedContent: {
               diff: 'diff --git a/src/auth.ts b/src/auth.ts',
               logs: 'pnpm test passed',
@@ -237,6 +249,9 @@ describe('Task drill-down', () => {
     fireEvent.click(screen.getByRole('tab', { name: /retained|正文/i }));
     expect(screen.getByText(/diff --git a\/src\/auth.ts b\/src\/auth.ts/i)).toBeInTheDocument();
     expect(screen.getByText(/pnpm test passed/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /trajectory|轨迹/i }));
+    expect(screen.getByText(/58 tests passed/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /作废任务|cancel task/i }));
 
