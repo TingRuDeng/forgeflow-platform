@@ -6,6 +6,7 @@ export interface TaskAssignment {
   pool: string;
   repo: string;
   commands?: Record<string, string>;
+  resumePayload?: Record<string, unknown> | null;
 }
 
 export interface TaskInfo {
@@ -24,6 +25,7 @@ export interface TaskPayload {
   protocolVersion?: string;
   traceId?: string;
   idempotencyKey?: string;
+  resumePayload?: Record<string, unknown> | null;
 }
 
 export interface WorkerResult {
@@ -45,6 +47,11 @@ export interface WorkerResult {
       output: string;
       timedOut?: boolean;
     }>;
+  };
+  waitingForInput?: {
+    requestedBy?: string;
+    reason?: string;
+    prompt?: string;
   };
 }
 

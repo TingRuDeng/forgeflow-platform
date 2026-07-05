@@ -300,6 +300,46 @@ describe('Task drill-down', () => {
       redriveStrategy: 'same_worker_continue',
     }));
   });
+
+  it('submits resume payload for tasks waiting for input', () => {
+    const onResume = vi.fn();
+
+    renderWithProviders(
+      <TaskDetailsPanel
+        task={{
+          id: 'dispatch-1:hitl-task',
+          title: 'Need rollout input',
+          status: 'waiting_for_input',
+          branchName: 'codex/hitl',
+          repo: 'owner/repo',
+          pool: 'codex',
+          waitingForInput: {
+            requestedBy: 'codex-worker',
+            reason: 'choose rollout scope',
+            requestedAt: '2026-07-05T10:00:00Z',
+          },
+        }}
+        assignment={{
+          taskId: 'dispatch-1:hitl-task',
+          repo: 'owner/repo',
+          pool: 'codex',
+        }}
+        onResume={onResume}
+      />
+    );
+
+    expect(screen.getByText(/choose rollout scope/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/恢复输入|resume payload/i), {
+      target: { value: '{"decision":"ship narrow scope"}' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /恢复任务|resume task/i }));
+
+    expect(onResume).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'dispatch-1:hitl-task',
+    }), {
+      decision: 'ship narrow scope',
+    });
+  });
 });
 
 describe('ArtifactWorkbench', () => {

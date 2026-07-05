@@ -10,6 +10,7 @@ import { ReviewQueue } from './components/ReviewQueue';
 import { useTranslation } from './lib/i18n';
 import { extractResponseError, parseJsonResponse } from './lib/http';
 import { postReviewDecision, type ReviewDecisionInput } from './lib/reviewDecision';
+import { postTaskCancel, postTaskResume } from './lib/taskActions';
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -30,6 +31,7 @@ const App: React.FC = () => {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   const [reviewingTaskId, setReviewingTaskId] = useState<string | null>(null);
+  const [resumingTaskId, setResumingTaskId] = useState<string | null>(null);
   const [bulkReviewingTaskIds, setBulkReviewingTaskIds] = useState<string[]>([]);
   const [updatingWorkerId, setUpdatingWorkerId] = useState<string | null>(null);
 
@@ -132,26 +134,26 @@ const App: React.FC = () => {
 
     try {
       setCancellingTaskId(task.id);
-      const res = await fetch(`/api/tasks/${encodeURIComponent(task.id)}/cancel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          at: new Date().toISOString(),
-          actor: 'console-ui',
-          reason: reason || t('cancelReasonDefault'),
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error('Failed to cancel task');
-      }
-
+      await postTaskCancel({ taskId: task.id, reason: reason || t('cancelReasonDefault') });
       await mutate();
     } catch (err) {
       console.error(err);
       alert(t('taskActionFailed'));
     } finally {
       setCancellingTaskId(null);
+    }
+  };
+
+  const handleTaskResume = async (task: { id: string }, resumePayload: Record<string, unknown>) => {
+    try {
+      setResumingTaskId(task.id);
+      await postTaskResume({ taskId: task.id, resumePayload });
+      await mutate();
+    } catch (err) {
+      console.error(err);
+      alert(t('taskActionFailed'));
+    } finally {
+      setResumingTaskId(null);
     }
   };
 
@@ -243,7 +245,9 @@ const App: React.FC = () => {
                     artifactBundles={selectedArtifactBundles}
                     cancellingTaskId={cancellingTaskId}
                     reviewingTaskId={reviewingTaskId}
+                    resumingTaskId={resumingTaskId}
                     onCancel={handleTaskCancel}
+                    onResume={handleTaskResume}
                     onReviewDecision={handleReviewDecision}
                   />
                 </div>

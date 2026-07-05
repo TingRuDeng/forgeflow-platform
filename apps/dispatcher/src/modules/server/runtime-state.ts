@@ -429,6 +429,11 @@ export interface WorkerResult {
   };
   evidence?: WorkerEvidence;
   artifactBundle?: ArtifactBundle;
+  waitingForInput?: {
+    requestedBy?: string;
+    reason?: string;
+    prompt?: string;
+  };
 }
 
 export interface RecordWorkerResultInput {
@@ -807,6 +812,20 @@ function buildCanonicalWorkerResult(task: Task, workerId: string, result: Worker
       commands,
     },
     evidence: normalizeWorkerEvidence(rawResult.evidence),
+    waitingForInput: normalizeWaitingForInput(rawResult.waitingForInput, workerId, normalizeString(rawResult.output)),
+  };
+}
+
+function normalizeWaitingForInput(value: unknown, workerId: string, fallbackReason: string): WorkerResult["waitingForInput"] {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const reason = normalizeString(value.reason, fallbackReason).trim();
+  const prompt = normalizeString(value.prompt).trim();
+  return {
+    requestedBy: normalizeString(value.requestedBy, workerId).trim() || workerId,
+    reason: reason || fallbackReason || "worker requested input",
+    ...(prompt ? { prompt } : {}),
   };
 }
 
@@ -2588,6 +2607,14 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   const hasExplicitArtifactBundle = Boolean(input.artifactBundle ?? input.result.artifactBundle);
   if (!activeAttempt && hasExplicitArtifactBundle) {
     throw new Error(`active attempt not found for task: ${task.id}`);
+  }
+  if (canonicalResult.waitingForInput) {
+    return interruptTaskForInput(state, {
+      taskId: task.id,
+      actor: canonicalResult.waitingForInput.requestedBy ?? input.workerId,
+      reason: canonicalResult.waitingForInput.reason ?? canonicalResult.output,
+      at: canonicalResult.generatedAt,
+    });
   }
   const artifactBundle = activeAttempt
     ? buildArtifactBundle({

@@ -372,6 +372,8 @@ function classifyWorkerResultError(error: unknown): number {
     || message === "worker result verification.allPassed must be a boolean"
     || message === "worker result verification.commands must be an array"
     || message === "worker result changedFiles must be an array of strings when provided"
+    || message === "worker result waitingForInput must be an object when provided"
+    || message.startsWith("worker result waitingForInput.")
     || message === "worker result pullRequest must be null or an object"
     || message === "worker result pullRequest.number must be a positive integer"
     || message === "worker result pullRequest.url must be a string"
@@ -599,6 +601,17 @@ function validateWorkerResultBody(body: unknown): Record<string, any> {
     && (!Array.isArray(body.changedFiles) || body.changedFiles.some((item) => typeof item !== "string"))
   ) {
     throw new Error("worker result changedFiles must be an array of strings when provided");
+  }
+
+  if (body.result.waitingForInput !== undefined) {
+    if (!isPlainObject(body.result.waitingForInput)) {
+      throw new Error("worker result waitingForInput must be an object when provided");
+    }
+    for (const key of ["requestedBy", "reason", "prompt"]) {
+      if (body.result.waitingForInput[key] !== undefined && typeof body.result.waitingForInput[key] !== "string") {
+        throw new Error(`worker result waitingForInput.${key} must be a string when provided`);
+      }
+    }
   }
 
   if (body.pullRequest !== undefined && body.pullRequest !== null) {

@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M26 串行：接通 worker 主动 HITL interrupt 与 resume payload 消费。
+- [x] M26 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M26 Review 小结
+
+已把 HITL 从控制面手动 interrupt/resume 扩展到 worker 主动暂停主链：通用 worker result 可携带 `waitingForInput`，dispatcher 会归一化请求者和原因，checkpoint active attempt，释放 worker / leases，并把任务推进到 `waiting_for_input`；worker result body 校验和 `@forgeflow/worker-protocol` schema 已同步。Console 任务详情在 `waiting_for_input` 状态展示请求来源、原因、时间，并可提交 JSON `resumePayload` 到既有 resume API；beta runtime 会把 resume payload 写入 `.orchestrator/assignments/<task>/assignment.json`，供下一轮 worker 进程消费。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 worker 主动 HITL interrupt、Console resume payload 操作和 runtime assignment package 消费；安全检查通过，未新增 secret、外部网络调用、mock 成功路径或静默 fallback，HTTP 输入继续做类型校验，Console resume payload 必须是 JSON object；复杂度检查通过，`App.tsx` 296 行、`TaskHitlSection.tsx` 74 行、`taskActions.ts` 38 行，新增函数均低于 50 行，既有超大 `runtime-state.ts` 未扩大职责边界；Document-refresh: needed，原因：worker result、HITL resume 和 Console 行为发生变化，已同步 README、docs/README、API endpoints、Worker Protocol 和技术债。结论：通过。
+
+验证已通过：`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/dispatcher-server.test.ts tests/modules/server/runtime-state.test.ts`（默认沙箱因既有 auth middleware `listen EPERM 127.0.0.1` 超时后，按同命令非沙箱重跑通过，133 tests passed）、`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx src/__tests__/App.test.tsx`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core test`、`CI=true pnpm --filter @forgeflow/worker-protocol test`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`、非沙箱 `CI=true pnpm test`。
+
+剩余风险：Console 当前使用 JSON textarea 作为最小通用 resume payload 入口；如果后续 worker prompt schema 固化，需要升级为 schema 驱动表单和 waiting-for-input 队列筛选。
+
 - [x] M25 串行：下沉 worker-daemon live executor 到 beta-runtime-core。
 - [x] M25 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 
