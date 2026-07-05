@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { TaskDetailsPanel, TaskList } from '../Lists';
 import { ArtifactWorkbench } from '../ArtifactWorkbench';
@@ -233,6 +233,13 @@ describe('Task drill-down', () => {
                   status: 'succeeded',
                   artifactRef: 'artifact://att-001/test-results.txt',
                 },
+                {
+                  sequence: 2,
+                  phase: 'typecheck',
+                  action: 'pnpm typecheck',
+                  observation: 'typecheck passed',
+                  status: 'succeeded',
+                },
               ],
             },
             retainedContent: {
@@ -283,7 +290,14 @@ describe('Task drill-down', () => {
     expect(screen.getByText(/pnpm test passed/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /trajectory|轨迹/i }));
-    expect(screen.getByText(/58 tests passed/i)).toBeInTheDocument();
+    expect(screen.getByText(/步骤 1 \/ 2|step 1 \/ 2/i)).toBeInTheDocument();
+    expect(within(screen.getByTestId('trajectory-step-detail')).getByText(/pnpm test/i)).toBeInTheDocument();
+    expect(within(screen.getByTestId('trajectory-step-detail')).queryByText(/pnpm typecheck/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /下一步|next step/i }));
+    expect(screen.getByText(/步骤 2 \/ 2|step 2 \/ 2/i)).toBeInTheDocument();
+    expect(within(screen.getByTestId('trajectory-step-detail')).getByText(/pnpm typecheck/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /上一步|previous step/i }));
+    expect(within(screen.getByTestId('trajectory-step-detail')).getByText(/58 tests passed/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /展开轨迹文件|open trajectory file/i }));
     expect(await screen.findByText(/artifact file body/i)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/artifacts/att-001/files/test-results.txt');

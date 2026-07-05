@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M45 串行：补齐 Console trajectory step 前后回放交互。
+- [x] M45 串行：运行最小充分验证并补充 review 小结。
+
+## M45 Review 小结
+
+已把 Console 任务详情 trajectory tab 从“逐条展开”推进到当前 bundle 内的 step 回放视图。审查者可以通过上一步 / 下一步或步骤选择器查看当前 step 的 phase、status、action、observation、command、exitCode 和 artifactRef，并继续从当前 step 展开或下载 manifest 登记的观察文件。
+
+Review Gate：finished。Spec 符合度通过，本轮只推进 Console 内的 trajectory step 回放交互，没有改变 ArtifactBundle schema、artifact store manifest、dispatcher 写入语义或 worker result contract；安全检查通过，仍只读取 manifest 登记的 artifact 文件，未新增 secret、命令拼接、mock 成功路径或静默 fallback；复杂度检查通过，`ArtifactTrajectory.tsx` 204 行、`ArtifactSummary.tsx` 258 行，新增 helper 组件均保持单一职责；Document-refresh: needed，原因：Console trajectory 展示能力变化，已同步 docs/README、ARTIFACT_BUNDLE_V1、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx` 失败于找不到“步骤 1 / 2”；GREEN 后同命令通过，16 个测试通过。最终验证 `CI=true pnpm --filter console test`、`CI=true pnpm --filter console lint`、`CI=true pnpm --filter console build`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。沙箱内 `CI=true pnpm test` 因 live dispatcher 监听 `127.0.0.1` 和 Trae session home 写入权限失败；按权限规则非沙箱复跑 `CI=true pnpm test` 通过，dispatcher 47 个测试文件、489 个测试通过。
+
+剩余风险：当前已支持当前 bundle 内的 step 前后回放和当前 step artifact 观察文件读取；跨 step 状态 diff、时间轴 scrubber 和原始 thought/action/observation 全量流仍需要 worker runtime 继续产出更细粒度 trajectory。
+
 - [x] M44 串行：补齐 Console trajectory step artifactRef 可回放入口。
 - [x] M44 串行：运行最小充分验证并补充 review 小结。
 
