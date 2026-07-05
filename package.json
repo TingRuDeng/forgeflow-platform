@@ -20,6 +20,7 @@
     "verify:shadow-cutover": "node scripts/check-shadow-drift.mjs .forgeflow-dispatcher --require-configured --require-primary-backend --max-mismatches 0 --max-delta 0",
     "verify:shadow-cutover:drill": "node scripts/verify-shadow-cutover-drill.mjs .forgeflow-dispatcher",
     "verify:shadow-cutover:drill:evidence": "node scripts/verify-shadow-cutover-drill.mjs .forgeflow-dispatcher --output .forgeflow-dispatcher/shadow-cutover-drill.json",
+    "verify:shadow-cutover:approve": "node scripts/approve-shadow-cutover.mjs .forgeflow-dispatcher --evidence .forgeflow-dispatcher/shadow-cutover-drill.json",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   },
