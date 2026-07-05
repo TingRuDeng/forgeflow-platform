@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M86 串行：让 release preflight 提前阻断未配置 npm 包名。
 - [x] M85 串行：为 runtime 包发布清单增加可复现 readiness gate。
 - [x] M84 串行：让 Console Artifact Workbench 支持跨任务 runtime event 搜索。
 - [x] M83 串行：把 packaged worker daemon cycle 收敛到 beta-runtime-core shared cycle。
@@ -9,6 +10,18 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M86 Review 小结
+
+已排查 GitHub Release workflow run `28751633695`：`beta-runtime-core` 手动发布在 typecheck、runtime package readiness、测试、shadow drift gate、build 和 provenance 生成后，于 `npm publish --access public --provenance --tag beta` 返回 E404。根因是 `@tingrudeng/beta-runtime-core` 包名尚未在 npm registry 创建，或当前 Trusted Publisher 没有该包发布权限；旧 preflight 只校验仓库变量和 package metadata，未提前验证 npm 包名可见性。
+
+已为 `scripts/release-publish-preflight.mjs` 增加 `--require-package-exists`，通过只读 `npm view <package> version` 在发布前校验包名存在；手动发布和自动发布 workflow 都已接入该参数。包名不存在、权限不足或 registry 查询失败时，workflow 会停在 Release preflight，并提示先创建 npm 包名和配置 Trusted Publisher，避免跑完构建后才在 `npm publish` PUT 阶段失败。
+
+Review Gate：finished。Spec 符合度通过，本轮只把 npm 包名 / Trusted Publisher 可见性检查前移到 release preflight，不改变包版本、runtime 代码、发布命令或 package 内容。安全检查通过，新增逻辑只执行 `npm view <package> version` 只读查询，失败时显式阻断；不新增 secret、npm publish、写 registry、mock 成功路径或静默 fallback。复杂度检查通过，`scripts/release-publish-preflight.mjs` 159 行、新增测试 99 行，新增函数均保持短函数。Document-refresh: needed，原因：release workflow 发布前门禁语义变化，已同步 docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/release-publish-preflight.test.ts --maxWorkers=1` 先失败于 preflight 未检查 npm 包名存在；GREEN 后 `CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/release-publish-preflight.test.ts tests/modules/execution/workflows.test.ts --maxWorkers=1` 通过，2 个测试文件、7 个测试通过；`node --check scripts/release-publish-preflight.mjs`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。真实 preflight 命令 `NPM_TRUSTED_PUBLISHING_ENABLED=true node scripts/release-publish-preflight.mjs --package-dir packages/beta-runtime-core --expected-repo TingRuDeng/forgeflow-platform --require-trusted-publishing --require-package-exists` 已在 publish 前失败；本次网络返回 registry 查询超时，但失败位置已前移到 preflight。
+
+剩余风险：该变更能把 npm 包名 / Trusted Publisher 缺口提前暴露为 preflight 失败；它不能代替外部 npm 管理动作，`@tingrudeng/beta-runtime-core` 与 `@tingrudeng/gemini-beta-runtime` 仍需在 npm 侧创建包名并绑定 GitHub Trusted Publisher 后才能真正发布。
 
 ## M85 Review 小结
 

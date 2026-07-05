@@ -147,6 +147,7 @@ jobs:
           --package-dir packages/${{ inputs.package }}
           --expected-repo ${{ github.repository }}
           --require-trusted-publishing
+          --require-package-exists
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -341,6 +342,7 @@ jobs:
           --package-dir packages/${{ matrix.package.name }}
           --expected-repo ${{ github.repository }}
           --require-trusted-publishing
+          --require-package-exists
 
       - name: Check deprecated entrypoints
         run: node scripts/check-deprecated-entrypoints.mjs
