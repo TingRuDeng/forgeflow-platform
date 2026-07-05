@@ -1,13 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn, spawnSync, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { handleDispatcherHttpRequest } from "./dispatcher-server.js";
-import { prepareTaskWorktree, removeTaskWorktree, safeTaskDirName } from "./task-worktree.js";
+import { safeTaskDirName } from "./task-worktree.js";
 import { formatLocalTimestamp } from "./time.js";
 import { logger, logTaskCompleted, logTaskFailed, } from "./logger.js";
 import { recordTaskMetric } from "./metrics.js";
 import { getDispatcherAuthHeader } from "./dispatcher-auth.js";
-import { buildWorkerEnv, assertSafeBranchName, shouldCreatePullRequest, shouldRemoveWorktreeOnExit, } from "./worker-daemon-helpers.js";
 function resolveDispatcherDist() {
     const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
     const distPath = path.join(repoRoot, "apps/dispatcher/dist/modules/server/runtime-glue-dispatcher-client.js");
@@ -30,6 +30,28 @@ async function bootstrapDispatcherBridge() {
     }
     const distDir = path.join(repoRoot, "apps/dispatcher/dist");
     return import(path.join(distDir, "modules/server/runtime-glue-dispatcher-client.js"));
+}
+function resolveBetaRuntimeCoreDist() {
+    const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+    const distPath = path.join(repoRoot, "packages/beta-runtime-core/dist/runtime/worker-daemon.js");
+    return { repoRoot, distPath };
+}
+function ensureBetaRuntimeCoreDist() {
+    const { repoRoot, distPath } = resolveBetaRuntimeCoreDist();
+    if (fs.existsSync(distPath)) {
+        return;
+    }
+    execSync("pnpm --filter @tingrudeng/beta-runtime-core build", {
+        cwd: repoRoot,
+        stdio: "inherit",
+    });
+}
+async function bootstrapBetaRuntimeCore() {
+    const { distPath } = resolveBetaRuntimeCoreDist();
+    if (!fs.existsSync(distPath)) {
+        ensureBetaRuntimeCoreDist();
+    }
+    return import(pathToFileURL(distPath).href);
 }
 function nowIso() {
     return formatLocalTimestamp();
@@ -60,28 +82,9 @@ async function reportWorkerEventBestEffort(client, workerId, event) {
         });
     }
 }
-function readJson(filePath) {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-}
 function writeJson(filePath, value) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
-}
-function ensureSuccess(result, message) {
-    if ((result.status ?? 1) !== 0) {
-        throw new Error(result.stderr || result.stdout || message);
-    }
-}
-function runGit(args, cwd) {
-    const result = spawnSync("git", args, {
-        cwd,
-        encoding: "utf8",
-    });
-    return {
-        status: result.status ?? 1,
-        stdout: (result.stdout || "").trim(),
-        stderr: (result.stderr || "").trim(),
-    };
 }
 function buildWorkerFailureBlocker(kind, code, message, details) {
     return {
@@ -139,153 +142,6 @@ function buildWorkerFailureEvidence(error) {
         findings: [],
     };
 }
-function materializeAssignmentPackage(worktreeDir, payload) {
-    const assignmentDir = path.join(worktreeDir, ".orchestrator", "assignments", safeTaskDirName(payload.assignment.taskId));
-    writeJson(path.join(assignmentDir, "assignment.json"), payload.assignment);
-    fs.writeFileSync(path.join(assignmentDir, "worker-prompt.md"), payload.workerPrompt || "");
-    fs.writeFileSync(path.join(assignmentDir, "context.md"), payload.contextMarkdown || "");
-    return assignmentDir;
-}
-function collectChangedFiles(repoDir) {
-    const result = runGit(["status", "--short"], repoDir);
-    if ((result.status ?? 1) !== 0) {
-        return [];
-    }
-    return (result.stdout ?? "")
-        .split(/\r?\n/)
-        .map((line) => line.trim().replace(/^[A-Z?]{1,2}\s+/, ""))
-        .filter(Boolean)
-        .filter((line) => !line.startsWith(".orchestrator/"))
-        .filter((line) => !line.startsWith("node_modules"));
-}
-function maybeCommitAndPush(worktreeDir, payload, changedFiles) {
-    if (changedFiles.length === 0) {
-        return;
-    }
-    const addResult = runGit(["add", ...changedFiles], worktreeDir);
-    ensureSuccess(addResult, `failed to stage changes for ${payload.assignment.taskId}`);
-    const commitResult = runGit([
-        "commit",
-        "-m",
-        `feat(${payload.assignment.taskId}): ${payload.task.title}`,
-    ], worktreeDir);
-    ensureSuccess(commitResult, `failed to commit changes for ${payload.assignment.taskId}`);
-    const pushResult = runGit([
-        "push",
-        "-u",
-        "origin",
-        payload.assignment.branchName,
-    ], worktreeDir);
-    ensureSuccess(pushResult, `failed to push changes for ${payload.assignment.taskId}`);
-}
-async function maybeCreatePullRequest(payload, changedFiles) {
-    if (!shouldCreatePullRequest() || !process.env.GITHUB_TOKEN || changedFiles.length === 0) {
-        return null;
-    }
-    const response = await fetch(`https://api.github.com/repos/${payload.task.repo}/pulls`, {
-        method: "POST",
-        headers: {
-            authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
-            "content-type": "application/json",
-            accept: "application/vnd.github+json",
-            "user-agent": "forgeflow-worker-daemon",
-        },
-        body: JSON.stringify({
-            title: payload.task.title,
-            head: payload.assignment.branchName,
-            base: payload.assignment.defaultBranch,
-            body: [
-                `Task: ${payload.task.id}`,
-                "",
-                "Changed Files:",
-                ...changedFiles.map((item) => `- ${item}`),
-            ].join("\n"),
-        }),
-    });
-    const text = await response.text();
-    const json = text ? JSON.parse(text) : {};
-    if (!response.ok) {
-        const message = json.message
-            || json.error
-            || text
-            || `failed to create pull request for ${payload.assignment.taskId}`;
-        throw new Error(message);
-    }
-    return {
-        number: json.number || 0,
-        url: json.html_url || "",
-        headBranch: payload.assignment.branchName,
-        baseBranch: payload.assignment.defaultBranch,
-    };
-}
-function buildDryRunWorkerResult(payload, outputDir, generatedAt) {
-    const workerResult = {
-        taskId: payload.assignment.taskId,
-        workerId: "",
-        provider: payload.assignment.pool,
-        pool: payload.assignment.pool,
-        branchName: payload.assignment.branchName,
-        repo: payload.assignment.repo,
-        defaultBranch: payload.assignment.defaultBranch,
-        mode: "run",
-        output: "dry-run worker execution completed",
-        generatedAt,
-        verification: {
-            allPassed: true,
-            commands: Object.values(payload.assignment.commands ?? {}).map((command) => ({
-                command,
-                exitCode: 0,
-                output: "dry-run ok",
-            })),
-        },
-    };
-    writeJson(path.join(outputDir, "worker-result.json"), workerResult);
-    writeJson(path.join(outputDir, "worker-verification.json"), workerResult.verification);
-    fs.writeFileSync(path.join(outputDir, "worker-output.raw.txt"), "dry-run worker execution completed\n");
-    return workerResult;
-}
-function runWorkerAssignmentScript(repoRoot, assignmentDir, worktreeDir, outputDir) {
-    return new Promise((resolve, reject) => {
-        const scriptPath = path.join(repoRoot, "scripts/run-worker-assignment.js");
-        const proc = spawn("node", [
-            scriptPath,
-            "--assignment-dir",
-            assignmentDir,
-            "--worktree-dir",
-            worktreeDir,
-            "--output-dir",
-            outputDir,
-        ], {
-            cwd: repoRoot,
-            env: buildWorkerEnv(),
-        });
-        let stdout = "";
-        let stderr = "";
-        proc.stdout?.on("data", (data) => {
-            stdout += data.toString();
-        });
-        proc.stderr?.on("data", (data) => {
-            stderr += data.toString();
-        });
-        proc.on("close", (code) => {
-            if (code === 0) {
-                try {
-                    const result = readJson(path.join(outputDir, "worker-result.json"));
-                    resolve(result);
-                }
-                catch (e) {
-                    reject(new Error(`failed to read worker-result.json: ${e instanceof Error ? e.message : String(e)}`));
-                }
-            }
-            else {
-                reject(new Error(`worker execution failed with code ${code}: ${stderr || stdout}`));
-            }
-        });
-        proc.on("error", (error) => {
-            reject(new Error(`worker execution error: ${error.message}`));
-        });
-    });
-}
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const HEARTBEAT_TIMEOUT_MS = 5_000;
 const HEARTBEAT_MAX_RETRIES = 3;
@@ -308,11 +164,10 @@ function buildWorkerProtocolEnvelope(payload) {
     };
 }
 async function executeClaimedTask(input) {
+    const betaRuntime = await bootstrapBetaRuntimeCore();
     const heartbeatClient = input.client;
     const taskId = input.payload.task.id;
     const workerId = input.workerId;
-    let worktreeDir = null;
-    let outputDir = "";
     let heartbeatIntervalId = null;
     const startTime = Date.now();
     const startHeartbeat = () => {
@@ -333,35 +188,29 @@ async function executeClaimedTask(input) {
     };
     try {
         startHeartbeat();
-        assertSafeBranchName(input.repoDir, input.payload.assignment.branchName, input.payload.assignment.defaultBranch);
-        worktreeDir = prepareTaskWorktree(input.repoDir, input.payload.assignment, {
-            allowReuse: true,
-            resetOnReuse: true,
-        });
-        const assignmentDir = materializeAssignmentPackage(worktreeDir, input.payload);
-        outputDir = path.join(assignmentDir, "execution");
-        fs.mkdirSync(outputDir, { recursive: true });
-        await reportWorkerEventBestEffort(input.client, input.workerId, {
-            type: "progress_reported",
-            taskId,
-            payload: { stage: "worktree_prepared", message: "worktree prepared, running worker assignment" },
-        });
-        const workerResult = input.dryRunExecution
-            ? buildDryRunWorkerResult(input.payload, outputDir, input.at ?? nowIso())
-            : await runWorkerAssignmentScript(input.repoRoot, assignmentDir, worktreeDir, outputDir);
-        const changedFiles = input.dryRunExecution ? [] : collectChangedFiles(worktreeDir);
-        await reportWorkerEventBestEffort(input.client, input.workerId, {
-            type: "progress_reported",
-            taskId,
-            payload: {
-                stage: "execution_completed",
-                message: `worker execution completed, ${changedFiles.length} changed file(s)`,
+        const execution = await betaRuntime.executeLiveWorkerTask({
+            client: input.client,
+            packageRoot: input.repoRoot,
+            workerId,
+            repoDir: input.repoDir,
+            payload: input.payload,
+            dryRunExecution: input.dryRunExecution,
+            at: input.at,
+            createPullRequest: process.env.FORGEFLOW_WORKER_CREATE_PR === "1",
+            removeWorktreeOnExit: process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT === "1",
+            resetWorktreeOnReuse: true,
+            runtimeScriptPath: path.join(input.repoRoot, "scripts/run-worker-assignment.js"),
+            runtimeScriptCwd: input.repoRoot,
+            reportEvent: (event) => reportWorkerEventBestEffort(input.client, input.workerId, event),
+            onCleanupError: (cleanupError) => {
+                logger.warn({
+                    operation: "cleanupWorktree",
+                    taskId,
+                    error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+                    event: "worktree_cleanup_failed",
+                });
             },
         });
-        if (!input.dryRunExecution) {
-            maybeCommitAndPush(worktreeDir, input.payload, changedFiles);
-        }
-        const pullRequest = input.dryRunExecution ? null : await maybeCreatePullRequest(input.payload, changedFiles);
         const durationMs = Date.now() - startTime;
         logTaskCompleted(input.payload.task.id, input.workerId, durationMs, true);
         recordTaskMetric({
@@ -372,13 +221,7 @@ async function executeClaimedTask(input) {
             durationMs,
             startedAt: new Date(Date.now() - durationMs).toISOString(),
         });
-        return {
-            result: workerResult,
-            changedFiles,
-            pullRequest,
-            worktreeDir,
-            outputDir,
-        };
+        return execution;
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -397,27 +240,6 @@ async function executeClaimedTask(input) {
     }
     finally {
         stopHeartbeat();
-        if (worktreeDir && shouldRemoveWorktreeOnExit()) {
-            try {
-                removeTaskWorktree(input.repoDir, taskId);
-            }
-            catch (cleanupError) {
-                logger.warn({
-                    operation: "cleanupWorktree",
-                    taskId,
-                    error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
-                    event: "worktree_cleanup_failed",
-                });
-                await reportWorkerEventBestEffort(input.client, input.workerId, {
-                    type: "worktree_cleanup_failed",
-                    taskId,
-                    payload: {
-                        error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
-                        failureCode: "cleanup_failed",
-                    },
-                });
-            }
-        }
     }
 }
 async function submitFailedClaimedTaskResult(input, errorMessage) {

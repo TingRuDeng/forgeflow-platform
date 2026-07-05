@@ -1,12 +1,12 @@
 import os from "node:os";
 
 import { createDispatcherClient } from "./dispatcher-client.js";
-import { processTaskAssignment } from "./task-processor.js";
+import { executeLiveWorkerTask, processTaskAssignment } from "./task-processor.js";
 import { resolvePackageRootDir, nowIso, sleep } from "./utils.js";
 import type { DispatcherClient, PullRequestInfo, TaskPayload } from "./types.js";
 
 export { createDispatcherClient } from "./dispatcher-client.js";
-export { buildWorkerProtocolEnvelope } from "./task-processor.js";
+export { buildWorkerProtocolEnvelope, executeLiveWorkerTask } from "./task-processor.js";
 export type { DispatcherClient, PullRequestInfo, TaskAssignment, TaskInfo, TaskPayload, WorkerResult } from "./types.js";
 
 export interface RunWorkerDaemonCycleInput {

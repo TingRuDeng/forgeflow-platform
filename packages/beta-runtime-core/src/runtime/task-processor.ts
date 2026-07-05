@@ -1,16 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { safeTaskDirName, prepareTaskWorktree } from "./task-worktree.js";
+import { safeTaskDirName, prepareTaskWorktree, removeTaskWorktree } from "./task-worktree.js";
 import { nowIso, sleep } from "./utils.js";
 import {
   buildDryRunWorkerResult,
   collectChangedFiles,
   createFailedWorkerResult,
+  assertSafeBranchName,
   materializeAssignmentPackage,
   maybeCommitAndPush,
   maybeCreatePullRequest,
   runWorkerAssignmentScript,
+  shouldCreatePullRequest,
   writeWorkerResultFiles,
 } from "./task-output.js";
 import type { PullRequestInfo, ProcessTaskAssignmentInput, TaskPayload, WorkerProtocolEnvelope, WorkerResult } from "./types.js";
@@ -20,11 +22,18 @@ const SUBMIT_RESULT_MAX_RETRIES = 3;
 const SUBMIT_RESULT_RETRY_DELAY_MS = 2_000;
 
 interface TaskExecutionResult {
+  result: WorkerResult;
   worktreeDir: string;
   outputDir: string;
-  workerResult: WorkerResult;
   changedFiles: string[];
   pullRequest: PullRequestInfo | null;
+}
+
+interface LiveWorkerTaskContext {
+  taskId: string;
+  worktreeDir: string;
+  assignmentDir: string;
+  outputDir: string;
 }
 
 interface TaskSummaryInput extends TaskExecutionResult {
@@ -33,9 +42,25 @@ interface TaskSummaryInput extends TaskExecutionResult {
 
 interface SubmitCompletedResultInput {
   input: ProcessTaskAssignmentInput;
-  workerResult: WorkerResult;
+  result: WorkerResult;
   changedFiles: string[];
   pullRequest: PullRequestInfo | null;
+}
+
+export interface LiveWorkerTaskEvent {
+  type: string;
+  taskId?: string;
+  payload?: unknown;
+}
+
+export interface ExecuteLiveWorkerTaskInput extends ProcessTaskAssignmentInput {
+  createPullRequest?: boolean;
+  removeWorktreeOnExit?: boolean;
+  resetWorktreeOnReuse?: boolean;
+  runtimeScriptPath?: string;
+  runtimeScriptCwd?: string;
+  reportEvent?: (event: LiveWorkerTaskEvent) => Promise<void>;
+  onCleanupError?: (error: unknown) => void;
 }
 
 export function buildWorkerProtocolEnvelope(payload: TaskPayload): WorkerProtocolEnvelope {
@@ -65,7 +90,7 @@ export async function processTaskAssignment(input: ProcessTaskAssignmentInput): 
       ...buildWorkerProtocolEnvelope(input.payload),
       at: input.at ?? nowIso(),
     });
-    const result = await runTaskExecution(input);
+    const result = await executeLiveWorkerTask(input);
     stopHeartbeat();
     await submitCompletedResult({ input, ...result });
     return buildTaskSummary({ input, ...result });
@@ -87,20 +112,105 @@ function startTaskHeartbeat(input: ProcessTaskAssignmentInput, taskId: string): 
   return () => clearInterval(intervalId);
 }
 
-async function runTaskExecution(input: ProcessTaskAssignmentInput): Promise<TaskExecutionResult> {
-  const worktreeDir = prepareTaskWorktree(input.repoDir, input.payload.assignment, { allowReuse: true });
+export async function executeLiveWorkerTask(input: ExecuteLiveWorkerTaskInput): Promise<TaskExecutionResult> {
+  let context: LiveWorkerTaskContext | null = null;
+  try {
+    context = await prepareLiveWorkerTask(input);
+    const result = await runLiveWorkerTask(input, context);
+    const changedFiles = input.dryRunExecution ? [] : collectChangedFiles(context.worktreeDir);
+    await reportLiveWorkerExecutionCompleted(input, context.taskId, changedFiles.length);
+    const pullRequest = await finalizeLiveWorkerTask(input, context.worktreeDir, changedFiles);
+    return {
+      worktreeDir: context.worktreeDir,
+      outputDir: context.outputDir,
+      result,
+      changedFiles,
+      pullRequest,
+    };
+  } finally {
+    await cleanupLiveWorkerTask(input, context);
+  }
+}
+
+async function prepareLiveWorkerTask(input: ExecuteLiveWorkerTaskInput): Promise<LiveWorkerTaskContext> {
+  const taskId = input.payload.task.id;
+  assertSafeBranchName(input.repoDir, input.payload.assignment.branchName, input.payload.assignment.defaultBranch);
+  const worktreeDir = prepareTaskWorktree(input.repoDir, input.payload.assignment, {
+    allowReuse: true,
+    resetOnReuse: input.resetWorktreeOnReuse ?? true,
+  });
   const assignmentDir = materializeAssignmentPackage(worktreeDir, input.payload);
   const outputDir = path.join(assignmentDir, "execution");
   fs.mkdirSync(outputDir, { recursive: true });
-  const workerResult = input.dryRunExecution
-    ? buildDryRunWorkerResult(input.payload, outputDir, input.at ?? nowIso())
-    : await runWorkerAssignmentScript({ packageRoot: input.packageRoot, assignmentDir, worktreeDir, outputDir });
-  const changedFiles = input.dryRunExecution ? [] : collectChangedFiles(worktreeDir);
-  if (!input.dryRunExecution) {
-    maybeCommitAndPush(worktreeDir, input.payload, changedFiles);
+  await input.reportEvent?.({
+    type: "progress_reported",
+    taskId,
+    payload: { stage: "worktree_prepared", message: "worktree prepared, running worker assignment" },
+  });
+  return { taskId, worktreeDir, assignmentDir, outputDir };
+}
+
+function runLiveWorkerTask(input: ExecuteLiveWorkerTaskInput, context: LiveWorkerTaskContext): Promise<WorkerResult> | WorkerResult {
+  if (input.dryRunExecution) {
+    return buildDryRunWorkerResult(input.payload, context.outputDir, input.at ?? nowIso());
   }
-  const pullRequest = input.dryRunExecution ? null : await maybeCreatePullRequest(input.payload, changedFiles);
-  return { worktreeDir, outputDir, workerResult, changedFiles, pullRequest };
+  return runWorkerAssignmentScript({
+    packageRoot: input.packageRoot,
+    assignmentDir: context.assignmentDir,
+    worktreeDir: context.worktreeDir,
+    outputDir: context.outputDir,
+    runtimeScriptPath: input.runtimeScriptPath,
+    runtimeScriptCwd: input.runtimeScriptCwd,
+  });
+}
+
+async function reportLiveWorkerExecutionCompleted(
+  input: ExecuteLiveWorkerTaskInput,
+  taskId: string,
+  changedFileCount: number,
+): Promise<void> {
+  await input.reportEvent?.({
+    type: "progress_reported",
+    taskId,
+    payload: {
+      stage: "execution_completed",
+      message: `worker execution completed, ${changedFileCount} changed file(s)`,
+    },
+  });
+}
+
+async function finalizeLiveWorkerTask(
+  input: ExecuteLiveWorkerTaskInput,
+  worktreeDir: string,
+  changedFiles: string[],
+): Promise<PullRequestInfo | null> {
+  if (input.dryRunExecution) {
+    return null;
+  }
+  maybeCommitAndPush(worktreeDir, input.payload, changedFiles);
+  return maybeCreatePullRequest(input.payload, changedFiles, {
+    createPullRequest: input.createPullRequest ?? shouldCreatePullRequest(),
+  });
+}
+
+async function cleanupLiveWorkerTask(
+  input: ExecuteLiveWorkerTaskInput,
+  context: LiveWorkerTaskContext | null,
+): Promise<void> {
+  if (!context || !input.removeWorktreeOnExit) return;
+  try {
+    removeTaskWorktree(input.repoDir, context.taskId);
+  } catch (error) {
+    input.onCleanupError?.(error);
+    await input.reportEvent?.({
+      type: "worktree_cleanup_failed",
+      taskId: context.taskId,
+      payload: {
+        error: error instanceof Error ? error.message : String(error),
+        failureCode: "cleanup_failed",
+      },
+    });
+  }
 }
 
 async function submitCompletedResult(submission: SubmitCompletedResultInput): Promise<void> {
@@ -110,7 +220,7 @@ async function submitCompletedResult(submission: SubmitCompletedResultInput): Pr
     try {
       await input.client.submitResult(input.workerId, {
         ...buildWorkerProtocolEnvelope(input.payload),
-        result: submission.workerResult,
+        result: submission.result,
         changedFiles: submission.changedFiles,
         pullRequest: submission.pullRequest,
       });

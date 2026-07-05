@@ -40,8 +40,42 @@ export function maybeCommitAndPush(worktreeDir: string, payload: TaskPayload, ch
   ensureSuccess(runGit(["push", "-u", "origin", payload.assignment.branchName], worktreeDir), `failed to push changes for ${payload.assignment.taskId}`);
 }
 
-export async function maybeCreatePullRequest(payload: TaskPayload, changedFiles: string[]): Promise<PullRequestInfo | null> {
-  if (!process.env.GITHUB_TOKEN || changedFiles.length === 0) {
+export function assertSafeBranchName(
+  repoDir: string,
+  branchName: string,
+  defaultBranch: string,
+  envSource: NodeJS.ProcessEnv = process.env,
+): void {
+  const normalizedBranch = branchName.trim();
+  if (!normalizedBranch) {
+    throw new Error("invalid branchName (empty)");
+  }
+  if (normalizedBranch !== branchName) {
+    throw new Error("invalid branchName (surrounding whitespace)");
+  }
+  if (normalizedBranch === defaultBranch) {
+    throw new Error(`refusing to push to default branch: ${defaultBranch}`);
+  }
+  const allowedPrefixes = String(envSource.FORGEFLOW_ALLOWED_PUSH_PREFIXES || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (allowedPrefixes.length > 0 && !allowedPrefixes.some((prefix) => normalizedBranch.startsWith(prefix))) {
+    throw new Error(`branchName not allowed by FORGEFLOW_ALLOWED_PUSH_PREFIXES: ${normalizedBranch}`);
+  }
+  ensureSuccess(runGit(["check-ref-format", "--branch", normalizedBranch], repoDir), `invalid git branch ref: ${normalizedBranch}`);
+}
+
+export function shouldCreatePullRequest(envSource: NodeJS.ProcessEnv = process.env): boolean {
+  return envSource.FORGEFLOW_WORKER_CREATE_PR === "1";
+}
+
+export async function maybeCreatePullRequest(
+  payload: TaskPayload,
+  changedFiles: string[],
+  options: { createPullRequest?: boolean } = {},
+): Promise<PullRequestInfo | null> {
+  if (!options.createPullRequest || !process.env.GITHUB_TOKEN || changedFiles.length === 0) {
     return null;
   }
 
@@ -140,6 +174,8 @@ export interface RunWorkerAssignmentScriptInput {
   assignmentDir: string;
   worktreeDir: string;
   outputDir: string;
+  runtimeScriptPath?: string;
+  runtimeScriptCwd?: string;
 }
 
 interface WorkerProcessResultHandlers {
@@ -158,7 +194,7 @@ interface WorkerResultInput {
 
 export function runWorkerAssignmentScript(input: RunWorkerAssignmentScriptInput): Promise<WorkerResult> {
   return new Promise((resolve, reject) => {
-    const scriptPath = path.join(input.packageRoot, "dist/runtime/run-worker-assignment.js");
+    const scriptPath = input.runtimeScriptPath ?? path.join(input.packageRoot, "dist/runtime/run-worker-assignment.js");
     if (!fs.existsSync(scriptPath)) {
       reject(new Error(`run-worker-assignment runtime script not found: ${scriptPath}`));
       return;
@@ -169,7 +205,7 @@ export function runWorkerAssignmentScript(input: RunWorkerAssignmentScriptInput)
 }
 
 function spawnWorkerAssignmentProcess(input: RunWorkerAssignmentScriptInput) {
-  const scriptPath = path.join(input.packageRoot, "dist/runtime/run-worker-assignment.js");
+  const scriptPath = input.runtimeScriptPath ?? path.join(input.packageRoot, "dist/runtime/run-worker-assignment.js");
   return spawn("node", [
     scriptPath,
     "--assignment-dir",
@@ -179,7 +215,7 @@ function spawnWorkerAssignmentProcess(input: RunWorkerAssignmentScriptInput) {
     "--output-dir",
     input.outputDir,
   ], {
-    cwd: input.packageRoot,
+    cwd: input.runtimeScriptCwd ?? input.packageRoot,
     env: buildWorkerEnv(),
   }) as ChildProcess & { stdout?: NodeJS.ReadableStream; stderr?: NodeJS.ReadableStream };
 }

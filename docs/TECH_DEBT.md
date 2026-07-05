@@ -293,15 +293,15 @@ Desired direction:
 - worker pool 契约已统一为通用 string（`apps/dispatcher/src/modules/runtime/types.ts`、`tasks/service.ts`、`dispatch/service.ts`、`workers/service.ts`），与 `runtime-state.ts` 既有 string 对齐；`task-schema` 的 `WorkerPoolSchema(codex|gemini|trae)` 作为校验边界保留。
 - gemini 已有对等远程运行时包 `@tingrudeng/gemini-beta-runtime`（镜像 codex-beta-runtime），与 codex/trae 三者在“远程 worker 运行时包”层面并列。
 - generic worker daemon 现在会上报 `progress_reported` 运行阶段事件（worktree_prepared / execution_completed），与 Trae 的进度可观测性对齐。
-- `scripts/lib/worker-daemon.ts` 的 register / heartbeat / claim / start / completed submitResult 主循环已委托给 `apps/dispatcher/src/modules/server/runtime-glue-dispatcher-client.ts:runWorkerDaemonCycle`；脚本侧保留 worktree、child worker execution、commit/push、PR 创建、失败 fallback result 和 cleanup executor。
+- `scripts/lib/worker-daemon.ts` 的 register / heartbeat / claim / start / completed submitResult 主循环已委托给 `apps/dispatcher/src/modules/server/runtime-glue-dispatcher-client.ts:runWorkerDaemonCycle`；worktree、child worker execution、commit/push、PR 创建和 cleanup live executor 已下沉到 `packages/beta-runtime-core/src/runtime/task-processor.ts:executeLiveWorkerTask`，脚本侧只保留 beta core bootstrap、日志 / metrics 和失败 fallback result。
 
 仍存在的债务：
 
 - **`scripts/lib` 构建可重建已修复（P0 完成）**：`scripts/lib/review-memory.ts` 的 type-only re-export 改从 `apps/dispatcher/dist` 的 `.d.ts` 取（消除 rootDir 违规），`worker-daemon.ts` 的 `startTime` 已提到 try 外（修复 latent ReferenceError），`scripts/lib/tsconfig.json` 改为非严格并排除 `*.test.ts`。现在 `tsc -p scripts/lib/tsconfig.json` 可干净、幂等地 emit；committed `.js` 已与 `.ts` 对齐（含此前缺失从未提交的 `logger.js` / `metrics.js` / `dispatcher-auth.js` 运行时依赖）。CI 新增 `Verify scripts/lib build is in sync` 步骤（`tsc` + `git diff --exit-code`）防止再次漂移。`.ts` 现在是真相源。
-- **daemon 主循环与 assignment runner 已收敛，live executor 仍待继续下沉（P2 部分完成）**：`scripts/lib/worker-daemon.ts` 已复用 `runtime-glue` 的 `runWorkerDaemonCycle`，completed submitResult retry / delivery_failed 事件由 shared cycle 负责；`run-worker-assignment` 的 prompt 拼接、verification shell / nvm 包装、执行 timeout、workspace dependency symlink、worker-result 文件写入已下沉到 `packages/beta-runtime-core/src/runtime/run-worker-assignment.ts` 与 `run-worker-assignment-cli.ts`。root `scripts/run-worker-assignment.ts` 只保留 dispatcher runtime factory bootstrap，`@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 只保留 provider CLI launch wrapper。脚本侧仍拥有重型 live executor，包括 worktree、child worker execution、commit/push、PR 创建、失败 fallback result 和 cleanup。
-  - 期望方向：继续把 live executor 的 worktree / commit / push / cleanup 生命周期下沉到 `runtime/*` 抽象或可发布 runtime core，让 `scripts/lib/worker-daemon.ts` 最终只保留 thin bootstrap 和本地兼容入口。
+- **daemon 主循环、assignment runner 与 live executor 已收敛到共享 runtime core（P2 主体完成）**：`scripts/lib/worker-daemon.ts` 已复用 `runtime-glue` 的 `runWorkerDaemonCycle`，completed submitResult retry / delivery_failed 事件由 shared cycle 负责；`run-worker-assignment` 的 prompt 拼接、verification shell / nvm 包装、执行 timeout、workspace dependency symlink、worker-result 文件写入已下沉到 `packages/beta-runtime-core/src/runtime/run-worker-assignment.ts` 与 `run-worker-assignment-cli.ts`；worktree / commit / push / PR / cleanup live executor 已下沉到 `executeLiveWorkerTask`。root `scripts/run-worker-assignment.ts` 只保留 dispatcher runtime factory bootstrap，`scripts/lib/worker-daemon.ts` 只保留 beta core bootstrap、日志 / metrics 和失败 fallback result，`@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 只保留 provider CLI launch wrapper。
+  - 期望方向：继续把脚本侧失败 fallback result、日志 / metrics 回调和 beta core dist bootstrap 收敛为可发布 runtime core 的显式 adapter，让 `scripts/lib/worker-daemon.ts` 最终只保留 thin bootstrap 和本地兼容入口。
 
 影响：
 
-- codex/gemini 已可作为受支持 worker 接入方式与 Trae 并列；worker-daemon 主循环与 assignment runner 已对齐到共享 runtime core，但 live executor 生命周期仍弱于 dispatcher 主链。
-- 任何对 generic worker daemon 的后续改动，应优先继续下沉 live executor 生命周期，而不是重新在脚本侧扩写主循环。
+- codex/gemini 已可作为受支持 worker 接入方式与 Trae 并列；worker-daemon 主循环、assignment runner 与 live executor 已对齐到共享 runtime core，但脚本侧仍保留失败 fallback result 和本地 dist bootstrap。
+- 任何对 generic worker daemon 的后续改动，应优先扩展 `packages/beta-runtime-core` adapter，而不是重新在脚本侧扩写主循环或 live executor。
