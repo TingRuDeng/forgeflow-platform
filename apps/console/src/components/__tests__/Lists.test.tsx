@@ -573,6 +573,28 @@ describe('ArtifactWorkbench', () => {
             summary: 'auth diff ready',
             changedFiles: [{ path: 'src/auth.ts' }],
             refs: { diff: 'artifact://bundle-auth/diff.patch' },
+            trajectory: {
+              schemaVersion: 'artifact-trajectory/v1',
+              steps: [
+                {
+                  sequence: 1,
+                  phase: 'action',
+                  action: 'run auth regression',
+                  observation: 'auth guard failed before patch',
+                  status: 'failed',
+                  command: 'pnpm test auth',
+                  artifactRef: 'artifact://bundle-auth/test-results.txt',
+                },
+                {
+                  sequence: 2,
+                  phase: 'verification',
+                  action: 'rerun auth regression',
+                  observation: 'auth guard passed after patch',
+                  status: 'succeeded',
+                  command: 'pnpm test auth',
+                },
+              ],
+            },
           },
           {
             taskId: 'task-2',
@@ -600,6 +622,13 @@ describe('ArtifactWorkbench', () => {
     expect(screen.getByText(/原因码.*2|reasoncode.*2/i)).toBeInTheDocument();
     expect(screen.getByText(/风险.*2|risk.*2/i)).toBeInTheDocument();
     expect(screen.getByText(/并排详情|side-by-side details/i)).toBeInTheDocument();
+    const trajectorySummary = within(screen.getByTestId('artifact-workbench-trajectory-bundle-auth'));
+    expect(trajectorySummary.getByText(/轨迹|trajectory/i)).toBeInTheDocument();
+    expect(trajectorySummary.getByText('2')).toBeInTheDocument();
+    expect(trajectorySummary.getByText(/失败步骤|failed steps/i)).toBeInTheDocument();
+    expect(trajectorySummary.getByText('1')).toBeInTheDocument();
+    expect(trajectorySummary.getByText(/最后步骤|last step/i)).toBeInTheDocument();
+    expect(trajectorySummary.getByText(/rerun auth regression/i)).toBeInTheDocument();
     expect(screen.getByText(/Fix auth gate.*test_gap.*needs_human_attention/i)).toBeInTheDocument();
     expect(screen.getByText(/Update docs.*docs_ready.*low/i)).toBeInTheDocument();
     expect(screen.getByText(/artifact:\/\/bundle-auth\/diff.patch/i)).toBeInTheDocument();
@@ -612,6 +641,13 @@ describe('ArtifactWorkbench', () => {
 
     fireEvent.change(screen.getByPlaceholderText(/筛选|filter/i), {
       target: { value: 'test_gap' },
+    });
+
+    expect(screen.getByText(/auth diff ready/i)).toBeInTheDocument();
+    expect(screen.queryByText(/docs updated/i)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/筛选|filter/i), {
+      target: { value: 'auth guard passed' },
     });
 
     expect(screen.getByText(/auth diff ready/i)).toBeInTheDocument();
