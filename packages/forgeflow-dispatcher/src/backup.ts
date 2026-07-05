@@ -7,7 +7,9 @@ const FILES = [
   "runtime-state.db-shm",
   "runtime-state.json",
   "runtime-state-shadow-status.json",
+  "shadow-cutover-drill.json",
   "shadow-cutover-approval.json",
+  "shadow-cutover-ready.json",
   "shadow-cutover-revocation.json",
 ];
 
