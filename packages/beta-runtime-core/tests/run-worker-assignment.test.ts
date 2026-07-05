@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  buildDispatcherRuntimeLaunchCommand,
   runWorkerAssignment,
   type AssignmentLaunchCommand,
 } from "../src/runtime/run-worker-assignment.js";
@@ -112,5 +113,94 @@ describe("shared run-worker-assignment runner", () => {
       },
     });
     expect(fs.readFileSync(path.join(outputDir, "worker-output.raw.txt"), "utf8")).toContain("# Context");
+  });
+
+  it("builds codex and gemini launch commands through shared runtime factories", async () => {
+    const root = makeTempDir();
+    const { assignmentDir, worktreeDir, outputDir } = writeAssignmentPackage(root);
+    const codexLaunches: unknown[] = [];
+    const geminiLaunches: unknown[] = [];
+
+    const codexSummary = await runWorkerAssignment({
+      assignmentDir,
+      worktreeDir,
+      outputDir,
+      dryRun: true,
+      buildLaunchCommand: (input) => buildDispatcherRuntimeLaunchCommand(input, {
+        codexModel: "gpt-5.4-codex",
+        geminiModel: "gemini-2.5-pro",
+        createCodexRuntime(role, options) {
+          return {
+            launchTask(launchInput) {
+              codexLaunches.push({ role, options, launchInput });
+              return { argv: ["codex", "exec", "-m", options?.model || "", launchInput.prompt] };
+            },
+          };
+        },
+        createGeminiRuntime(options) {
+          return {
+            launchTask(launchInput) {
+              geminiLaunches.push({ options, launchInput });
+              return { argv: ["gemini", "-m", options?.model || "", "-p", launchInput.prompt] };
+            },
+          };
+        },
+      }),
+    });
+
+    expect(codexSummary.status).toBe("dry_run");
+    if (codexSummary.status !== "dry_run") {
+      throw new Error(`expected dry_run, got ${codexSummary.status}`);
+    }
+    expect(codexSummary.launch).toMatchObject({
+      provider: "codex",
+      cwd: worktreeDir,
+      argv: ["codex", "exec", "-m", "gpt-5.4-codex", "Do the work.\n\n# Context\n"],
+    });
+    expect(codexLaunches).toHaveLength(1);
+    expect(geminiLaunches).toHaveLength(0);
+
+    fs.writeFileSync(path.join(assignmentDir, "assignment.json"), JSON.stringify({
+      taskId: "dispatch-1:task-1",
+      workerId: "gemini-worker",
+      pool: "gemini",
+      branchName: "ai/gemini/task-1",
+      repo: "owner/repo",
+      defaultBranch: "main",
+      commands: {},
+    }));
+
+    const geminiSummary = await runWorkerAssignment({
+      assignmentDir,
+      worktreeDir,
+      outputDir,
+      dryRun: true,
+      buildLaunchCommand: (input) => buildDispatcherRuntimeLaunchCommand(input, {
+        codexModel: "",
+        geminiModel: "gemini-2.5-pro",
+        createCodexRuntime() {
+          throw new Error("codex runtime should not be used for gemini");
+        },
+        createGeminiRuntime(options) {
+          return {
+            launchTask(launchInput) {
+              geminiLaunches.push({ options, launchInput });
+              return { argv: ["gemini", "-m", options?.model || "", "-p", launchInput.prompt] };
+            },
+          };
+        },
+      }),
+    });
+
+    expect(geminiSummary.status).toBe("dry_run");
+    if (geminiSummary.status !== "dry_run") {
+      throw new Error(`expected dry_run, got ${geminiSummary.status}`);
+    }
+    expect(geminiSummary.launch).toMatchObject({
+      provider: "gemini",
+      cwd: worktreeDir,
+      argv: ["gemini", "-m", "gemini-2.5-pro", "-p", "Do the work.\n\n# Context\n"],
+    });
+    expect(geminiLaunches).toHaveLength(1);
   });
 });

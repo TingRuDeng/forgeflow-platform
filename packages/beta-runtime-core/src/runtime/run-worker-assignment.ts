@@ -44,6 +44,44 @@ export function buildVerificationCommands(assignment: TaskAssignment, worktreeDi
   }));
 }
 
+export interface WorkerRuntimeLike {
+  launchTask(input: { taskId: string; prompt: string; mode: "run"; worktreeDir: string }): { argv: string[] };
+}
+
+export interface DispatcherRuntimeLaunchOptions {
+  codexModel?: string;
+  geminiModel: string;
+  createCodexRuntime: (role: "worker", options?: { model?: string }) => WorkerRuntimeLike;
+  createGeminiRuntime: (options?: { model?: string; extraArgs?: string[] }) => WorkerRuntimeLike;
+}
+
+export function buildDispatcherRuntimeLaunchCommand(
+  input: { assignment: TaskAssignment; prompt: string; worktreeDir: string },
+  options: DispatcherRuntimeLaunchOptions,
+): AssignmentLaunchCommand {
+  const launchInput = {
+    taskId: input.assignment.taskId,
+    prompt: input.prompt,
+    mode: "run" as const,
+    worktreeDir: input.worktreeDir,
+  };
+  if (input.assignment.pool === "codex") {
+    const runtime = options.createCodexRuntime("worker", { model: options.codexModel?.trim() || undefined });
+    return {
+      provider: "codex",
+      argv: runtime.launchTask(launchInput).argv,
+      cwd: input.worktreeDir,
+    };
+  }
+
+  const runtime = options.createGeminiRuntime({ model: options.geminiModel });
+  return {
+    provider: "gemini",
+    argv: runtime.launchTask(launchInput).argv,
+    cwd: input.worktreeDir,
+  };
+}
+
 export async function runWorkerAssignment(input: RunWorkerAssignmentInput): Promise<RunWorkerAssignmentSummary> {
   const assignmentDir = path.resolve(input.assignmentDir);
   const outputDir = path.resolve(input.outputDir || assignmentDir);

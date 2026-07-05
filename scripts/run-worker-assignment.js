@@ -9,8 +9,21 @@ const GEMINI_MODEL = "gemini-2.5-pro";
 function repoRoot() {
     return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 }
-function ensureBuiltFile(distPath, buildCommand) {
-    if (fs.existsSync(distPath)) {
+function newestMtimeMs(targetPath) {
+    if (!fs.existsSync(targetPath)) {
+        return 0;
+    }
+    const stat = fs.statSync(targetPath);
+    if (!stat.isDirectory()) {
+        return stat.mtimeMs;
+    }
+    return fs.readdirSync(targetPath)
+        .map((entry) => newestMtimeMs(path.join(targetPath, entry)))
+        .reduce((max, current) => Math.max(max, current), stat.mtimeMs);
+}
+function ensureBuiltFile(distPath, buildCommand, sourceDir) {
+    const distMtime = fs.existsSync(distPath) ? fs.statSync(distPath).mtimeMs : 0;
+    if (distMtime > 0 && (!sourceDir || newestMtimeMs(sourceDir) <= distMtime)) {
         return;
     }
     execSync(buildCommand, {
@@ -18,15 +31,16 @@ function ensureBuiltFile(distPath, buildCommand) {
         stdio: "inherit",
     });
 }
-async function loadAssignmentRunner() {
-    const distPath = path.join(repoRoot(), "packages", "beta-runtime-core", "dist", "runtime", "run-worker-assignment-cli.js");
-    ensureBuiltFile(distPath, "pnpm --filter @tingrudeng/beta-runtime-core build");
+async function loadRuntimeCore() {
+    const packageRoot = path.join(repoRoot(), "packages", "beta-runtime-core");
+    const distPath = path.join(packageRoot, "dist", "index.js");
+    ensureBuiltFile(distPath, "pnpm --filter @tingrudeng/beta-runtime-core build", path.join(packageRoot, "src"));
     return import(pathToFileURL(distPath).href);
 }
 async function loadRuntimeFactories() {
     const runtimeDir = path.join(repoRoot(), "apps", "dispatcher", "dist", "modules", "runtime");
     const codexPath = path.join(runtimeDir, "codex.js");
-    ensureBuiltFile(codexPath, "pnpm --filter @forgeflow/dispatcher build");
+    ensureBuiltFile(codexPath, "pnpm --filter @forgeflow/dispatcher build", path.join(repoRoot(), "apps", "dispatcher", "src", "modules", "runtime"));
     const codexModule = await import(pathToFileURL(codexPath).href);
     const geminiModule = await import(pathToFileURL(path.join(runtimeDir, "gemini.js")).href);
     return {
@@ -34,34 +48,16 @@ async function loadRuntimeFactories() {
         createGeminiRuntime: geminiModule.createGeminiRuntime,
     };
 }
-async function buildLaunchCommand(input) {
-    const { createCodexRuntime, createGeminiRuntime } = await loadRuntimeFactories();
-    const launchInput = {
-        taskId: input.assignment.taskId,
-        prompt: input.prompt,
-        mode: "run",
-        worktreeDir: input.worktreeDir,
-    };
-    if (input.assignment.pool === "codex") {
-        const runtime = createCodexRuntime("worker", { model: CODEX_MODEL });
-        return {
-            provider: "codex",
-            argv: runtime.launchTask(launchInput).argv,
-            cwd: input.worktreeDir,
-        };
-    }
-    const runtime = createGeminiRuntime({ model: GEMINI_MODEL });
-    return {
-        provider: "gemini",
-        argv: runtime.launchTask(launchInput).argv,
-        cwd: input.worktreeDir,
-    };
-}
 async function main() {
-    const { runWorkerAssignmentCli } = await loadAssignmentRunner();
-    await runWorkerAssignmentCli({
+    const runtimeCore = await loadRuntimeCore();
+    const runtimeFactories = await loadRuntimeFactories();
+    await runtimeCore.runWorkerAssignmentCli({
         usageCommand: "node scripts/run-worker-assignment.js",
-        buildLaunchCommand,
+        buildLaunchCommand: (input) => runtimeCore.buildDispatcherRuntimeLaunchCommand(input, {
+            ...runtimeFactories,
+            codexModel: CODEX_MODEL,
+            geminiModel: GEMINI_MODEL,
+        }),
         execTimeoutMs: Number(process.env.FORGEFLOW_EXEC_TIMEOUT_MS) || undefined,
         verificationTimeoutMs: Number(process.env.FORGEFLOW_VERIFICATION_TIMEOUT_MS) || undefined,
         generatedAt: formatLocalTimestamp,
