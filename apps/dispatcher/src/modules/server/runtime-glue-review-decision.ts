@@ -8,7 +8,7 @@ export interface DispatcherReviewClient {
 }
 
 export interface StateDirReviewClient {
-  submitDecision(taskId: string, payload: ReviewDecisionPayload): unknown;
+  submitDecision(taskId: string, payload: ReviewDecisionPayload): Promise<unknown>;
 }
 
 export interface SubmitReviewDecisionInput {
@@ -80,12 +80,12 @@ function createStateDirReviewClient(
     body: unknown;
     clientAddress?: string;
     internalCall?: boolean;
-  }) => { json: unknown },
+  }) => { json: unknown } | Promise<{ json: unknown }>,
   stateDir: string,
 ): StateDirReviewClient {
   return {
-    submitDecision(taskId: string, payload: ReviewDecisionPayload) {
-      const result = handleRequest({
+    async submitDecision(taskId: string, payload: ReviewDecisionPayload): Promise<unknown> {
+      const result = await handleRequest({
         stateDir,
         method: "POST",
         pathname: `/api/reviews/${encodeURIComponent(taskId)}/decision`,
@@ -112,7 +112,7 @@ export function createStateDirReviewClientFactory(
     body: unknown;
     clientAddress?: string;
     internalCall?: boolean;
-  }) => { json: unknown },
+  }) => { json: unknown } | Promise<{ json: unknown }>,
 ): (stateDir: string) => StateDirReviewClient {
   return (stateDir: string) => createStateDirReviewClient(handleRequest, stateDir);
 }

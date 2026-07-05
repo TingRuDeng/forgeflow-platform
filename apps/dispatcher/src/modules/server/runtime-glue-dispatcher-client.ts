@@ -30,12 +30,12 @@ export interface DispatcherHttpClient extends DispatcherWorkerClient {
 }
 
 export interface DispatcherStateDirClient {
-  registerWorker(worker: WorkerRegistration): unknown;
-  heartbeat(workerId: string, payload: HeartbeatPayload): unknown;
-  getAssignedTask(workerId: string): unknown;
-  claimTask(workerId: string, payload?: { at?: string }): unknown;
-  startTask(workerId: string, payload: StartTaskPayload): unknown;
-  submitResult(workerId: string, payload: SubmitResultPayload): unknown;
+  registerWorker(worker: WorkerRegistration): Promise<unknown>;
+  heartbeat(workerId: string, payload: HeartbeatPayload): Promise<unknown>;
+  getAssignedTask(workerId: string): Promise<unknown>;
+  claimTask(workerId: string, payload?: { at?: string }): Promise<unknown>;
+  startTask(workerId: string, payload: StartTaskPayload): Promise<unknown>;
+  submitResult(workerId: string, payload: SubmitResultPayload): Promise<unknown>;
 }
 
 export interface CreateDispatcherHttpClientOptions {
@@ -169,7 +169,7 @@ export interface CreateDispatcherStateDirClientOptions {
     pathname: string;
     body?: unknown;
     internalCall?: boolean;
-  }) => { json: unknown };
+  }) => { json: unknown } | Promise<{ json: unknown }>;
 }
 
 export function createDispatcherStateDirClientFactory(
@@ -179,63 +179,69 @@ export function createDispatcherStateDirClientFactory(
 
   return (stateDir: string): DispatcherStateDirClient => {
     return {
-      registerWorker(worker: WorkerRegistration): unknown {
-        return handleRequest({
+      async registerWorker(worker: WorkerRegistration): Promise<unknown> {
+        const response = await handleRequest({
           stateDir,
           method: "POST",
           pathname: "/api/workers/register",
           body: worker,
           internalCall: true,
-        }).json;
+        });
+        return response.json;
       },
 
-      heartbeat(workerId: string, payload: HeartbeatPayload): unknown {
-        return handleRequest({
+      async heartbeat(workerId: string, payload: HeartbeatPayload): Promise<unknown> {
+        const response = await handleRequest({
           stateDir,
           method: "POST",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/heartbeat`,
           body: payload,
           internalCall: true,
-        }).json;
+        });
+        return response.json;
       },
 
-      getAssignedTask(workerId: string): unknown {
-        return handleRequest({
+      async getAssignedTask(workerId: string): Promise<unknown> {
+        const response = await handleRequest({
           stateDir,
           method: "GET",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/assigned-task`,
           internalCall: true,
-        }).json;
+        });
+        return response.json;
       },
 
-      claimTask(workerId: string, payload?: { at?: string }): unknown {
-        return handleRequest({
+      async claimTask(workerId: string, payload?: { at?: string }): Promise<unknown> {
+        const response = await handleRequest({
           stateDir,
           method: "POST",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/claim-task`,
           body: payload ?? {},
           internalCall: true,
-        }).json;
+        });
+        return response.json;
       },
 
-      startTask(workerId: string, payload: StartTaskPayload): unknown {
-        return handleRequest({
+      async startTask(workerId: string, payload: StartTaskPayload): Promise<unknown> {
+        const response = await handleRequest({
           stateDir,
           method: "POST",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/start-task`,
           body: payload,
           internalCall: true,
-        }).json;
+        });
+        return response.json;
       },
 
-      submitResult(workerId: string, payload: SubmitResultPayload): unknown {
-        return handleRequest({
+      async submitResult(workerId: string, payload: SubmitResultPayload): Promise<unknown> {
+        const response = await handleRequest({
           stateDir,
           method: "POST",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/result`,
           body: payload,
           internalCall: true,
-        }).json;
+        });
+        return response.json;
       },
     };
   };

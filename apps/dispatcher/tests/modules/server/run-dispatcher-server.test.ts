@@ -30,6 +30,12 @@ describe("run-dispatcher-server.js CLI", () => {
     expect(args.persistenceBackend).toBe("sqlite");
   });
 
+  it("uses postgres persistence backend when --persistence-backend postgres is provided", async () => {
+    const { parseArgs } = await loadCliModule();
+    const args = parseArgs(["--persistence-backend", "postgres"]);
+    expect(args.persistenceBackend).toBe("postgres");
+  });
+
   it("throws error for invalid persistence-backend value", async () => {
     const { parseArgs } = await loadCliModule();
     expect(() => {
@@ -73,6 +79,21 @@ describe("run-dispatcher-server.js CLI", () => {
     applyPersistenceBackend(args);
 
     expect(process.env.RUNTIME_STATE_BACKEND).toBe("sqlite");
+
+    if (previous === undefined) {
+      delete process.env.RUNTIME_STATE_BACKEND;
+    } else {
+      process.env.RUNTIME_STATE_BACKEND = previous;
+    }
+  });
+
+  it("writes RUNTIME_STATE_BACKEND=postgres when postgres is requested", async () => {
+    const { applyPersistenceBackend, parseArgs } = await loadCliModule();
+    const previous = process.env.RUNTIME_STATE_BACKEND;
+    const args = parseArgs(["--persistence-backend", "postgres"]);
+    applyPersistenceBackend(args);
+
+    expect(process.env.RUNTIME_STATE_BACKEND).toBe("postgres");
 
     if (previous === undefined) {
       delete process.env.RUNTIME_STATE_BACKEND;

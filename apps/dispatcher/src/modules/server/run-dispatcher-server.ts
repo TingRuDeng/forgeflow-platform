@@ -10,7 +10,7 @@ type DispatcherServerCliArgs = {
   host: string;
   port: number;
   stateDir: string;
-  persistenceBackend: "json" | "sqlite";
+  persistenceBackend: "json" | "sqlite" | "postgres";
   help?: boolean;
 };
 
@@ -42,8 +42,8 @@ export function parseArgs(argv: string[]): DispatcherServerCliArgs {
       continue;
     }
     if (arg === "--persistence-backend" && next) {
-      if (next !== "json" && next !== "sqlite") {
-        throw new Error(`invalid persistence-backend: ${next}. Must be "json" or "sqlite"`);
+      if (next !== "json" && next !== "sqlite" && next !== "postgres") {
+        throw new Error(`invalid persistence-backend: ${next}. Must be "json", "sqlite", or "postgres"`);
       }
       args.persistenceBackend = next;
       index += 1;
@@ -67,7 +67,7 @@ Usage:
     [--host 0.0.0.0] \\
     [--port 8787] \\
     [--state-dir .forgeflow-dispatcher] \\
-    [--persistence-backend json|sqlite]
+    [--persistence-backend json|sqlite|postgres]
 `);
 }
 

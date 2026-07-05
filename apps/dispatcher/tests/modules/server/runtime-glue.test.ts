@@ -379,15 +379,15 @@ describe("runtime-glue worker-daemon-cycle", () => {
 });
 
 describe("runtime-glue state-dir review client", () => {
-  it("submitDecision calls handleRequest with correct path", () => {
-    const mockHandleRequest = vi.fn().mockReturnValue({
+  it("submitDecision calls handleRequest with correct path", async () => {
+    const mockHandleRequest = vi.fn().mockResolvedValue({
       json: { status: "decision_recorded", tasks: [] },
     });
 
     const createStateDirReviewClient = createStateDirReviewClientFactory(mockHandleRequest);
     const client = createStateDirReviewClient("/tmp/state-dir");
 
-    client.submitDecision("task-1", {
+    await client.submitDecision("task-1", {
       actor: "tester",
       decision: "rework",
     });

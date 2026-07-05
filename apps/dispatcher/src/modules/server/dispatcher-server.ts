@@ -27,7 +27,7 @@ import {
   getAssignedTaskForWorker,
   heartbeatWorker,
   interruptTaskForInput,
-  loadRuntimeState,
+  loadRuntimeStateAsync,
   markWorkerOffline,
   reconcileRuntimeState,
   recordReviewDecision,
@@ -35,7 +35,7 @@ import {
   recordWorkerResult,
   registerWorker,
   resumeTaskFromInput,
-  saveRuntimeState,
+  saveRuntimeStateAsync,
 } from "./runtime-state.js";
 import type { RegisterWorkerInput, RuntimeState, Task } from "./runtime-state.js";
 import { handleTraeRoute } from "./runtime-dispatcher-server.js";
@@ -822,14 +822,14 @@ export async function readJsonBody(request: AsyncIterable<Buffer | string>, maxB
   }
 }
 
-function withState<T>(stateDir: string, callback: (state: RuntimeState) => T): T {
+async function withStateAsync<T>(stateDir: string, callback: (state: RuntimeState) => T | Promise<T>): Promise<T> {
   const releaseLock = acquireStateLock(stateDir);
   try {
-    const state = loadRuntimeState(stateDir);
-    const result = callback(state);
+    const state = await loadRuntimeStateAsync(stateDir);
+    const result = await callback(state);
     const nextState = (result as { state?: RuntimeState } | null | undefined)?.state;
     if (nextState && !isReadOnlyModeEnabled()) {
-      saveRuntimeState(stateDir, nextState);
+      await saveRuntimeStateAsync(stateDir, nextState);
     }
     return result;
   } finally {
@@ -866,7 +866,7 @@ function listBackupManifests(stateDir: string): Array<{ name: string; path: stri
     }));
 }
 
-export function handleDispatcherHttpRequest(input: DispatcherRequestInput): JsonResponse {
+export async function handleDispatcherHttpRequest(input: DispatcherRequestInput): Promise<JsonResponse> {
   const { stateDir, method, pathname, query = {}, body = {}, authHeader, clientAddress, internalCall } = input;
 
   const authError = createAuthMiddleware({ method, pathname, authHeader, clientAddress, internalCall });
@@ -899,7 +899,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     if (method === "GET" && pathname === "/api/dashboard/snapshot") {
       const snapshot = useStructuredReads()
         ? { snapshot: buildStructuredDashboardSnapshot(stateDir) }
-        : withState(stateDir, (state) => {
+        : await withStateAsync(stateDir, (state) => {
           const nextState = reconcileRuntimeState(state);
           return {
             state: nextState,
@@ -912,13 +912,13 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     if (method === "GET" && pathname === "/api/context") {
       const snapshot = useStructuredReads()
         ? buildStructuredDashboardSnapshot(stateDir)
-        : withState(stateDir, (state) => {
+        : (await withStateAsync(stateDir, (state) => {
           const nextState = reconcileRuntimeState(state);
           return {
             state: nextState,
             snapshot: buildDashboardSnapshot(nextState),
           };
-        }).snapshot;
+        })).snapshot;
       const eventLimitRaw = Number.parseInt(query.eventLimit ?? "", 10);
       const context = buildControlContext(snapshot, {
         since: query.since,
@@ -958,7 +958,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
             },
           };
         })()
-        : withState(stateDir, (state) => {
+        : await withStateAsync(stateDir, (state) => {
           const nextState = reconcileRuntimeState(state);
           const snapshot = buildDashboardSnapshot(nextState);
           return {
@@ -995,13 +995,13 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     if (method === "GET" && pathname === "/api/slo") {
       const snapshot = useStructuredReads()
         ? buildStructuredDashboardSnapshot(stateDir)
-        : withState(stateDir, (state) => {
+        : (await withStateAsync(stateDir, (state) => {
           const nextState = reconcileRuntimeState(state);
           return {
             state: nextState,
             snapshot: buildDashboardSnapshot(nextState),
           };
-        }).snapshot;
+        })).snapshot;
       return createNoStoreJsonResponse(200, buildStage3SloStatus(snapshot));
     }
 
@@ -1019,7 +1019,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     if (method === "GET" && pathname === "/api/workers") {
       const snapshot = useStructuredReads()
         ? { snapshot: buildStructuredDashboardSnapshot(stateDir) }
-        : withState(stateDir, (state) => {
+        : await withStateAsync(stateDir, (state) => {
           const nextState = reconcileRuntimeState(state);
           return {
             state: nextState,
@@ -1032,9 +1032,9 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     if (method === "GET" && pathname === "/api/leases") {
       const state = useStructuredReads()
         ? loadStructuredRuntimeState(stateDir)
-        : withState(stateDir, (currentState) => ({
+        : (await withStateAsync(stateDir, (currentState) => ({
           state: reconcileRuntimeState(currentState),
-        })).state;
+        }))).state;
       return createNoStoreJsonResponse(200, state.leases ?? []);
     }
 
@@ -1067,7 +1067,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
       : null;
     if (artifactMatch) {
       const bundleId = decodeURIComponent(artifactMatch[1]);
-      const state = loadRuntimeState(stateDir);
+      const state = await loadRuntimeStateAsync(stateDir);
       const artifact = (state.artifactBundles ?? []).find((candidate) => candidate.bundleId === bundleId);
       return artifact
         ? createNoStoreJsonResponse(200, artifact)
@@ -1102,7 +1102,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     if (method === "POST" && pathname === "/api/workers/register") {
       try {
         const validatedBody = validateWorkerRegisterBody(body);
-        const result = withState(stateDir, (state) => {
+        const result = await withStateAsync(stateDir, (state) => {
           const nextState = reconcileRuntimeState(registerWorker(state, validatedBody), {
             now: validatedBody.at,
           });
@@ -1126,7 +1126,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
       ? pathname.match(/^\/api\/workers\/([^/]+)\/heartbeat$/)
       : null;
     if (heartbeatMatch) {
-      const result = withState(stateDir, (state) => {
+      const result = await withStateAsync(stateDir, (state) => {
         const nextState = reconcileRuntimeState(heartbeatWorker(state, {
           workerId: decodeURIComponent(heartbeatMatch[1]),
           at: body.at,
@@ -1147,7 +1147,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
       ? pathname.match(/^\/api\/workers\/([^/]+)\/offline$/)
       : null;
     if (offlineMatch) {
-      const result = withState(stateDir, (state) => ({
+      const result = await withStateAsync(stateDir, (state) => ({
         state: markWorkerOffline(state, {
           workerId: decodeURIComponent(offlineMatch[1]),
           at: body.at,
@@ -1164,7 +1164,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
       ? pathname.match(/^\/api\/workers\/([^/]+)\/assigned-task$/)
       : null;
     if (assignedMatch) {
-      const payload = withState(stateDir, (state) => {
+      const payload = await withStateAsync(stateDir, (state) => {
         const nextState = reconcileRuntimeState(state);
         return {
           state: nextState,
@@ -1178,7 +1178,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
       ? pathname.match(/^\/api\/workers\/([^/]+)\/claim-task$/)
       : null;
     if (claimMatch) {
-      const payload = withState(stateDir, (state) => claimAssignedTaskForWorker(state, {
+      const payload = await withStateAsync(stateDir, (state) => claimAssignedTaskForWorker(state, {
         workerId: decodeURIComponent(claimMatch[1]),
         at: body.at,
       }));
@@ -1191,7 +1191,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     if (startMatch) {
       try {
         const validatedBody = validateWorkerStartBody(body);
-        const result = withState(stateDir, (state) => ({
+        const result = await withStateAsync(stateDir, (state) => ({
           state: beginTaskForWorker(state, {
             workerId: decodeURIComponent(startMatch[1]),
             taskId: validatedBody.taskId,
@@ -1221,7 +1221,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     if (resultMatch) {
       try {
         const validatedBody = validateWorkerResultBody(body);
-        const result = withState(stateDir, (state) => {
+        const result = await withStateAsync(stateDir, (state) => {
           const recordedState = recordWorkerResult(state, {
             workerId: decodeURIComponent(resultMatch[1]),
             attemptId: validatedBody.attemptId,
@@ -1256,7 +1256,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     if (workerEventMatch) {
       try {
         const validatedBody = validateWorkerEventBody(body);
-        const result = withState(stateDir, (state) => ({
+        const result = await withStateAsync(stateDir, (state) => ({
           state: recordWorkerEvent(state, {
             workerId: decodeURIComponent(workerEventMatch[1]),
             type: validatedBody.type,
@@ -1281,7 +1281,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
       ? pathname.match(/^\/api\/workers\/([^/]+)\/disable$/)
       : null;
     if (disableMatch) {
-      const result = withState(stateDir, (state) => ({
+      const result = await withStateAsync(stateDir, (state) => ({
         state: disableWorker(state, {
           workerId: decodeURIComponent(disableMatch[1]),
           disabledBy: body.disabledBy,
@@ -1298,7 +1298,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
       ? pathname.match(/^\/api\/workers\/([^/]+)\/enable$/)
       : null;
     if (enableMatch) {
-      const result = withState(stateDir, (state) => ({
+      const result = await withStateAsync(stateDir, (state) => ({
         state: enableWorker(state, {
           workerId: decodeURIComponent(enableMatch[1]),
           at: body.at,
@@ -1315,7 +1315,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
       : null;
     if (cancelTaskMatch) {
       try {
-        const result = withState(stateDir, (state) => ({
+        const result = await withStateAsync(stateDir, (state) => ({
           state: cancelTask(state, {
             taskId: decodeURIComponent(cancelTaskMatch[1]),
             actor: String(body.actor || "").trim() || "codex-control",
@@ -1343,7 +1343,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     if (interruptTaskMatch) {
       try {
         const taskId = decodeURIComponent(interruptTaskMatch[1]);
-        const result = withState(stateDir, (state) => ({
+        const result = await withStateAsync(stateDir, (state) => ({
           state: interruptTaskForInput(state, {
             taskId,
             actor: String(body.actor || "").trim() || "codex-control",
@@ -1371,7 +1371,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
       try {
         const taskId = decodeURIComponent(resumeTaskMatch[1]);
         const resumePayload = isPlainObject(body.resumePayload) ? body.resumePayload : null;
-        const result = withState(stateDir, (state) => ({
+        const result = await withStateAsync(stateDir, (state) => ({
           state: resumeTaskFromInput(state, {
             taskId,
             actor: String(body.actor || "").trim() || "codex-control",
@@ -1396,7 +1396,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
       const memoryStore = loadMemoryStore(stateDir);
       const normalizedBody = normalizeDispatchBody(body);
 
-      const result = withState(stateDir, (state) => {
+      const result = await withStateAsync(stateDir, (state) => {
         const dispatchResult = createDispatch(state, normalizedBody);
 
         if (memoryStore && memoryStore.lessons && memoryStore.lessons.length > 0) {
@@ -1442,7 +1442,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     if (reviewMatch) {
       try {
         const validatedBody = validateReviewDecisionBody(body);
-        const result = withState(stateDir, (state) => ({
+        const result = await withStateAsync(stateDir, (state) => ({
           state: recordReviewDecision(state, {
             taskId: decodeURIComponent(reviewMatch[1]),
             actor: validatedBody.actor,
@@ -1476,7 +1476,7 @@ export function handleDispatcherHttpRequest(input: DispatcherRequestInput): Json
     ];
     if (method === "POST" && traeRoutes.includes(pathname)) {
       try {
-        const result = withState(stateDir, (state) => {
+        const result = await withStateAsync(stateDir, (state) => {
           const handled = handleTraeRoute(state, { method, pathname, body });
           const attemptId = typeof body.attempt_id === "string" ? body.attempt_id : undefined;
           return {
@@ -1529,7 +1529,7 @@ export async function startDispatcherServer(input: { host?: string; port?: numbe
       }
 
       const body = method === "POST" ? await readJsonBody(request) : undefined;
-      const handled = handleDispatcherHttpRequest({
+      const handled = await handleDispatcherHttpRequest({
         stateDir,
         method,
         pathname,
