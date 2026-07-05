@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M30 串行：把 Console 批量审查结果升级为页面内明细。
+- [x] M30 串行：运行最小充分验证、Review Gate 并补充 review 小结。
+
+## M30 Review 小结
+
+已把 Console 批量审查提交结果从 `alert` 升级为审查队列内的结果面板：批量提交后展示成功数 / 总数，并按 taskId 展示失败原因。批量提交逻辑拆到 `apps/console/src/lib/bulkReviewDecision.ts`，`App.tsx` 只保留状态编排，避免继续推高入口组件复杂度。
+
+Review Gate：finished。Spec 符合度通过，本轮完成 Console 审查工作台中批量处理结果的页面内明细；安全检查通过，仍只调用既有 review decision API，未新增后端写路径、secret、外部网络调用或静默 fallback；复杂度检查通过，`App.tsx` 294 行、`ReviewQueue.tsx` 256 行、`bulkReviewDecision.ts` 34 行，新增/修改生产文件均低于 300 行；Document-refresh: needed，原因：Console 批量审查结果展示行为变化，已同步 README、docs/README 和 TECH_DEBT。结论：通过。
+
+验证已通过：`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx`、`CI=true pnpm --filter console exec vitest run src/__tests__/App.test.tsx`、`CI=true pnpm --filter console test`、`CI=true pnpm --filter console build`。
+
+剩余风险：Console 审查工作台仍可继续补跨任务对比和 artifact / review 证据联动。
+
 - [x] M29 串行：下沉 worker-daemon 失败回写到 beta-runtime-core adapter。
 - [x] M29 串行：运行最小充分验证、Review Gate 并补充 review 小结。
 
@@ -24,7 +37,7 @@ Review Gate：finished。Spec 符合度通过，本轮完成 Console 批量 merg
 
 验证已通过：`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx src/__tests__/App.test.tsx`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
 
-剩余风险：批量处理结果明细当前通过 alert 展示；后续可升级为页面内结果列表，并继续补跨任务证据对比和 artifact / review 证据联动。
+剩余风险：该批次记录的 alert 明细已由 M30 升级为页面内结果列表；后续继续补跨任务证据对比和 artifact / review 证据联动。
 
 - [x] M27 串行：在 Console 审查队列补 waiting-for-input 筛选入口。
 - [x] M27 串行：运行最小充分验证、Review Gate 并补充 review 小结。
@@ -76,7 +89,7 @@ Review Gate：finished。Spec 符合度通过，本轮完成 Console 审查工�
 
 验证已通过：RED 阶段确认 `ReviewQueue` 缺失导致 Console 测试失败；GREEN 后通过 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx`、`CI=true pnpm --filter console test`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`git diff --check`。
 
-剩余风险：批量 merge 仍未开放，后续需要单独设计风险确认、逐项失败明细和跨任务证据对比，避免高风险合并被误批量执行。
+剩余风险：该批次记录的批量 merge 与逐项失败明细已由 M28 / M30 补齐；后续继续补跨任务证据对比，避免高风险合并缺少上下文。
 
 - [x] M23 串行：补齐 Console artifact 下载和跨任务筛选工作台。
 - [x] M23 串行：运行最小充分验证、Review Gate 并补充 review 小结。

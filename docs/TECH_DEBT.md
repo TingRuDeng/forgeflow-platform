@@ -188,14 +188,14 @@ Desired direction:
 - 代码审查和文档阅读时容易把 vNext 目标契约误读为当前已执行的 runtime 保护
 - 空 envelope / 无 active attempt 的 worker mutation 已被拒绝，历史夹具或迁移脚本必须先补 claim / attempt 语义
 - ArtifactBundle 已支持结构化 `trajectory` 和受限 `retainedContent`，dispatcher 会把 trajectory / retained diff / log / test result 写入本地 artifact store，并通过 manifest、retention 和 `/api/artifacts/:bundleId/files/:fileName` 支持按需读取
-- Console 任务详情可通过摘要 / 引用 / 正文 / 轨迹 tabs 查看审查证据，并可在 `review` 状态直接提交带 `reasonCode`、`mustFix[]`、重驱动策略和高风险确认的 `merge` / `rework` / `block` 决策；Console 审查队列支持对多个 `review` 任务批量提交共享证据的 `merge` / `rework` / `block` 决策，批量 merge 会要求确认已选高风险任务并在失败时展示逐项 taskId / error 明细；审查队列也会单独列出 `waiting_for_input` 任务供点击定位；`waiting_for_input` 任务可在 Console 详情页提交 JSON `resumePayload`
+- Console 任务详情可通过摘要 / 引用 / 正文 / 轨迹 tabs 查看审查证据，并可在 `review` 状态直接提交带 `reasonCode`、`mustFix[]`、重驱动策略和高风险确认的 `merge` / `rework` / `block` 决策；Console 审查队列支持对多个 `review` 任务批量提交共享证据的 `merge` / `rework` / `block` 决策，批量 merge 会要求确认已选高风险任务，批量提交结果会在队列内展示成功数和逐项 taskId / error 明细；审查队列也会单独列出 `waiting_for_input` 任务供点击定位；`waiting_for_input` 任务可在 Console 详情页提交 JSON `resumePayload`
 - HITL 当前已接通 dispatcher 状态语义、worker 主动 `waitingForInput`、Console resume payload 编辑和 beta runtime assignment package 消费
 
 期望方向：
 
 - Console refs tab 已支持 artifact 引用复制、manifest 文件按需展开和下载；Artifact Review Workbench 已支持跨任务 artifact 筛选并可跳转到对应任务；审查队列已支持批量 `merge` / `rework` / `block`，后续继续补跨任务对比和 artifact / review 证据联动
 - 继续把 HITL resume 从 JSON textarea 升级为按 worker prompt schema 渲染的表单
-- 继续补齐跨任务对比、批量处理结果的页面内明细和 artifact / review 证据联动
+- 继续补齐跨任务对比和 artifact / review 证据联动
 
 ## 9. Shadow path has drift gate and reconciliation entry, but production cutover still needs an ops drill
 

@@ -508,4 +508,22 @@ describe('ReviewQueue', () => {
       acknowledgeRisk: true,
     }));
   });
+
+  it('shows bulk review result details inside the queue', () => {
+    renderWithProviders(
+      <ReviewQueue
+        tasks={[{ id: 'task-risky', title: 'Touch auth', status: 'review', repo: 'owner/auth' }]}
+        bulkResult={{
+          total: 2,
+          succeeded: ['task-safe'],
+          failed: [{ taskId: 'task-risky', message: 'risk_ack_required' }],
+        }}
+      />
+    );
+
+    expect(screen.getByText(/批量审查结果|bulk review result/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 \/ 2/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/task-risky/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/risk_ack_required/i)).toBeInTheDocument();
+  });
 });
