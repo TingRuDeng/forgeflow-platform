@@ -163,12 +163,29 @@ function validateReady(readyPath: string, approval: CutoverApprovalStatus): Cuto
   return { exists: true, path: path.resolve(readyPath), ok: true, updatedAt: fileUpdatedAt(readyPath) };
 }
 
-function validateComplete(completePath: string): CutoverCompleteStatus {
+function validateCompleteReadyEvidence(payload: Record<string, unknown>, approval: CutoverApprovalStatus): void {
+  if (payload.ok !== true) {
+    throw new Error("cutover completion ready_evidence must contain ok=true");
+  }
+  const approvalEvidence = phasePayload(payload, "approval_evidence");
+  if (path.resolve(String(approvalEvidence.approvalPath ?? "")) !== approval.path) {
+    throw new Error("cutover completion approvalPath does not match approval marker");
+  }
+  if (path.resolve(String(approvalEvidence.evidencePath ?? "")) !== approval.evidencePath) {
+    throw new Error("cutover completion evidencePath does not match approval marker");
+  }
+  if (approvalEvidence.evidenceSha256 !== approval.evidenceSha256) {
+    throw new Error("cutover completion evidenceSha256 does not match approval marker");
+  }
+}
+
+function validateComplete(completePath: string, approval: CutoverApprovalStatus): CutoverCompleteStatus {
   const complete = readJsonObject(completePath);
   if (complete.ok !== true) {
     throw new Error("cutover completion evidence must contain ok=true");
   }
-  requiredPhase(complete, "ready_evidence");
+  const readyEvidence = requiredPhase(complete, "ready_evidence");
+  validateCompleteReadyEvidence(isRecord(readyEvidence.payload) ? readyEvidence.payload : {}, approval);
   requiredPhase(complete, "primary_backend");
   const snapshot = requiredPhase(complete, "primary_snapshot");
   const payload = isRecord(snapshot.payload) ? snapshot.payload : {};
@@ -241,7 +258,7 @@ export function readRuntimeStatePrimaryCutoverStatus(stateDir: string): RuntimeS
     if (missingComplete) {
       return { ...base, status: "ready", approval, ready, lastError: null };
     }
-    const complete = validateComplete(completePath);
+    const complete = validateComplete(completePath, approval);
     return { ...base, status: "completed", approval, ready, complete, lastError: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

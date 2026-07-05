@@ -64,6 +64,20 @@ function writeCutoverEvidence(stateDir: string): { approvalPath: string; evidenc
   return { approvalPath, evidencePath, evidenceSha256 };
 }
 
+function completeReadyPayload(evidence: { approvalPath: string; evidencePath: string; evidenceSha256: string }) {
+  return {
+    ok: true,
+    phases: [
+      { name: "strict_cutover_preflight", ok: true, payload: { cutover: { reason: "cutover_ready" } } },
+      {
+        name: "approval_evidence",
+        ok: true,
+        payload: { ok: true, ...evidence, cutoverReason: "cutover_ready" },
+      },
+    ],
+  };
+}
+
 afterEach(() => {
   restoreEnv();
   for (const root of tempRoots.splice(0)) {
@@ -96,12 +110,12 @@ describe("runtime-state-primary-cutover", () => {
 
   it("reports completed when post-cutover completion evidence exists", () => {
     const stateDir = makeStateDir();
-    writeCutoverEvidence(stateDir);
+    const evidence = writeCutoverEvidence(stateDir);
     writeJson(path.join(stateDir, "shadow-cutover-complete.json"), {
       ok: true,
       completedAt: "2026-07-06T03:00:00.000Z",
       phases: [
-        { name: "ready_evidence", ok: true, payload: { ok: true } },
+        { name: "ready_evidence", ok: true, payload: completeReadyPayload(evidence) },
         { name: "primary_backend", ok: true, payload: { reason: "primary_backend_configured" } },
         { name: "primary_snapshot", ok: true, payload: { connected: true, hasSnapshot: true, sequence: 42 } },
       ],
@@ -116,6 +130,29 @@ describe("runtime-state-primary-cutover", () => {
       completedAt: "2026-07-06T03:00:00.000Z",
       sequence: 42,
     });
+  });
+
+  it("rejects stale completion evidence from a different approval marker", () => {
+    const stateDir = makeStateDir();
+    const evidence = writeCutoverEvidence(stateDir);
+    writeJson(path.join(stateDir, "shadow-cutover-complete.json"), {
+      ok: true,
+      completedAt: "2026-07-06T03:00:00.000Z",
+      phases: [
+        {
+          name: "ready_evidence",
+          ok: true,
+          payload: completeReadyPayload({ ...evidence, evidenceSha256: "0".repeat(64) }),
+        },
+        { name: "primary_backend", ok: true, payload: { reason: "primary_backend_configured" } },
+        { name: "primary_snapshot", ok: true, payload: { connected: true, hasSnapshot: true, sequence: 42 } },
+      ],
+    });
+
+    const status = readRuntimeStatePrimaryCutoverStatus(stateDir);
+
+    expect(status.status).toBe("failed");
+    expect(status.lastError).toContain("cutover completion evidenceSha256");
   });
 
   it("reports blocked when revocation marker exists", () => {

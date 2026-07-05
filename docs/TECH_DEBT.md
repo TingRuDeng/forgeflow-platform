@@ -236,7 +236,7 @@ Current situation:
 - `RUNTIME_STATE_BACKEND=postgres` refuses primary snapshot load/save until `shadow-cutover-approval.json` exists, has `approved=true`, records `cutoverReason=cutover_ready`, points to archived drill evidence through `evidencePath`, the current evidence file SHA-256 matches `evidenceSha256`, and `shadow-cutover-ready.json` confirms the final strict preflight + approval evidence gate; it also refuses primary snapshot load/save when `shadow-cutover-revocation.json` exists
 - `DISPATCHER_SHADOW_MODE=primary` is accepted only as a post-cutover compatibility state when `RUNTIME_STATE_BACKEND=postgres` and `DISPATCHER_PRIMARY_POSTGRES_URL` are configured; without that primary backend it fails as `primary_backend_not_selected`
 - `@forgeflow/dispatcher-store-postgres` now has primary snapshot primitives (`dispatcher_runtime_state`, JSONB load/save), and dispatcher HTTP routes plus `/api/query/*` use the async runtime-state path for state mutations / reads
-- `/api/dr/status.primaryCutover` now summarizes approval marker, final ready evidence, post-cutover completion evidence, revocation marker, primary backend selection, and evidence mismatch failures for Console / operator review
+- `/api/dr/status.primaryCutover` now summarizes approval marker, final ready evidence, post-cutover completion evidence, revocation marker, primary backend selection, and evidence mismatch failures for Console / operator review; completed status requires completion evidence to bind to the current approval marker and archived drill evidence hash
 - `pnpm verify:stage3` 和 release workflow 都会执行 `pnpm verify:shadow-drift` 作为 rollout / release gate
 
 Impact:
