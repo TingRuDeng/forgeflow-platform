@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M85 串行：为 runtime 包发布清单增加可复现 readiness gate。
 - [x] M84 串行：让 Console Artifact Workbench 支持跨任务 runtime event 搜索。
 - [x] M83 串行：把 packaged worker daemon cycle 收敛到 beta-runtime-core shared cycle。
 - [x] M82 串行：让 Console runtime events 支持按事件类型筛选。
@@ -8,6 +9,16 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M85 Review 小结
+
+已新增 `scripts/check-runtime-package-readiness.mjs` 和根命令 `pnpm verify:runtime-packages`，把 runtime 包发布清单变成可复现门禁。该脚本默认只做本地只读校验，覆盖 `automation-gateway-core`、`beta-runtime-core`、`codex-beta-runtime`、`gemini-beta-runtime`、`trae-beta-runtime` 的 public package 元数据、发布文件范围、build/typecheck/test 脚本、provider CLI bin、源码内 `workspace:*` 依赖以及发布前依赖重写规则。CI 与 release workflow 都已接入该门禁；需要生产发布前校验 npm registry 时，可显式运行 `node scripts/check-runtime-package-readiness.mjs --check-registry --require-published`，该模式只执行 `npm view` 只读查询。
+
+Review Gate：finished。Spec 符合度通过，本轮只把 runtime 包发布清单和 registry 查询前置为可复现门禁，不改变 worker runtime、dispatcher API、发布版本号或 npm 发布行为。安全检查通过，默认模式不联网、不写文件、不发布；可选 registry 模式只执行 `npm view` 只读查询，且带超时控制；`--require-published` 会把缺失包名、缺失版本或查询失败显式失败，不做静默放行。复杂度检查通过，新增脚本 221 行、新增测试 165 行，单函数均保持短函数拆分。Document-refresh: needed，原因：runtime 包发布门禁和剩余外部边界变化，已同步 README、docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：`CI=true pnpm verify:runtime-packages` 通过；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/runtime-package-readiness.test.ts tests/modules/execution/workflows.test.ts --maxWorkers=1` 通过，2 个测试文件、9 个测试通过；`node scripts/check-runtime-package-readiness.mjs --check-registry --registry-timeout-ms 1` 通过并证明 registry 查询超时时会输出明确 warning；`node --check scripts/check-runtime-package-readiness.mjs`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。首次直接运行 `pnpm verify:runtime-packages` 时 pnpm 在非 TTY 下触发依赖目录清理确认并中止，按 pnpm 提示使用 `CI=true` 后通过。
+
+剩余风险：该门禁能证明仓库内 runtime 包清单和 CI/release 接入未漂移；`@tingrudeng/beta-runtime-core` 与 `@tingrudeng/gemini-beta-runtime` 的 npm 包名创建、Trusted Publisher 配置和真实生产远端安装仍是外部动作，需要在发布窗口用 `--check-registry --require-published` 和实际远端 smoke 验证补证据。
 
 ## M84 Review 小结
 
