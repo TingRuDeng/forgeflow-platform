@@ -4739,13 +4739,13 @@ describe("dispatcher runtime state (TypeScript)", () => {
     state = resumeTaskFromInput(state, {
       taskId: dispatch.taskIds[0],
       actor: "codex-control",
-      resumePayload: { decision: "ship narrow scope" },
+      resumePayload: { decision: "ship narrow scope", reviewers: ["alice"] },
       at: "2026-04-08T10:10:05.000Z",
     });
 
     expect(state.tasks[0]).toMatchObject({
       status: "ready",
-      resumePayload: { decision: "ship narrow scope" },
+      resumePayload: { decision: "ship narrow scope", reviewers: ["alice"] },
       waitingForInput: null,
     });
     expect(state.assignments[0]).toMatchObject({ status: "pending" });
