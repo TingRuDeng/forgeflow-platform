@@ -74,6 +74,12 @@ function countValues(values: Array<string | null | undefined>): Array<[string, n
   return [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
 }
 
+function evidenceCountClass(hasDifference: boolean): string {
+  return hasDifference
+    ? 'rounded border border-amber-300/30 bg-amber-300/10 px-2 py-1 font-mono text-amber-100'
+    : 'rounded border border-white/10 bg-white/5 px-2 py-1 font-mono';
+}
+
 const EvidenceComparison: React.FC<{
   bundles: ArtifactBundle[];
   reviewByTask: Map<string, ReviewSummary | undefined>;
@@ -84,12 +90,25 @@ const EvidenceComparison: React.FC<{
   const reasonCounts = countValues(reviews.map((review) => review?.evidence?.reasonCode));
   const riskCounts = countValues(reviews.map((review) => review?.riskAssessment?.level));
   if (reasonCounts.length === 0 && riskCounts.length === 0) return null;
+  const hasReasonDiff = reasonCounts.length > 1;
+  const hasRiskDiff = riskCounts.length > 1;
   return (
     <div className="rounded-lg border border-white/10 bg-black/15 p-3">
       <div className="text-[11px] uppercase tracking-wide text-white/45">{t('artifactEvidenceComparison')}</div>
+      {(hasReasonDiff || hasRiskDiff) && (
+        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-amber-100">
+          <span>{t('artifactEvidenceDifferences')}</span>
+          {hasReasonDiff && <span>{t('reasonCode')}: {reasonCounts.length}</span>}
+          {hasRiskDiff && <span>{t('riskLevelLabel')}: {riskCounts.length}</span>}
+        </div>
+      )}
       <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-white/60">
-        {reasonCounts.map(([reason, count]) => <span key={`reason-${reason}`} className="font-mono">{reason} {count}</span>)}
-        {riskCounts.map(([risk, count]) => <span key={`risk-${risk}`} className="font-mono">{risk} {count}</span>)}
+        {reasonCounts.map(([reason, count]) => (
+          <span key={`reason-${reason}`} className={evidenceCountClass(hasReasonDiff)}>{reason} {count}</span>
+        ))}
+        {riskCounts.map(([risk, count]) => (
+          <span key={`risk-${risk}`} className={evidenceCountClass(hasRiskDiff)}>{risk} {count}</span>
+        ))}
       </div>
     </div>
   );

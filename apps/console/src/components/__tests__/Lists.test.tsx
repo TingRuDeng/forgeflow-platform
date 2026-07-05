@@ -456,6 +456,9 @@ describe('ArtifactWorkbench', () => {
     expect(screen.getByText(/docs_ready.*1/i)).toBeInTheDocument();
     expect(screen.getByText(/needs_human_attention.*1/i)).toBeInTheDocument();
     expect(screen.getByText(/low.*1/i)).toBeInTheDocument();
+    expect(screen.getByText(/证据差异|evidence differences/i)).toBeInTheDocument();
+    expect(screen.getByText(/原因码.*2|reasoncode.*2/i)).toBeInTheDocument();
+    expect(screen.getByText(/风险.*2|risk.*2/i)).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText(/筛选|filter/i), {
       target: { value: 'test_gap' },
