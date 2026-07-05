@@ -1,5 +1,18 @@
 # 当前项目审查修复任务
 
+- [x] M46 串行：把 `run-worker-assignment` Codex/Gemini launch builder 下沉到 beta-runtime-core。
+- [x] M46 串行：运行最小充分验证并补充 review 小结。
+
+## M46 Review 小结
+
+已新增 `buildDispatcherRuntimeLaunchCommand`，让共享 `@tingrudeng/beta-runtime-core` 负责根据 assignment pool 构建 Codex/Gemini launch command；`scripts/run-worker-assignment.ts` 只保留 beta-runtime-core dist 加载、dispatcher runtime factory 加载、环境变量注入和 CLI bootstrap。脚本侧 dist 检查也从“文件存在即可”改为比较 src/dist mtime，避免共享 core 或 dispatcher runtime 改动后继续加载陈旧 dist。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 runtime executor / launch 去重，把 Codex/Gemini launch builder 从 root 脚本侧下沉到共享 beta-runtime-core，没有改变 dry-run 输出、默认 Gemini model、`FORGEFLOW_CODEX_MODEL` 语义或 verification/result 写入语义；安全检查通过，未新增 secret、网络副作用、命令拼接输入或静默 fallback；复杂度检查通过，`scripts/run-worker-assignment.ts` 102 行，`packages/beta-runtime-core/src/runtime/run-worker-assignment.ts` 270 行，新增函数均保持单一职责；Document-refresh: needed，原因：runtime 去重边界变化，已同步 README、docs/README、TECH_DEBT、beta-runtime-core README 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter @tingrudeng/beta-runtime-core exec vitest run tests/run-worker-assignment.test.ts` 失败于 `buildDispatcherRuntimeLaunchCommand is not a function`；GREEN 后 `CI=true pnpm --filter @tingrudeng/beta-runtime-core test` 通过，3 个测试文件、17 个测试通过；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/server/run-worker-assignment.test.ts --maxWorkers=1` 通过，3 个测试通过；`CI=true pnpm exec tsc -p scripts/tsconfig.json`、`CI=true pnpm --filter @tingrudeng/beta-runtime-core typecheck`、`CI=true pnpm --filter @tingrudeng/codex-beta-runtime test`、`CI=true pnpm --filter @tingrudeng/gemini-beta-runtime test`、`CI=true pnpm lint`、`CI=true pnpm typecheck`、`CI=true pnpm docs:validate`、`git diff --check` 均通过。非沙箱 `CI=true pnpm test` 通过，dispatcher 47 个测试文件、489 个测试通过。
+
+剩余风险：root `scripts/run-worker-assignment.ts` 仍负责动态加载 beta-runtime-core 和 dispatcher runtime dist，这是源码仓 live bootstrap 职责；如果后续继续收敛，应把 dist freshness 检查抽成通用 bootstrap helper，而不是在脚本入口继续扩写业务逻辑。
+
 - [x] M45 串行：补齐 Console trajectory step 前后回放交互。
 - [x] M45 串行：运行最小充分验证并补充 review 小结。
 
