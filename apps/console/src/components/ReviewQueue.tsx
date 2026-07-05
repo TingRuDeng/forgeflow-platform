@@ -44,6 +44,11 @@ interface ReviewQueueProps {
   reviews?: ReviewSummary[];
   selectedTaskId?: string | null;
   submittingTaskIds?: string[];
+  bulkResult?: {
+    total: number;
+    succeeded: string[];
+    failed: Array<{ taskId: string; message: string }>;
+  } | null;
   onSelectTask?: (taskId: string) => void;
   onBulkReviewDecision?: (
     decision: 'merge' | 'rework' | 'block',
@@ -134,6 +139,41 @@ function ReviewQueueHeader(props: { selectedCount: number; reviewCount: number }
   );
 }
 
+function BulkReviewResultPanel(props: {
+  result?: ReviewQueueProps['bulkResult'];
+}) {
+  const { t } = useTranslation();
+  const result = props.result;
+  if (!result) {
+    return null;
+  }
+  const hasFailures = result.failed.length > 0;
+  return (
+    <div
+      role="status"
+      className={`rounded-lg border p-3 text-xs ${hasFailures ? 'border-rose-400/30 bg-rose-400/10 text-rose-100' : 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100'}`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-semibold text-white/85">{t('bulkReviewResult')}</span>
+        <span className="font-mono text-white/60">{result.succeeded.length} / {result.total}</span>
+      </div>
+      {hasFailures ? (
+        <div className="mt-2 space-y-1">
+          <div className="font-semibold text-rose-100">{t('bulkReviewFailures')}</div>
+          {result.failed.map((failure) => (
+            <div key={failure.taskId} className="grid grid-cols-1 gap-1 rounded-md bg-black/20 p-2">
+              <span className="font-mono break-all text-white/75">{failure.taskId}</span>
+              <span className="break-words text-white/60">{failure.message}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-2 text-white/60">{t('bulkReviewAllSucceeded')}</div>
+      )}
+    </div>
+  );
+}
+
 function useReviewQueueModel(input: {
   tasks: TaskSummary[];
   reviews: ReviewSummary[];
@@ -177,6 +217,7 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({
   reviews = [],
   selectedTaskId,
   submittingTaskIds = [],
+  bulkResult = null,
   onSelectTask,
   onBulkReviewDecision,
 }) => {
@@ -185,6 +226,8 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({
   return (
     <div className="p-4 space-y-4">
       <ReviewQueueHeader selectedCount={model.selectedIds.length} reviewCount={model.reviewTasks.length} />
+
+      <BulkReviewResultPanel result={bulkResult} />
 
       <WaitingInputQueue
         tasks={model.waitingInputTasks}

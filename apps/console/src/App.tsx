@@ -10,6 +10,7 @@ import { ReviewQueue } from './components/ReviewQueue';
 import { useTranslation } from './lib/i18n';
 import { extractResponseError, parseJsonResponse } from './lib/http';
 import { postReviewDecision, type ReviewDecisionInput } from './lib/reviewDecision';
+import { submitBulkReviewDecision, type BulkReviewResult } from './lib/bulkReviewDecision';
 import { postTaskCancel, postTaskResume } from './lib/taskActions';
 
 const fetcher = async (url: string) => {
@@ -33,6 +34,7 @@ const App: React.FC = () => {
   const [reviewingTaskId, setReviewingTaskId] = useState<string | null>(null);
   const [resumingTaskId, setResumingTaskId] = useState<string | null>(null);
   const [bulkReviewingTaskIds, setBulkReviewingTaskIds] = useState<string[]>([]);
+  const [bulkReviewResult, setBulkReviewResult] = useState<BulkReviewResult | null>(null);
   const [updatingWorkerId, setUpdatingWorkerId] = useState<string | null>(null);
 
   const selectedTask = useMemo(() => {
@@ -187,27 +189,18 @@ const App: React.FC = () => {
 
     try {
       setBulkReviewingTaskIds(taskIds);
-      const results = await Promise.allSettled(
-        taskIds.map((taskId) => postReviewDecision({
-          taskId,
-          decision,
-          reviewInput: input,
-          notes: `${decision} from console bulk review`,
-        })),
-      );
-      const failures = results.flatMap((result, index) => {
-        if (result.status !== 'rejected') return [];
-        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
-        return [`${taskIds[index]}: ${message}`];
-      });
+      setBulkReviewResult(null);
+      const result = await submitBulkReviewDecision(decision, taskIds, input);
       await mutate();
-      if (failures.length > 0) {
-        throw new Error(`${failures.length} / ${taskIds.length} ${t('bulkReviewFailed')}: ${failures.join('; ')}`);
-      }
+      setBulkReviewResult(result);
     } catch (err) {
       console.error(err);
       const message = err instanceof Error ? err.message : String(err);
-      alert(`${t('reviewActionFailed')}: ${message}`);
+      setBulkReviewResult({
+        total: taskIds.length,
+        succeeded: [],
+        failed: taskIds.map((taskId) => ({ taskId, message })),
+      });
     } finally {
       setBulkReviewingTaskIds([]);
     }
@@ -272,6 +265,7 @@ const App: React.FC = () => {
                   reviews={Array.isArray(data.reviews) ? data.reviews : []}
                   selectedTaskId={selectedTask?.id || null}
                   submittingTaskIds={bulkReviewingTaskIds}
+                  bulkResult={bulkReviewResult}
                   onSelectTask={setSelectedTaskId}
                   onBulkReviewDecision={handleBulkReviewDecision}
                 />

@@ -205,4 +205,48 @@ describe('App dashboard loading', () => {
 
     await waitFor(() => expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('risk_ack_required')));
   });
+
+  it('shows bulk review failures in the review queue instead of an alert', async () => {
+    const reviewSnapshot = {
+      ...snapshot,
+      stats: {
+        ...snapshot.stats,
+        tasks: { total: 2, review: 2, merged: 0 },
+      },
+      metrics: {
+        ...snapshot.metrics,
+        reviewBacklog: 2,
+      },
+      tasks: [
+        { id: 'task-safe', title: 'Safe task', status: 'review', repo: 'owner/docs' },
+        { id: 'task-risky', title: 'Risky task', status: 'review', repo: 'owner/auth' },
+      ],
+      reviews: [
+        { taskId: 'task-safe', decision: 'pending' },
+        { taskId: 'task-risky', decision: 'pending' },
+      ],
+    };
+    const alertMock = vi.fn();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(reviewSnapshot), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'decision_recorded' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'risk_ack_required' }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(reviewSnapshot), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('alert', alertMock);
+
+    renderApp();
+
+    fireEvent.click(await screen.findByLabelText(/选择任务 task-safe|select task task-safe/i));
+    fireEvent.click(screen.getByLabelText(/选择任务 task-risky|select task task-risky/i));
+    fireEvent.click(screen.getByRole('button', { name: /批量返工|bulk rework/i }));
+
+    expect(await screen.findByText(/批量审查结果|bulk review result/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 \/ 2/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/task-risky/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/risk_ack_required/i)).toBeInTheDocument();
+    expect(alertMock).not.toHaveBeenCalled();
+  });
 });
