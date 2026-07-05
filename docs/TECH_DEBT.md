@@ -197,7 +197,7 @@ Desired direction:
 - 继续补 HITL resume schema 的更丰富字段类型、跨 worker prompt 模板约束和 Console 校验文案
 - 继续补齐跨任务对比和 artifact / review 证据联动
 
-## 9. Shadow path has drift gate and reconciliation entry, but production cutover still needs an ops drill
+## 9. Shadow path has drift gate, reconciliation, and cutover drill, but external primary ops remain deferred
 
 Current situation:
 
@@ -213,6 +213,7 @@ Current situation:
 - `scripts/check-shadow-drift.mjs <stateDir> --record-alert` can append a `shadow_drift_detected` system event when drift is present
 - `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1` and `pnpm verify:shadow-drift:reconcile` provide an explicit automatic reconciliation cadence hook without changing the default read-only gate
 - `pnpm verify:shadow-cutover` is a strict production cutover preflight: shadow must be configured and zero-drift under `--max-mismatches 0 --max-delta 0`, and the primary backend must be configured as `RUNTIME_STATE_BACKEND=postgres` with `DISPATCHER_PRIMARY_POSTGRES_URL`
+- `pnpm verify:shadow-cutover:drill` runs drift gate, explicit reconcile + alert recording, and strict cutover preflight as one production rehearsal command
 - `DISPATCHER_SHADOW_MODE=primary` is still explicitly rejected as `primary_store_not_implemented`; it is not the primary-store switch
 - `@forgeflow/dispatcher-store-postgres` now has primary snapshot primitives (`dispatcher_runtime_state`, JSONB load/save), and dispatcher HTTP routes plus `/api/query/*` use the async runtime-state path for state mutations / reads
 - `pnpm verify:stage3` 和 release workflow 都会执行 `pnpm verify:shadow-drift` 作为 rollout / release gate
@@ -220,11 +221,11 @@ Current situation:
 Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
-- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、strict cutover preflight、primary-mode 硬拒绝、Postgres primary snapshot 原语、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真正 primary-store 切换仍需要生产阈值演练和外部存储运维确认
+- shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、strict cutover preflight、production cutover drill、primary-mode 硬拒绝、Postgres primary snapshot 原语、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真正 primary-store 切换仍需要外部存储运维确认和真实生产变更窗口
 
 Desired direction:
 
-- run production threshold drills and require `pnpm verify:shadow-cutover` before any primary-store switch
+- require `pnpm verify:shadow-cutover:drill` before any primary-store switch and keep the captured phase JSON as change evidence
 - keep the event / metric / SLO contract stable while shadow remains best-effort
 
 ## 10. Live dispatcher DR drill covers local failure scenarios, but production cutover is still deferred
