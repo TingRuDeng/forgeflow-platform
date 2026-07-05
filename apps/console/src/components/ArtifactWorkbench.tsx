@@ -3,6 +3,7 @@ import { Search } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import type { ArtifactBundle } from './TaskTimeline';
 import { ArtifactWorkbenchRefs } from './ArtifactWorkbenchRefs';
+import { RuntimeEventWorkbench } from './RuntimeEventWorkbench';
 import { flattenArtifactRefs } from './artifactWorkbenchRefsModel';
 
 interface TaskSummary {
@@ -24,10 +25,26 @@ interface ReviewSummary {
   } | null;
 }
 
+interface RuntimeEvent {
+  taskId: string;
+  type: string;
+  at?: string;
+  summary?: string;
+  payload?: {
+    message?: string;
+    failureCode?: string;
+    data?: {
+      message?: string;
+      failureCode?: string;
+    } | null;
+  } | null;
+}
+
 interface ArtifactWorkbenchProps {
   bundles: ArtifactBundle[];
   tasks: TaskSummary[];
   reviews?: ReviewSummary[];
+  events?: RuntimeEvent[];
   selectedTaskId?: string | null;
   onSelectTask?: (taskId: string) => void;
 }
@@ -148,6 +165,7 @@ export const ArtifactWorkbench: React.FC<ArtifactWorkbenchProps> = ({
   bundles,
   tasks,
   reviews = [],
+  events = [],
   selectedTaskId,
   onSelectTask,
 }) => {
@@ -165,6 +183,8 @@ export const ArtifactWorkbench: React.FC<ArtifactWorkbenchProps> = ({
 
   return (
     <div className="p-4 space-y-4">
+      <RuntimeEventWorkbench events={events} tasks={tasks} onSelectTask={onSelectTask} />
+
       <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3">
         <label className="relative block">
           <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/35" aria-hidden="true" />

@@ -478,6 +478,54 @@ describe('Task drill-down', () => {
 });
 
 describe('ArtifactWorkbench', () => {
+  it('searches runtime events across tasks and selects the owning task', () => {
+    const onSelectTask = vi.fn();
+
+    renderWithProviders(
+      <ArtifactWorkbench
+        selectedTaskId="task-2"
+        onSelectTask={onSelectTask}
+        tasks={[
+          { id: 'task-1', title: 'Fix auth gate', status: 'review', repo: 'owner/auth' },
+          { id: 'task-2', title: 'Update docs', status: 'merged', repo: 'owner/docs' },
+        ]}
+        events={[
+          {
+            taskId: 'task-1',
+            type: 'delivery_failed',
+            at: '2026-07-06T10:00:00Z',
+            payload: { message: 'submitResult exhausted retries' },
+          },
+          {
+            taskId: 'task-2',
+            type: 'progress_reported',
+            at: '2026-07-06T10:01:00Z',
+            payload: { message: 'docs verification passed' },
+          },
+        ]}
+        bundles={[]}
+      />
+    );
+
+    expect(screen.getByText(/运行事件搜索|runtime event search/i)).toBeInTheDocument();
+    expect(screen.getByText(/delivery_failed.*1/i)).toBeInTheDocument();
+    expect(screen.getByText(/progress_reported.*1/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/事件类型|event type/i), {
+      target: { value: 'delivery_failed' },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/搜索运行事件|search runtime events/i), {
+      target: { value: 'submitResult' },
+    });
+
+    expect(screen.getByText(/submitResult exhausted retries/i)).toBeInTheDocument();
+    expect(screen.queryByText(/docs verification passed/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/Fix auth gate/i));
+
+    expect(onSelectTask).toHaveBeenCalledWith('task-1');
+  });
+
   it('filters artifacts across tasks and selects the owning task', async () => {
     const onSelectTask = vi.fn();
     const writeText = vi.fn();

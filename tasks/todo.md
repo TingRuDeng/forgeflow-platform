@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M84 串行：让 Console Artifact Workbench 支持跨任务 runtime event 搜索。
 - [x] M83 串行：把 packaged worker daemon cycle 收敛到 beta-runtime-core shared cycle。
 - [x] M82 串行：让 Console runtime events 支持按事件类型筛选。
 - [x] M81 串行：让 Console 任务详情 runtime events 支持完整展开。
@@ -7,6 +8,16 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M84 Review 小结
+
+已在 Console Artifact Workbench 顶部新增跨任务 runtime event 搜索区域。该区域直接消费 dashboard snapshot 的 `events[]`，展示 event type 聚合计数，支持按 event type 和全文查询筛选，并可点击事件跳转到对应任务详情。这样 reviewer 可先按 `delivery_failed`、`progress_reported`、任务标题、仓库或事件摘要定位风险任务，再进入 artifact / review / HITL 详情。
+
+Review Gate：finished。Spec 符合度通过，本轮继续推进 Console 审查工作台产品化，只把 dashboard snapshot 已有 runtime events 聚合到 Artifact Workbench，不改变 dispatcher API、事件 payload、artifact schema、review decision 或后端保留策略。安全检查通过，筛选只作用于前端已加载事件数组，不新增 secret、外部网络、后端写路径、mock 成功路径或静默 fallback。复杂度检查通过，新增 `RuntimeEventWorkbench.tsx` 164 行，`ArtifactWorkbench.tsx` 249 行，`App.tsx` 保持 300 行。Document-refresh: needed，原因：Console 工作台新增跨任务 runtime event 搜索和 event type 聚合，已同步 README、docs README、TECH_DEBT 和 tasks。结论：通过。
+
+验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx --maxWorkers=1` 先失败于缺少“运行事件搜索 / Runtime Event Search”；GREEN 后同命令通过，1 个测试文件、17 个测试通过。最终验证：`CI=true pnpm --filter console exec vitest run src/components/__tests__/Lists.test.tsx src/__tests__/App.test.tsx --maxWorkers=1` 通过，2 个测试文件、22 个测试通过；`CI=true pnpm --filter console lint`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：本轮只做前端工作台聚合，不改变 dashboard snapshot API；运行事件保留范围仍由 dispatcher snapshot 和后端保留策略决定。
 
 ## M83 Review 小结
 
@@ -26,7 +37,7 @@ Review Gate：finished。Spec 符合度通过，本轮继续推进 Console 审�
 
 验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/TaskTimelineRuntimeEvents.test.tsx --maxWorkers=1` 先失败于缺少“事件类型 / Event type”筛选控件；GREEN 后 `CI=true pnpm --filter console exec vitest run src/components/__tests__/TaskTimelineRuntimeEvents.test.tsx src/components/__tests__/Lists.test.tsx src/components/__tests__/TaskDetailsPanelTerminationPolicy.test.tsx --maxWorkers=1` 通过，3 个测试文件、19 个测试通过；`CI=true pnpm --filter console lint`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
 
-剩余风险：单任务详情页 runtime events 已支持展开和按类型筛选；跨任务事件筛选、按 event type 聚合摘要和全文事件搜索仍可继续产品化。
+剩余风险：单任务详情页 runtime events 已支持展开和按类型筛选；M84 已补齐跨任务事件筛选、按 event type 聚合摘要和全文事件搜索。
 
 ## M81 Review 小结
 
@@ -36,7 +47,7 @@ Review Gate：finished。Spec 符合度通过，本轮继续推进 Console 审�
 
 验证已通过：RED 阶段 `CI=true pnpm --filter console exec vitest run src/components/__tests__/TaskTimelineRuntimeEvents.test.tsx --maxWorkers=1` 先失败于缺少事件计数和展开按钮；GREEN 后 `CI=true pnpm --filter console exec vitest run src/components/__tests__/TaskTimelineRuntimeEvents.test.tsx src/components/__tests__/Lists.test.tsx src/components/__tests__/TaskDetailsPanelTerminationPolicy.test.tsx --maxWorkers=1` 通过，3 个测试文件、18 个测试通过；`CI=true pnpm --filter console lint`、`CI=true pnpm --filter console build`、`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
 
-剩余风险：Console 任务详情已可展开完整 runtime events；更大范围的审查工作台能力仍取决于后续是否继续做跨任务事件筛选、按 event type 聚合和专门的事件搜索。
+剩余风险：Console 任务详情已可展开完整 runtime events；M84 已补齐跨任务事件筛选、按 event type 聚合和专门事件搜索。
 
 ## M80 Review 小结
 
