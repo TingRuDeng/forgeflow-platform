@@ -68,8 +68,6 @@ function runSmoke(rootDir: string, fixturePath: string, fakeNpmBin: string, args
     rootDir,
     "--registry-fixture",
     fixturePath,
-    "--groups",
-    "codex",
     ...args,
   ], {
     cwd: repoRoot,
@@ -93,7 +91,7 @@ describe("published runtime smoke", () => {
     });
     const fakeNpmBin = createFakeNpm(tempDir);
 
-    const result = runSmoke(tempDir, fixturePath, fakeNpmBin, ["--require-published"]);
+    const result = runSmoke(tempDir, fixturePath, fakeNpmBin, ["--groups", "codex", "--require-published"]);
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("published runtime smoke passed: codex");
@@ -107,9 +105,41 @@ describe("published runtime smoke", () => {
       "@tingrudeng/codex-beta-runtime": { status: "missing" },
     });
 
-    const result = runSmoke(tempDir, fixturePath, createFakeNpm(tempDir), ["--require-published"]);
+    const result = runSmoke(tempDir, fixturePath, createFakeNpm(tempDir), ["--groups", "codex", "--require-published"]);
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("@tingrudeng/codex-beta-runtime@0.1.0-beta.2 registry action=setup_required");
+  });
+
+  it("maps provider package names to smoke groups", () => {
+    const tempDir = makeTempDir();
+    writeProviderPackage(tempDir, "codex-beta-runtime", "0.1.0-beta.2");
+    const fixturePath = writeRegistryFixture(tempDir, {
+      "@tingrudeng/codex-beta-runtime": { status: "published", versions: ["0.1.0-beta.2"] },
+    });
+
+    const result = runSmoke(tempDir, fixturePath, createFakeNpm(tempDir), [
+      "--package",
+      "codex-beta-runtime",
+      "--require-published",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("published runtime smoke passed: codex");
+  });
+
+  it("skips non-provider packages when invoked from release workflow", () => {
+    const tempDir = makeTempDir();
+    writeProviderPackage(tempDir, "codex-beta-runtime", "0.1.0-beta.2");
+    const fixturePath = writeRegistryFixture(tempDir, {});
+
+    const result = runSmoke(tempDir, fixturePath, createFakeNpm(tempDir), [
+      "--package",
+      "beta-runtime-core",
+      "--require-published",
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("@tingrudeng/beta-runtime-core is not a provider runtime");
   });
 });

@@ -1,5 +1,6 @@
 # 当前项目审查修复任务
 
+- [x] M92 串行：让 Release workflow 在 provider runtime 发布后运行 published smoke。
 - [x] M91 串行：新增已发布 runtime 包 registry 安装 / CLI smoke。
 - [x] M90 串行：让 release workflow 复用通用 release package 检测脚本。
 - [x] M89 串行：新增 runtime npm 包名 / Trusted Publisher 设置报告并共享 runtime package spec。
@@ -15,6 +16,18 @@
 - [x] M79 串行：绑定 post-cutover completion evidence 到当前 approval marker。
 - [x] M78 串行：新增 shadow primary cutover completion evidence。
 - [x] M77 串行：在 `/api/dr/status` 与 Console DR 面板暴露 primary cutover evidence 状态。
+
+## M92 Review 小结
+
+已让 `scripts/verify-published-runtime-smoke.mjs` 支持 `--package <name>`：传入 `codex-beta-runtime`、`gemini-beta-runtime`、`trae-beta-runtime` 时会自动映射到对应 provider smoke group；传入 `beta-runtime-core`、`automation-gateway-core` 等非 provider 包时会显式跳过，不把 support core 发布误判成 provider smoke 缺失。
+
+`.github/workflows/release.yml` 的手动发布和自动发布现在都会在 `npm publish` 成功后运行 `node scripts/verify-published-runtime-smoke.mjs --package <package> --require-published`。手动发布路径中该步骤位于 `npm publish` 之后、git commit/tag/push 之前；若 provider runtime 发布后无法从 registry 安装或 CLI 无法启动，workflow 会在记录 git 版本历史前失败，并复用既有发布后 git 恢复 issue 机制。
+
+Review Gate：finished。Spec 符合度通过，本轮只把已存在的 published smoke 接入 release post-publish，不改变 publish、version bump、preflight 或非 provider 包发布语义。安全检查通过，新增步骤只读安装已发布包并校验 CLI，不读取 secret、不写 registry、不启动 worker / gateway 长进程；非 provider 包显式 skip。复杂度检查通过，脚本 211 行、测试 145 行、workflow 测试 134 行，均低于 300 行。Document-refresh: not-needed，原因：外部 operator 命令未变化，只是 release workflow 内部在 publish 后调用既有 smoke。结论：通过。
+
+验证已通过：`node --check scripts/verify-published-runtime-smoke.mjs` 通过；`CI=true pnpm --filter @forgeflow/dispatcher exec vitest run tests/modules/execution/published-runtime-smoke.test.ts tests/modules/execution/workflows.test.ts --maxWorkers=1` 通过，2 个测试文件、10 个测试通过；真实 registry `node scripts/verify-published-runtime-smoke.mjs --package codex-beta-runtime --require-published --registry-timeout-ms 5000` 通过；`node scripts/verify-published-runtime-smoke.mjs --package beta-runtime-core --require-published --registry-timeout-ms 5000` 按预期 skip。`CI=true pnpm typecheck`、`CI=true pnpm lint`、`CI=true pnpm docs:validate`、`python3 scripts/validate_docs.py . --profile generic`、`git diff --check` 均通过。
+
+剩余风险：post-publish smoke 已接入 release workflow；完整全量 provider smoke 仍依赖 `@tingrudeng/beta-runtime-core` 和 `@tingrudeng/gemini-beta-runtime` 完成 npm 包名 / Trusted Publisher 配置并发布。
 
 ## M91 Review 小结
 

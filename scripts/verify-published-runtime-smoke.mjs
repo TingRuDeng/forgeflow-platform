@@ -19,6 +19,10 @@ const PROVIDER_GROUPS = {
   trae: findProvider("forgeflow-trae-beta"),
 };
 
+const PROVIDER_PACKAGE_TO_GROUP = Object.fromEntries(
+  Object.entries(PROVIDER_GROUPS).map(([groupName, spec]) => [spec.name, groupName]),
+);
+
 function findProvider(binName) {
   const spec = RUNTIME_PACKAGES.find((candidate) => candidate.bin === binName);
   if (!spec) {
@@ -57,6 +61,25 @@ function resolveGroups(input) {
     }
   }
   return groupNames;
+}
+
+function normalizePackageName(input) {
+  if (!input) {
+    return "";
+  }
+  return input.startsWith("@tingrudeng/") ? input : `@tingrudeng/${input}`;
+}
+
+function resolveGroupsFromPackage(input) {
+  const packageName = normalizePackageName(input);
+  if (!packageName) {
+    return null;
+  }
+  const groupName = PROVIDER_PACKAGE_TO_GROUP[packageName];
+  if (!groupName) {
+    return [];
+  }
+  return [groupName];
 }
 
 function run(command, args, cwd, env = {}) {
@@ -143,7 +166,12 @@ async function main() {
     rootDir,
     timeoutMs: parsePositiveInteger(args["registry-timeout-ms"], 15000),
   };
-  const groupNames = resolveGroups(typeof args.groups === "string" ? args.groups : "");
+  const packageGroups = resolveGroupsFromPackage(typeof args.package === "string" ? args.package : "");
+  if (packageGroups?.length === 0) {
+    console.log(`published runtime smoke skipped: package ${normalizePackageName(args.package)} is not a provider runtime`);
+    return;
+  }
+  const groupNames = packageGroups ?? resolveGroups(typeof args.groups === "string" ? args.groups : "");
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-published-runtime-smoke-"));
   const issues = [];
   const warnings = [];
