@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --config vitest.config.ts",
+    "test": "node scripts/run-tests.mjs",
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
