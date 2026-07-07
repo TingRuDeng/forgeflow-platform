@@ -30,6 +30,16 @@ describe("workflow quality gates", () => {
     expect(releaseWorkflow.match(/run: pnpm verify:runtime-packages:install$/gm)?.length).toBe(2);
   });
 
+  it("checks deprecated entrypoints in local scripts and CI", () => {
+    const ciWorkflow = readWorkflow("ci.yml");
+    const packageJson = fs.readFileSync(path.join(repoRoot, "package.json"), "utf8");
+    const scripts = JSON.parse(packageJson).scripts;
+
+    expect(scripts["verify:deprecated-entrypoints"]).toBe("node scripts/check-deprecated-entrypoints.mjs");
+    expect(ciWorkflow).toContain("Check deprecated entrypoints");
+    expect(ciWorkflow).toContain("pnpm verify:deprecated-entrypoints");
+  });
+
   it("publishes manual releases before recording git version history", () => {
     const workflow = readWorkflow("release.yml");
 

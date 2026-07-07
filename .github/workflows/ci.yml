@@ -47,6 +47,9 @@ jobs:
       - name: Validate docs
         run: pnpm docs:validate
 
+      - name: Check deprecated entrypoints
+        run: pnpm verify:deprecated-entrypoints
+
       - name: Verify runtime package readiness
         run: pnpm verify:runtime-packages
 
