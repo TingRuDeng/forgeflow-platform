@@ -123,6 +123,9 @@ jobs:
           --require-package-exists
           --require-published-workspace-deps
 
+      - name: Check deprecated entrypoints
+        run: pnpm verify:deprecated-entrypoints
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -329,7 +332,7 @@ jobs:
           --require-published-workspace-deps
 
       - name: Check deprecated entrypoints
-        run: node scripts/check-deprecated-entrypoints.mjs
+        run: pnpm verify:deprecated-entrypoints
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
