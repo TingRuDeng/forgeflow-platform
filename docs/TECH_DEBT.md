@@ -13,14 +13,14 @@ Only confirmed, still-active debt belongs here.
 ## 一分钟摘要
 
 - 本文件只写仍然存在的债务，不写愿望清单。
-- 当前债务集中在 runtime bridge、持久化多形态、shadow 可观测性、Trae gateway 重复实现和 Stage 3 边界。
+- 当前债务集中在 runtime bridge、持久化 fallback / shadow 边界、Trae gateway 发布适配层和 Stage 3 边界。
 - 近期审查确认 dispatcher 外部资源锁、DR drill 深度和手动发布版本落账仍需后续修复。
 - 修复债务时必须同步 `README.md`、`docs/README.md` 和相关稳定文档。
 
 ```yaml
 ai_summary:
   authority: "已确认仍存在的技术债、影响范围和迁移边界"
-  scope: "runtime bridge、persistence、shadow path、Trae gateway、文档系统、Stage 3 deferred 能力"
+  scope: "runtime bridge、persistence fallback、shadow path、Trae gateway、文档系统、Stage 3 deferred 能力"
   read_when:
     - "拆分技术债修复任务"
     - "判断某项能力是否已经完整落地"
@@ -63,23 +63,23 @@ Desired direction:
 - either keep this adapter split explicit and well-tested
 - or remove more checked-in wrappers once all supported entrypoints can run directly from packaged/app-owned runtime modules
 
-## 2. SQLite runtime state, JSON fallback, and schema constants still coexist without one fully consolidated persistence story
+## 2. SQLite runtime state and JSON fallback still coexist as an explicit compatibility boundary
 
 Current situation:
 
 - dispatcher runtime state now defaults to SQLite via `runtime-state-sqlite.ts`
 - JSON fallback still exists for explicit compatibility mode and import bootstrap
-- `apps/dispatcher/src/db/schema.ts` still defines standalone SQLite schema constants that are not the active runtime persistence path
+- standalone `apps/dispatcher/src/db/schema.ts` constants have been removed; live SQLite schema ownership is now concentrated in `runtime-state-sqlite.ts`
 
 Impact:
 
 - easy to overstate database maturity or assume every persistence path is SQLite-first
-- persistence-related changes can still land in the default SQLite backend, the JSON fallback, or the schema constants separately
+- persistence-related changes can still land in the default SQLite backend or the explicit JSON fallback separately
 
 Desired direction:
 
-- keep the SQLite snapshot backend and JSON fallback explicitly documented, or further consolidate the remaining duplicate persistence representations
-- decide whether `apps/dispatcher/src/db/schema.ts` should survive as a compatibility constant set now that runtime SQLite + structured projection tables are the live path
+- keep the SQLite snapshot backend and JSON fallback explicitly documented
+- do not reintroduce standalone schema constants outside the live runtime persistence module without a tested caller
 
 ## 3. Postgres / queue shadow path exists, but external stores are not primary yet
 

@@ -13,7 +13,7 @@
 - `apps/dispatcher/` owns dispatcher-side domain code and TypeScript runtime foundations.
 - live runtime entry 仍经过 `scripts/lib/*` adapter / bootstrap。
 - 修改状态、接口或持久化时必须同步检查 `scripts/lib/*`、CLI、docs 和测试。
-- `src/db/schema.ts` 不是 live SQLite snapshot backend。
+- live SQLite snapshot / projection schema ownership is in `src/modules/server/runtime-state-sqlite.ts`。
 
 ```yaml
 ai_summary:
@@ -51,7 +51,6 @@ Current verified contents:
 - dispatcher domain services under `src/modules/*`
 - dispatcher runtime foundations under `src/modules/server/*`
 - dispatcher-owned review-memory and task-worktree implementations under `src/modules/server/*`
-- schema constants under `src/db/schema.ts`
 - dispatcher-focused tests under `tests/modules/*`
 
 ## Does Not Own Alone
@@ -87,9 +86,6 @@ Current live bridges import built output from `apps/dispatcher/dist`, so behavio
   - review-side domain logic
 - `src/modules/runtime/`
   - worker assignment payload shaping and runtime adapters
-- `src/db/schema.ts`
-  - SQLite schema constants, but not the active runtime snapshot backend
-
 ## Change Ripple
 
 Changing dispatcher state semantics usually ripples into:

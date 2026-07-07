@@ -45,11 +45,11 @@ ai_summary:
 - 对脚本事实核对 `scripts/*.mjs`、`scripts/lib/*.ts` 和 package runtime 源码。
 - 运行 `pnpm docs:validate` 检查本文结构和链接。
 
-## 1. Do not mistake `apps/dispatcher/src/db/schema.ts` for the live dispatcher truth source
+## 1. Do not create standalone dispatcher schema constants outside the live persistence module
 
 Current mainline runtime state is loaded through `scripts/lib/dispatcher-state.js`, which bootstraps the dispatcher-owned implementation in `apps/dispatcher/dist/modules/server/runtime-state.js`. SQLite remains the default backend (`.forgeflow-dispatcher/runtime-state.db`), and JSON is only an explicit fallback/import path.
 
-If you change dispatcher behavior and only update the SQLite schema constants, you have not updated the active runtime path.
+If you change dispatcher persistence, update `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts` and its tests. Standalone schema constants were removed because they were not the active runtime path.
 
 ## 2. Do not collapse dispatcher APIs and Trae automation gateway APIs into one generic API story
 

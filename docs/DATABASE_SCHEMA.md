@@ -16,7 +16,7 @@
 - `snapshots` 仍是权威 runtime snapshot，结构化表是 query projection。
 - `leases[]` 当前支持 `assignment`、`repo`、`branch`、`session` resource type；dispatcher 管理的 task 生命周期会获取并释放对应资源。
 - Postgres / queue shadow path 是 best-effort，不是 primary store。
-- `apps/dispatcher/src/db/schema.ts` 不是当前 live runtime persistence path。
+- live SQLite schema ownership is in `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts`; standalone dispatcher schema constants are not kept.
 
 ```yaml
 ai_summary:
@@ -421,7 +421,7 @@ Recovery semantics:
 - runtime-state.db 读取失败时默认 fail-closed
 - 只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 且 `runtime-state.json` 存在时，才允许走 JSON 救援导入
 
-`apps/dispatcher/src/db/schema.ts` still contains additional SQLite schema constants, but those constants are not the active dispatcher runtime persistence path.
+Standalone dispatcher SQLite schema constants have been removed. Runtime schema changes must be made in `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts` with matching round-trip tests.
 
 ## 6. What To Update When Persistence Changes
 

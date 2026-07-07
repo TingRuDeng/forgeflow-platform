@@ -127,7 +127,7 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
   - enabled with `DISPATCHER_SHADOW_MODE` / `DISPATCHER_POSTGRES_URL`
   - current role is shadow projection / queue shadow, not dispatcher truth source
 
-`apps/dispatcher/src/db/schema.ts` still defines standalone SQLite schema constants, but dispatcher runtime persistence is now owned by the runtime-state SQLite backend rather than those constants directly.
+Dispatcher runtime persistence is owned by the runtime-state SQLite backend. Standalone dispatcher schema constants are intentionally not kept outside that live module.
 
 ## 4. Main Flows
 
