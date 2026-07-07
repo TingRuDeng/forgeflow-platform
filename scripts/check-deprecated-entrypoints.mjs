@@ -1,6 +1,8 @@
 import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-const DEPRECATED_PATHS = [
+export const DEPRECATED_PATHS = [
   "scripts/start-staging-dispatcher.sh",
   "scripts/start-staging-trae-gateway.sh",
   "scripts/start-staging-trae-launch.sh",
@@ -11,16 +13,33 @@ const DEPRECATED_PATHS = [
   "scripts/run-codex-control-flow.js",
 ];
 
-const existing = DEPRECATED_PATHS.filter((file) => fs.existsSync(file));
-if (existing.length > 0) {
-  console.error(JSON.stringify({
-    ok: false,
-    deprecatedEntryPointsStillPresent: existing,
-  }, null, 2));
-  process.exit(1);
+export function findDeprecatedEntryPoints(options = {}) {
+  const cwd = options.cwd ?? process.cwd();
+  return DEPRECATED_PATHS.filter((file) => fs.existsSync(path.join(cwd, file)));
 }
 
-console.log(JSON.stringify({
-  ok: true,
-  checked: DEPRECATED_PATHS,
-}, null, 2));
+function writeJson(write, payload) {
+  write(JSON.stringify(payload, null, 2));
+}
+
+export function runDeprecatedEntryPointCheck(options = {}) {
+  const existing = findDeprecatedEntryPoints({ cwd: options.cwd });
+  if (existing.length > 0) {
+    writeJson(options.stderr ?? console.error, {
+      ok: false,
+      deprecatedEntryPointsStillPresent: existing,
+    });
+    return 1;
+  }
+
+  writeJson(options.stdout ?? console.log, {
+    ok: true,
+    checked: DEPRECATED_PATHS,
+  });
+  return 0;
+}
+
+const entryPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";
+if (import.meta.url === entryPath) {
+  process.exitCode = runDeprecatedEntryPointCheck();
+}
