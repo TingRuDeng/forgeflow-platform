@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -13,6 +15,7 @@ import {
   saveRuntimeState,
   sqliteStore,
 } from "../../../src/modules/server/runtime-state-sqlite.js";
+import { persistRuntimeStateShadowWriteStatus } from "../../../src/modules/server/runtime-state-shadow-health.js";
 import { readRuntimeStateShadowWriteStatus } from "../../../src/modules/server/runtime-state-shadow.js";
 
 const { DatabaseSync } = await import("node:sqlite");
@@ -20,6 +23,10 @@ const { DatabaseSync } = await import("node:sqlite");
 const tempRoots: string[] = [];
 const originalShadowMode = process.env.DISPATCHER_SHADOW_MODE;
 const originalPostgresUrl = process.env.DISPATCHER_POSTGRES_URL;
+const dispatcherRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const runtimeStateSqliteDistUrl = pathToFileURL(
+  path.join(dispatcherRoot, "dist/modules/server/runtime-state-sqlite.js"),
+).href;
 
 function makeTempDir(): string {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-sqlite-state-"));
@@ -172,6 +179,48 @@ async function waitForShadowFailureEvent(stateDir: string): Promise<void> {
   }
 }
 
+async function waitForFile(filePath: string, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!fs.existsSync(filePath)) {
+    if (Date.now() >= deadline) {
+      throw new Error(`timed out waiting for file: ${filePath}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+function spawnShadowFailureRecorder(stateDir: string, startedMarker: string): Promise<void> {
+  const source = `
+    const fs = await import("node:fs");
+    const module = await import(${JSON.stringify(runtimeStateSqliteDistUrl)});
+    fs.writeFileSync(${JSON.stringify(startedMarker)}, "started");
+    module.recordShadowFailureEvent(${JSON.stringify(stateDir)});
+  `;
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["--input-type=module", "--eval", source], {
+      cwd: dispatcherRoot,
+      env: {
+        ...process.env,
+        DISPATCHER_SHADOW_MODE: "shadow-write",
+        DISPATCHER_POSTGRES_URL: "postgres://example.invalid/forgeflow",
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`shadow failure recorder failed: code=${code} signal=${signal} stderr=${stderr}`));
+    });
+  });
+}
+
 function readSnapshotState(stateDir: string): {
   journalMode: string;
   count: number;
@@ -282,6 +331,72 @@ describe("runtime-state-sqlite", () => {
       configured: true,
     });
   });
+
+  it("appends a shadow failure to the latest committed snapshot under concurrent writes", async () => {
+    const stateDir = makeTempDir();
+    const startedMarker = path.join(stateDir, "shadow-recorder-started");
+    saveRuntimeState(stateDir, createTestState());
+    await waitForAsyncShadowWrite();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    persistRuntimeStateShadowWriteStatus(stateDir, {
+      status: "failed",
+      mode: "shadow-write",
+      queueMode: "shadow-write",
+      configured: true,
+      lastAttemptAt: "2026-07-26T10:00:00.000Z",
+      lastSuccessAt: null,
+      lastFailureAt: "2026-07-26T10:00:01.000Z",
+      lastError: "simulated concurrent shadow failure",
+    });
+
+    const latest = loadRuntimeState(stateDir);
+    const concurrentState: RuntimeState = {
+      ...latest,
+      sequence: latest.sequence + 1,
+      events: [
+        ...latest.events,
+        {
+          taskId: "dispatch-1:task-1",
+          type: "concurrent_state_update",
+          at: "2026-07-26T10:00:00.500Z",
+        },
+      ],
+    };
+    const content = JSON.stringify(concurrentState);
+    const writerDb = new DatabaseSync(path.join(stateDir, "runtime-state.db"));
+    let transactionOpen = false;
+    try {
+      writerDb.exec("PRAGMA busy_timeout = 5000; BEGIN IMMEDIATE;");
+      transactionOpen = true;
+      writerDb.prepare(`
+        INSERT INTO snapshots (data, checksum_sha256, created_at)
+        VALUES (?, ?, ?)
+      `).run(
+        content,
+        crypto.createHash("sha256").update(content, "utf8").digest("hex"),
+        "2026-07-26T10:00:00.500Z",
+      );
+
+      const recorder = spawnShadowFailureRecorder(stateDir, startedMarker);
+      await waitForFile(startedMarker);
+      // The recorder enters its synchronous SQLite write path immediately after the marker.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      writerDb.exec("COMMIT;");
+      transactionOpen = false;
+      await recorder;
+    } finally {
+      if (transactionOpen) {
+        writerDb.exec("ROLLBACK;");
+      }
+      writerDb.close();
+    }
+
+    const reloaded = loadRuntimeState(stateDir);
+    expect(reloaded.sequence).toBe(concurrentState.sequence);
+    expect(reloaded.events.some((event) => event.type === "concurrent_state_update")).toBe(true);
+    expect(reloaded.events.filter((event) => event.type === "shadow_write_failed")).toHaveLength(1);
+    expect(sqliteStore.compareStructuredProjection(stateDir).matches).toBe(true);
+  }, 15_000);
 
   it("reloads runtime state from sqlite file", () => {
     const stateDir = makeTempDir();

@@ -407,6 +407,8 @@ Current endpoint families:
   - Accepts `review_ready` or `failed`, then maps to dispatcher task states.
   - `review_ready` now assumes the runtime already verified that remote branch HEAD exactly matches the reported commit SHA.
   - Packaged runtime may briefly retry remote verification after push before downgrading the report to `failed`.
+  - Packaged Trae runtime retries terminal delivery up to 3 attempts with a 2-second default delay; `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` and `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS` override those values.
+  - A failed attempt emits `submit_result_retry_failed`; exhaustion emits `delivery_failed`. The runtime only promotes the worker to idle and releases its Trae session after dispatcher acknowledgement. Exhaustion preserves the session, stops task polling, and exits non-zero so an unacknowledged assignment is not executed again in the same worker process.
   - Delivery evidence may include a remote-verified push state plus `remoteHeadSha`.
   - Dispatcher now rebuilds canonical worker result metadata for Trae too; route-local payload no longer overrides dispatcher-owned task identity fields.
   - Failure evidence may now carry structured blocker codes such as:

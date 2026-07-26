@@ -130,6 +130,7 @@ Runtime behavior notes:
 - the recommended control-plane helper now binds dispatcher to `127.0.0.1` by default; if your Trae runtime talks to a remote control plane, set `--dispatcher-url` explicitly instead of assuming a non-loopback default bind
 - `stop worker` / `restart worker` / `stop all` / `restart all` now best-effort mark the configured worker `offline` in dispatcher before stopping the local process, so the dashboard does not stay falsely online during the heartbeat lease window
 - `restart launch` / `restart all` now wait for the old CDP debugger port to drain during clean macOS relaunch before spawning the new Trae app instance
+- terminal result delivery retries up to 3 attempts with a 2-second default delay; override with `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` and `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS`. When delivery remains unacknowledged, the runtime keeps the current session, stops polling, and exits non-zero instead of executing the assignment again.
 
 If `forgeflow-trae-beta update` fails because a mirrored registry has not synced the latest shared dependency yet, rerun the upgrade with:
 

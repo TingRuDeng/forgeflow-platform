@@ -375,6 +375,7 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 
 - Trae runtime 只有在远端分支 HEAD 与最终回执里的 commit SHA 完全一致时，才会上报 `review_ready`
 - 如果 push 已报告成功但远端 ref 仍在传播，runtime 会先做短暂重试；重试耗尽后按 failed 处理，不会直接把产物送进 review
+- terminal result 回写默认最多尝试 3 次、间隔 2 秒，可用 `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` / `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS` 调整；结果未获 dispatcher 确认时不会把 worker 降为 idle 或释放当前 Trae session，且会停止任务轮询并以非零状态退出，避免重复执行
 - generic worker claim 已收口为显式 POST：`GET /api/workers/:workerId/assigned-task` 只读，真正 claim 走 `POST /api/workers/:workerId/claim-task`
 - dispatcher 会对 worker result 做 canonicalization：`workerId/pool/repo/defaultBranch/branchName/mode` 由 dispatcher 重建，不接受 worker 覆盖
 - 自动创建 PR 只允许开 draft，而且必须同时满足：验收命令通过、push 成功且无 `push_error`、远端 SHA 已验证一致、变更仍在允许范围内
