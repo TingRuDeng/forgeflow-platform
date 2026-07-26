@@ -36,7 +36,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 ## Core Directories
 
 - `apps/dispatcher/src/modules/server/`：dispatcher HTTP、状态机、SQLite、shadow、SLO 和 worktree 核心实现。
-- `packages/trae-beta-runtime/src/`：远程 Trae worker runtime。
+- `packages/trae-beta-runtime/src/`：远程 Trae worker runtime；`packages/beta-runtime-core/src/runtime/execution-profile.ts`：Codex / Gemini trusted-host 与 isolated-container 执行边界。
 - `packages/forgeflow-dispatcher/`：install-and-run dispatcher runtime 包。
 - `packages/worker-review-orchestrator-cli/`：dispatch、watch、inspect、decide 控制层 CLI。
 - `scripts/`：源码仓 live entrypoint、DR 脚本、发布脚本和 bootstrap glue。
@@ -62,7 +62,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - 修改状态机或任务流转：读 `docs/STATE_MACHINE.md`，再查 `apps/dispatcher/src/modules/server/runtime-state.ts`。
 - 修改持久化或 DR：读 `docs/DATABASE_SCHEMA.md`、`docs/runbooks/runtime-state-backup-restore-repair.md`，再查 `runtime-state-sqlite.ts` 和 `scripts/*runtime-state.mjs`。
 - 修改 Trae 无人值守链路：读 `docs/ARCHITECTURE.md`、`docs/API_ENDPOINTS.md`、`docs/KNOWN_PITFALLS.md`，再查 `scripts/lib/trae-automation-worker.ts` 与 `packages/trae-beta-runtime/src/`。
-- 修改非 Trae runtime 或 npm 包：读对应 `packages/*/README.md`、`package.json` 和包内测试，再回到根级 `pnpm test` / `pnpm typecheck` 验证。
+- 修改非 Trae runtime 或 npm 包：读对应 `packages/*/README.md`、`package.json` 和包内测试；执行隔离还要读 `docs/contracts/execution-profile-v1.md` 并查 `execution-profile.ts`、`run-worker-assignment.ts` 和 provider `start-worker.ts`，再回到根级验证。
 - 修改发布或 runtime 包可安装性：读 `README.md`、`.github/workflows/release.yml`、`docs/runbooks/release-cadence.md` 和对应 `packages/*/package.json`，再用 `npm view <pkg> version dist-tags --json` 核对 registry 事实。
 - 推进 vNext runtime reliability：读 `docs/rfcs/0001-runtime-reliability-vnext.md`、`docs/WORKER_PROTOCOL_V1.md`、`docs/TASK_ATTEMPT_MODEL.md`、`docs/ARTIFACT_BUNDLE_V1.md`。
 - 修改文档体系：读 `docs/README.md`、`docs/DOC_SYNC_CHECKLIST.md` 和本文件，改完运行 `pnpm docs:validate`。
@@ -72,7 +72,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - 不要只改 `apps/dispatcher/src` 就假定 live entrypoint 已同步；`scripts/*.js` 和 `scripts/lib/*` 仍是源码仓运行入口。
 - `leases[]` 当前在 task claim 生命周期内强约束 assignment / repo / branch；continuation 或 follow-up 任务还会强约束 session。
 - `DISPATCHER_READ_ONLY_MODE=1` 默认冻结 `/api/` 写方法；它覆盖 dispatcher HTTP API 写入，但不覆盖直接文件、外部数据库或绕过 HTTP 的写入。
-- 控制层使用 `DISPATCHER_API_TOKEN`；远程 worker 应使用 `DISPATCHER_WORKER_TOKEN`，并由服务端 `DISPATCHER_WORKER_TOKENS` 绑定 workerId，不要把主 token 分发给 worker。
+- 控制层使用 `DISPATCHER_API_TOKEN`；远程 worker 应使用按 workerId 绑定的 `DISPATCHER_WORKER_TOKEN`。Codex / Gemini 默认是 `trusted-host`；`isolated-container` 必须由 operator 显式启用并 fail closed，Docker `bridge` 不是域名级网络 allowlist。
 - `/api/metrics` 的事件型计数只覆盖 `metrics.eventWindow` 标出的最近 500 条运行窗口；完整审计应分页读取 `/api/query/events`。
 - Postgres / queue shadow path 是 best-effort shadow；SQLite snapshot 仍是真相源。
 - shadow drift 的 `--record-alert` 写入与 dispatcher 共用本机 `.runtime-state.lock` 并在锁内重读最新状态；它不提供跨主机互斥。

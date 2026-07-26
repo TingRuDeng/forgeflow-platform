@@ -94,6 +94,8 @@ dispatcher 侧用 `DISPATCHER_WORKER_TOKENS='{"worker-id":"worker-specific-token
 
 每个 assignment 子进程默认最多运行 30 分钟。可设置 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 为正整数毫秒值覆盖默认值；`SIGINT` / `SIGTERM` 会取消 dispatcher 请求和结果重试等待，并终止完整子进程树。
 
+默认 execution profile 是 `trusted-host`。需要容器边界时，在启动 worker 前设置 `FORGEFLOW_EXECUTION_PROFILE=isolated-container` 和固定本地镜像；镜像必须包含 `gemini`、`/bin/sh` 及 verification 工具链。runtime / image preflight 失败不会回退宿主机。完整契约见 `../../docs/contracts/execution-profile-v1.md`。
+
 ## Gemini 集成选项
 
 `run-worker-assignment` 使用 gemini CLI run mode（`gemini -m gemini-2.5-pro -p <prompt>`），并支持以下环境变量覆盖：

@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 
+import { isIsolatedExecutionProfile } from "./execution-profile.js";
 import type { AssignmentLaunchCommand, AssignmentLaunchInput } from "./run-worker-assignment-types.js";
 
 interface LaunchBuilderOptions {
@@ -55,6 +56,9 @@ function isCommandAvailable(command: string): boolean {
 
 function resolveProviderBin(env: Record<string, string | undefined>, envKey: string, fallback: string): string {
   const override = env[envKey]?.trim() || "";
+  if (isIsolatedExecutionProfile(env)) {
+    return override || fallback;
+  }
   const candidates = override ? [override] : [fallback];
   for (const candidate of candidates) {
     if (isCommandAvailable(candidate)) return candidate;
@@ -73,7 +77,7 @@ export function buildCodexLaunchCommand(
   options: LaunchBuilderOptions = {},
 ): AssignmentLaunchCommand {
   assertPool(input, "codex");
-  const env = options.env ?? process.env;
+  const env = options.env ?? input.env ?? process.env;
   const argv = [resolveProviderBin(env, "FORGEFLOW_CODEX_BIN", "codex"), "exec"];
   const model = env.FORGEFLOW_CODEX_MODEL?.trim() || "";
   if (model) argv.push("-m", model);
@@ -88,7 +92,7 @@ export function buildGeminiLaunchCommand(
   options: LaunchBuilderOptions = {},
 ): AssignmentLaunchCommand {
   assertPool(input, "gemini");
-  const env = options.env ?? process.env;
+  const env = options.env ?? input.env ?? process.env;
   return {
     provider: "gemini",
     argv: [

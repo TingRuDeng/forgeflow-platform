@@ -468,6 +468,20 @@ node scripts/run-worker-daemon.js \
 
 每个 assignment 子进程默认最多运行 30 分钟，可用 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 覆盖为正整数毫秒值。`SIGINT` / `SIGTERM` 会同时取消 dispatcher HTTP 请求、结果重试等待和完整子进程树，避免 worker 停止时继续等待网络超时。
 
+Codex / Gemini 默认仍在 `trusted-host` profile 中执行。需要把 provider 与 verification 约束在同一个 fail-closed 容器边界时，由 worker 操作者在启动前配置：
+
+```bash
+export FORGEFLOW_EXECUTION_PROFILE=isolated-container
+export FORGEFLOW_EXECUTION_CONTAINER_IMAGE=forgeflow-worker:2026-07-26
+export FORGEFLOW_EXECUTION_NETWORK=bridge
+export FORGEFLOW_EXECUTION_CPUS=2
+export FORGEFLOW_EXECUTION_MEMORY=4g
+export FORGEFLOW_EXECUTION_PIDS_LIMIT=256
+forgeflow-codex-beta start worker
+```
+
+指定镜像必须已存在，并包含 provider CLI、`/bin/sh` 和任务 verification 所需工具链；runtime 或镜像检查失败时不会回退到宿主机。Docker `bridge` 不是域名级出站白名单，`none` 则会同时阻断 provider API。完整契约见 `docs/contracts/execution-profile-v1.md`。
+
 远程机器推荐的 Codex npm 入口：
 
 ```bash

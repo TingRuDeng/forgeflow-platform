@@ -144,6 +144,7 @@ function runLiveWorkerTask(input: ExecuteLiveWorkerTaskInput, context: LiveWorke
     assignmentDir: context.assignmentDir,
     worktreeDir: context.worktreeDir,
     outputDir: context.outputDir,
+    provider: input.payload.assignment.pool,
     runtimeScriptPath: input.runtimeScriptPath,
     runtimeScriptCwd: input.runtimeScriptCwd,
     timeoutMs: Number.isSafeInteger(input.executionTimeoutMs) && (input.executionTimeoutMs ?? 0) > 0

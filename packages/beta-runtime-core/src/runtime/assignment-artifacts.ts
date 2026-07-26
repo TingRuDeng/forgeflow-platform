@@ -61,7 +61,7 @@ export function buildAssignmentArtifactBundle(input: BuildAssignmentArtifactBund
           sequence: 1,
           phase: "preflight" as const,
           action: `prepared assignment package for ${input.assignment.taskId}`,
-          observation: `provider=${input.launch.provider} cwd=${input.launch.cwd}`,
+          observation: `provider=${input.launch.provider} profile=${input.launch.executionProfile ?? "trusted-host"} cwd=${input.launch.cwd}`,
           status: "succeeded" as const,
         },
         {

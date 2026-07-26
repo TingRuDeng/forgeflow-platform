@@ -3,6 +3,8 @@ import path from "node:path";
 import { spawn, type ChildProcess, type StdioOptions } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { executionProfilePolicyId } from "@tingrudeng/beta-runtime-core";
+
 import { listManagedProcesses } from "./process-control.js";
 
 export interface StartWorkerOptions {
@@ -140,25 +142,28 @@ function readFlagValue(command: string, flag: string, nextFlags: string[]) {
   return command.slice(valueStart, valueEnd).trim();
 }
 
-function matchesWorkerCommand(command: string, input: {
+export function matchesCodexWorkerCommand(command: string, input: {
   repoDir: string;
   dispatcherUrl: string;
   workerId: string;
   pool: string;
   codexBin: string;
+  executionPolicyId: string;
 }) {
-  const trailingFlags = ["--pool", "--codex-bin", "--poll-interval-ms", "--dry-run-execution", "--once"];
+  const trailingFlags = ["--pool", "--codex-bin", "--execution-policy-id", "--poll-interval-ms", "--dry-run-execution", "--once"];
   const actualRepoDir = readFlagValue(command, "--repo-dir", ["--dispatcher-url", "--worker-id", ...trailingFlags]);
   const actualDispatcherUrl = readFlagValue(command, "--dispatcher-url", ["--worker-id", ...trailingFlags]);
   const actualWorkerId = readFlagValue(command, "--worker-id", trailingFlags);
-  const actualPool = readFlagValue(command, "--pool", ["--codex-bin", "--poll-interval-ms", "--dry-run-execution", "--once"]);
-  const actualCodexBin = readFlagValue(command, "--codex-bin", ["--poll-interval-ms", "--dry-run-execution", "--once"]);
+  const actualPool = readFlagValue(command, "--pool", ["--codex-bin", "--execution-policy-id", "--poll-interval-ms", "--dry-run-execution", "--once"]);
+  const actualCodexBin = readFlagValue(command, "--codex-bin", ["--execution-policy-id", "--poll-interval-ms", "--dry-run-execution", "--once"]);
+  const actualExecutionPolicyId = readFlagValue(command, "--execution-policy-id", ["--poll-interval-ms", "--dry-run-execution", "--once"]);
 
   return actualRepoDir === input.repoDir
     && actualDispatcherUrl === input.dispatcherUrl
     && actualWorkerId === input.workerId
     && actualPool === input.pool
-    && actualCodexBin === input.codexBin;
+    && actualCodexBin === input.codexBin
+    && actualExecutionPolicyId === input.executionPolicyId;
 }
 
 export function startWorker(options: StartWorkerOptions = {}): SpawnedForgeFlowCommand {
@@ -178,6 +183,11 @@ export function startWorker(options: StartWorkerOptions = {}): SpawnedForgeFlowC
   const workerId = String(options.workerId || process.env.FORGEFLOW_WORKER_ID || "codex-remote").trim();
   const pool = String(options.pool || process.env.FORGEFLOW_WORKER_POOL || "codex").trim();
   const codexBin = String(options.codexBin || process.env.FORGEFLOW_CODEX_BIN || "codex").trim();
+  const executionEnv = {
+    ...process.env,
+    ...(options.env || {}),
+  };
+  const executionPolicyId = executionProfilePolicyId(executionEnv);
 
   if (pool !== "codex") {
     throw new Error(`pool must be codex, got ${pool}`);
@@ -195,6 +205,9 @@ export function startWorker(options: StartWorkerOptions = {}): SpawnedForgeFlowC
     "--codex-bin",
     codexBin,
   ];
+  if (executionPolicyId) {
+    args.push("--execution-policy-id", executionPolicyId);
+  }
 
   if (options.pollIntervalMs !== undefined) {
     args.push("--poll-interval-ms", String(Number(options.pollIntervalMs)));
@@ -210,15 +223,16 @@ export function startWorker(options: StartWorkerOptions = {}): SpawnedForgeFlowC
     const status = listManagedProcesses("worker");
     const existing = status.matches[0];
     if (existing) {
-      if (!matchesWorkerCommand(existing.command, {
+      if (!matchesCodexWorkerCommand(existing.command, {
         repoDir,
         dispatcherUrl,
         workerId,
         pool: "codex",
         codexBin,
+        executionPolicyId,
       })) {
         throw new Error(
-          "existing managed worker does not match requested repo/dispatcher/worker/pool/codex-bin settings; use --force to replace it",
+          "existing managed worker does not match requested repo/dispatcher/worker/pool/codex-bin/execution-profile settings; use --force to replace it",
         );
       }
       return reuseExistingProcess(scriptPath, args, existing.pid, options, packageRootDir);

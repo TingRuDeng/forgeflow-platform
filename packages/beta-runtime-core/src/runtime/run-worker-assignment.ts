@@ -4,8 +4,16 @@ import { spawnSync } from "node:child_process";
 
 import { readJson } from "./utils.js";
 import { buildAssignmentArtifactBundle } from "./assignment-artifacts.js";
+import {
+  applyExecutionProfile,
+  assertExecutionProfileReady,
+  executionProfilesEqual,
+  resolveExecutionProfile,
+  type ExecutionProfile,
+} from "./execution-profile.js";
 import { spawnProcessTree, terminateProcessTree } from "./process-tree.js";
 import type { TaskAssignment, WorkerResult } from "./types.js";
+import { buildProviderProcessEnv } from "./worker-env.js";
 import type {
   AssignmentLaunchCommand,
   AssignmentVerificationCommand,
@@ -34,8 +42,14 @@ export function buildAssignmentPrompt(workerPrompt: string, contextMarkdown: str
   return `${workerPrompt.trim()}\n\n${contextMarkdown.trim()}\n`;
 }
 
-export function buildVerificationCommands(assignment: TaskAssignment, worktreeDir: string): AssignmentVerificationCommand[] {
-  const shell = getVerificationShell();
+export function buildVerificationCommands(
+  assignment: TaskAssignment,
+  worktreeDir: string,
+  executionProfile: ExecutionProfile = resolveExecutionProfile(),
+): AssignmentVerificationCommand[] {
+  const shell = executionProfile.name === "isolated-container"
+    ? "/bin/sh"
+    : getVerificationShell();
   return Object.values(assignment.commands ?? {}).map((command) => ({
     command,
     argv: [
@@ -89,31 +103,78 @@ export async function runWorkerAssignment(input: RunWorkerAssignmentInput): Prom
   const assignmentDir = path.resolve(input.assignmentDir);
   const outputDir = path.resolve(input.outputDir || assignmentDir);
   const worktreeDir = path.resolve(input.worktreeDir);
-  ensureWorkspaceDependencies(worktreeDir);
+  const executionEnv = input.executionEnv ?? process.env;
+  const configuredExecutionProfile = resolveExecutionProfile(executionEnv);
+  if (
+    input.executionProfile
+    && !executionProfilesEqual(input.executionProfile, configuredExecutionProfile)
+  ) {
+    throw new Error(
+      "execution profile override does not match the operator-owned worker environment",
+    );
+  }
+  const executionProfile = input.executionProfile ?? configuredExecutionProfile;
+  if (!input.dryRun) {
+    assertExecutionProfileReady(executionProfile, input.executionProfileProbe);
+  }
+  if (executionProfile.name === "trusted-host") {
+    ensureWorkspaceDependencies(worktreeDir);
+  }
 
   const assignment = readJson(path.join(assignmentDir, "assignment.json")) as TaskAssignment;
   const workerPrompt = fs.readFileSync(path.join(assignmentDir, "worker-prompt.md"), "utf8");
   const contextMarkdown = fs.readFileSync(path.join(assignmentDir, "context.md"), "utf8");
   const prompt = buildAssignmentPrompt(workerPrompt, contextMarkdown);
-  const launch = await input.buildLaunchCommand({ assignment, prompt, worktreeDir });
-  const verificationCommands = buildVerificationCommands(assignment, worktreeDir);
+  const providerEnv = buildProviderProcessEnv(executionEnv, assignment.pool);
+  const verificationEnv = buildProviderProcessEnv(executionEnv);
+  const launch = applyExecutionProfile(
+    await input.buildLaunchCommand({
+      assignment,
+      prompt,
+      worktreeDir,
+      env: providerEnv,
+    }),
+    executionProfile,
+    {
+      workspaceDir: worktreeDir,
+      provider: assignment.pool,
+      envSource: executionEnv,
+    },
+  );
+  const verificationCommands = buildVerificationCommands(
+    assignment,
+    worktreeDir,
+    executionProfile,
+  ).map((command) => applyExecutionProfile(command, executionProfile, {
+    workspaceDir: worktreeDir,
+    envSource: executionEnv,
+  }));
 
   if (input.dryRun) {
     return {
       status: "dry_run",
       assignmentDir,
       outputDir,
+      executionProfile: executionProfile.name,
       launch,
       verificationCommands,
     };
   }
 
   fs.mkdirSync(outputDir, { recursive: true });
-  const launchResult = await runCommandWithTimeout(launch, input.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS);
+  const launchResult = await runCommandWithTimeout(
+    launch,
+    input.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS,
+    providerEnv,
+  );
   const verification = [];
   if (!launchResult.timedOut) {
     for (const command of verificationCommands) {
-      const result = await runCommandWithTimeout(command, input.verificationTimeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS);
+      const result = await runCommandWithTimeout(
+        command,
+        input.verificationTimeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS,
+        verificationEnv,
+      );
       verification.push({
         command: command.command,
         exitCode: result.exitCode,
@@ -145,6 +206,7 @@ export async function runWorkerAssignment(input: RunWorkerAssignmentInput): Prom
     provider: launch.provider,
     taskId: assignment.taskId,
     outputDir,
+    executionProfile: executionProfile.name,
     verificationPassed: workerResult.verification.allPassed,
     timedOut: Boolean(launchResult.timedOut),
   };
@@ -210,12 +272,16 @@ function ensureWorkspaceDependencies(worktreeDir: string): void {
 function runCommandWithTimeout(
   command: AssignmentLaunchCommand | AssignmentVerificationCommand,
   timeoutMs: number,
+  env: NodeJS.ProcessEnv,
 ): Promise<CommandResult> {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
     let timedOut = false;
-    const proc = spawnProcessTree(command.argv[0], command.argv.slice(1), { cwd: command.cwd });
+    const proc = spawnProcessTree(command.argv[0], command.argv.slice(1), {
+      cwd: command.cwd,
+      env,
+    });
     const timer = setTimeout(() => {
       timedOut = true;
       terminateProcessTree(proc);

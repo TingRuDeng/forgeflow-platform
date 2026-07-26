@@ -9,6 +9,10 @@ ForgeFlow beta runtime 的共享 worker daemon 与 task worktree 控制逻辑。
 - 这是源码内共享包，不是远程机器直接安装入口。
 - npm 包名当前仍需外部包名和 Trusted Publisher 配置；配置完成并发布前，由 workspace 依赖消费。
 
+## 执行隔离
+
+Codex / Gemini assignment 默认使用 `trusted-host`。设置 `FORGEFLOW_EXECUTION_PROFILE=isolated-container` 和固定本地 `FORGEFLOW_EXECUTION_CONTAINER_IMAGE` 后，共享 runner 会把 provider 与 verification 都放入同一容器策略，并在 runtime 或镜像不可用时 fail closed。完整环境变量、挂载、secret、资源与网络边界见 `../../docs/contracts/execution-profile-v1.md`。
+
 ## 验证
 
 ```bash

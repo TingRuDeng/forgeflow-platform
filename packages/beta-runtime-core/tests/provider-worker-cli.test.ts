@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   formatProviderWorkerCliHelp,
@@ -40,6 +40,8 @@ describe("provider worker cli", () => {
       "mac,codex",
       "--codex-bin",
       "/usr/local/bin/codex",
+      "--execution-policy-id",
+      "sha256:test-policy",
       "--poll-interval-ms",
       "7000",
       "--dry-run-execution",
@@ -54,6 +56,7 @@ describe("provider worker cli", () => {
       hostname: "host-1",
       labels: ["mac", "codex"],
       providerBin: "/usr/local/bin/codex",
+      executionPolicyId: "sha256:test-policy",
       pollIntervalMs: 7000,
       dryRunExecution: true,
       once: true,
@@ -116,5 +119,64 @@ describe("provider worker cli", () => {
       }),
     ]);
     expect(writes.join("")).toContain("\"status\": \"idle\"");
+  });
+
+  it("fails before daemon registration when isolated execution is unavailable", async () => {
+    const runWorkerDaemon = vi.fn(async () => ({
+      status: "idle" as const,
+      workerId: "codex-1",
+    }));
+
+    await expect(runProviderWorkerCli([
+      "--dispatcher-url",
+      "http://127.0.0.1:8787",
+      "--worker-id",
+      "codex-1",
+      "--pool",
+      "codex",
+      "--repo-dir",
+      "/repo",
+    ], codexConfig, {
+      env: {
+        FORGEFLOW_EXECUTION_PROFILE: "isolated-container",
+        FORGEFLOW_EXECUTION_CONTAINER_IMAGE: "forgeflow-worker:test",
+      },
+      executionProfileProbe: () => ({
+        status: 1,
+        stderr: "docker daemon unavailable",
+      }),
+      runWorkerDaemon,
+    })).rejects.toThrow("isolated execution profile blocked");
+
+    expect(runWorkerDaemon).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale managed-process execution policy id", async () => {
+    const runWorkerDaemon = vi.fn(async () => ({
+      status: "idle" as const,
+      workerId: "codex-1",
+    }));
+
+    await expect(runProviderWorkerCli([
+      "--dispatcher-url",
+      "http://127.0.0.1:8787",
+      "--worker-id",
+      "codex-1",
+      "--pool",
+      "codex",
+      "--repo-dir",
+      "/repo",
+      "--execution-policy-id",
+      "sha256:stale",
+    ], codexConfig, {
+      env: {
+        FORGEFLOW_EXECUTION_PROFILE: "isolated-container",
+        FORGEFLOW_EXECUTION_CONTAINER_IMAGE: "forgeflow-worker:test",
+      },
+      executionProfileProbe: () => ({ status: 0 }),
+      runWorkerDaemon,
+    })).rejects.toThrow("execution policy id does not match");
+
+    expect(runWorkerDaemon).not.toHaveBeenCalled();
   });
 });
