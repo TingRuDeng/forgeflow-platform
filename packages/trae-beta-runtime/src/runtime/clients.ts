@@ -47,6 +47,7 @@ export interface JsonHttpClientOptions {
       headers?: Record<string, string>;
       body?: string;
       timeoutMs: number;
+      signal?: AbortSignal;
     },
   ) => Promise<JsonHttpResponse>;
 }
@@ -55,6 +56,7 @@ export interface JsonHttpRequestOptions {
   method?: string;
   body?: unknown;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 interface JsonHttpResponse {
@@ -70,6 +72,7 @@ async function requestWithNodeTransport(
     headers?: Record<string, string>;
     body?: string;
     timeoutMs: number;
+    signal?: AbortSignal;
   },
 ): Promise<JsonHttpResponse> {
   const url = new URL(urlString);
@@ -99,20 +102,29 @@ async function requestWithNodeTransport(
       });
     });
 
-    const timeoutId = setTimeout(() => {
+    const abortRequest = () => {
       const error = new Error("Request aborted");
       error.name = "AbortError";
       request.destroy(error);
-    }, init.timeoutMs);
+    };
+    const timeoutId = setTimeout(abortRequest, init.timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      init.signal?.removeEventListener("abort", abortRequest);
+    };
 
     request.on("error", (error) => {
-      clearTimeout(timeoutId);
+      cleanup();
       reject(error);
     });
 
-    request.on("close", () => {
-      clearTimeout(timeoutId);
-    });
+    request.on("close", cleanup);
+
+    if (init.signal?.aborted) {
+      abortRequest();
+      return;
+    }
+    init.signal?.addEventListener("abort", abortRequest, { once: true });
 
     if (init.body) {
       request.write(init.body);
@@ -130,7 +142,17 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
   async function request(path: string, init: JsonHttpRequestOptions = {}) {
     const controller = new AbortController();
     const timeoutMs = Number(init.timeoutMs || 10000);
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    let timedOut = false;
+    const abortFromCaller = () => controller.abort(init.signal?.reason);
+    if (init.signal?.aborted) {
+      abortFromCaller();
+    } else {
+      init.signal?.addEventListener("abort", abortFromCaller, { once: true });
+    }
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
 
     try {
       const method = init.method || "GET";
@@ -159,8 +181,8 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
           headers,
           body,
           timeoutMs,
+          signal: controller.signal,
         });
-      clearTimeout(timeoutId);
 
       const json = response.text ? JSON.parse(response.text) : {};
       if (!response.ok) {
@@ -168,13 +190,22 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
       }
       return json;
     } catch (error) {
-      clearTimeout(timeoutId);
       const message = error instanceof Error ? error.message : String(error);
       if (error instanceof Error && error.name === "AbortError") {
+        if (!timedOut && init.signal?.aborted) {
+          const aborted = new Error(sourceLabel
+            ? `${sourceLabel} ${path} failed: request aborted`
+            : `request aborted: ${path}`);
+          aborted.name = "AbortError";
+          throw aborted;
+        }
         const timeoutMessage = `request timeout: ${path}`;
         throw new Error(sourceLabel ? `${sourceLabel} ${path} failed: ${timeoutMessage}` : timeoutMessage);
       }
       throw new Error(sourceLabel ? `${sourceLabel} ${path} failed: ${message}` : message);
+    } finally {
+      clearTimeout(timeoutId);
+      init.signal?.removeEventListener("abort", abortFromCaller);
     }
   }
 
@@ -201,11 +232,12 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
         timeoutMs: requestTimeoutMs,
       });
     },
-    async fetchTask(workerId: string, repoDir: string) {
+    async fetchTask(workerId: string, repoDir: string, requestOptions: { signal?: AbortSignal } = {}) {
       return http.request("/api/trae/fetch-task", {
         method: "POST",
         body: { worker_id: workerId, repo_dir: repoDir },
         timeoutMs: requestTimeoutMs,
+        signal: requestOptions.signal,
       });
     },
     async startTask(workerId: string, taskId: string, attemptLease: WorkerProtocolEnvelopeInput = {}) {
@@ -269,7 +301,7 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
       };
       evidence?: WorkerEvidence;
       artifactBundle?: TraeWorkerArtifactBundle;
-    }) {
+    }, requestOptions: { signal?: AbortSignal } = {}) {
       return http.request("/api/trae/submit-result", {
         method: "POST",
         body: {
@@ -294,6 +326,7 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
           artifact_bundle: input.artifactBundle,
         },
         timeoutMs: requestTimeoutMs,
+        signal: requestOptions.signal,
       });
     },
     async heartbeat(workerId: string) {

@@ -25,6 +25,13 @@ const STATE_FALLBACK_ENV = "FORGEFLOW_ALLOW_STATE_FALLBACK_JSON";
 const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 const SHADOW_WRITE_FAILED_EVENT_TYPE = "shadow_write_failed";
 
+type RuntimeStateSnapshotRow = {
+  revision: number;
+  data: string;
+  checksum_sha256: string;
+  created_at: string;
+};
+
 function nowIso(): string {
   return formatLocalTimestamp();
 }
@@ -300,7 +307,31 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
   ensureColumn(db, "runtime_events", "event_id", "TEXT");
 }
 
-function persistRuntimeStateSnapshot(db: InstanceType<typeof DatabaseSync>, state: RuntimeState): RuntimeState {
+function readLatestRuntimeStateSnapshot(db: InstanceType<typeof DatabaseSync>): RuntimeState {
+  const row = db
+    .prepare(
+      "SELECT revision, data, checksum_sha256, created_at FROM snapshots ORDER BY revision DESC LIMIT 1",
+    )
+    .get() as RuntimeStateSnapshotRow | undefined;
+
+  if (!row) {
+    throw new Error("snapshots table is empty");
+  }
+
+  const actualChecksum = checksumSha256(row.data);
+  if (actualChecksum !== row.checksum_sha256) {
+    throw new Error(`snapshot checksum mismatch at revision ${row.revision}`);
+  }
+
+  return coerceRuntimeState(
+    parseJsonContent(row.data, `failed to parse snapshot at revision ${row.revision}`),
+  );
+}
+
+function persistRuntimeStateSnapshotWithinTransaction(
+  db: InstanceType<typeof DatabaseSync>,
+  state: RuntimeState,
+): RuntimeState {
   const normalizedState = ensureRuntimeEventIdentities(state);
   const persistedState = {
     ...normalizedState,
@@ -311,15 +342,20 @@ function persistRuntimeStateSnapshot(db: InstanceType<typeof DatabaseSync>, stat
   const createdAt = nowIso();
   const checksum = checksumSha256(content);
 
+  db.prepare(`
+    INSERT INTO snapshots (data, checksum_sha256, created_at)
+    VALUES (?, ?, ?)
+  `).run(content, checksum, createdAt);
+
+  appendRuntimeAuditEvents(db, persistedState.events);
+  rewriteStructuredProjection(db, persistedState);
+  return persistedState;
+}
+
+function persistRuntimeStateSnapshot(db: InstanceType<typeof DatabaseSync>, state: RuntimeState): RuntimeState {
   db.exec("BEGIN IMMEDIATE;");
   try {
-    db.prepare(`
-      INSERT INTO snapshots (data, checksum_sha256, created_at)
-      VALUES (?, ?, ?)
-    `).run(content, checksum, createdAt);
-
-    appendRuntimeAuditEvents(db, persistedState.events);
-    rewriteStructuredProjection(db, persistedState);
+    const persistedState = persistRuntimeStateSnapshotWithinTransaction(db, state);
     db.exec("COMMIT;");
     return persistedState;
   } catch (error) {
@@ -389,21 +425,29 @@ function buildShadowFailureEvent(status: RuntimeStateShadowWriteStatus): Event {
   };
 }
 
-function recordShadowFailureEvent(stateDir: string): void {
+export function recordShadowFailureEvent(stateDir: string): void {
   const status = readRuntimeStateShadowWriteStatus(stateDir);
   if (status.status !== "failed") {
-    return;
-  }
-
-  const state = loadRuntimeState(stateDir);
-  if (hasShadowFailureEvent(state, status)) {
     return;
   }
 
   const db = new DatabaseSync(dbFilePath(stateDir));
   try {
     initDb(db);
-    persistRuntimeStateSnapshot(db, appendRuntimeEvent(state, buildShadowFailureEvent(status)));
+    db.exec("BEGIN IMMEDIATE;");
+    try {
+      const state = readLatestRuntimeStateSnapshot(db);
+      if (!hasShadowFailureEvent(state, status)) {
+        persistRuntimeStateSnapshotWithinTransaction(
+          db,
+          appendRuntimeEvent(state, buildShadowFailureEvent(status)),
+        );
+      }
+      db.exec("COMMIT;");
+    } catch (error) {
+      db.exec("ROLLBACK;");
+      throw error;
+    }
   } finally {
     db.close();
   }
@@ -729,31 +773,7 @@ export function loadRuntimeState(stateDir: string): RuntimeState {
   try {
     db = new DatabaseSync(readOnlyDbUri(filePath), { readOnly: true });
     applyReadOnlyPragmas(db);
-    const row = db
-      .prepare(
-        "SELECT revision, data, checksum_sha256, created_at FROM snapshots ORDER BY revision DESC LIMIT 1",
-      )
-      .get() as
-      | {
-          revision: number;
-          data: string;
-          checksum_sha256: string;
-          created_at: string;
-        }
-      | undefined;
-
-    if (!row) {
-      throw new Error("snapshots table is empty");
-    }
-
-    const actualChecksum = checksumSha256(row.data);
-    if (actualChecksum !== row.checksum_sha256) {
-      throw new Error(`snapshot checksum mismatch at revision ${row.revision}`);
-    }
-
-    return coerceRuntimeState(
-      parseJsonContent(row.data, `failed to parse snapshot at revision ${row.revision}`),
-    );
+    return readLatestRuntimeStateSnapshot(db);
   } catch (error) {
     return loadFromJsonFallback(stateDir, error);
   } finally {

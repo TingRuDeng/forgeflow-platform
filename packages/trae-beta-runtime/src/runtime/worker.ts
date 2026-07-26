@@ -44,7 +44,10 @@ import {
   prepareTaskWorktree,
   safeTaskDirName,
 } from "./task-worktree.js";
-import { submitResultLifecycle } from "./submit-result-lifecycle.js";
+import {
+  submitResultLifecycle,
+  WorkerResultDeliveryError,
+} from "./submit-result-lifecycle.js";
 
 const DEFAULT_POLL_INTERVAL_MS = Number(process.env.TRAE_AUTOMATION_POLL_INTERVAL_MS || 5000);
 const DEFAULT_ERROR_BACKOFF_MS = Number(process.env.TRAE_AUTOMATION_ERROR_BACKOFF_MS || 5000);
@@ -981,7 +984,12 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     }
   }
 
-  async function submitParsedResult(task: WorkerRuntimeTask, parsed: WorkerRuntimeReport, sessionId: string | null) {
+  async function submitParsedResult(
+    task: WorkerRuntimeTask,
+    parsed: WorkerRuntimeReport,
+    sessionId: string | null,
+    signal?: AbortSignal,
+  ) {
     const traceId = extractTaskTraceId(task);
     const successRequested = parsed.result === "成功";
     const successAllowed = hasCodeChangeEvidence(parsed) || isEnvironmentOnlySuccess(parsed);
@@ -1070,6 +1078,8 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       submitResult: dispatcherClient.submitResult,
       promoteToIdle: () => heartbeat.promoteToIdle(),
       releaseSession: releaseTaskSession,
+      signal,
+      sleep,
       startPayload: {
         status,
         sessionId,
@@ -1108,6 +1118,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
     rawOutput = "",
     sessionId: string | null = null,
     phase = "execution",
+    signal?: AbortSignal,
   ) {
     const classified = classifyWorkerFailure(error, phase);
     const traceId = extractTaskTraceId(task);
@@ -1146,6 +1157,8 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       submitResult: dispatcherClient.submitResult,
       promoteToIdle: () => heartbeat.promoteToIdle(),
       releaseSession: releaseTaskSession,
+      signal,
+      sleep,
       startPayload: {
         status: "failed",
         sessionId,
@@ -1205,7 +1218,11 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       || "";
   }
 
-  async function tryRecoverFromCurrentSession(task: WorkerRuntimeTask, sessionId: string | null) {
+  async function tryRecoverFromCurrentSession(
+    task: WorkerRuntimeTask,
+    sessionId: string | null,
+    signal?: AbortSignal,
+  ) {
     if (!sessionId || typeof automationClient.getSession !== "function") {
       return null;
     }
@@ -1251,7 +1268,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       "Session completed, extracting stored response",
       workerId,
     );
-    const finalStatus = await submitParsedResult(task, parsed, sessionId);
+    const finalStatus = await submitParsedResult(task, parsed, sessionId, signal);
     return {
       status: finalStatus,
       taskId: task.task_id,
@@ -1361,11 +1378,13 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       }
     },
 
-    async runOnce() {
+    async runOnce(signal?: AbortSignal) {
       await emitPhaseEvent("fetch_task_start", { repoDir });
       let fetched: unknown;
       try {
-        fetched = await dispatcherClient.fetchTask(workerId, repoDir);
+        fetched = signal
+          ? await dispatcherClient.fetchTask(workerId, repoDir, { signal })
+          : await dispatcherClient.fetchTask(workerId, repoDir);
       } catch (error) {
         await emitPhaseEvent("fetch_task_failed", {
           repoDir,
@@ -1424,7 +1443,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         } catch {
           // progress reporting failure should not block terminal failure submission
         }
-        await submitFailure(task, new Error(summary), "", null, "workspace_prepare");
+        await submitFailure(task, new Error(summary), "", null, "workspace_prepare", signal);
         return {
           status: "failed",
           taskId: task.task_id,
@@ -1541,19 +1560,22 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
             const mismatchError = new Error(
               `Task ID mismatch: expected "${task.task_id}" but got "${parsed.taskId}". The response may be from a previous task.`
             );
-            const recovered = await tryRecoverFromCurrentSession(task, sessionId);
+            const recovered = await tryRecoverFromCurrentSession(task, sessionId, signal);
             if (recovered) {
               return recovered;
             }
             throw mismatchError;
           }
-          const finalStatus = await submitParsedResult(task, parsed, sessionId);
+          const finalStatus = await submitParsedResult(task, parsed, sessionId, signal);
           return {
             status: finalStatus,
             taskId: task.task_id,
             responseText: finalText,
           };
         } catch (chatError) {
+          if (chatError instanceof WorkerResultDeliveryError) {
+            throw chatError;
+          }
           await emitPhaseEvent("send_chat_failed", {
             sessionId,
             message: chatError instanceof Error ? chatError.message : String(chatError),
@@ -1619,7 +1641,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
                     `Task ID mismatch: expected "${task.task_id}" but got "${parsed.taskId}". The response may be from a previous task.`
                   );
                 }
-                const finalStatus = await submitParsedResult(task, parsed, sessionId);
+                const finalStatus = await submitParsedResult(task, parsed, sessionId, signal);
                 return {
                   status: finalStatus,
                   taskId: task.task_id,
@@ -1698,7 +1720,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
                 prNumber: null,
                 prUrl: null,
               },
-            }, sessionId);
+            }, sessionId, signal);
             return {
               status: "review_ready",
               taskId: task.task_id,
@@ -1728,6 +1750,9 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           throw new Error("Hard timeout exceeded");
         }
       } catch (error) {
+        if (error instanceof WorkerResultDeliveryError) {
+          throw error;
+        }
         debugLog("worker.task.error", {
           taskId: task.task_id,
           sessionId,
@@ -1763,7 +1788,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
               prNumber: null,
               prUrl: null,
             },
-          }, sessionId);
+          }, sessionId, signal);
           return {
             status: "review_ready",
             taskId: task.task_id,
@@ -1776,7 +1801,14 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           reason: artifactCheck.evidence.remoteCheckReason || artifactCheck.reason,
           source: "task_error",
         }, task.task_id);
-        await submitFailure(task, error instanceof Error ? error : new Error(String(error)), "", sessionId, "task_execution");
+        await submitFailure(
+          task,
+          error instanceof Error ? error : new Error(String(error)),
+          "",
+          sessionId,
+          "task_execution",
+          signal,
+        );
         return {
           status: "failed",
           taskId: task.task_id,
@@ -1787,23 +1819,33 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
 
     async runLoop(signal?: AbortSignal) {
       let consecutiveErrors = 0;
-      while (!signal?.aborted) {
-        try {
-          const result = await runtime.runOnce();
-          consecutiveErrors = 0;
-          if (result.status === "no_task") {
-            await sleep(pollIntervalMs);
-          }
-        } catch (error) {
-          consecutiveErrors += 1;
-          const backoffMs = Math.min(maxErrorBackoffMs, errorBackoffMs * consecutiveErrors);
-          logger?.warn?.(
-            `[trae-automation-worker] runLoop recovered from error: ${error instanceof Error ? error.message : String(error)}`
-          );
-          if (!signal?.aborted) {
-            await sleep(backoffMs);
+      try {
+        while (!signal?.aborted) {
+          try {
+            const result = await runtime.runOnce(signal);
+            consecutiveErrors = 0;
+            if (result.status === "no_task") {
+              await sleep(pollIntervalMs);
+            }
+          } catch (error) {
+            if (error instanceof WorkerResultDeliveryError) {
+              logger?.warn?.(
+                `[trae-automation-worker] stopping after terminal result delivery failure: ${error.message}`
+              );
+              throw error;
+            }
+            consecutiveErrors += 1;
+            const backoffMs = Math.min(maxErrorBackoffMs, errorBackoffMs * consecutiveErrors);
+            logger?.warn?.(
+              `[trae-automation-worker] runLoop recovered from error: ${error instanceof Error ? error.message : String(error)}`
+            );
+            if (!signal?.aborted) {
+              await sleep(backoffMs);
+            }
           }
         }
+      } finally {
+        heartbeat.stop();
       }
     },
 
@@ -1937,9 +1979,12 @@ export async function runWorkerRuntimeFromArgv(argv: string[], partialDeps: Part
   });
 
   if (args.once) {
-    const result = await runtime.runOnce();
-    console.log(JSON.stringify(result, null, 2));
-    runtime.stop();
+    try {
+      const result = await runtime.runOnce();
+      console.log(JSON.stringify(result, null, 2));
+    } finally {
+      runtime.stop();
+    }
     return;
   }
 
@@ -1947,8 +1992,11 @@ export async function runWorkerRuntimeFromArgv(argv: string[], partialDeps: Part
   process.once("SIGINT", () => controller.abort());
   process.once("SIGTERM", () => controller.abort());
 
-  await runtime.runLoop(controller.signal);
-  runtime.stop();
+  try {
+    await runtime.runLoop(controller.signal);
+  } finally {
+    runtime.stop();
+  }
 }
 
 if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] || "")) {

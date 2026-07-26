@@ -288,7 +288,7 @@ vNext runtime reliability 推进：
   - install-and-run runtime 包：`../packages/forgeflow-dispatcher/README.md`
 - `start-control-plane.sh` 现在默认把 dispatcher 绑定到 `127.0.0.1`；监听非 loopback 地址必须显式传 `FORGEFLOW_DISPATCHER_HOST` 或 `--host`。
 - `codex` / `gemini` 的 `worker daemon` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `../packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。worker-daemon 主循环、worker CLI、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到 `@tingrudeng/beta-runtime-core`，dispatcher runtime-glue 与源码脚本复用同一个 shared daemon cycle，脚本侧 dist bootstrap 已收敛到 `../scripts/lib/runtime-bootstrap.ts`，本地日志 / metrics hook 组装已拆到 `../scripts/lib/worker-daemon-hooks.ts`；CI 和 release workflow 会运行 `pnpm verify:runtime-packages` 校验 runtime 包发布清单，并运行 `pnpm verify:runtime-packages:install` 本地打包 / 安装 codex、gemini、trae runtime tarball；`pnpm report:runtime-packages:setup` 会输出 npm 包名、当前版本、发布顺序和 Trusted Publisher 配置缺口；生产发布窗口可用 `pnpm verify:runtime-packages:published` 强制校验 npm registry 包名、版本和已发布依赖元数据，并用 `pnpm verify:runtime-packages:published-smoke` 从 registry 安装已发布 provider runtime 后验证 CLI；剩余边界是未发布包的外部 npm 配置和生产部署证据。
-- `worker-daemon` / Trae runtime 现在只有在结果成功回写到 dispatcher 后才会对外呈现“完成”；`submitResult`、`git push`、自动 PR 创建失败都属于显式失败，而不是假完成。shared daemon cycle 只维持一条 single-flight heartbeat 并覆盖结果重试；assignment 子进程默认总超时为 30 分钟，可用 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 覆盖。执行 timeout / SIGINT / SIGTERM 会取消 dispatcher HTTP 请求与重试等待，并终止完整子进程树。
+- `worker-daemon` / Trae runtime 现在只有在结果成功回写到 dispatcher 后才会对外呈现“完成”；`submitResult`、`git push`、自动 PR 创建失败都属于显式失败，而不是假完成。Trae terminal result 与 shared daemon cycle 默认都最多尝试 3 次、间隔 2 秒，可用 `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` / `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS` 调整；Trae 在结果未获确认时保留 session，停止任务轮询并以非零状态退出。shared daemon cycle 只维持一条 single-flight heartbeat 并覆盖结果重试；assignment 子进程默认总超时为 30 分钟，可用 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 覆盖。执行 timeout / SIGINT / SIGTERM 会取消 dispatcher HTTP 请求与重试等待，并终止完整子进程树。
 - `dependsOn` 现在进入 dispatcher 调度门控：依赖未满足时任务保持 `planned`，满足后自动解锁为 `ready`。
 - generic worker claim 已从副作用 GET 收口为显式 POST：
   - `GET /api/workers/:workerId/assigned-task` 只读
@@ -316,6 +316,7 @@ vNext runtime reliability 推进：
 - Trae dispatch prompt 现在优先由 `worker-review-orchestrator-cli` 基于结构化任务字段自动渲染；dispatcher assignment 会保留最终 `workerPrompt`，并附带 `workerPromptMode/reportSchemaVersion` 元信息。
 - follow-up / rework 分支只有在源任务已经交付过可验证的远端产物、且目标 worker 不变时才允许复用；否则控制层应新开 `-rN` 分支继续。
 - Trae review-ready 的成功门槛现在包含远端 SHA 校验与短暂重试窗口；只有远端分支 HEAD 与最终回执 commit SHA 一致时，结果才会进入 review。
+- Trae terminal result 投递失败会写 `submit_result_retry_failed`，耗尽后写 `delivery_failed`；只有 dispatcher 确认终态后才把 worker 降为 idle 并释放 session。耗尽时 runtime 会保留 session、停止任务轮询并退出，避免把未确认任务再次取回执行。
 - `new_chat` 模式下的 Trae 采样现在会缩到最后一个可见 chat root，并在读取到上一个已完成任务的 `任务ID` 时提前报 stale-session 错误，而不是继续把旧对话当成本次任务基线。
 - control-layer CLI 现在补齐了 `dispatch/dispatch-task/watch/inspect/decide` 的 `--state-dir` 本地 dispatcher fallback，并统一了 `watch --summary` / `inspect --summary` 的 review/failure/redrive/progress/trace 摘要字段。
 - Trae runtime 现在会把结构化 phase events 和 failure blocker codes 写回 dispatcher worker events；generic worker daemon 的 failed result 也会带 blocker code。控制层 redrive 会优先读 blocker `code`，再回退到旧的文本 pattern。

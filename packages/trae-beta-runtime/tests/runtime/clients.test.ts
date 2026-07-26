@@ -239,6 +239,37 @@ describe("runtime/clients", () => {
     );
   }, 1000);
 
+  it("propagates caller cancellation into dispatcher result delivery", async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(async (_input, init) => {
+      const signal = init?.signal as AbortSignal | undefined;
+      await new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        controller.abort();
+      });
+      return new Response("{}");
+    });
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await expect(dispatcher.submitResult({
+      taskId: "task-aborted",
+      status: "failed",
+      summary: "cancelled",
+      testOutput: "",
+      risks: [],
+      filesChanged: [],
+    }, { signal: controller.signal })).rejects.toMatchObject({
+      name: "AbortError",
+      message: "dispatcher /api/trae/submit-result failed: request aborted",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const init = (fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(init.signal?.aborted).toBe(true);
+  });
+
   it("sends evidence in submitResult request", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       status: 200,

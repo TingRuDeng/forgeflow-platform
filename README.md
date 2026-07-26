@@ -62,7 +62,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - `forgeflow-review-orchestrator dispatch-task` 在 `pool=trae` 时会默认按结构化任务规范自动渲染 worker prompt，并把最终 prompt 连同 `workerPromptMode/reportSchemaVersion` 一起持久化到 dispatcher assignment；自定义 Trae prompt 若缺少 `任务完成/结果/任务ID` 会在 dispatch 前被拒绝。
 - follow-up / rework 任务只有在源任务已经交付过可验证的远端分支产物、且 worker 不变时才允许复用原分支；否则控制层应改用新的 `-rN` 分支继续修复。
 - Trae runtime 的 `new_chat` 采样现在会优先收窄到最后一个可见聊天根节点，并在基线里检测是否仍持续读到上一个任务的完成回执；发现旧 `任务ID` 污染时会提前失败，而不是继续误读旧会话。
-- Trae runtime 现在只有在远端分支 HEAD 与最终回执里的 commit SHA 完全一致时才会把成功结果提升为 `review_ready`；遇到远端 ref 传播延迟时，会先进入短暂重试窗口，而不是立刻把产物交给 review。
+- Trae runtime 现在只有在远端分支 HEAD 与最终回执里的 commit SHA 完全一致时才会把成功结果提升为 `review_ready`；遇到远端 ref 传播延迟时，会先进入短暂重试窗口，而不是立刻把产物交给 review。terminal result 回写默认最多尝试 3 次、间隔 2 秒，可用 `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` / `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS` 调整；dispatcher 未确认结果时不会把 worker 降为 idle 或释放当前 Trae session，并会停止任务轮询、以非零状态退出，避免重复执行未确认任务。
 - dispatcher 的状态型 HTTP 路径现在共用一把跨进程文件锁（`.runtime-state.lock`）；锁竞争超时会显式返回 `503`。锁文件记录 PID、owner token 和创建时间，存活进程持有的锁不会仅因超过 stale 阈值被回收，释放时也会核对 inode 与 owner token，避免旧 callback 删除替换锁。
 - dispatcher SQLite snapshot 现在按 revision 追加落盘，并保存 `checksum_sha256`；读取默认 fail-closed，只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 时才允许从 JSON 救援导入。
 - `dependsOn` 现在进入调度门控：依赖未满足的任务保持 `planned`，依赖满足后由 dispatcher 自动解锁到 `ready` 并写状态事件。
@@ -88,7 +88,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - Trae runtime 现在会通过 `POST /api/workers/:workerId/events` 回写结构化 phase events 与 failure blocker codes；Trae automation worker 会把同一批 phase events 写入结构化 trajectory artifact 和受限 retained content，generic Codex/Gemini assignment runner 也会在结果里附带 trajectory artifact；dispatcher artifact store 会落盘 `result.json`、retained diff / log / test result、`trajectory.json` 和可下载的 `trajectory.traj`，生成真实 `artifact://<bundleId>/<file>` 引用，并在 retention 删除正文时同步裁剪 runtime bundle 索引。
 - 阶段三核心底座现在已进入主线：dispatcher 运行时状态引入显式 `leases[]`，task claim 生命周期会获取 `assignment` / `repo` / `branch` lease；continuation 或 follow-up 任务还会基于会话锚点获取 `session` lease。该强约束只覆盖 dispatcher 管理的 task 生命周期，不覆盖绕过 dispatcher HTTP 或直接操作 repo、branch、Trae session store 的外部脚本。
 - dispatcher SQLite 真相源现在同时维护 query-first 结构化投影；可用 `DISPATCHER_STRUCTURED_READS=1` 切换只读查询到 projection 路径，并通过 `/api/query/*` 与 `/api/query/projection-health` 做一致性核对。
-- dispatcher 现在支持可回滚的 Postgres / queue shadow path：`DISPATCHER_SHADOW_MODE=shadow-write` 与 `DISPATCHER_POSTGRES_URL` 打开后，SQLite 仍是真相源，外部库只承接 best-effort shadow projection；shadow 写失败会进入 durable health record、runtime event、metrics 和 SLO。
+- dispatcher 现在支持可回滚的 Postgres / queue shadow path：`DISPATCHER_SHADOW_MODE=shadow-write` 与 `DISPATCHER_POSTGRES_URL` 打开后，SQLite 仍是真相源，外部库只承接 best-effort shadow projection；shadow 写失败会进入 durable health record、runtime event、metrics 和 SLO。失败事件会在同一 SQLite 写事务内读取最新已提交 snapshot 后再合并，避免异步失败回调把并发业务更新覆盖成旧快照。
 - `scripts/check-shadow-drift.mjs --record-alert` 写入 drift 事件时会与 dispatcher 共用本机 `.runtime-state.lock`，并在锁内重读最新状态，避免本机并发写覆盖；该文件锁不提供跨主机互斥。
 - dispatcher 现在额外暴露 `GET /api/slo` 和 `GET /api/dr/status`，用于读取 burn-rate、只读状态、shadow 写入 / 自动对账最近一轮证据、primary cutover / completion evidence、projection 健康度和备份清单。
 - `DISPATCHER_READ_ONLY_MODE=1` 是当前只读降级开关；`dispatcher-server.ts:isMutationRequest` 默认冻结 `/api/` 下的 `POST` / `PUT` / `PATCH` / `DELETE` 写方法，当前 HTTP mutation 路由已被覆盖。它仍不是独立路由注册系统，直接改运行时文件、外部数据库或绕过 dispatcher HTTP 的写入需要由运维流程单独管控。
