@@ -63,7 +63,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - 修改持久化或 DR：读 `docs/DATABASE_SCHEMA.md`、`docs/runbooks/runtime-state-backup-restore-repair.md`，再查 `runtime-state-sqlite.ts` 和 `scripts/*runtime-state.mjs`。
 - 修改 Trae 无人值守链路：读 `docs/ARCHITECTURE.md`、`docs/API_ENDPOINTS.md`、`docs/KNOWN_PITFALLS.md`，再查 `scripts/lib/trae-automation-worker.ts` 与 `packages/trae-beta-runtime/src/`。
 - 修改非 Trae runtime 或 npm 包：读对应 `packages/*/README.md`、`package.json` 和包内测试；执行隔离还要读 `docs/contracts/execution-profile-v1.md` 并查 `execution-profile.ts`、`run-worker-assignment.ts` 和 provider `start-worker.ts`，再回到根级验证。
-- 修改发布或 runtime 包可安装性：读 `README.md`、`.github/workflows/release.yml`、`docs/runbooks/release-cadence.md` 和对应 `packages/*/package.json`，再用 `npm view <pkg> version dist-tags --json` 核对 registry 事实。
+- 修改发布或 runtime 包可安装性：读 `README.md`、`.github/workflows/release.yml`、`docs/runbooks/release-cadence.md` 和对应 `packages/*/package.json`，先用只读 `npm view <pkg> version dist-tags --json` 核对 registry 事实；需要核验实际 registry payload 时运行 `node scripts/verify-published-package-tarball.mjs --package <package>`。
 - 推进 vNext runtime reliability：读 `docs/rfcs/0001-runtime-reliability-vnext.md`、`docs/WORKER_PROTOCOL_V1.md`、`docs/TASK_ATTEMPT_MODEL.md`、`docs/ARTIFACT_BUNDLE_V1.md`。
 - 修改文档体系：读 `docs/README.md`、`docs/DOC_SYNC_CHECKLIST.md` 和本文件，改完运行 `pnpm docs:validate`。
 

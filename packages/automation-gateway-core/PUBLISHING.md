@@ -13,7 +13,7 @@ The repository release path is GitHub Actions only:
 
 - Node 22+
 - pnpm installed
-- npm access to publish the `@tingrudeng` scope
+- the npm package name and Trusted Publisher binding for the `@tingrudeng` scope
 - a clean checkout of the ForgeFlow repository
 - npm must already trust GitHub repo `TingRuDeng/forgeflow-platform` as a Trusted Publisher for `@tingrudeng/automation-gateway-core`
 
@@ -43,14 +43,14 @@ Preferred path:
 2. Set repository/org variable `NPM_TRUSTED_PUBLISHING_ENABLED=true`
 3. Trigger `.github/workflows/release.yml`
 
-From the repository root:
+Preview the release from the repository root:
 
 ```bash
-pnpm --filter @tingrudeng/automation-gateway-core build
-pnpm --filter @tingrudeng/automation-gateway-core publish --access public --no-git-checks
+node scripts/release-package.js --package automation-gateway-core --bump prerelease --dry-run
 ```
 
 When a new `@tingrudeng/trae-beta-runtime` version depends on a new core version, publish this package first.
+The workflow prepares and publishes one exact tarball, then downloads npm `dist.tarball` and verifies its integrity, contents, and installability.
 
 ## Notes
 

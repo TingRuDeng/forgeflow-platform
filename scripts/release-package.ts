@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { execFileSync } from 'child_process';
 
@@ -35,24 +35,19 @@ Options:
   --package <name>       Package name to release (required)
   --bump <type>          Version bump type: major, minor, patch, prerelease (required)
   --tag <name>           npm dist-tag to publish with (optional)
-  --publish              Actually publish to npm (default: dry-run only)
-  --ci                   Confirm the publish is running in CI / GitHub Actions
+  --publish              Deprecated and rejected; formal publishing only runs through the Release workflow
   --dry-run              Explicit dry-run mode (default behavior)
   --help                 Show this help message
 
 Behavior:
-  - Without --publish: Shows what would happen, does NOT modify package.json or publish
-  - With --publish: only allowed in CI / GitHub Actions, then updates package.json version AND publishes to npm
-  - CI publish uses provenance and --no-git-checks to avoid local git state conflicts
+  - Always previews the version and exact-tarball release steps
+  - Never modifies package.json or publishes
+  - Formal publishing is owned exclusively by .github/workflows/release.yml
 
 Examples:
   # Dry-run: see what version would be published
   node scripts/release-package.js --package codex-beta-runtime --bump prerelease
   node scripts/release-package.js --package trae-beta-runtime --bump prerelease
-
-  # Actually publish in CI
-  node scripts/release-package.js --package trae-beta-runtime --bump prerelease --publish --ci
-  node scripts/release-package.js --package codex-beta-runtime --bump prerelease --publish --ci
 
   # Explicit dry-run
   node scripts/release-package.js --package trae-beta-runtime --bump prerelease --dry-run
@@ -79,8 +74,6 @@ if (!parsedArgs.bump) {
 const packageName = parsedArgs.package as string;
 const bumpType = parsedArgs.bump as string;
 const shouldPublish = parsedArgs.publish === true;
-const isDryRun = !shouldPublish;
-const isCiExecution = parsedArgs.ci === true || process.env.GITHUB_ACTIONS === "true";
 const distTag = typeof parsedArgs.tag === "string" ? parsedArgs.tag : "";
 const DIST_TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
 
@@ -90,7 +83,7 @@ function runCommand(command: string, commandArgs: string[], options: Parameters<
     cwd: workspacePath,
     ...options,
   });
-  return typeof result === "string" ? result : result.toString("utf-8");
+  return typeof result === "string" ? result : result?.toString("utf-8") ?? "";
 }
 
 function validateDistTag(tag: string): void {
@@ -103,12 +96,14 @@ function validateDistTag(tag: string): void {
   }
 }
 
-if (shouldPublish && !isCiExecution) {
-  console.error("Error: release-package publish is CI-only. Run it from GitHub Actions with --ci enabled.");
+validateDistTag(distTag);
+
+if (shouldPublish) {
+  console.error(
+    "Error: release-package is preview-only. Dispatch .github/workflows/release.yml for formal publishing.",
+  );
   process.exit(1);
 }
-
-validateDistTag(distTag);
 
 const workspacePath = resolve(process.cwd());
 let packagePath: string;
@@ -140,49 +135,6 @@ try {
   console.error((error as Error).message);
   process.exit(1);
 }
-
-function validatePublishMetadata(pkgPath: string, pkgJson: { [key: string]: any }): void {
-  const expectedRepo = process.env.GITHUB_REPOSITORY;
-  if (!expectedRepo) {
-    return;
-  }
-
-  const relativePath = pkgPath.replace(`${workspacePath}/`, "").replace(/\\/g, "/");
-  const expectedRepositoryUrl = `git+https://github.com/${expectedRepo}.git`;
-  const expectedHomepage = `https://github.com/${expectedRepo}/tree/main/${relativePath}`;
-  const expectedBugsUrl = `https://github.com/${expectedRepo}/issues`;
-  const mismatches: string[] = [];
-
-  if (pkgJson.repository?.url !== expectedRepositoryUrl) {
-    mismatches.push(`repository.url should be ${expectedRepositoryUrl}`);
-  }
-  if (pkgJson.repository?.directory !== relativePath) {
-    mismatches.push(`repository.directory should be ${relativePath}`);
-  }
-  if (pkgJson.homepage !== expectedHomepage) {
-    mismatches.push(`homepage should be ${expectedHomepage}`);
-  }
-  if (pkgJson.bugs?.url !== expectedBugsUrl) {
-    mismatches.push(`bugs.url should be ${expectedBugsUrl}`);
-  }
-
-  if (mismatches.length > 0) {
-    console.error("Error: package metadata is out of sync with the current GitHub repository:");
-    for (const mismatch of mismatches) {
-      console.error(`- ${mismatch}`);
-    }
-    process.exit(1);
-  }
-}
-
-if (shouldPublish && process.env.NPM_TRUSTED_PUBLISHING_ENABLED !== "true") {
-  console.error(
-    "Error: release-package publish requires NPM_TRUSTED_PUBLISHING_ENABLED=true after npm Trusted Publishing is configured for the current GitHub repository.",
-  );
-  process.exit(1);
-}
-
-validatePublishMetadata(packagePath, packageJson);
 
 const currentVersion = packageJson.version;
 const versionParts = currentVersion.split('.');
@@ -224,64 +176,29 @@ if (bumpType === 'prerelease') {
   newVersion = `${major}.${minor}.${patch}`;
 }
 
+const expectedDistTag = newVersion.includes("-") ? "beta" : "latest";
+if (distTag && distTag !== expectedDistTag) {
+  console.error(
+    `Error: dist-tag mismatch for @tingrudeng/${packageName}@${newVersion}: expected ${expectedDistTag}, got ${distTag}`,
+  );
+  process.exit(1);
+}
+const publishDistTag = distTag || expectedDistTag;
+
 console.log(`\nPackage: @tingrudeng/${packageName}`);
 console.log(`Current version: ${currentVersion}`);
 console.log(`New version: ${newVersion}`);
-console.log(`Mode: ${isDryRun ? 'DRY-RUN (no changes will be made)' : 'PUBLISH (will update package.json and publish)'}`);
-
-if (isDryRun) {
-  console.log('\n[DRY-RUN] Would perform the following actions:');
-  console.log(`  1. Update ${packageJsonPath}`);
-  console.log(`     "version": "${currentVersion}" → "${newVersion}"`);
-  console.log(`  2. Build the package:`);
-  console.log(`     pnpm --filter @tingrudeng/${packageName} build`);
-  console.log(`  3. Publish to npm (with Trusted Publishing):`);
-  console.log(
-    `     npm publish ${packagePath} --access public --provenance${distTag ? ` --tag ${distTag}` : ""}`
-  );
-  console.log('\nTo actually publish, add --publish flag');
-  process.exit(0);
-}
-
-console.log('\nUpdating package.json...');
-packageJson.version = newVersion;
-
-try {
-  writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n', 'utf-8');
-  console.log(`✓ Updated ${packageJsonPath}`);
-} catch (error) {
-  console.error('Error: Failed to write package.json');
-  console.error((error as Error).message);
-  process.exit(1);
-}
-
-console.log('\nBuilding package...');
-try {
-  runCommand("pnpm", ["--filter", `@tingrudeng/${packageName}`, "build"], {
-    stdio: 'inherit',
-  });
-  console.log('✓ Build completed');
-} catch (error) {
-  console.error('Error: Build failed');
-  process.exit(1);
-}
-
-console.log('\nPublishing to npm with Trusted Publishing (OIDC)...');
-try {
-  const publishArgs = ["publish", packagePath, "--access", "public", "--provenance"];
-  if (distTag) {
-    publishArgs.push("--tag", distTag);
-  }
-  runCommand("npm", publishArgs, {
-    stdio: 'inherit',
-    env: { ...process.env, GITHUB_ACTIONS: "true" }
-  });
-  console.log(`✓ Successfully published @tingrudeng/${packageName}@${newVersion}`);
-} catch (error) {
-  console.error('Error: Publish failed');
-  console.error('Note: package.json has already been updated with the new version');
-  process.exit(1);
-}
-
-console.log('\nRelease completed successfully!');
-console.log(`Package: @tingrudeng/${packageName}@${newVersion}`);
+console.log('Mode: PREVIEW (no changes will be made)');
+console.log('\n[PREVIEW] The Release workflow will perform the following actions:');
+console.log(`  1. Update ${packageJsonPath}`);
+console.log(`     "version": "${currentVersion}" → "${newVersion}"`);
+console.log(`  2. Build the package:`);
+console.log(`     pnpm --filter @tingrudeng/${packageName} build`);
+console.log(`  3. Prepare and publish one exact tarball (with Trusted Publishing):`);
+console.log(
+  `     npm publish <prepared-tarball> --ignore-scripts --access public --provenance --tag ${publishDistTag}`
+);
+console.log(
+  `  4. Download registry dist.tarball and verify dist-tag, integrity, exact contents, and installability`,
+);
+console.log('\nFormal publishing is available only through .github/workflows/release.yml');

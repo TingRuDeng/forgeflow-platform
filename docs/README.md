@@ -329,15 +329,19 @@ vNext runtime reliability 推进：
 - `../.github/workflows/ci.yml`
   - GitHub Actions CI workflow 配置。
   - 定义 push/pull_request 触发条件与验证步骤。
+  - 第三方 action 固定到完整 commit SHA，workflow 默认只授予 `contents: read`；`.github/dependabot.yml` 每周检查 GitHub Actions pin 更新。
 - `../.github/workflows/release.yml`
   - GitHub Actions 发布入口。
   - 用 OIDC + provenance 执行 npm 发布。
+  - 手动与自动发布共用仓库级 concurrency group，并把 publish checkout 绑定到 detect / dispatch 时的 commit SHA；publish 紧邻远端 `main` 校验执行，发布后再次核对 `main`，竞态漂移会使 workflow 失败并留下恢复证据。
+  - build 后以 `--ignore-scripts` 生成唯一 release tarball，再发布该 tarball；发布后从 registry `dist.tarball` 下载精确产物，并核对目标 dist-tag、integrity、shasum、完整文件集、manifest、bin 与安装结果。
   - 手动发布只允许从 `main` ref 触发，版本 bump 后会再次查询精确新版本；只有该版本尚未发布且 registry 查询可信时才继续 build / publish，版本记录固定推回 `main`。
   - 发布前会校验包元数据是否与当前仓库 `TingRuDeng/forgeflow-platform` 对齐，并要求 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 作为自动发布显式门禁；手动发布和自动发布都会先用 `npm view <package> version` 确认目标包名已在 npm registry 创建，避免跑完构建后才在 `npm publish` 阶段暴露包名 / Trusted Publisher 权限缺口；preflight 还会把 `workspace:*` 依赖解析为本地 workspace 版本，并要求该精确依赖版本已经发布。
   - CI 和 release workflow 会执行 `pnpm verify:runtime-packages:install`，在不访问 npm registry 的情况下本地打包并安装 runtime tarball，确认 provider 包不会泄漏 `workspace:*` 依赖且 CLI bin 可安装。
   - `pnpm report:runtime-packages:setup` 会只读查询 npm registry，输出 runtime 包 package/version 状态、发布顺序和 Trusted Publisher 绑定要求；发布窗口可加 `-- --require-ready` 把缺口转成硬失败。
   - 生产发布窗口可额外执行 `pnpm verify:runtime-packages:published`，校验 runtime 包名、当前本地版本和已发布依赖元数据是否与源码发布清单一致。
   - 生产发布完成后可执行 `pnpm verify:runtime-packages:published-smoke`，从 registry 安装当前源码版本的 codex/gemini/trae provider runtime，并验证 CLI bin、`--version` 和 `--help`。
+  - 任意已发布包可执行 `node scripts/verify-published-package-tarball.mjs --package <package>` 做只读精确 registry tarball 复核。
   - push 自动发布只发布 npm 上已存在包名的缺失版本；全新包名会进入 `自动发布等待 npm 包名配置` summary。
   - push 自动发布会先运行生产依赖审计、lint、文档校验、typecheck、测试和 shadow drift gate，再执行 `npm publish`。
   - 如果进入发布矩阵后发现精确版本已存在，workflow 会失败并要求递增版本，不会以“skip”伪装成功。

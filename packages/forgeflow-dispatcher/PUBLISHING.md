@@ -35,11 +35,13 @@ Normal path:
 - merge the versioned `packages/forgeflow-dispatcher/package.json` change to `main`
 - let `.github/workflows/release.yml` auto-detect and publish the exact version
 
-Manual path:
+Manual workflow path:
 
 ```bash
-node scripts/release-package.js --package forgeflow-dispatcher --bump prerelease --tag beta --publish --ci
+gh workflow run release.yml --ref main -f package=forgeflow-dispatcher -f bump=prerelease -f tag=beta
 ```
+
+`scripts/release-package.js` is preview-only and rejects `--publish`; it is not an alternate publishing path.
 
 ## Notes
 

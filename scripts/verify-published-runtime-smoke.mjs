@@ -133,6 +133,13 @@ function verifyProvider(row, installDir) {
   if (!fs.existsSync(packageJsonPath)) {
     throw new Error(`${row.packageName} was not installed from registry`);
   }
+  const installedPackageJson = readJson(packageJsonPath);
+  if (installedPackageJson.name !== row.packageName || installedPackageJson.version !== row.version) {
+    throw new Error(
+      `${row.packageName} installed manifest mismatch: expected ${row.packageName}@${row.version}, `
+      + `got ${installedPackageJson.name}@${installedPackageJson.version}`,
+    );
+  }
   const binPath = resolveBinPath(installDir, row.spec.bin);
   if (!fs.existsSync(binPath)) {
     throw new Error(`${row.packageName} did not install bin ${row.spec.bin}`);

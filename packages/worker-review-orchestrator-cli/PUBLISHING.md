@@ -15,12 +15,13 @@ If the package behavior depends on live dispatcher flows, also run the relevant 
 
 ## Publish
 
-Build and publish from the repository root:
+Preview from the repository root, then use `.github/workflows/release.yml` for the formal OIDC release:
 
 ```bash
-pnpm --filter @tingrudeng/worker-review-orchestrator-cli build
-pnpm --filter @tingrudeng/worker-review-orchestrator-cli publish --access public --no-git-checks
+node scripts/release-package.js --package worker-review-orchestrator-cli --bump prerelease --dry-run
 ```
+
+The workflow publishes one prepared tarball and verifies the exact npm registry artifact before reporting success.
 
 ## Intended Install Shape
 

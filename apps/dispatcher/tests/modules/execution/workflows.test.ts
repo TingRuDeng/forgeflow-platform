@@ -90,7 +90,11 @@ describe("workflow quality gates", () => {
     expect(workflow).toMatch(/contents:\s+write/);
     expect(workflow).toMatch(/issues:\s+write/);
     expect(workflow).toContain("id: publish");
-    expect(workflow).toContain("release-package-json-before-publish");
+    expect(workflow).toContain("Prepare exact release tarball");
+    expect(workflow).toContain("scripts/prepare-release-tarball.mjs");
+    expect(workflow).toContain("Verify exact registry tarball");
+    expect(workflow).toContain("scripts/verify-published-package-tarball.mjs");
+    expect(workflow).toContain("--expected-manifest");
     expect(workflow).toContain("git commit");
     expect(workflow).toContain("git tag");
     expect(workflow).toContain("git push");
@@ -123,7 +127,9 @@ describe("workflow quality gates", () => {
     expect(runSteps).toContain('[[ "$RELEASE_REF" != "refs/heads/main" ]]');
     expect(runSteps).toContain('git push origin "HEAD:main" --follow-tags');
     expect(runSteps).toContain('validate-release-inputs.mjs "$RELEASE_PACKAGE" "$NPM_DIST_TAG"');
-    expect(runSteps).toContain('npm publish --access public --provenance --tag "$NPM_DIST_TAG"');
+    expect(runSteps).toContain(
+      'npm publish "$RELEASE_TARBALL" --ignore-scripts --access public --provenance --tag "$NPM_DIST_TAG"',
+    );
   });
 
   it("checks the bumped manual release version before build and publish", () => {
@@ -131,7 +137,7 @@ describe("workflow quality gates", () => {
     const bumpIndex = manualJob.indexOf("- name: Bump package version");
     const availabilityIndex = manualJob.indexOf("- name: Verify bumped version is available");
     const buildIndex = manualJob.indexOf("- name: Build package");
-    const publishIndex = manualJob.indexOf("- name: Publish to npm with Trusted Publishing");
+    const publishIndex = manualJob.indexOf("- name: Require unchanged main and publish exact tarball");
 
     expect(bumpIndex).toBeGreaterThanOrEqual(0);
     expect(availabilityIndex).toBeGreaterThan(bumpIndex);
@@ -174,7 +180,7 @@ describe("workflow quality gates", () => {
   it("runs full verification before automatic npm publish", () => {
     const workflow = readWorkflow("release.yml");
     const publishAutoIndex = workflow.indexOf("publish-auto:");
-    const npmPublishIndex = workflow.indexOf("npm publish --access public --provenance", publishAutoIndex);
+    const npmPublishIndex = workflow.indexOf('npm publish "$RELEASE_TARBALL"', publishAutoIndex);
 
     expect(publishAutoIndex).toBeGreaterThanOrEqual(0);
     expect(npmPublishIndex).toBeGreaterThan(publishAutoIndex);
@@ -197,7 +203,72 @@ describe("workflow quality gates", () => {
     expect(autoJob).toContain("RELEASE_VERSION: ${{ matrix.package.version }}");
     expect(autoRunSteps).not.toMatch(/\$\{\{\s*matrix\.package\.(?:name|version)\s*\}\}/);
     expect(autoRunSteps).not.toContain("${{ steps.preflight.outputs.dist_tag }}");
-    expect(autoRunSteps).toContain('npm publish --access public --provenance --tag "$NPM_DIST_TAG"');
+    expect(autoRunSteps).toContain(
+      'npm publish "$RELEASE_TARBALL" --ignore-scripts --access public --provenance --tag "$NPM_DIST_TAG"',
+    );
+  });
+
+  it("pins every third-party action to a full commit SHA and uses least-privilege defaults", () => {
+    for (const workflowName of ["ci.yml", "release.yml", "release-scorecard.yml", "stage3-drill.yml"]) {
+      const workflow = readWorkflow(workflowName);
+      const usesLines = workflow.split("\n").filter((line) => line.trimStart().startsWith("uses:"));
+
+      expect(usesLines.length).toBeGreaterThan(0);
+      for (const line of usesLines) {
+        expect(line).toMatch(/uses:\s+[^@\s]+@[0-9a-f]{40}\s+#\s+v\d+/);
+      }
+    }
+
+    expect(readWorkflow("ci.yml")).toMatch(/permissions:\n  contents: read/);
+    expect(readWorkflow("stage3-drill.yml")).toMatch(/permissions:\n  contents: read/);
+    const dependabot = fs.readFileSync(path.join(repoRoot, ".github", "dependabot.yml"), "utf8");
+    expect(dependabot).toContain("package-ecosystem: github-actions");
+    expect(dependabot).toContain("interval: weekly");
+  });
+
+  it("serializes all releases and binds automatic publish to the detected commit and version", () => {
+    const workflow = readWorkflow("release.yml");
+    const publishAutoIndex = workflow.indexOf("publish-auto:");
+    const autoJob = workflow.slice(publishAutoIndex);
+
+    expect(workflow).toContain("group: release-${{ github.repository }}");
+    expect(workflow).not.toContain("group: release-${{ github.ref_name }}");
+    expect(workflow).toContain("release-sha: ${{ steps.detect.outputs.release-sha }}");
+    expect(workflow).toContain('echo "release-sha=$GITHUB_SHA"');
+    expect(autoJob).toContain("ref: ${{ needs.detect-changes.outputs.release-sha }}");
+    expect(autoJob).toContain("Verify detected release identity");
+    expect(autoJob).toContain('[[ "$CURRENT_SHA" != "$RELEASE_SHA" ]]');
+    expect(autoJob).toContain('[[ "$CURRENT_VERSION" != "$RELEASE_VERSION" ]]');
+  });
+
+  it("publishes and verifies the same prepared tarball in manual and automatic jobs", () => {
+    const workflow = readWorkflow("release.yml");
+
+    expect(workflow.match(/name: Prepare exact release tarball/g)?.length).toBe(2);
+    expect(workflow.match(/name: Require unchanged main and publish exact tarball/g)?.length).toBe(2);
+    expect(workflow.match(/name: Verify main remained unchanged during publish/g)?.length).toBe(2);
+    expect(workflow.match(/name: Verify exact registry tarball/g)?.length).toBe(2);
+    expect(workflow.match(/scripts\/prepare-release-tarball\.mjs/g)?.length).toBe(2);
+    expect(workflow.match(/scripts\/verify-published-package-tarball\.mjs/g)?.length).toBe(2);
+    expect(workflow.match(/npm publish "\$RELEASE_TARBALL" --ignore-scripts/g)?.length).toBe(2);
+    expect(workflow.match(/git fetch --no-tags origin main/g)?.length).toBe(4);
+    expect(workflow.match(/\[\[ "\$REMOTE_MAIN" != "\$RELEASE_SHA" \]\]/g)?.length).toBe(4);
+    expect(workflow).toContain("Summarize automatic post-publish recovery");
+    expect(workflow.match(/steps\.publish\.outcome == 'success'/g)?.length).toBe(3);
+    expect(workflow.match(/package-manager-cache: false/g)?.length).toBe(3);
+    expect(workflow).not.toContain("cache: pnpm");
+    expect(workflow).toContain('--expected-dist-tag "$NPM_DIST_TAG"');
+    expect(workflow).toContain('--expected-dist-tag "$EXPECTED_DIST_TAG"');
+    expect(workflow.match(/--expected-dist-tag/g)?.length).toBe(3);
+  });
+
+  it("runs release scorecard only after a successful Release workflow and pins its checkout SHA", () => {
+    const workflow = readWorkflow("release-scorecard.yml");
+
+    expect(workflow).toContain('workflows: ["Release"]');
+    expect(workflow).toContain("if: github.event.workflow_run.conclusion == 'success'");
+    expect(workflow).toContain("ref: ${{ github.event.workflow_run.head_sha }}");
+    expect(workflow).toContain("persist-credentials: false");
   });
 
   it("fails releases unless npm confirms the exact version is available", () => {
