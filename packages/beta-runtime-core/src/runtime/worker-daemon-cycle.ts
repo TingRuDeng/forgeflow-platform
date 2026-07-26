@@ -1,7 +1,18 @@
 import os from "node:os";
 
-import { nowIso, sleep } from "./utils.js";
-import type { DispatcherClient, PullRequestInfo, TaskPayload, WorkerResult } from "./types.js";
+import {
+  requestOptions,
+  sleepUntilAborted,
+  throwIfAborted,
+} from "./abort-signal.js";
+import { nowIso } from "./utils.js";
+import { startSingleFlightInterval } from "./single-flight-interval.js";
+import type {
+  DispatcherClient,
+  PullRequestInfo,
+  TaskPayload,
+  WorkerResult,
+} from "./types.js";
 
 const SUBMIT_RESULT_MAX_RETRIES = 3;
 const SUBMIT_RESULT_RETRY_DELAY_MS = 2_000;
@@ -30,6 +41,7 @@ export interface SharedWorkerDaemonCycleInput {
   taskExecutor?: TaskExecutor;
   at?: string;
   now?: () => string;
+  signal?: AbortSignal;
 }
 
 export type SharedWorkerDaemonCycleResult =
@@ -59,11 +71,13 @@ function buildWorkerProtocolEnvelope(assigned: TaskPayload) {
 }
 
 function getSubmitResultMaxRetries(): number {
-  return Number(process.env.WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES || SUBMIT_RESULT_MAX_RETRIES);
+  const value = Number(process.env.WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES);
+  return Number.isSafeInteger(value) && value > 0 ? value : SUBMIT_RESULT_MAX_RETRIES;
 }
 
 function getSubmitResultRetryDelayMs(): number {
-  return Number(process.env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS || SUBMIT_RESULT_RETRY_DELAY_MS);
+  const value = Number(process.env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS);
+  return Number.isSafeInteger(value) && value >= 0 ? value : SUBMIT_RESULT_RETRY_DELAY_MS;
 }
 
 function startTaskHeartbeat(input: {
@@ -71,29 +85,33 @@ function startTaskHeartbeat(input: {
   workerId: string;
   taskId: string;
   now?: () => string;
-}): () => void {
-  const intervalId = setInterval(async () => {
-    try {
-      await input.client.heartbeat(input.workerId, { at: input.now?.() ?? nowIso() });
-    } catch (error) {
+  signal?: AbortSignal;
+}): () => Promise<void> {
+  return startSingleFlightInterval({
+    intervalMs: TASK_HEARTBEAT_INTERVAL_MS,
+    run: () => input.client.heartbeat(
+      input.workerId,
+      { at: input.now?.() ?? nowIso() },
+      ...requestOptions(input.signal),
+    ).then(() => undefined),
+    onError: (error) => {
       console.error(`heartbeat failed for task ${input.taskId}:`, error instanceof Error ? error.message : String(error));
-    }
-  }, TASK_HEARTBEAT_INTERVAL_MS);
-  return () => clearInterval(intervalId);
+    },
+  });
 }
 
 async function reportWorkerEventBestEffort(
   input: SharedWorkerDaemonCycleInput,
   payload: { type: string; taskId?: string; payload?: unknown; at?: string },
 ): Promise<void> {
-  if (typeof input.client.reportEvent !== "function") {
+  if (input.signal?.aborted || typeof input.client.reportEvent !== "function") {
     return;
   }
   try {
     await input.client.reportEvent(input.workerId, {
       ...payload,
       at: payload.at ?? resolveNow(input),
-    });
+    }, ...requestOptions(input.signal));
   } catch {
     // 事件回报是诊断增强，不能遮蔽主链 submitResult 的真实失败。
   }
@@ -118,10 +136,18 @@ async function submitResultWithRetry(input: {
   let lastError: string | null = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+    throwIfAborted(input.cycle.signal, "worker daemon cycle aborted");
     try {
-      await input.cycle.client.submitResult(input.cycle.workerId, input.payload);
+      await input.cycle.client.submitResult(
+        input.cycle.workerId,
+        input.payload,
+        ...requestOptions(input.cycle.signal),
+      );
       return;
     } catch (error) {
+      if (input.cycle.signal?.aborted) {
+        throwIfAborted(input.cycle.signal, "worker daemon cycle aborted");
+      }
       lastError = error instanceof Error ? error.message : String(error);
       await reportWorkerEventBestEffort(input.cycle, {
         type: "submit_result_retry_failed",
@@ -133,7 +159,11 @@ async function submitResultWithRetry(input: {
         },
       });
       if (attempt < maxRetries) {
-        await sleep(retryDelayMs);
+        await sleepUntilAborted(
+          retryDelayMs,
+          input.cycle.signal,
+          "worker daemon cycle aborted",
+        );
       }
     }
   }
@@ -155,36 +185,27 @@ async function executeAssignedTask(input: {
   assigned: TaskPayload;
   taskId: string;
 }): Promise<TaskExecutionResult> {
-  const stopHeartbeat = startTaskHeartbeat({
-    client: input.cycle.client,
-    workerId: input.cycle.workerId,
-    taskId: input.taskId,
-    now: input.cycle.now,
-  });
-  try {
-    if (input.cycle.taskExecutor) {
-      return await input.cycle.taskExecutor.executeTask(
-        input.assigned.task,
-        input.assigned.assignment,
-        input.assigned,
-      );
-    }
-    if (input.cycle.dryRunExecution) {
-      return {
-        result: { dryRun: true, taskId: input.taskId },
-        changedFiles: [],
-        pullRequest: null,
-      };
-    }
-    throw new Error("taskExecutor is required when dryRunExecution is false");
-  } finally {
-    stopHeartbeat();
+  if (input.cycle.taskExecutor) {
+    return input.cycle.taskExecutor.executeTask(
+      input.assigned.task,
+      input.assigned.assignment,
+      input.assigned,
+    );
   }
+  if (input.cycle.dryRunExecution) {
+    return {
+      result: { dryRun: true, taskId: input.taskId },
+      changedFiles: [],
+      pullRequest: null,
+    };
+  }
+  throw new Error("taskExecutor is required when dryRunExecution is false");
 }
 
 export async function runSharedWorkerDaemonCycle(
   input: SharedWorkerDaemonCycleInput,
 ): Promise<SharedWorkerDaemonCycleResult> {
+  throwIfAborted(input.signal, "worker daemon cycle aborted");
   const at = input.at ?? resolveNow(input);
 
   await input.client.registerWorker({
@@ -194,37 +215,51 @@ export async function runSharedWorkerDaemonCycle(
     labels: input.labels ?? [],
     repoDir: input.repoDir,
     at,
-  });
-  await input.client.heartbeat(input.workerId, { at });
+  }, ...requestOptions(input.signal));
+  await input.client.heartbeat(input.workerId, { at }, ...requestOptions(input.signal));
 
-  const assigned = await input.client.claimTask(input.workerId, { at });
+  const assigned = await input.client.claimTask(input.workerId, { at }, ...requestOptions(input.signal));
   if (!assigned?.assignment || !assigned.task) {
     return { status: "idle", workerId: input.workerId };
   }
 
   const taskId = assigned.task.id ?? "unknown";
   const envelope = buildWorkerProtocolEnvelope(assigned);
-  await input.client.startTask(input.workerId, { taskId, ...envelope, at });
-
-  const executionResult = await executeAssignedTask({ cycle: input, assigned, taskId });
-  await submitResultWithRetry({
-    cycle: input,
-    taskId,
-    payload: {
-      ...envelope,
-      result: executionResult.result as WorkerResult,
-      changedFiles: executionResult.changedFiles,
-      pullRequest: executionResult.pullRequest,
-    },
-  });
-
-  return {
-    status: "completed",
+  await input.client.startTask(
+    input.workerId,
+    { taskId, ...envelope, at },
+    ...requestOptions(input.signal),
+  );
+  const stopHeartbeat = startTaskHeartbeat({
+    client: input.client,
     workerId: input.workerId,
     taskId,
-    worktreeDir: executionResult.worktreeDir,
-    outputDir: executionResult.outputDir,
-    changedFiles: executionResult.changedFiles,
-    pullRequest: executionResult.pullRequest,
-  };
+    now: input.now,
+    signal: input.signal,
+  });
+  try {
+    const executionResult = await executeAssignedTask({ cycle: input, assigned, taskId });
+    await submitResultWithRetry({
+      cycle: input,
+      taskId,
+      payload: {
+        ...envelope,
+        result: executionResult.result as WorkerResult,
+        changedFiles: executionResult.changedFiles,
+        pullRequest: executionResult.pullRequest,
+      },
+    });
+
+    return {
+      status: "completed",
+      workerId: input.workerId,
+      taskId,
+      worktreeDir: executionResult.worktreeDir,
+      outputDir: executionResult.outputDir,
+      changedFiles: executionResult.changedFiles,
+      pullRequest: executionResult.pullRequest,
+    };
+  } finally {
+    await stopHeartbeat();
+  }
 }

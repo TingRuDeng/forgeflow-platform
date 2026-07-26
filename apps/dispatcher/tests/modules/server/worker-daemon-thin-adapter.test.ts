@@ -74,6 +74,7 @@ describe("worker daemon thin adapter", () => {
 
   it("keeps worker-daemon as a thin cycle adapter under the file size budget", () => {
     const workerDaemonSource = fs.readFileSync(workerDaemonSourcePath, "utf8");
+    const taskExecutorSource = fs.readFileSync(workerDaemonTaskExecutorSourcePath, "utf8");
     const clientSourceExists = fs.existsSync(workerDaemonClientSourcePath);
     const taskExecutorSourceExists = fs.existsSync(workerDaemonTaskExecutorSourcePath);
 
@@ -82,6 +83,7 @@ describe("worker daemon thin adapter", () => {
     expect(workerDaemonSource).toContain("./worker-daemon-task-executor.js");
     expect(workerDaemonSource).not.toContain("function createLazyDispatcherClient");
     expect(workerDaemonSource).not.toContain("executeManagedWorkerTask");
+    expect(taskExecutorSource).toContain("heartbeatManagedExternally: true");
     expect(clientSourceExists).toBe(true);
     expect(taskExecutorSourceExists).toBe(true);
   });

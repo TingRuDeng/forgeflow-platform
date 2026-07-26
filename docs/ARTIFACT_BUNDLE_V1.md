@@ -14,6 +14,7 @@
 - 最小 bundle 包含 `schemaVersion`、`changedFiles` 和 `refs`。
 - 大对象不直接塞进 runtime-state，优先存引用；review 需要的短 diff / log / test 摘要可通过 `retainedContent` 保留正文片段。
 - 当前 `packages/result-contracts` 已提供可执行 schema，dispatcher 会保存 result 产出的 bundle，并把 bundleId 绑定到 active attempt。
+- `packages/worker-protocol` 直接复用并重导出该 schema，不再维护第二份 ArtifactBundle 定义。
 
 ```yaml
 ai_summary:
@@ -97,8 +98,10 @@ runtime-state 只应保存 bundle 摘要、引用和受限正文片段。大型 
 - SQLite structured projection 使用 `artifact_bundles` 表承载查询投影，并保存 `trajectory_json` 与 `retained_content_json`。
 - dispatcher 在 worker 未显式提交 `trajectory` 时，会从 verification commands 生成默认 `artifact-trajectory/v1` 步骤轨迹。
 - dispatcher HTTP 写入 worker result 或 Trae submit-result 时，会把 `trajectory` 或 `retainedContent.trajectory` 以及 `retainedContent.diff`、`retainedContent.logs`、`retainedContent.testResults` 落到 `${stateDir}/artifacts/<bundle-dir>/`。
-- artifact store 使用 `manifest.json` 作为文件索引，当前文件名分别是 `diff.patch`、`session.log`、`test-results.txt`、`trajectory.json`。
+- artifact store 使用 `manifest.json` 作为文件索引；当前会按实际内容生成 `result.json`、`diff.patch`、`session.log`、`test-results.txt`、`trajectory.json` 和 `trajectory.traj`。
+- dispatcher 不再信任 worker 预填的本地 `artifact://` 占位引用：落盘后会用真实 `bundleId` 和 manifest 文件名重建 refs；`session.log` 同时作为 `logs` 与 `terminalTranscript` 引用。
 - `DISPATCHER_ARTIFACT_RETENTION_MAX_BUNDLES` 可限制本地 artifact store 保留的最新 bundle 数，默认保留 100 个 bundle。
+- retention 删除旧 bundle 目录时，同一次状态写入会同步裁剪 `RuntimeState.artifactBundles[]`，避免 Console / query index 长期指向已删除正文。
 - `TaskAttempt.artifactBundleId` 指向当前 attempt 的 bundle。
 - `/api/artifacts/:bundleId` 可按 bundleId 获取单个 bundle。
 - `/api/artifacts/:bundleId/files/:fileName` 可按需读取 manifest 登记的 artifact 文件正文。

@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 import { readJson } from "./utils.js";
 import { buildAssignmentArtifactBundle } from "./assignment-artifacts.js";
+import { spawnProcessTree, terminateProcessTree } from "./process-tree.js";
 import type { TaskAssignment, WorkerResult } from "./types.js";
 import type {
   AssignmentLaunchCommand,
@@ -39,8 +40,8 @@ export function buildVerificationCommands(assignment: TaskAssignment, worktreeDi
     command,
     argv: [
       shell,
-      "-lc",
-      `export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; nvm use 22 >/dev/null 2>&1 || true; ${command}`,
+      "-c",
+      `if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)" != "22" ]; then export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; nvm use 22 >/dev/null 2>&1 || true; fi; ${command}`,
     ],
     cwd: worktreeDir,
   }));
@@ -110,14 +111,16 @@ export async function runWorkerAssignment(input: RunWorkerAssignmentInput): Prom
   fs.mkdirSync(outputDir, { recursive: true });
   const launchResult = await runCommandWithTimeout(launch, input.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS);
   const verification = [];
-  for (const command of verificationCommands) {
-    const result = await runCommandWithTimeout(command, input.verificationTimeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS);
-    verification.push({
-      command: command.command,
-      exitCode: result.exitCode,
-      output: result.output,
-      timedOut: result.timedOut,
-    });
+  if (!launchResult.timedOut) {
+    for (const command of verificationCommands) {
+      const result = await runCommandWithTimeout(command, input.verificationTimeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS);
+      verification.push({
+        command: command.command,
+        exitCode: result.exitCode,
+        output: result.output,
+        timedOut: result.timedOut,
+      });
+    }
   }
 
   const finalOutput = launchResult.timedOut
@@ -156,7 +159,7 @@ function resolveVerificationShell(): string {
   ].filter(Boolean) as string[];
 
   for (const candidate of candidates) {
-    const probe = spawnSync(candidate, ["-lc", "exit 0"], { encoding: "utf8" });
+    const probe = spawnSync(candidate, ["-c", "exit 0"], { encoding: "utf8" });
     if ((probe.status ?? 1) === 0) {
       return candidate;
     }
@@ -212,10 +215,10 @@ function runCommandWithTimeout(
     let stdout = "";
     let stderr = "";
     let timedOut = false;
-    const proc = spawn(command.argv[0], command.argv.slice(1), { cwd: command.cwd });
+    const proc = spawnProcessTree(command.argv[0], command.argv.slice(1), { cwd: command.cwd });
     const timer = setTimeout(() => {
       timedOut = true;
-      proc.kill("SIGKILL");
+      terminateProcessTree(proc);
     }, timeoutMs);
 
     proc.stdout?.on("data", (data) => {
@@ -267,7 +270,9 @@ function buildWorkerResult(input: {
     output: input.output,
     generatedAt: input.generatedAt,
     verification: {
-      allPassed: input.verification.every((item) => item.exitCode === 0),
+      allPassed: input.launchExitCode === 0
+        && !input.launchTimedOut
+        && input.verification.every((item) => item.exitCode === 0),
       commands: input.verification,
     },
     artifactBundle: buildAssignmentArtifactBundle({

@@ -1,7 +1,9 @@
+import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const repoRoot = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
@@ -11,6 +13,19 @@ const discoveryModulePath = path.join(repoRoot, "scripts/lib/trae-cdp-discovery.
 const clientModulePath = path.join(repoRoot, "scripts/lib/trae-cdp-client.js");
 const driverModulePath = path.join(repoRoot, "scripts/lib/trae-dom-driver.js");
 const gatewayModulePath = path.join(repoRoot, "scripts/lib/trae-automation-gateway.js");
+const tempStateDirs: string[] = [];
+
+function makeTempStateDir(): string {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-trae-gateway-"));
+  tempStateDirs.push(stateDir);
+  return stateDir;
+}
+
+afterEach(() => {
+  for (const stateDir of tempStateDirs.splice(0)) {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
 
 describe("trae cdp discovery", () => {
   it("selects the highest scoring Trae page target", async () => {
@@ -586,7 +601,7 @@ describe("trae automation gateway", () => {
       path.join(repoRoot, "scripts/lib/trae-automation-session-store.js")
     );
 
-    const sessionStore = sessionStoreModule.createSessionStore(null);
+    const sessionStore = sessionStoreModule.createSessionStore(makeTempStateDir());
     const session = sessionStore.create({ sessionId: "test-session-123" });
 
     const result = await mod.handleTraeAutomationHttpRequest(
@@ -605,7 +620,7 @@ describe("trae automation gateway", () => {
       path.join(repoRoot, "scripts/lib/trae-automation-session-store.js")
     );
 
-    const sessionStore = sessionStoreModule.createSessionStore(null);
+    const sessionStore = sessionStoreModule.createSessionStore(makeTempStateDir());
 
     await expect(
       mod.handleTraeAutomationHttpRequest(
@@ -621,7 +636,7 @@ describe("trae automation gateway", () => {
       path.join(repoRoot, "scripts/lib/trae-automation-session-store.js")
     );
 
-    const sessionStore = sessionStoreModule.createSessionStore(null);
+    const sessionStore = sessionStoreModule.createSessionStore(makeTempStateDir());
     const automationDriver = {
       prepareSession: vi.fn(async () => ({
         status: "ok",
@@ -653,7 +668,7 @@ describe("trae automation gateway", () => {
       path.join(repoRoot, "scripts/lib/trae-automation-session-store.js")
     );
 
-    const sessionStore = sessionStoreModule.createSessionStore(null);
+    const sessionStore = sessionStoreModule.createSessionStore(makeTempStateDir());
     const automationDriver = {
       prepareSession: vi.fn(async () => ({
         status: "ok",
@@ -687,7 +702,7 @@ describe("trae automation gateway", () => {
       path.join(repoRoot, "scripts/lib/trae-automation-session-store.js")
     );
 
-    const sessionStore = sessionStoreModule.createSessionStore(null);
+    const sessionStore = sessionStoreModule.createSessionStore(makeTempStateDir());
     const session = sessionStore.create({ sessionId: "test-session-456" });
 
     const automationDriver = {
@@ -724,7 +739,7 @@ describe("trae automation gateway", () => {
       path.join(repoRoot, "scripts/lib/trae-automation-session-store.js")
     );
 
-    const sessionStore = sessionStoreModule.createSessionStore(null);
+    const sessionStore = sessionStoreModule.createSessionStore(makeTempStateDir());
     sessionStore.create({ sessionId: "debug-session" });
     const debugLog = vi.fn();
     const automationDriver = {
@@ -776,7 +791,7 @@ describe("trae automation gateway", () => {
       path.join(repoRoot, "scripts/lib/trae-automation-session-store.js")
     );
 
-    const sessionStore = sessionStoreModule.createSessionStore(null);
+    const sessionStore = sessionStoreModule.createSessionStore(makeTempStateDir());
     sessionStore.create({ sessionId: "test-session-789" });
     sessionStore.markCompleted("test-session-789", { responseText: "Cached reply" });
 
@@ -811,7 +826,7 @@ describe("trae automation gateway", () => {
       path.join(repoRoot, "scripts/lib/trae-automation-session-store.js")
     );
 
-    const sessionStore = sessionStoreModule.createSessionStore(null);
+    const sessionStore = sessionStoreModule.createSessionStore(makeTempStateDir());
     sessionStore.create({ sessionId: "test-session-error" });
 
     const automationDriver = {
@@ -845,7 +860,7 @@ describe("trae automation gateway", () => {
       path.join(repoRoot, "scripts/lib/trae-automation-session-store.js")
     );
 
-    const sessionStore = sessionStoreModule.createSessionStore(null);
+    const sessionStore = sessionStoreModule.createSessionStore(makeTempStateDir());
     sessionStore.create({ sessionId: "test-session-timeout" });
 
     const automationDriver = {
@@ -896,6 +911,7 @@ describe("trae automation gateway", () => {
     const instance = await mod.startTraeAutomationGateway({
       host: "127.0.0.1",
       port: 0,
+      stateDir: makeTempStateDir(),
       automationDriver: {
         ready: vi.fn(async () => ({ ready: true })),
         prepareSession: vi.fn(async () => ({ status: "ok", preparation: { clicked: true } })),

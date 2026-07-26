@@ -17,9 +17,13 @@ function buildClaimInput(input, client, payload) {
         payload,
         dryRunExecution: Boolean(input.dryRunExecution),
         at: input.at,
+        signal: input.signal,
     };
 }
 export async function runWorkerDaemonCycle(input) {
+    if (input.signal?.aborted) {
+        return { status: "stopped", workerId: input.workerId };
+    }
     const client = input.client ?? createDispatcherClient(input.dispatcherUrl || "");
     const bridge = await bootstrapDispatcherBridge();
     let claimedPayload = null;
@@ -33,6 +37,7 @@ export async function runWorkerDaemonCycle(input) {
             repoDir: input.repoDir,
             dryRunExecution: input.dryRunExecution,
             at: input.at,
+            signal: input.signal,
             taskExecutor: {
                 executeTask: (task, assignment, assigned) => {
                     claimedPayload = buildClaimedTaskPayload(task, assignment, assigned);
@@ -44,17 +49,51 @@ export async function runWorkerDaemonCycle(input) {
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (claimedPayload && message.startsWith("submitResult failed after")) {
-            await submitFailedClaimedTaskResult(buildClaimInput(input, client, claimedPayload), message);
+            try {
+                await submitFailedClaimedTaskResult(buildClaimInput(input, client, claimedPayload), message);
+            }
+            catch (fallbackError) {
+                if (error instanceof Error && error.cause === undefined) {
+                    error.cause = fallbackError;
+                }
+            }
         }
         throw error;
     }
 }
 export async function runWorkerDaemon(input) {
-    while (true) {
-        const summary = await runWorkerDaemonCycle(input);
+    while (!input.signal?.aborted) {
+        let summary;
+        try {
+            summary = await runWorkerDaemonCycle(input);
+        }
+        catch (error) {
+            if (input.signal?.aborted) {
+                return { status: "stopped", workerId: input.workerId };
+            }
+            throw error;
+        }
         if (input.once) {
             return summary;
         }
-        await sleep(input.pollIntervalMs ?? 5000);
+        await sleepUntilAborted(input.pollIntervalMs ?? 5000, input.signal);
     }
+    return { status: "stopped", workerId: input.workerId };
+}
+function sleepUntilAborted(ms, signal) {
+    if (!signal) {
+        return sleep(ms);
+    }
+    if (signal.aborted) {
+        return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+        const timer = setTimeout(finish, ms);
+        function finish() {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", finish);
+            resolve();
+        }
+        signal.addEventListener("abort", finish, { once: true });
+    });
 }

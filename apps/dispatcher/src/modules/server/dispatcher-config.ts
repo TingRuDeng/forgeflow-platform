@@ -5,6 +5,7 @@ import os from "node:os";
 export interface DispatcherConfig {
   authMode?: "legacy" | "token" | "open";
   apiToken?: string;
+  workerTokens?: Record<string, string>;
   port?: number;
 }
 
@@ -61,4 +62,45 @@ export function getDispatcherAuthMode(): DispatcherAuthMode {
 export function getDispatcherApiToken(): string | null {
   const config = loadDispatcherConfig();
   return process.env.DISPATCHER_API_TOKEN || config.apiToken || null;
+}
+
+export function getDispatcherWorkerTokens(): Record<string, string> {
+  const config = loadDispatcherConfig();
+  const raw = process.env.DISPATCHER_WORKER_TOKENS;
+  const apiToken = process.env.DISPATCHER_API_TOKEN || config.apiToken || null;
+  let candidate: unknown = config.workerTokens ?? {};
+
+  if (raw) {
+    try {
+      candidate = JSON.parse(raw);
+    } catch (error) {
+      throw new Error(
+        `failed to parse DISPATCHER_WORKER_TOKENS: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    throw new Error("DISPATCHER_WORKER_TOKENS must be a JSON object mapping worker IDs to tokens");
+  }
+
+  const workerTokens: Record<string, string> = {};
+  const seenTokens = new Set<string>();
+  for (const [workerId, token] of Object.entries(candidate)) {
+    if (!workerId.trim() || workerId !== workerId.trim()) {
+      throw new Error("DISPATCHER_WORKER_TOKENS contains an invalid worker ID");
+    }
+    if (typeof token !== "string" || !token.trim() || token !== token.trim()) {
+      throw new Error(`DISPATCHER_WORKER_TOKENS contains an invalid token for worker "${workerId}"`);
+    }
+    if (apiToken && token === apiToken) {
+      throw new Error(`DISPATCHER_WORKER_TOKENS token for worker "${workerId}" must differ from DISPATCHER_API_TOKEN`);
+    }
+    if (seenTokens.has(token)) {
+      throw new Error("DISPATCHER_WORKER_TOKENS must use a unique token for each worker");
+    }
+    seenTokens.add(token);
+    workerTokens[workerId] = token;
+  }
+  return workerTokens;
 }

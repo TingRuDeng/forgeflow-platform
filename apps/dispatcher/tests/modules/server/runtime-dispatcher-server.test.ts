@@ -438,7 +438,9 @@ describe("runtime-dispatcher-server foundation", () => {
       const result = applyTraeReportProgress(state, "task-1", "Working on it...", "trae-01");
       expect(result.events).toHaveLength(1);
       expect(result.events[0].type).toBe("progress_reported");
+      expect(result.events[0].eventId).toBe("event-1");
       expect(result.events[0].payload).toEqual({ message: "Working on it...", worker_id: "trae-01" });
+      expect(result.eventSequence).toBe(1);
     });
 
     it("works without worker_id", () => {

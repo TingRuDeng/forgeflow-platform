@@ -4,12 +4,18 @@ import crypto from "node:crypto";
 
 import {
   createPgClient,
+  listRuntimeAuditEvents,
   loadPrimaryRuntimeStateSnapshot,
   savePrimaryRuntimeStateSnapshot,
 } from "@forgeflow/dispatcher-store-postgres";
 
 import { createEmptyRuntimeState } from "./runtime-state-json.js";
 import type { RuntimeState } from "./runtime-state.js";
+import { ensureRuntimeEventIdentities } from "./runtime-events.js";
+import type {
+  RuntimeAuditEventPage,
+  RuntimeAuditEventQueryOptions,
+} from "./runtime-events.js";
 
 const PRIMARY_POSTGRES_URL_ENV = "DISPATCHER_PRIMARY_POSTGRES_URL";
 const PRIMARY_CUTOVER_APPROVAL_FILE_ENV = "DISPATCHER_PRIMARY_CUTOVER_APPROVAL_FILE";
@@ -165,10 +171,10 @@ export async function loadRuntimeStateFromPostgres(stateDir: string): Promise<Ru
   const client = await createPgClient(postgresUrl);
   try {
     const snapshot = await loadPrimaryRuntimeStateSnapshot<Partial<RuntimeState>>(client);
-    return {
+    return ensureRuntimeEventIdentities({
       ...createEmptyRuntimeState(),
       ...(snapshot ?? {}),
-    };
+    });
   } finally {
     await client.end?.();
   }
@@ -179,7 +185,43 @@ export async function saveRuntimeStateToPostgres(stateDir: string, state: Runtim
   validatePrimaryCutoverFiles(stateDir);
   const client = await createPgClient(postgresUrl);
   try {
-    await savePrimaryRuntimeStateSnapshot(client, state as unknown as Record<string, unknown>);
+    const normalizedState = ensureRuntimeEventIdentities(state);
+    const auditEvents = normalizedState.events.map((event) => {
+      if (!event.eventId) {
+        throw new Error("runtime audit event is missing eventId");
+      }
+      return {
+        eventId: event.eventId,
+        taskId: event.taskId,
+        type: event.type,
+        at: event.at,
+        summary: event.summary,
+        payload: event.payload,
+      };
+    });
+    await savePrimaryRuntimeStateSnapshot(
+      client,
+      normalizedState as unknown as Record<string, unknown>,
+      auditEvents,
+    );
+  } finally {
+    await client.end?.();
+  }
+}
+
+export async function readRuntimeAuditEventsFromPostgres(
+  stateDir: string,
+  options: RuntimeAuditEventQueryOptions = {},
+): Promise<RuntimeAuditEventPage> {
+  const postgresUrl = getPrimaryPostgresUrl();
+  validatePrimaryCutoverFiles(stateDir);
+  const client = await createPgClient(postgresUrl);
+  try {
+    const page = await listRuntimeAuditEvents(client, options);
+    return {
+      ...page,
+      scope: "durable_audit",
+    };
   } finally {
     await client.end?.();
   }

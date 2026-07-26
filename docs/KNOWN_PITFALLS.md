@@ -187,11 +187,12 @@ publisher configuration is complete.
 - `sessionInterruptionCount`
 - `stateLockTimeoutCount`
 
-These counts are built from dispatcher runtime events plus a small in-process timeout counter.
+These counts are built from the retained dispatcher runtime-event window plus a small in-process timeout counter. `/api/metrics.eventWindow` reports the exact window boundary; the runtime state keeps at most 500 events.
 
 Implications:
 
-- dispatcher-side events are durable enough for control-plane diagnosis
+- dispatcher-side audit events are durably appended in SQLite/PostgreSQL and can be paged through `/api/query/events`
+- `/api/metrics` is a recent-window view, not a lifetime counter; use the audit query for older history
 - worker-side event reporting is still best-effort
 - a zero count does not prove that no worker-side failure happened anywhere outside dispatcher reachability
 
@@ -216,7 +217,7 @@ Do not describe read-only mode as an infrastructure-wide write barrier: direct r
 
 不要把它描述成全局 Git 仓库互斥锁：它约束 dispatcher 管理的 task 生命周期，不覆盖 dispatcher 外部脚本直接操作同一 repo、branch 或 Trae session 的情况。
 
-不要因为其他位置存在 worktree 检查、Trae session 和 repo concurrency 指标，就假定 repo、branch 或 session ownership 已经是硬并发保护。
+不要因为其他位置存在 worktree 检查、Trae session 文件锁和 repo concurrency 指标，就假定 repo、branch 或 session ownership 已经是全局硬并发保护。`sessions.json.lock` 只串行化同一状态目录内的本机文件变更，不提供跨主机 ownership。
 
 ## 16. Source DR scripts and packaged dispatcher CLI have different argument shapes
 

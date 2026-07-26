@@ -14,6 +14,7 @@
 - 每个写入 envelope 都必须包含 `taskId`、`attemptId`、`workerId`、`leaseToken`、`traceId` 和 `idempotencyKey`。
 - 当前 Trae 主链和通用 worker start/result 都必须携带并校验完整 v1 envelope；空 envelope 写入会被拒绝。
 - `@forgeflow/worker-protocol` 提供 `buildWorkerStartPayload` 和 `buildWorkerResultPayload`，作为内部 worker adapter / 第三方准入的最小 SDK helper。
+- ArtifactBundle schema 以 `@forgeflow/result-contracts` 为唯一实现，worker-protocol 只重导出，避免协议包之间字段漂移。
 - 具体 schema 以 `../packages/worker-protocol/src/index.ts` 为可执行契约。
 
 ```yaml
@@ -120,7 +121,8 @@ POST /api/tasks/:taskId/attempts/:attemptId/result
 - 通用 worker result 可携带 `waitingForInput`，用于主动请求 dispatcher 进入 HITL 暂停；其中 `resumePayloadSchema` 可声明 `string` / `number` / `integer` / `boolean` / `array` 字段、枚举、textarea、范围、数组数量和必填项，供 Console 渲染结构化恢复表单并展示校验错误；dispatcher 会 checkpoint active attempt、释放 worker / leases，并在后续 `/api/tasks/:taskId/resume` 时按保存的 schema 校验 `resumePayload`。
 - `/api/trae/fetch-task` 会返回 `attempt_id`、`lease_token`、`protocol_version`、`trace_id` 和 `idempotency_key`，Trae runtime 会在 `/api/trae/start-task` 和 `/api/trae/submit-result` 回写时携带它们。
 - Trae start/result 会对照当前 active attempt 校验 worker、attemptId、leaseToken、protocolVersion、traceId 和 idempotencyKey。
-- 如果 worker 携带的 `attemptId` 已进入 `expired` / `failed` / `succeeded` / `cancelled` / `superseded` 等终态，dispatcher 会拒绝这次 stale 写入。
+- `succeeded` / `failed` attempt 的完整 result 可在网络响应丢失后按同一 envelope 重放；只有 canonical result、成功结果的 `changedFiles`、PR metadata 与 ArtifactBundle 和已落账内容全部一致时才返回幂等成功，内容变化或 bundle 证据已被 retention 移除而无法核对时都会以 idempotency conflict 拒绝。
+- 其他终态 attempt（或不是已落账 result 的重放）仍会作为 stale 写入拒绝。
 - 如果没有 active attempt，worker result 会被拒绝为 `active attempt not found`；缺少任一 envelope 字段会被拒绝为 `worker protocol v1 envelope incomplete`。
 
 ## 错误语义
@@ -131,7 +133,7 @@ POST /api/tasks/:taskId/attempts/:attemptId/result
 | 409 | `ATTEMPT_SUPERSEDED` | attempt 已被新 attempt 取代 |
 | 400 | `PROTOCOL_VERSION_UNSUPPORTED` | 协议版本不支持 |
 | 400 | `INVALID_TRANSITION` | 状态转移非法 |
-| 409 | `IDEMPOTENCY_CONFLICT` | 同一 idempotencyKey 对应不同 payload |
+| 409 | `IDEMPOTENCY_CONFLICT` | 同一 idempotencyKey 重放了不同 canonical result、成功结果 changedFiles、PR metadata 或 ArtifactBundle |
 | 403 | `WORKER_NOT_AUTHORIZED` | worker 无权限处理该队列或 runtime class |
 | 422 | `RESULT_SCHEMA_INVALID` | result 或 artifact 不符合 schema |
 
@@ -144,4 +146,4 @@ POST /api/tasks/:taskId/attempts/:attemptId/result
 - vNext 规范事件名继续使用 `task_created`、`attempt_started`、`attempt_failed`、`review_decided` 等稳定枚举。
 - 当前 dispatcher / worker 已存在的事件名通过 `normalizeRuntimeEventType()` 映射到规范枚举，例如 `created -> task_created`、`progress_reported -> attempt_progress`、`delivery_failed -> attempt_failed`。
 - helper 对未知事件返回 `null`，不做静默 fallback。
-- 本批次不改变 dispatcher 既有 `Event.type` 存储格式，也不新增 SQLite 事件列。
+- dispatcher 既有 `Event.type` 存储格式保持不变；runtime event 现在另有稳定 `eventId`，SQLite/PostgreSQL append-only audit 表提供持久化 sequence 和分页读取。

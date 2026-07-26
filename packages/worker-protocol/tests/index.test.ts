@@ -139,12 +139,20 @@ describe("ArtifactBundleSchema", () => {
         trajectory: "artifact://attempt-1/trajectory.json",
         traj: "artifact://attempt-1/trajectory.traj",
       },
+      retainedContent: {
+        logs: "worker completed",
+        testResults: "1 passed",
+      },
     });
 
     expect(bundle.schemaVersion).toBe("artifact-bundle/v1");
     expect(bundle.changedFiles[0]?.changeType).toBe("modified");
     expect(bundle.refs.trajectory).toBe("artifact://attempt-1/trajectory.json");
     expect(bundle.refs.traj).toBe("artifact://attempt-1/trajectory.traj");
+    expect(bundle.retainedContent).toEqual({
+      logs: "worker completed",
+      testResults: "1 passed",
+    });
   });
 
   it("accepts structured replayable trajectory steps", () => {

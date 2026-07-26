@@ -14,6 +14,7 @@
 
 - `.forgeflow-dispatcher/runtime-state.db` 是 dispatcher 默认真相源，JSON 只是显式 fallback / import。
 - `snapshots` 仍是权威 runtime snapshot，结构化表是 query projection。
+- runtime state 只保留最近 500 条事件窗口；SQLite/PostgreSQL 另有 append-only audit table 保存可分页历史。
 - `leases[]` 当前支持 `assignment`、`repo`、`branch`、`session` resource type；dispatcher 管理的 task 生命周期会获取并释放对应资源。
 - Postgres / queue shadow path 是 best-effort，不是 primary store。
 - live SQLite schema ownership is in `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts`; standalone dispatcher schema constants are not kept.
@@ -105,6 +106,8 @@ Top-level collections currently include:
 
 当前事件记录还会保留最小关联字段：
 
+- `eventId`（dispatcher 生成的稳定事件 ID）
+- `auditSequence`（从 durable audit 表读取时附带的分页序列）
 - `summary`
 - `payload.traceId`
 - `payload.sessionId`
@@ -115,6 +118,7 @@ Supporting metadata:
 - `version`
 - `updatedAt`
 - `sequence`
+- `eventSequence`
 
 时间字段说明：
 
@@ -318,6 +322,12 @@ Both gateway implementations use `sessions.json` and default to the same user-st
 - script-local gateway: `~/.forgeflow-trae-beta/sessions/`
 - packaged runtime gateway: `~/.forgeflow-trae-beta/sessions/`
 - script-local gateway can still override the directory with `--state-dir <path>`
+- local writers serialize through `sessions.json.lock`, reload the latest file while holding that lock, and publish with a process-unique temporary file plus rename
+- malformed JSON fails closed instead of being replaced by an empty store
+
+The lock protects one local state directory from lost updates. It is not a distributed lease and does not make multiple active gateways safe; gateway startup still marks persisted non-terminal sessions as `interrupted`.
+
+Lock timing can be adjusted with `FORGEFLOW_TRAE_SESSION_LOCK_TIMEOUT_MS`, `FORGEFLOW_TRAE_SESSION_LOCK_RETRY_MS`, and `FORGEFLOW_TRAE_SESSION_LOCK_STALE_MS`.
 
 Verified session fields include:
 
@@ -366,6 +376,7 @@ Stage-3 query-first projection tables now also live in the same SQLite file:
 - `pull_requests`
 - `dispatches`
 - `runtime_events`
+- `runtime_audit_events`
 - `leases`
 - `sessions`
 
@@ -375,14 +386,28 @@ Current role of those tables:
 - they support `/api/query/*`, structured reads, and projection health checks
 - `task_attempts` 保存 vNext synthetic attempt projection，authoritative truth 仍以 snapshot 的 `taskAttempts[]` 为准
 - `artifact_bundles` 保存 vNext ArtifactBundle 摘要、refs projection、`trajectory_json` 和可选 retained diff / log / test result / trajectory 正文片段
+- `runtime_events` 只保存 runtime snapshot 当前保留的最近 500 条事件投影
+- `runtime_audit_events` 按 `event_id` 幂等追加完整历史，`sequence` 是分页游标；`/api/query/events` 优先读取该表
 - they do not replace `snapshots` as the runtime truth source
+
+每次 SQLite 状态写入在同一个 `BEGIN IMMEDIATE` transaction 内完成三件事：
+
+1. 追加带 checksum 的权威 snapshot。
+2. 按 `event_id` 幂等追加 `runtime_audit_events`。
+3. 重写 query-first structured projection。
+
+任一步失败都会 rollback，避免 snapshot 已推进但 projection 或 audit 未落账。
 
 Artifact 文件正文不进入 SQLite 表：
 
-- dispatcher 会把结构化 `trajectory` 或 `retainedContent.trajectory`，以及 `retainedContent.diff`、`retainedContent.logs`、`retainedContent.testResults` 写入 `${stateDir}/artifacts/<bundle-dir>/`
+- dispatcher 会把结构化报告、`trajectory` 或 `retainedContent.trajectory`，以及 `retainedContent.diff`、`retainedContent.logs`、`retainedContent.testResults` 写入 `${stateDir}/artifacts/<bundle-dir>/`
 - 每个 bundle 目录包含 `manifest.json`，用于登记可读取的文件名、ref 和字节数
+- 当前生成文件名为 `result.json`、`diff.patch`、`session.log`、`test-results.txt`、`trajectory.json` 和 `trajectory.traj`（按实际内容存在）
 - 本地 artifact store 的 bundle retention 由 `DISPATCHER_ARTIFACT_RETENTION_MAX_BUNDLES` 控制，默认 100
+- retention 删除 bundle 目录时，同一次 dispatcher 状态写入会同步移除对应 `artifactBundles[]` / SQLite projection 索引；bundle metadata 读取本身不要求当前节点持有本地 manifest，避免 Postgres 多节点读取被本机文件系统错误过滤
 - SQLite `artifact_bundles.refs_json` 保存指向这些文件的 `artifact://<bundleId>/<fileName>` 引用
+
+PostgreSQL primary backend 使用 `dispatcher_runtime_audit_events` 保存同类 append-only 审计记录。primary snapshot 与新审计事件在同一个 PostgreSQL transaction 内提交；查询同样使用 `audit_sequence` 做 `beforeSequence` 分页。
 
 Current stage-3 optional shadow path:
 
@@ -409,10 +434,10 @@ Current shadow semantics:
 
 This is intentionally not a fully normalized operational schema. The current design optimizes for:
 
-- revision history for audit / rescue
+- revision history for rescue plus append-only runtime audit events
 - checksum validation to detect silent corruption
 - WAL mode for safer concurrent read/write behavior
-- transactional snapshot persistence
+- transactional snapshot / audit / projection persistence
 - file-backed SQLite correctness
 - simple JSON import from `runtime-state.json`
 

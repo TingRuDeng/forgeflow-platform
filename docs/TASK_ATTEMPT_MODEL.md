@@ -50,13 +50,14 @@ ai_summary:
 - claim-backed result 必须携带完整 v1 envelope，并会把 active attempt 标记为 `succeeded` 或 `failed`。
 - task cancel 会把 active attempt 标记为 `cancelled`。
 - reconcile 会把离线 worker 的过期 running attempt 标记为 `expired`，并按最小 retry policy redrive 或失败。
-- late result 携带历史终态 `attemptId` 时会被拒绝，不允许覆盖新 attempt 或 task 状态。
+- late result 携带历史终态 `attemptId` 时默认会被拒绝，不允许覆盖新 attempt 或 task 状态；唯一例外是已落账 `succeeded` / `failed` result 的精确幂等重放。
 - `taskAttempts[]` 会随 runtime snapshot 一起保存。
 - SQLite structured projection 会写入并读取 `task_attempts`。
 - worker start/result 写入必须携带完整 v1 envelope；dispatcher 会校验 `attemptId`、`leaseToken`、`protocolVersion`、`traceId` 和 `idempotencyKey` 必须匹配当前 active attempt。
 - Trae `fetch-task` 会创建或复用 active attempt，并把 `attempt_id` / `lease_token` / `protocol_version` / `trace_id` / `idempotency_key` 返回给 runtime；Trae runtime 在 start/result 回写时会继续携带这些字段。
 - reconcile 支持 `maxTaskAttempts` retry policy；task-level `terminationPolicy.maxAttempts` 优先于 reconcile 调用方传入的全局 `maxTaskAttempts`，未配置时默认最多 2 次 attempt。
 - task-level `terminationPolicy.attemptLeaseTimeoutMs` 会覆盖 attempt lease 过期时间；`terminationPolicy.heartbeatTimeoutMs` 会覆盖该 task 的 worker offline 判定；`terminationPolicy.assignmentTimeoutMs` 会覆盖该 task 的未 claim assignment 回收时间。
+- 同一 `idempotencyKey` 的 result 重放会核对 canonical result、成功结果的 `changedFiles`、PR metadata 与 ArtifactBundle；内容不同或 bundle 已被 retention 移除而无法核对时会被拒绝，不能借重放修改终态证据或审查风险输入。
 
 尚未实现：
 

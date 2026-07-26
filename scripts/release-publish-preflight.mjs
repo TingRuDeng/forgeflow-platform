@@ -39,6 +39,7 @@ const expectedRepo = typeof args["expected-repo"] === "string" ? args["expected-
 const requireTrustedPublishing = args["require-trusted-publishing"] === true;
 const requirePackageExists = args["require-package-exists"] === true;
 const requirePublishedWorkspaceDeps = args["require-published-workspace-deps"] === true;
+const requireVersionAvailable = args["require-version-available"] === true;
 
 if (!packageDir) {
   console.error("Error: --package-dir is required");
@@ -163,6 +164,17 @@ if (requirePackageExists && publishedPackage.status !== "published") {
   const message = publishedPackage.status === "missing"
     ? `${packageJson.name} must exist on npm before this workflow can publish. Create the package name and configure npm Trusted Publisher for repo ${expectedRepo} first.`
     : `${packageJson.name} npm package existence check failed: ${publishedPackage.error}`;
+  issues.push(message);
+}
+
+const publishedTargetVersion = requireVersionAvailable
+  ? readPublishedPackageTargetVersion(packageJson.name, packageJson.version)
+  : { status: "not_checked", version: "" };
+
+if (requireVersionAvailable && publishedTargetVersion.status !== "missing") {
+  const message = publishedTargetVersion.status === "published"
+    ? `${packageJson.name}@${packageJson.version} already exists on npm. Increment the package version before releasing.`
+    : `${packageJson.name}@${packageJson.version} availability check failed: ${publishedTargetVersion.error}`;
   issues.push(message);
 }
 

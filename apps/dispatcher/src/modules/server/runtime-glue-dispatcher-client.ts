@@ -5,6 +5,7 @@ import type {
   StartTaskPayload,
   SubmitResultPayload,
   AssignedTaskResponse,
+  DispatcherRequestOptions,
 } from "./runtime-glue-types.js";
 
 const HEARTBEAT_TIMEOUT_MS = 5_000;
@@ -15,23 +16,54 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function createAbortError(message: string): Error {
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined, message: string): void {
+  if (signal?.aborted) {
+    throw createAbortError(message);
+  }
+}
+
+function sleepUntilAborted(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return sleep(ms);
+  }
+  throwIfAborted(signal, "dispatcher retry aborted");
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(finish, ms);
+    function finish() {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    function onAbort() {
+      clearTimeout(timer);
+      reject(createAbortError("dispatcher retry aborted"));
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export interface DispatcherHttpClient extends DispatcherWorkerClient {
-  registerWorker(worker: WorkerRegistration): Promise<unknown>;
-  heartbeat(workerId: string, payload: HeartbeatPayload): Promise<unknown>;
-  getAssignedTask(workerId: string): Promise<AssignedTaskResponse>;
-  claimTask(workerId: string, payload?: { at?: string }): Promise<AssignedTaskResponse>;
-  startTask(workerId: string, payload: StartTaskPayload): Promise<unknown>;
-  submitResult(workerId: string, payload: SubmitResultPayload): Promise<unknown>;
+  registerWorker(worker: WorkerRegistration, options?: DispatcherRequestOptions): Promise<unknown>;
+  heartbeat(workerId: string, payload: HeartbeatPayload, options?: DispatcherRequestOptions): Promise<unknown>;
+  getAssignedTask(workerId: string, options?: DispatcherRequestOptions): Promise<AssignedTaskResponse>;
+  claimTask(workerId: string, payload?: { at?: string }, options?: DispatcherRequestOptions): Promise<AssignedTaskResponse>;
+  startTask(workerId: string, payload: StartTaskPayload, options?: DispatcherRequestOptions): Promise<unknown>;
+  submitResult(workerId: string, payload: SubmitResultPayload, options?: DispatcherRequestOptions): Promise<unknown>;
 }
 
 export interface DispatcherStateDirClient {
-  registerWorker(worker: WorkerRegistration): Promise<unknown>;
-  heartbeat(workerId: string, payload: HeartbeatPayload): Promise<unknown>;
-  getAssignedTask(workerId: string): Promise<unknown>;
-  claimTask(workerId: string, payload?: { at?: string }): Promise<unknown>;
-  startTask(workerId: string, payload: StartTaskPayload): Promise<unknown>;
-  submitResult(workerId: string, payload: SubmitResultPayload): Promise<unknown>;
-  reportEvent(workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }): Promise<unknown>;
+  registerWorker(worker: WorkerRegistration, options?: DispatcherRequestOptions): Promise<unknown>;
+  heartbeat(workerId: string, payload: HeartbeatPayload, options?: DispatcherRequestOptions): Promise<unknown>;
+  getAssignedTask(workerId: string, options?: DispatcherRequestOptions): Promise<unknown>;
+  claimTask(workerId: string, payload?: { at?: string }, options?: DispatcherRequestOptions): Promise<unknown>;
+  startTask(workerId: string, payload: StartTaskPayload, options?: DispatcherRequestOptions): Promise<unknown>;
+  submitResult(workerId: string, payload: SubmitResultPayload, options?: DispatcherRequestOptions): Promise<unknown>;
+  reportEvent(workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }, options?: DispatcherRequestOptions): Promise<unknown>;
 }
 
 export interface CreateDispatcherHttpClientOptions {
@@ -51,12 +83,19 @@ export function createDispatcherHttpClient(
     method: string,
     pathname: string,
     body: unknown,
-    callOptions: { timeout?: number } = {},
+    callOptions: { timeout?: number; signal?: AbortSignal } = {},
   ): Promise<unknown> {
     const url = `${baseUrl}${pathname}`;
+    throwIfAborted(callOptions.signal, `dispatcher request aborted: ${method} ${url}`);
     const timeoutMs = callOptions.timeout ?? defaultTimeout;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    let timedOut = false;
+    const onAbort = () => controller.abort(callOptions.signal?.reason);
+    callOptions.signal?.addEventListener("abort", onAbort, { once: true });
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
 
     try {
       const response = await fetchImpl(url, {
@@ -68,7 +107,6 @@ export function createDispatcherHttpClient(
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
-      clearTimeout(timeoutId);
       const text = await response.text();
       const json = text ? JSON.parse(text) : {};
       if (!response.ok) {
@@ -78,9 +116,17 @@ export function createDispatcherHttpClient(
       }
       return json;
     } catch (error) {
-      clearTimeout(timeoutId);
+      if (callOptions.signal?.aborted) {
+        throw createAbortError(`dispatcher request aborted: ${method} ${url}`);
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
+      if (timedOut) {
+        throw new Error(`dispatcher request failed: ${method} ${url} - timed out after ${timeoutMs}ms`);
+      }
       throw new Error(`dispatcher request failed: ${method} ${url} - ${errorMessage}`);
+    } finally {
+      clearTimeout(timeoutId);
+      callOptions.signal?.removeEventListener("abort", onAbort);
     }
   }
 
@@ -88,19 +134,31 @@ export function createDispatcherHttpClient(
     method: string,
     pathname: string,
     body: unknown,
-    callOptions: { timeout?: number; maxRetries?: number; retryDelayMs?: number } = {},
+    callOptions: {
+      timeout?: number;
+      maxRetries?: number;
+      retryDelayMs?: number;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<unknown> {
     const maxRetries = callOptions.maxRetries ?? 0;
     const retryDelayMs = callOptions.retryDelayMs ?? 1_000;
     let lastError: unknown = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      throwIfAborted(callOptions.signal, `dispatcher request aborted: ${method} ${baseUrl}${pathname}`);
       try {
-        return await call(method, pathname, body, { timeout: callOptions.timeout });
+        return await call(method, pathname, body, {
+          timeout: callOptions.timeout,
+          signal: callOptions.signal,
+        });
       } catch (error) {
+        if (callOptions.signal?.aborted) {
+          throw createAbortError(`dispatcher request aborted: ${method} ${baseUrl}${pathname}`);
+        }
         lastError = error;
         if (attempt < maxRetries) {
-          await sleep(retryDelayMs);
+          await sleepUntilAborted(retryDelayMs, callOptions.signal);
         }
       }
     }
@@ -108,11 +166,13 @@ export function createDispatcherHttpClient(
   }
 
   return {
-    registerWorker(worker: WorkerRegistration): Promise<unknown> {
-      return call("POST", "/api/workers/register", worker) as Promise<unknown>;
+    registerWorker(worker: WorkerRegistration, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
+      return call("POST", "/api/workers/register", worker, {
+        signal: requestOptions?.signal,
+      }) as Promise<unknown>;
     },
 
-    heartbeat(workerId: string, payload: HeartbeatPayload): Promise<unknown> {
+    heartbeat(workerId: string, payload: HeartbeatPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
       return callWithRetry(
         "POST",
         `/api/workers/${encodeURIComponent(workerId)}/heartbeat`,
@@ -121,47 +181,53 @@ export function createDispatcherHttpClient(
           timeout: HEARTBEAT_TIMEOUT_MS,
           maxRetries: HEARTBEAT_MAX_RETRIES,
           retryDelayMs: HEARTBEAT_RETRY_DELAY_MS,
+          signal: requestOptions?.signal,
         },
       ) as Promise<unknown>;
     },
 
-    getAssignedTask(workerId: string): Promise<AssignedTaskResponse> {
+    getAssignedTask(workerId: string, requestOptions?: DispatcherRequestOptions): Promise<AssignedTaskResponse> {
       return call(
         "GET",
         `/api/workers/${encodeURIComponent(workerId)}/assigned-task`,
         undefined,
+        { signal: requestOptions?.signal },
       ) as Promise<AssignedTaskResponse>;
     },
 
-    claimTask(workerId: string, payload?: { at?: string }): Promise<AssignedTaskResponse> {
+    claimTask(workerId: string, payload?: { at?: string }, requestOptions?: DispatcherRequestOptions): Promise<AssignedTaskResponse> {
       return call(
         "POST",
         `/api/workers/${encodeURIComponent(workerId)}/claim-task`,
         payload ?? {},
+        { signal: requestOptions?.signal },
       ) as Promise<AssignedTaskResponse>;
     },
 
-    startTask(workerId: string, payload: StartTaskPayload): Promise<unknown> {
+    startTask(workerId: string, payload: StartTaskPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
       return call(
         "POST",
         `/api/workers/${encodeURIComponent(workerId)}/start-task`,
         payload,
+        { signal: requestOptions?.signal },
       ) as Promise<unknown>;
     },
 
-    submitResult(workerId: string, payload: SubmitResultPayload): Promise<unknown> {
+    submitResult(workerId: string, payload: SubmitResultPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
       return call(
         "POST",
         `/api/workers/${encodeURIComponent(workerId)}/result`,
         payload,
+        { signal: requestOptions?.signal },
       ) as Promise<unknown>;
     },
 
-    reportEvent(workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }): Promise<unknown> {
+    reportEvent(workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
       return call(
         "POST",
         `/api/workers/${encodeURIComponent(workerId)}/events`,
         payload,
+        { signal: requestOptions?.signal },
       ) as Promise<unknown>;
     },
   };
@@ -184,7 +250,8 @@ export function createDispatcherStateDirClientFactory(
 
   return (stateDir: string): DispatcherStateDirClient => {
     return {
-      async registerWorker(worker: WorkerRegistration): Promise<unknown> {
+      async registerWorker(worker: WorkerRegistration, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
+        throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
         return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "POST",
@@ -194,7 +261,8 @@ export function createDispatcherStateDirClientFactory(
         }));
       },
 
-      async heartbeat(workerId: string, payload: HeartbeatPayload): Promise<unknown> {
+      async heartbeat(workerId: string, payload: HeartbeatPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
+        throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
         return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "POST",
@@ -204,7 +272,8 @@ export function createDispatcherStateDirClientFactory(
         }));
       },
 
-      async getAssignedTask(workerId: string): Promise<unknown> {
+      async getAssignedTask(workerId: string, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
+        throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
         return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "GET",
@@ -213,7 +282,8 @@ export function createDispatcherStateDirClientFactory(
         }));
       },
 
-      async claimTask(workerId: string, payload?: { at?: string }): Promise<unknown> {
+      async claimTask(workerId: string, payload?: { at?: string }, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
+        throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
         return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "POST",
@@ -223,7 +293,8 @@ export function createDispatcherStateDirClientFactory(
         }));
       },
 
-      async startTask(workerId: string, payload: StartTaskPayload): Promise<unknown> {
+      async startTask(workerId: string, payload: StartTaskPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
+        throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
         return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "POST",
@@ -233,7 +304,8 @@ export function createDispatcherStateDirClientFactory(
         }));
       },
 
-      async submitResult(workerId: string, payload: SubmitResultPayload): Promise<unknown> {
+      async submitResult(workerId: string, payload: SubmitResultPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
+        throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
         return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "POST",
@@ -243,7 +315,8 @@ export function createDispatcherStateDirClientFactory(
         }));
       },
 
-      async reportEvent(workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }): Promise<unknown> {
+      async reportEvent(workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
+        throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
         return readStateDirResponseJson(await handleRequest({
           stateDir,
           method: "POST",
@@ -257,7 +330,7 @@ export function createDispatcherStateDirClientFactory(
 }
 
 function getDispatcherAuthHeader(): Record<string, string> {
-  const token = process.env.DISPATCHER_API_TOKEN;
+  const token = process.env.DISPATCHER_WORKER_TOKEN || process.env.DISPATCHER_API_TOKEN;
   if (!token) return {};
   return { Authorization: `Bearer ${token}` };
 }

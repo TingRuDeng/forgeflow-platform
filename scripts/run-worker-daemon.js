@@ -95,6 +95,10 @@ async function main() {
     if (!args.repoDir) {
         throw new Error("--repo-dir is required");
     }
+    const abortController = new AbortController();
+    const stop = () => abortController.abort();
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
     const summary = await runWorkerDaemon({
         dispatcherUrl: args.dispatcherUrl,
         workerId: args.workerId,
@@ -105,6 +109,10 @@ async function main() {
         pollIntervalMs: args.pollIntervalMs,
         dryRunExecution: args.dryRunExecution,
         once: args.once,
+        signal: abortController.signal,
+    }).finally(() => {
+        process.removeListener("SIGINT", stop);
+        process.removeListener("SIGTERM", stop);
     });
     console.log(JSON.stringify(summary, null, 2));
 }

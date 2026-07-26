@@ -207,8 +207,19 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `repoConcurrencySaturation`
 - `failureCodes`
 - `reviewReasonCodes`
+- `eventWindow`
 - `workers`
 - `tasks`
+
+`eventWindow` 只描述 runtime state 最近 500 条事件所覆盖的指标窗口，不是全历史计数。完整审计历史使用：
+
+```bash
+curl -s -D - \
+  -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
+  "http://127.0.0.1:8787/api/query/events?limit=500"
+```
+
+若响应头包含 `x-forgeflow-event-next-before-sequence`，把该值作为下一次请求的 `beforeSequence` 继续向前分页。
 
 详细的 metrics / alert 说明见 `observability-and-alerting.md`。
 

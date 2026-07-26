@@ -149,9 +149,13 @@ function createHttpClient(baseUrl: string): HttpClient {
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     try {
+      const dispatcherToken = process.env.DISPATCHER_WORKER_TOKEN || process.env.DISPATCHER_API_TOKEN;
       const response = await fetch(url, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(dispatcherToken ? { Authorization: `Bearer ${dispatcherToken}` } : {}),
+        },
         body: JSON.stringify(body),
         signal: controller.signal,
       });

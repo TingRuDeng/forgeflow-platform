@@ -84,14 +84,18 @@ export interface WorkerProtocolEnvelope {
   idempotencyKey?: string;
 }
 
+export interface DispatcherRequestOptions {
+  signal?: AbortSignal;
+}
+
 export interface DispatcherClient {
-  registerWorker: (worker: { workerId: string; pool: string; hostname: string; labels: string[]; repoDir: string; at: string }) => Promise<unknown>;
-  heartbeat: (workerId: string, payload: { at: string }) => Promise<unknown>;
-  getAssignedTask: (workerId: string) => Promise<TaskPayload | null>;
-  claimTask: (workerId: string, payload?: { at?: string }) => Promise<TaskPayload | null>;
-  startTask: (workerId: string, payload: WorkerProtocolEnvelope & { taskId: string; at: string }) => Promise<unknown>;
-  submitResult: (workerId: string, payload: WorkerProtocolEnvelope & { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }) => Promise<unknown>;
-  reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }) => Promise<unknown>;
+  registerWorker: (worker: { workerId: string; pool: string; hostname: string; labels: string[]; repoDir: string; at: string }, options?: DispatcherRequestOptions) => Promise<unknown>;
+  heartbeat: (workerId: string, payload: { at: string }, options?: DispatcherRequestOptions) => Promise<unknown>;
+  getAssignedTask: (workerId: string, options?: DispatcherRequestOptions) => Promise<TaskPayload | null>;
+  claimTask: (workerId: string, payload?: { at?: string }, options?: DispatcherRequestOptions) => Promise<TaskPayload | null>;
+  startTask: (workerId: string, payload: WorkerProtocolEnvelope & { taskId: string; at: string }, options?: DispatcherRequestOptions) => Promise<unknown>;
+  submitResult: (workerId: string, payload: WorkerProtocolEnvelope & { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }, options?: DispatcherRequestOptions) => Promise<unknown>;
+  reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }, options?: DispatcherRequestOptions) => Promise<unknown>;
 }
 
 export interface ProcessTaskAssignmentInput {
@@ -102,4 +106,5 @@ export interface ProcessTaskAssignmentInput {
   payload: TaskPayload;
   dryRunExecution: boolean;
   at?: string;
+  signal?: AbortSignal;
 }

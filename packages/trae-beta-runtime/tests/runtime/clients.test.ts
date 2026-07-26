@@ -6,9 +6,49 @@ import {
   createJsonHttpClient,
 } from "../../src/runtime/clients.js";
 
+const originalDispatcherApiToken = process.env.DISPATCHER_API_TOKEN;
+const originalDispatcherWorkerToken = process.env.DISPATCHER_WORKER_TOKEN;
+
 describe("runtime/clients", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    if (originalDispatcherApiToken === undefined) {
+      delete process.env.DISPATCHER_API_TOKEN;
+    } else {
+      process.env.DISPATCHER_API_TOKEN = originalDispatcherApiToken;
+    }
+    if (originalDispatcherWorkerToken === undefined) {
+      delete process.env.DISPATCHER_WORKER_TOKEN;
+    } else {
+      process.env.DISPATCHER_WORKER_TOKEN = originalDispatcherWorkerToken;
+    }
+  });
+
+  it("prefers the worker-scoped dispatcher token", async () => {
+    process.env.DISPATCHER_API_TOKEN = "operator-token";
+    process.env.DISPATCHER_WORKER_TOKEN = "worker-token";
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await dispatcher.register({
+      workerId: "trae-worker",
+      pool: "trae",
+      repoDir: "/tmp/repo",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:8787/api/trae/register",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer worker-token",
+        }),
+      }),
+    );
   });
 
   it("labels dispatcher fetchTask transport failures with the request source", async () => {

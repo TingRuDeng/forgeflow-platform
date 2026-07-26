@@ -78,13 +78,13 @@ export function buildWorkerProtocolEnvelope(
 }
 
 export interface DispatcherClient {
-  registerWorker: (worker: { workerId: string; pool: string; hostname: string; labels: string[]; repoDir: string; at: string }) => Promise<unknown>;
-  heartbeat: (workerId: string, payload: { at: string }) => Promise<unknown>;
-  getAssignedTask: (workerId: string) => Promise<TaskPayload | null>;
-  claimTask: (workerId: string, payload?: { at?: string }) => Promise<TaskPayload | null>;
-  startTask: (workerId: string, payload: ReturnType<typeof buildWorkerProtocolEnvelope> & { taskId: string; at: string }) => Promise<unknown>;
-  submitResult: (workerId: string, payload: ReturnType<typeof buildWorkerProtocolEnvelope> & { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }) => Promise<unknown>;
-  reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }) => Promise<unknown>;
+  registerWorker: (worker: { workerId: string; pool: string; hostname: string; labels: string[]; repoDir: string; at: string }, options?: { signal?: AbortSignal }) => Promise<unknown>;
+  heartbeat: (workerId: string, payload: { at: string }, options?: { signal?: AbortSignal }) => Promise<unknown>;
+  getAssignedTask: (workerId: string, options?: { signal?: AbortSignal }) => Promise<TaskPayload | null>;
+  claimTask: (workerId: string, payload?: { at?: string }, options?: { signal?: AbortSignal }) => Promise<TaskPayload | null>;
+  startTask: (workerId: string, payload: ReturnType<typeof buildWorkerProtocolEnvelope> & { taskId: string; at: string }, options?: { signal?: AbortSignal }) => Promise<unknown>;
+  submitResult: (workerId: string, payload: ReturnType<typeof buildWorkerProtocolEnvelope> & { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }, options?: { signal?: AbortSignal }) => Promise<unknown>;
+  reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }, options?: { signal?: AbortSignal }) => Promise<unknown>;
 }
 
 export interface ProcessTaskAssignmentInput {
@@ -95,6 +95,7 @@ export interface ProcessTaskAssignmentInput {
   payload: TaskPayload;
   dryRunExecution: boolean;
   at?: string;
+  signal?: AbortSignal;
 }
 
 export interface RunWorkerDaemonCycleInput {
@@ -108,6 +109,7 @@ export interface RunWorkerDaemonCycleInput {
   repoRoot?: string;
   dryRunExecution?: boolean;
   at?: string;
+  signal?: AbortSignal;
 }
 
 export type RunWorkerDaemonCycleSummary =

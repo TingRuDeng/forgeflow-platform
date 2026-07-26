@@ -73,6 +73,7 @@ Current rules:
   - if attempts are still below the default max of 2, dispatcher records `attempt_expired` and `task_redriven`, releases worker / assignment ownership, and moves the task back to `ready`
   - if attempts are exhausted, dispatcher records `attempt_expired` and moves task / assignment to `failed`
 - A late worker result that still carries an expired / terminal `attemptId` is rejected before it can mutate task, assignment, review, artifact, or worker state.
+- 已落账 `succeeded` / `failed` result 允许在响应丢失后按同一 v1 envelope 精确重放；canonical result、成功结果的 `changedFiles`、PR metadata 或 ArtifactBundle 任一发生变化都会按 idempotency conflict 拒绝。
 - `POST /api/tasks/:taskId/interrupt` 会把可中断任务置为 `waiting_for_input`，释放 worker / lease，并把 active attempt 标记为 `checkpointed`。
 - `POST /api/tasks/:taskId/resume` 会写入 `resumePayload`，把任务恢复为 `ready`，供下一次 worker claim 时继续使用。
 

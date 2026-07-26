@@ -8,6 +8,8 @@
 
 - dispatcher runtime state 中新增的 `leases[]`
 - SQLite 结构化投影与 `/api/query/*` 只读面
+- SQLite / PostgreSQL 的 append-only runtime event audit
+- `/api/metrics.eventWindow` 的 retained-window 语义
 - `DISPATCHER_STRUCTURED_READS`
 - `DISPATCHER_READ_ONLY_MODE`
 - `DISPATCHER_SHADOW_MODE` / `DISPATCHER_QUEUE_SHADOW_MODE`
@@ -74,10 +76,13 @@
 - `workers`
 - `tasks`
 - `assignments`
+- `task_attempts`
+- `artifact_bundles`
 - `reviews`
 - `pull_requests`
 - `dispatches`
 - `runtime_events`
+- `runtime_audit_events`
 - `leases`
 - `sessions`
 
@@ -86,11 +91,44 @@
 当前语义：
 
 - `snapshots` 仍是真相源
-- 结构化表是由同一次保存事务重建的 query projection
+- `runtime_events` 是 runtime snapshot 当前保留的最近 500 条事件投影
+- `runtime_audit_events` 按稳定 `eventId` 幂等追加完整历史，表内 `sequence` 是分页游标
+- SQLite 每次保存会在同一个 `BEGIN IMMEDIATE` transaction 内追加 snapshot、追加 audit events 并重建 query projection；任一步失败都会整体 rollback
+- 除 append-only audit table 外，其余结构化表是由同一次保存事务重建的 query projection
 - `/api/query/projection-health` 会比较 snapshot 派生计数与结构化投影计数
 - projection mismatch 当前属于运维 / drift 信号，不会自动把 SQLite 主链切到 failed
 
-## 4. Structured Read Semantics
+## 4. Durable Event Query
+
+Runtime event 有两个不同观察面：
+
+- `RuntimeState.events[]` 和 `/api/metrics` 的事件型计数只覆盖最近 500 条 retained runtime window
+- SQLite `runtime_audit_events` 与 PostgreSQL `dispatcher_runtime_audit_events` 保存 append-only 持久历史
+
+每个新事件在进入 runtime state 时会获得稳定 `eventId` 和单调递增的 `eventSequence`。持久化层再分配 `auditSequence` 作为数据库分页游标；重复保存同一 snapshot 时，`eventId` 唯一约束会阻止重复落账。
+
+读取入口：
+
+- `GET /api/query/events`
+- `limit` 默认 `500`，范围 `1..5000`
+- `beforeSequence` 只返回小于该 audit sequence 的更早事件
+- 当前页 JSON body 继续保持数组，并按 sequence 升序返回
+
+分页和数据范围通过响应头暴露：
+
+- `x-forgeflow-event-scope`
+- `x-forgeflow-event-total`
+- `x-forgeflow-event-returned`
+- `x-forgeflow-event-limit`
+- `x-forgeflow-event-has-more`
+- `x-forgeflow-event-next-before-sequence`
+- `x-forgeflow-event-retention-limit`
+
+`/api/metrics.eventWindow` 明确描述 retained runtime window 的限制、当前条数和最早/最新时间；它不是 lifetime total。需要历史审计时必须分页读取 `/api/query/events`。
+
+PostgreSQL primary backend 会在同一 transaction 内提交 primary snapshot 与本次新增 audit events；SQLite 和 PostgreSQL 都按 `eventId` 幂等写入。
+
+## 5. Structured Read Semantics
 
 环境变量：
 
@@ -117,7 +155,7 @@
 - structured reads 只改变读路径，不改变 dispatcher 写语义
 - structured reads 关闭时，读路径会回退到 snapshot 派生逻辑
 
-## 5. Read-only Mode
+## 6. Read-only Mode
 
 环境变量：
 
@@ -142,7 +180,7 @@
 - read-only 不是独立路由注册系统，而是通过 `dispatcher-server.ts:isMutationRequest` 默认冻结 `/api/` 下的 `POST` / `PUT` / `PATCH` / `DELETE` 写方法；当前 dispatcher HTTP mutation 路由已纳入保护。
 - 该开关只约束 dispatcher HTTP API 写入；直接修改 runtime state 文件、外部数据库或绕过 dispatcher HTTP 的写入不在本契约保护范围内。
 
-## 6. Shadow Modes
+## 7. Shadow Modes
 
 环境变量：
 
@@ -171,6 +209,7 @@
   - `dispatcher_events`
   - `dispatcher_leases`
 - 如果 queue shadow 启用，还会写入 assignment delivery queue 影子表
+- PostgreSQL primary backend 另用 `dispatcher_runtime_audit_events` 保存完整审计历史；它不等同于上述 shadow projection 的 `dispatcher_events`
 
 当前边界：
 
@@ -183,11 +222,13 @@
 - Postgres primary snapshot 原语提供底层表与 JSONB snapshot 读写；同步 `loadRuntimeState()` / `saveRuntimeState()` 在 `RUNTIME_STATE_BACKEND=postgres` 下会显式失败，HTTP route 主链和 `/api/query/*` 使用 async state API；async Postgres primary load/save 会在连接数据库前校验 `shadow-cutover-approval.json`、其 `evidencePath` 指向的归档 drill evidence、`evidenceSha256` 和 `shadow-cutover-ready.json` 中的 `strict_cutover_preflight` / `approval_evidence` phase，并在存在 `shadow-cutover-revocation.json` 时拒绝继续使用 primary backend
 - `/api/query/*` 在 SQLite backend 下仍读取 SQLite structured projection；在 Postgres backend 下读取 primary snapshot，并由 `/api/query/projection-health` 对同一 primary snapshot 输出计数一致性
 
-## 7. Completion Signals
+## 8. Completion Signals
 
 阶段三核心底座当前最小验收信号：
 
 - `pnpm verify:stage3`
 - `/api/query/projection-health` 显示 SQLite projection 无漂移
+- `/api/query/events` 可按 `beforeSequence` 分页读取持久审计历史
+- `/api/metrics.eventWindow` 明确标识 retained runtime window
 - `/api/slo` 可输出 burn-rate 状态
 - `/api/dr/status` 可输出 read-only / structured reads / shadow write health / shadow reconciler latest status / projection health / backup 清单

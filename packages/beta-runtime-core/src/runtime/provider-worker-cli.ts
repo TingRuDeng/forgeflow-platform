@@ -128,16 +128,27 @@ export async function runProviderWorkerCli(
     (deps.env ?? process.env)[config.binEnv] = args.providerBin;
   }
   const runDaemon = deps.runWorkerDaemon ?? runWorkerDaemon;
-  const summary = await runDaemon({
-    dispatcherUrl,
-    workerId,
-    pool,
-    repoDir,
-    hostname: args.hostname,
-    labels: args.labels,
-    pollIntervalMs: args.pollIntervalMs,
-    dryRunExecution: args.dryRunExecution,
-    once: args.once,
-  });
+  const abortController = deps.runWorkerDaemon ? null : new AbortController();
+  const stop = () => abortController?.abort();
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  let summary: RunWorkerDaemonCycleResult;
+  try {
+    summary = await runDaemon({
+      dispatcherUrl,
+      workerId,
+      pool,
+      repoDir,
+      hostname: args.hostname,
+      labels: args.labels,
+      pollIntervalMs: args.pollIntervalMs,
+      dryRunExecution: args.dryRunExecution,
+      once: args.once,
+      ...(abortController ? { signal: abortController.signal } : {}),
+    });
+  } finally {
+    process.removeListener("SIGINT", stop);
+    process.removeListener("SIGTERM", stop);
+  }
   writeStdout(`${JSON.stringify(summary, null, 2)}\n`);
 }

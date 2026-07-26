@@ -1,8 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  requestOptions,
+  sleepUntilAborted,
+  throwIfAborted,
+} from "./abort-signal.js";
 import { safeTaskDirName, prepareTaskWorktree, removeTaskWorktree } from "./task-worktree.js";
-import { nowIso, sleep } from "./utils.js";
+import { nowIso } from "./utils.js";
 import {
   buildDryRunWorkerResult,
   collectChangedFiles,
@@ -19,6 +24,11 @@ import type { PullRequestInfo, ProcessTaskAssignmentInput, TaskPayload, WorkerPr
 
 const SUBMIT_RESULT_MAX_RETRIES = 3;
 const SUBMIT_RESULT_RETRY_DELAY_MS = 2_000;
+export const DEFAULT_WORKER_EXECUTION_TIMEOUT_MS = 30 * 60_000;
+
+export class WorkerResultDeliveryError extends Error {
+  readonly code = "worker_result_delivery_failed";
+}
 
 export interface TaskExecutionResult {
   result: WorkerResult;
@@ -57,12 +67,22 @@ export interface LiveWorkerTaskEvent {
   payload?: unknown;
 }
 
+export function resolveWorkerExecutionTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const value = Number(env.WORKER_DAEMON_EXECUTION_TIMEOUT_MS);
+  return Number.isSafeInteger(value) && value > 0
+    ? value
+    : DEFAULT_WORKER_EXECUTION_TIMEOUT_MS;
+}
+
 export interface ExecuteLiveWorkerTaskInput extends ProcessTaskAssignmentInput {
   createPullRequest?: boolean;
   removeWorktreeOnExit?: boolean;
   resetWorktreeOnReuse?: boolean;
   runtimeScriptPath?: string;
   runtimeScriptCwd?: string;
+  executionTimeoutMs?: number;
   reportEvent?: (event: LiveWorkerTaskEvent) => Promise<void>;
   onCleanupError?: (error: unknown) => void;
 }
@@ -126,6 +146,10 @@ function runLiveWorkerTask(input: ExecuteLiveWorkerTaskInput, context: LiveWorke
     outputDir: context.outputDir,
     runtimeScriptPath: input.runtimeScriptPath,
     runtimeScriptCwd: input.runtimeScriptCwd,
+    timeoutMs: Number.isSafeInteger(input.executionTimeoutMs) && (input.executionTimeoutMs ?? 0) > 0
+      ? input.executionTimeoutMs
+      : resolveWorkerExecutionTimeoutMs(),
+    signal: input.signal,
   });
 }
 
@@ -196,29 +220,49 @@ export async function submitFailedWorkerResult(request: SubmitFailedWorkerResult
     const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
     console.error(`failed to submit error result for ${taskId}:`, fallbackMessage);
     await request.onFallbackFailed?.({ taskId, error: fallbackMessage });
+    if (fallbackError instanceof WorkerResultDeliveryError) {
+      throw fallbackError;
+    }
+    throw new WorkerResultDeliveryError(`failed to submit error result for ${taskId}: ${fallbackMessage}`);
   }
 }
 
 async function submitFailedResultWithRetry(request: SubmitFailedWorkerResultInput, failedResult: WorkerResult, taskId: string): Promise<void> {
-  const maxRetries = request.maxRetries ?? SUBMIT_RESULT_MAX_RETRIES;
+  const maxRetries = Number.isSafeInteger(request.maxRetries) && (request.maxRetries ?? 0) > 0
+    ? request.maxRetries ?? SUBMIT_RESULT_MAX_RETRIES
+    : SUBMIT_RESULT_MAX_RETRIES;
+  const retryDelayMs = Number.isSafeInteger(request.retryDelayMs) && (request.retryDelayMs ?? -1) >= 0
+    ? request.retryDelayMs ?? SUBMIT_RESULT_RETRY_DELAY_MS
+    : SUBMIT_RESULT_RETRY_DELAY_MS;
+  let lastError = "unknown delivery error";
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    throwIfAborted(request.input.signal, "worker result delivery aborted");
     try {
       await request.input.client.submitResult(request.input.workerId, {
         ...buildWorkerProtocolEnvelope(request.input.payload),
         result: failedResult,
         changedFiles: [],
         pullRequest: null,
-      });
+      }, ...requestOptions(request.input.signal));
       console.error(`submitted failed result for ${taskId} after catch`);
       await request.onSubmitted?.({ taskId });
       return;
     } catch (submitError) {
+      throwIfAborted(request.input.signal, "worker result delivery aborted");
       const error = submitError instanceof Error ? submitError.message : String(submitError);
+      lastError = error;
       console.error(`submitResult in catch attempt ${attempt} failed:`, error);
       await request.onSubmitAttemptFailed?.({ taskId, attempt, maxRetries, error });
       if (attempt < maxRetries) {
-        await sleep(request.retryDelayMs ?? SUBMIT_RESULT_RETRY_DELAY_MS);
+        await sleepUntilAborted(
+          retryDelayMs,
+          request.input.signal,
+          "worker result delivery aborted",
+        );
       }
     }
   }
+  throw new WorkerResultDeliveryError(
+    `failed to submit error result for ${taskId} after ${maxRetries} attempts: ${lastError}`,
+  );
 }

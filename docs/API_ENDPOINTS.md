@@ -67,15 +67,18 @@ The dispatcher server supports three authentication modes controlled by the `DIS
 
 - **Environment variables**:
   - `DISPATCHER_AUTH_MODE`: One of `token`, `legacy`, or `open` (default: `token`)
-  - `DISPATCHER_API_TOKEN`: The token to use for authentication (required in `token` mode)
+  - `DISPATCHER_API_TOKEN`: Control-plane token with access to all endpoints (required in `token` mode)
+  - `DISPATCHER_WORKER_TOKENS`: Optional JSON object mapping worker IDs to scoped tokens; values must be unique, trimmed, and different from `DISPATCHER_API_TOKEN`
+  - `DISPATCHER_WORKER_TOKEN`: Worker-side token used by remote runtime clients
 
 - **Auth modes**:
-  - `token` (default): All endpoints except `/health` require `Authorization: Bearer <DISPATCHER_API_TOKEN>` header. Returns `500` if `DISPATCHER_API_TOKEN` is not set.
-  - `legacy`: When `DISPATCHER_API_TOKEN` is not set, only loopback addresses (127.0.0.1, ::1, ::ffff:127.0.0.1) can access endpoints without authentication. When set, requires `Authorization: Bearer <token>` header for all endpoints except `/health`.
+  - `token` (default): `DISPATCHER_API_TOKEN` remains required as the control-plane credential. All endpoints except `/health` require that token, or a matching worker-scoped token on the worker's own routes. Returns `500` if `DISPATCHER_API_TOKEN` is not set.
+  - `legacy`: When `DISPATCHER_API_TOKEN` is not set, loopback addresses (127.0.0.1, ::1, ::ffff:127.0.0.1) can access endpoints without authentication; configured worker tokens can still authenticate remotely to their scoped routes. When the control-plane token is set, non-health requests require a valid control-plane or applicable worker token.
   - `open`: All endpoints are accessible without authentication. Useful for local development.
 
 - **Whitelist**: `/health` endpoint is always accessible without authentication in all modes.
 - **Authentication failure**: Returns `401` status code with `{ "error": "unauthorized" }` JSON response
+- **Worker scope failure**: A valid worker token used for another worker or a control-plane endpoint returns `403` with `{ "error": "forbidden" }`
 
 ### State lock
 
@@ -87,6 +90,10 @@ Dispatcher 当前会在状态目录下维护 `.runtime-state.lock`，状态型 e
   - `DISPATCHER_STATE_LOCK_STALE_MS` (default `30000`)
 - Lock timeout response:
   - `503` with `{ "error": "state lock timeout after ...: <lock-path>" }`
+- Reclaim safety:
+  - lock metadata records `pid`, `ownerToken`, and `createdAt`
+  - a live owner PID is not reclaimed solely because the lock age exceeds `DISPATCHER_STATE_LOCK_STALE_MS`
+  - release verifies the original inode and owner token before unlinking, so an old callback cannot remove a replacement lock
 - Caller expectation:
   - 把它当作暂时性竞争错误并重试，不要误判成认证或 payload 问题
 
@@ -147,6 +154,7 @@ Current endpoint families:
     - `repoConcurrencySaturation`
     - `failureCodes`
     - `reviewReasonCodes`
+    - `eventWindow`
     - `workers`
     - `tasks`
 - `GET /api/workers`
@@ -158,7 +166,18 @@ Current endpoint families:
 - `GET /api/query/tasks`
   - Returns structured task projection rows from the SQLite query store.
 - `GET /api/query/events`
-  - Returns structured event projection rows from the SQLite query store.
+  - Returns durable audit-event rows in ascending sequence order for the current page while preserving the historical array response shape.
+  - Query parameters:
+    - `limit`: positive page size, default `500`, maximum `5000`
+    - `beforeSequence`: return rows with audit sequence lower than this cursor
+  - Response headers expose pagination and scope without changing the JSON body:
+    - `x-forgeflow-event-scope` (`durable_audit` or legacy `runtime_window`)
+    - `x-forgeflow-event-total`
+    - `x-forgeflow-event-returned`
+    - `x-forgeflow-event-limit`
+    - `x-forgeflow-event-has-more`
+    - `x-forgeflow-event-next-before-sequence` when another page exists
+    - `x-forgeflow-event-retention-limit` for the in-memory runtime window
 - `GET /api/query/reviews`
   - Returns structured review projection rows from the SQLite query store.
 - `GET /api/query/leases`
@@ -176,6 +195,7 @@ Current endpoint families:
 - `GET /api/artifacts/:bundleId/files/:fileName`
   - Returns one artifact store file as `{ bundleId, fileName, content }`.
   - Only files listed in the artifact store manifest can be read.
+  - Dispatcher-generated files currently include `result.json`, `diff.patch`, `session.log`, `test-results.txt`, `trajectory.json`, and `trajectory.traj` when the corresponding content exists.
   - Returns `400 invalid_artifact_file` for path traversal or invalid file names.
   - Returns `404 artifact_file_not_found` when the bundle or file is unknown.
 - `GET /api/slo`
@@ -266,7 +286,7 @@ Current endpoint families:
     - `branchName`
     - `mode`
   - Dispatcher will reject mismatched worker metadata with `409`.
-  - Dispatcher will reject stale result writes with `409` when the payload carries a terminal historical `attemptId`.
+  - Dispatcher accepts an exact replay after a `succeeded` or `failed` attempt as an idempotent success when the complete envelope, canonical result, PR metadata, and ArtifactBundle match the recorded result. A changed replay returns `409 idempotency replay mismatch`; other terminal historical attempts remain stale and are rejected with `409`.
   - Request-body validation now rejects malformed result payloads with `400`.
   - `result` may now include additive structured worker evidence for dispatcher persistence:
     - `failureType`

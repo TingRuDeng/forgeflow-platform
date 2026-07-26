@@ -9,7 +9,14 @@ import {
 import type { DispatcherClient, PullRequestInfo, TaskPayload } from "./types.js";
 
 export { createDispatcherClient } from "./dispatcher-client.js";
-export { buildWorkerProtocolEnvelope, executeLiveWorkerTask, submitFailedWorkerResult } from "./task-processor.js";
+export {
+  DEFAULT_WORKER_EXECUTION_TIMEOUT_MS,
+  WorkerResultDeliveryError,
+  buildWorkerProtocolEnvelope,
+  executeLiveWorkerTask,
+  resolveWorkerExecutionTimeoutMs,
+  submitFailedWorkerResult,
+} from "./task-processor.js";
 export {
   DEFAULT_SUBMIT_RESULT_MAX_RETRIES,
   DEFAULT_SUBMIT_RESULT_RETRY_DELAY_MS,
@@ -31,6 +38,7 @@ export interface RunWorkerDaemonCycleInput {
   packageRoot?: string;
   dryRunExecution?: boolean;
   at?: string;
+  signal?: AbortSignal;
 }
 
 export type RunWorkerDaemonCycleResult =
@@ -45,6 +53,7 @@ async function executeAssignedTask(input: {
   payload: TaskPayload;
   dryRunExecution: boolean;
   at?: string;
+  signal?: AbortSignal;
 }): Promise<TaskExecutionResult> {
   try {
     return await executeLiveWorkerTask(input);
@@ -59,6 +68,9 @@ async function executeAssignedTask(input: {
 }
 
 export async function runWorkerDaemonCycle(input: RunWorkerDaemonCycleInput): Promise<RunWorkerDaemonCycleResult> {
+  if (input.signal?.aborted) {
+    return { status: "stopped", workerId: input.workerId };
+  }
   const client = input.client ?? createDispatcherClient(input.dispatcherUrl || "");
   const packageRoot = input.packageRoot ?? resolvePackageRootDir();
   const summary: SharedWorkerDaemonCycleResult = await runSharedWorkerDaemonCycle({
@@ -70,6 +82,7 @@ export async function runWorkerDaemonCycle(input: RunWorkerDaemonCycleInput): Pr
     repoDir: input.repoDir,
     dryRunExecution: input.dryRunExecution,
     at: input.at,
+    signal: input.signal,
     taskExecutor: {
       executeTask: (_task, _assignment, payload) => executeAssignedTask({
         client,
@@ -79,6 +92,7 @@ export async function runWorkerDaemonCycle(input: RunWorkerDaemonCycleInput): Pr
         payload,
         dryRunExecution: Boolean(input.dryRunExecution),
         at: input.at,
+        signal: input.signal,
       }),
     },
   });
@@ -91,11 +105,38 @@ export interface RunWorkerDaemonInput extends RunWorkerDaemonCycleInput {
 }
 
 export async function runWorkerDaemon(input: RunWorkerDaemonInput): Promise<RunWorkerDaemonCycleResult> {
-  while (true) {
-    const summary = await runWorkerDaemonCycle(input);
+  while (!input.signal?.aborted) {
+    let summary: RunWorkerDaemonCycleResult;
+    try {
+      summary = await runWorkerDaemonCycle(input);
+    } catch (error) {
+      if (input.signal?.aborted) {
+        return { status: "stopped", workerId: input.workerId };
+      }
+      throw error;
+    }
     if (input.once) {
       return summary;
     }
-    await sleep(input.pollIntervalMs ?? 5000);
+    await sleepUntilAborted(input.pollIntervalMs ?? 5000, input.signal);
   }
+  return { status: "stopped", workerId: input.workerId };
+}
+
+function sleepUntilAborted(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return sleep(ms);
+  }
+  if (signal.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(finish, ms);
+    function finish() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal.addEventListener("abort", finish, { once: true });
+  });
 }

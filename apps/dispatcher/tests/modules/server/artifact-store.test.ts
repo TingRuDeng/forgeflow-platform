@@ -48,6 +48,11 @@ function createBundle(bundleId: string, createdAt: string): ArtifactBundle {
       logs: "pnpm test passed",
       testResults: "1 passed",
     },
+    testResults: [{
+      name: "pnpm test",
+      status: "passed",
+      outputRef: "artifact://attempt-1/tests.txt",
+    }],
     riskNotes: [],
     nextActions: [],
     createdAt,
@@ -66,19 +71,28 @@ describe("artifact store", () => {
     const stored = persistArtifactBundleFiles(stateDir, createBundle("bundle-1", "2026-06-12T09:00:00.000Z"));
 
     expect(stored.bundle.refs).toMatchObject({
+      structuredReport: "artifact://bundle-1/result.json",
       diff: "artifact://bundle-1/diff.patch",
       logs: "artifact://bundle-1/session.log",
+      terminalTranscript: "artifact://bundle-1/session.log",
       testResults: "artifact://bundle-1/test-results.txt",
       trajectory: "artifact://bundle-1/trajectory.json",
       traj: "artifact://bundle-1/trajectory.traj",
     });
     expect(stored.manifest.files.map((file) => file.fileName)).toEqual([
+      "result.json",
       "diff.patch",
       "session.log",
       "test-results.txt",
       "trajectory.json",
       "trajectory.traj",
     ]);
+    expect(stored.bundle.testResults?.[0]?.outputRef).toBe("artifact://bundle-1/test-results.txt");
+    expect(JSON.parse(readArtifactStoreFile(stateDir, "bundle-1", "result.json"))).toMatchObject({
+      schemaVersion: "artifact-bundle/v1",
+      bundleId: "bundle-1",
+      taskId: "task-1",
+    });
     expect(readArtifactStoreFile(stateDir, "bundle-1", "diff.patch")).toBe("diff --git a/src/a.ts b/src/a.ts");
     expect(JSON.parse(readArtifactStoreFile(stateDir, "bundle-1", "trajectory.json"))).toMatchObject({
       schemaVersion: "artifact-trajectory/v1",
@@ -123,10 +137,11 @@ describe("artifact store", () => {
     persistArtifactBundleFiles(stateDir, createBundle("bundle-mid", "2026-06-12T10:00:00.000Z"), {
       maxBundles: 2,
     });
-    persistArtifactBundleFiles(stateDir, createBundle("bundle-new", "2026-06-12T11:00:00.000Z"), {
+    const newest = persistArtifactBundleFiles(stateDir, createBundle("bundle-new", "2026-06-12T11:00:00.000Z"), {
       maxBundles: 2,
     });
 
+    expect(newest.removedBundleIds).toEqual(["bundle-old"]);
     expect(listArtifactStoreManifests(stateDir).map((manifest) => manifest.bundleId)).toEqual([
       "bundle-mid",
       "bundle-new",

@@ -108,6 +108,30 @@ describe("runtime-glue dispatcher-client", () => {
       ).rejects.toThrow("dispatcher request failed");
     });
 
+    it("aborts an in-flight dispatcher request through request options", async () => {
+      const mockFetch = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        const signal = init.signal as AbortSignal;
+        signal.addEventListener("abort", () => reject(new Error("fetch aborted")), { once: true });
+      }));
+      const client = createDispatcherHttpClient({
+        dispatcherUrl: "http://localhost:8787",
+        fetchImpl: mockFetch as never,
+      });
+      const abortController = new AbortController();
+
+      const pending = client.registerWorker({
+        workerId: "test-worker",
+        pool: "codex",
+      }, { signal: abortController.signal });
+      abortController.abort();
+
+      await expect(pending).rejects.toMatchObject({
+        name: "AbortError",
+        message: expect.stringContaining("dispatcher request aborted"),
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
     it("strips trailing slash from dispatcherUrl", async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,

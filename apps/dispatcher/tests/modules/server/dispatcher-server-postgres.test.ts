@@ -16,6 +16,13 @@ const mocks = vi.hoisted(() => {
     client,
     store,
     createPgClient: vi.fn(async () => client),
+    listRuntimeAuditEvents: vi.fn(async () => ({
+      events: [],
+      total: 0,
+      limit: 500,
+      hasMore: false,
+      nextBeforeSequence: null,
+    })),
     loadPrimaryRuntimeStateSnapshot: vi.fn(async () => store.state),
     savePrimaryRuntimeStateSnapshot: vi.fn(async (_client: unknown, state: unknown) => {
       store.state = state;
@@ -25,6 +32,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@forgeflow/dispatcher-store-postgres", () => ({
   createPgClient: mocks.createPgClient,
+  listRuntimeAuditEvents: mocks.listRuntimeAuditEvents,
   loadPrimaryRuntimeStateSnapshot: mocks.loadPrimaryRuntimeStateSnapshot,
   savePrimaryRuntimeStateSnapshot: mocks.savePrimaryRuntimeStateSnapshot,
 }));
@@ -158,7 +166,7 @@ describe("dispatcher server postgres backend", () => {
       events: [{ taskId: "task-1", type: "created", at: "2026-07-05T10:00:00.000Z" }],
       reviews: [{ taskId: "task-1", decision: "pending", notes: "" }],
       leases: [{ id: "lease-1", resourceType: "assignment", resourceId: "task-1" }],
-      artifactBundles: [{ bundleId: "bundle-1", taskId: "task-1", attemptId: "attempt-1", schemaVersion: "artifact-bundle-v1" }],
+      artifactBundles: [{ bundleId: "bundle-1", taskId: "task-1", attemptId: "attempt-1", schemaVersion: "artifact-bundle/v1" }],
     };
     const stateDir = makeApprovedStateDir();
     const { handleDispatcherHttpRequest } = await loadServerModule();
@@ -186,7 +194,7 @@ describe("dispatcher server postgres backend", () => {
     expect(tasksResponse.json).toEqual([{ id: "task-1", title: "Task 1" }]);
     expect(artifactsResponse.status).toBe(200);
     expect(artifactsResponse.json).toEqual([
-      { bundleId: "bundle-1", taskId: "task-1", attemptId: "attempt-1", schemaVersion: "artifact-bundle-v1" },
+      { bundleId: "bundle-1", taskId: "task-1", attemptId: "attempt-1", schemaVersion: "artifact-bundle/v1" },
     ]);
     expect(healthResponse.status).toBe(200);
     expect(healthResponse.json).toMatchObject({

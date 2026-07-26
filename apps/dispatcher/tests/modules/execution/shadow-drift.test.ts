@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -10,6 +11,46 @@ const repoRoot = path.resolve(
   "../../../../../",
 );
 const checkShadowDriftScriptPath = path.join(repoRoot, "scripts/check-shadow-drift.mjs");
+const dispatcherStateScriptPath = path.join(repoRoot, "scripts/lib/dispatcher-state.js");
+
+function spawnConcurrentAlertWriter(stateDir: string, marker: string): Promise<void> {
+  const source = `
+    const [{ recordShadowDriftAlert }, stateModule] = await Promise.all([
+      import(${JSON.stringify(pathToFileURL(checkShadowDriftScriptPath).href)}),
+      import(${JSON.stringify(pathToFileURL(dispatcherStateScriptPath).href)}),
+    ]);
+    await recordShadowDriftAlert(
+      stateModule,
+      ${JSON.stringify(stateDir)},
+      { level: "critical", mismatchCount: 1, absoluteDelta: 1, marker: ${JSON.stringify(marker)} },
+      { status: "drifted", mismatches: [{ key: ${JSON.stringify(marker)}, delta: 1 }] },
+    );
+  `;
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["--input-type=module", "--eval", source], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        DISPATCHER_STATE_LOCK_TIMEOUT_MS: "10000",
+        FORGEFLOW_DISPATCHER_DIST_PREBUILT: "1",
+        RUNTIME_STATE_BACKEND: "json",
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`alert writer failed: code=${code} signal=${signal} stderr=${stderr}`));
+    });
+  });
+}
 
 describe("shadow drift verification", () => {
   it("reports not_configured when shadow Postgres is disabled", () => {
@@ -253,6 +294,27 @@ describe("shadow drift verification", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES must be a non-negative number");
+  }, 30_000);
+
+  it("preserves concurrent cross-process alert writes under the runtime state lock", async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-shadow-alert-lock-"));
+    const markers = Array.from({ length: 8 }, (_, index) => `writer-${index + 1}`);
+
+    try {
+      await Promise.all(markers.map((marker) => spawnConcurrentAlertWriter(stateDir, marker)));
+      const state = JSON.parse(
+        fs.readFileSync(path.join(stateDir, "runtime-state.json"), "utf8"),
+      );
+      const recordedMarkers = state.events
+        .filter((event: { type: string }) => event.type === "shadow_drift_detected")
+        .map((event: { payload: { alert: { marker: string } } }) => event.payload.alert.marker)
+        .sort();
+
+      expect(recordedMarkers).toEqual([...markers].sort());
+      expect(state.sequence).toBe(markers.length);
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   }, 30_000);
 
 });

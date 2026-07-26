@@ -25,7 +25,11 @@ export {
 export {
   AUTOMATION_SESSION_RESTART_ERROR,
   AUTOMATION_SESSION_TTL_MS,
+  AutomationSessionLockTimeoutError,
   AutomationSessionStatus,
+  DEFAULT_AUTOMATION_SESSION_LOCK_RETRY_MS,
+  DEFAULT_AUTOMATION_SESSION_LOCK_STALE_MS,
+  DEFAULT_AUTOMATION_SESSION_LOCK_TIMEOUT_MS,
   createPersistentAutomationSessionStore,
   getAutomationSessionPublicShape,
 } from "./session-store.js";

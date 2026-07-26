@@ -62,14 +62,18 @@ export interface WorkerRegistration {
   at?: string;
 }
 
+export interface DispatcherRequestOptions {
+  signal?: AbortSignal;
+}
+
 export interface DispatcherWorkerClient {
-  registerWorker(worker: WorkerRegistration): Promise<unknown>;
-  heartbeat(workerId: string, payload: HeartbeatPayload): Promise<unknown>;
-  getAssignedTask(workerId: string): Promise<AssignedTaskResponse>;
-  claimTask(workerId: string, payload?: { at?: string }): Promise<AssignedTaskResponse>;
-  startTask(workerId: string, payload: StartTaskPayload): Promise<unknown>;
-  submitResult(workerId: string, payload: SubmitResultPayload): Promise<unknown>;
-  reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }) => Promise<unknown>;
+  registerWorker(worker: WorkerRegistration, options?: DispatcherRequestOptions): Promise<unknown>;
+  heartbeat(workerId: string, payload: HeartbeatPayload, options?: DispatcherRequestOptions): Promise<unknown>;
+  getAssignedTask(workerId: string, options?: DispatcherRequestOptions): Promise<AssignedTaskResponse>;
+  claimTask(workerId: string, payload?: { at?: string }, options?: DispatcherRequestOptions): Promise<AssignedTaskResponse>;
+  startTask(workerId: string, payload: StartTaskPayload, options?: DispatcherRequestOptions): Promise<unknown>;
+  submitResult(workerId: string, payload: SubmitResultPayload, options?: DispatcherRequestOptions): Promise<unknown>;
+  reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }, options?: DispatcherRequestOptions) => Promise<unknown>;
 }
 
 export interface AssignedTaskResponse {
@@ -93,10 +97,11 @@ export interface WorkerDaemonCycleInput {
   repoRoot?: string;
   dryRunExecution?: boolean;
   at?: string;
+  signal?: AbortSignal;
 }
 
 export interface WorkerDaemonCycleResult {
-  status: "idle" | "completed";
+  status: "idle" | "completed" | "stopped";
   workerId: string;
   taskId?: string;
   worktreeDir?: string;

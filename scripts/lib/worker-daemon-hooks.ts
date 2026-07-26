@@ -10,6 +10,7 @@ interface WorkerDaemonHookClient {
   reportEvent?: (
     workerId: string,
     payload: { type: string; taskId?: string; payload?: unknown; at?: string },
+    options?: { signal?: AbortSignal },
   ) => Promise<unknown>;
 }
 
@@ -21,6 +22,7 @@ interface WorkerDaemonHookInput {
       repo: string;
     };
   };
+  signal?: AbortSignal;
 }
 
 function nowIso(): string {
@@ -31,8 +33,9 @@ export async function reportWorkerEventBestEffort(
   client: WorkerDaemonHookClient,
   workerId: string,
   event: { type: string; taskId?: string; payload?: unknown; at?: string },
+  signal?: AbortSignal,
 ): Promise<void> {
-  if (typeof client.reportEvent !== "function") {
+  if (signal?.aborted || typeof client.reportEvent !== "function") {
     return;
   }
   try {
@@ -41,7 +44,7 @@ export async function reportWorkerEventBestEffort(
       taskId: event.taskId,
       payload: event.payload,
       at: event.at ?? nowIso(),
-    });
+    }, ...(signal ? [{ signal }] : []));
   } catch (error) {
     logger.warn({
       operation: "reportWorkerEvent",
@@ -110,7 +113,7 @@ export function buildFailedResultCallbacks(input: WorkerDaemonHookInput, taskId:
           error: event.error,
           fallback: true,
         },
-      });
+      }, input.signal);
     },
     onFallbackFailed: async (event: { error: string }) => {
       logger.error({ operation: "submitResult", taskId, error: event.error, event: "submitResult_fallback_failed" });
@@ -122,7 +125,7 @@ export function buildFailedResultCallbacks(input: WorkerDaemonHookInput, taskId:
           error: event.error,
           failureCode: "delivery_failed",
         },
-      });
+      }, input.signal);
     },
   };
 }

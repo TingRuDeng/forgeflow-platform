@@ -9,6 +9,7 @@ import type { RuntimeState } from "../../../src/modules/server/runtime-state.js"
 
 import {
   loadRuntimeState,
+  readRuntimeAuditEvents,
   saveRuntimeState,
   sqliteStore,
 } from "../../../src/modules/server/runtime-state-sqlite.js";
@@ -296,6 +297,94 @@ describe("runtime-state-sqlite", () => {
     expect(reloaded.tasks[0].id).toBe("dispatch-1:task-1");
     expect(reloaded.dispatches).toHaveLength(1);
     expect(reloaded.dispatches[0].id).toBe("dispatch-1");
+  });
+
+  it("rolls back the snapshot when structured projection rebuild fails", () => {
+    const stateDir = makeTempDir();
+    const originalState = createTestState();
+    saveRuntimeState(stateDir, originalState);
+
+    const duplicateWorkerState: RuntimeState = {
+      ...originalState,
+      updatedAt: "2026-04-01T11:00:00.000Z",
+      sequence: 2,
+      workers: [
+        ...originalState.workers,
+        {
+          ...originalState.workers[0],
+          hostname: "duplicate-worker-host",
+        },
+      ],
+    };
+
+    expect(() => saveRuntimeState(stateDir, duplicateWorkerState)).toThrow();
+
+    const reloaded = loadRuntimeState(stateDir);
+    expect(reloaded.sequence).toBe(1);
+    expect(reloaded.workers).toHaveLength(1);
+    expect(reloaded.workers[0].hostname).toBe("test-host");
+    expect(readSnapshotState(stateDir).count).toBe(1);
+    expect(sqliteStore.compareStructuredProjection(stateDir).matches).toBe(true);
+  });
+
+  it("keeps audit events after the runtime window advances and deduplicates repeated saves", () => {
+    const stateDir = makeTempDir();
+    const firstState: RuntimeState = {
+      ...createTestState(),
+      events: Array.from({ length: 500 }, (_, index) => ({
+        taskId: `task-${index + 1}`,
+        type: "test_event",
+        at: `2026-04-01T10:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`,
+        payload: { index: index + 1 },
+      })),
+    };
+    saveRuntimeState(stateDir, firstState);
+
+    const reloaded = loadRuntimeState(stateDir);
+    const advancedState: RuntimeState = {
+      ...reloaded,
+      events: [
+        ...reloaded.events.slice(10),
+        ...Array.from({ length: 10 }, (_, index) => ({
+          taskId: `task-${501 + index}`,
+          type: "test_event",
+          at: `2026-04-01T19:00:${String(index).padStart(2, "0")}.000Z`,
+          payload: { index: 501 + index },
+        })),
+      ],
+    };
+    saveRuntimeState(stateDir, advancedState);
+    saveRuntimeState(stateDir, advancedState);
+
+    expect(loadRuntimeState(stateDir).events).toHaveLength(500);
+    const latestPage = readRuntimeAuditEvents(stateDir, { limit: 5 });
+    expect(latestPage).toMatchObject({
+      total: 510,
+      limit: 5,
+      hasMore: true,
+      nextBeforeSequence: 506,
+      scope: "durable_audit",
+    });
+    expect(latestPage.events.map((event) => event.eventId)).toEqual([
+      "event-506",
+      "event-507",
+      "event-508",
+      "event-509",
+      "event-510",
+    ]);
+
+    const oldestPage = readRuntimeAuditEvents(stateDir, {
+      limit: 5,
+      beforeSequence: 6,
+    });
+    expect(oldestPage.events.map((event) => event.eventId)).toEqual([
+      "event-1",
+      "event-2",
+      "event-3",
+      "event-4",
+      "event-5",
+    ]);
+    expect(oldestPage.hasMore).toBe(false);
   });
 
   it("writes task attempts to the structured sqlite projection", () => {

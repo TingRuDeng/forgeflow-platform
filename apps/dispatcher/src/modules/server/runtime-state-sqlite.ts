@@ -4,6 +4,13 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { AssignmentPayload, Event, RuntimeState } from "./runtime-state.js";
+import {
+  appendRuntimeEvent,
+  ensureRuntimeEventIdentities,
+  resolveRuntimeAuditEventPageLimit,
+  type RuntimeAuditEventPage,
+  type RuntimeAuditEventQueryOptions,
+} from "./runtime-events.js";
 import type { RuntimeStateStore } from "./runtime-state-store.js";
 import {
   readRuntimeStateShadowWriteStatus,
@@ -16,7 +23,6 @@ const { DatabaseSync } = await import("node:sqlite");
 
 const STATE_FALLBACK_ENV = "FORGEFLOW_ALLOW_STATE_FALLBACK_JSON";
 const SQLITE_BUSY_TIMEOUT_MS = 5_000;
-const RUNTIME_EVENTS_RETENTION_LIMIT = 500;
 const SHADOW_WRITE_FAILED_EVENT_TYPE = "shadow_write_failed";
 
 function nowIso(): string {
@@ -59,16 +65,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function appendEvent(state: RuntimeState, event: Event): RuntimeState {
-  const nextEvents = [...state.events, event];
-  return {
-    ...state,
-    events: nextEvents.length > RUNTIME_EVENTS_RETENTION_LIMIT
-      ? nextEvents.slice(-RUNTIME_EVENTS_RETENTION_LIMIT)
-      : nextEvents,
-  };
-}
-
 function fromJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) {
     return fallback;
@@ -91,11 +87,19 @@ function ensureColumn(
   columnName: string,
   columnDefinition: string,
 ): void {
-  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
-  if (columns.some((column) => column.name === columnName)) {
+  if (hasColumn(db, tableName, columnName)) {
     return;
   }
   db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition};`);
+}
+
+function hasColumn(
+  db: InstanceType<typeof DatabaseSync>,
+  tableName: string,
+  columnName: string,
+): boolean {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  return columns.some((column) => column.name === columnName);
 }
 
 function initDb(db: InstanceType<typeof DatabaseSync>): void {
@@ -242,12 +246,26 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
 
     CREATE TABLE IF NOT EXISTS runtime_events (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id TEXT,
       task_id TEXT NOT NULL,
       type TEXT NOT NULL,
       at TEXT NOT NULL,
       summary TEXT,
       payload_json TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS runtime_audit_events (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id TEXT NOT NULL UNIQUE,
+      task_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      at TEXT NOT NULL,
+      summary TEXT,
+      payload_json TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS runtime_audit_events_task_sequence_idx
+      ON runtime_audit_events (task_id, sequence);
 
     CREATE TABLE IF NOT EXISTS leases (
       id TEXT PRIMARY KEY,
@@ -279,25 +297,67 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
   ensureColumn(db, "tasks", "resume_payload_json", "TEXT");
   ensureColumn(db, "reviews", "risk_assessment_json", "TEXT");
   ensureColumn(db, "tasks", "termination_policy_json", "TEXT");
+  ensureColumn(db, "runtime_events", "event_id", "TEXT");
 }
 
 function persistRuntimeStateSnapshot(db: InstanceType<typeof DatabaseSync>, state: RuntimeState): RuntimeState {
+  const normalizedState = ensureRuntimeEventIdentities(state);
   const persistedState = {
-    ...state,
+    ...normalizedState,
     updatedAt: nowIso(),
-    leases: state.leases ?? [],
+    leases: normalizedState.leases ?? [],
   };
   const content = JSON.stringify(persistedState);
   const createdAt = nowIso();
   const checksum = checksumSha256(content);
 
-  db.prepare(`
-    INSERT INTO snapshots (data, checksum_sha256, created_at)
-    VALUES (?, ?, ?)
-  `).run(content, checksum, createdAt);
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    db.prepare(`
+      INSERT INTO snapshots (data, checksum_sha256, created_at)
+      VALUES (?, ?, ?)
+    `).run(content, checksum, createdAt);
 
-  rewriteStructuredProjection(db, persistedState);
-  return persistedState;
+    appendRuntimeAuditEvents(db, persistedState.events);
+    rewriteStructuredProjection(db, persistedState);
+    db.exec("COMMIT;");
+    return persistedState;
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+}
+
+function appendRuntimeAuditEvents(
+  db: InstanceType<typeof DatabaseSync>,
+  events: Event[],
+): void {
+  const insertEvent = db.prepare(`
+    INSERT INTO runtime_audit_events (
+      event_id, task_id, type, at, summary, payload_json
+    )
+    SELECT ?, ?, ?, ?, ?, ?
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM runtime_audit_events
+      WHERE event_id = ?
+    )
+  `);
+
+  for (const event of events) {
+    if (!event.eventId) {
+      throw new Error("runtime audit event is missing eventId");
+    }
+    insertEvent.run(
+      event.eventId,
+      event.taskId,
+      event.type,
+      event.at,
+      event.summary ?? null,
+      asJson(event.payload ?? null),
+      event.eventId,
+    );
+  }
 }
 
 function hasShadowFailureEvent(state: RuntimeState, status: RuntimeStateShadowWriteStatus): boolean {
@@ -343,7 +403,7 @@ function recordShadowFailureEvent(stateDir: string): void {
   const db = new DatabaseSync(dbFilePath(stateDir));
   try {
     initDb(db);
-    persistRuntimeStateSnapshot(db, appendEvent(state, buildShadowFailureEvent(status)));
+    persistRuntimeStateSnapshot(db, appendRuntimeEvent(state, buildShadowFailureEvent(status)));
   } finally {
     db.close();
   }
@@ -366,6 +426,7 @@ function createEmptyRuntimeState(): RuntimeState {
     version: 1,
     updatedAt: nowIso(),
     sequence: 0,
+    eventSequence: 0,
     workers: [],
     tasks: [],
     taskAttempts: [],
@@ -380,7 +441,7 @@ function createEmptyRuntimeState(): RuntimeState {
 }
 
 function coerceRuntimeState(parsed: unknown): RuntimeState {
-  return {
+  return ensureRuntimeEventIdentities({
     ...createEmptyRuntimeState(),
     ...(parsed as Partial<RuntimeState>),
     leases: Array.isArray((parsed as Partial<RuntimeState>)?.leases)
@@ -392,7 +453,7 @@ function coerceRuntimeState(parsed: unknown): RuntimeState {
     artifactBundles: Array.isArray((parsed as Partial<RuntimeState>)?.artifactBundles)
       ? (parsed as Partial<RuntimeState>).artifactBundles ?? []
       : [],
-  };
+  });
 }
 
 function shouldAllowJsonFallback(): boolean {
@@ -414,9 +475,7 @@ function rewriteStructuredProjection(
   db: InstanceType<typeof DatabaseSync>,
   state: RuntimeState,
 ): void {
-  db.exec("BEGIN IMMEDIATE;");
-  try {
-    db.exec(`
+  db.exec(`
       DELETE FROM workers;
       DELETE FROM tasks;
       DELETE FROM task_attempts;
@@ -428,7 +487,7 @@ function rewriteStructuredProjection(
       DELETE FROM runtime_events;
       DELETE FROM leases;
       DELETE FROM sessions;
-    `);
+  `);
 
     const insertWorker = db.prepare(`
       INSERT INTO workers (
@@ -619,11 +678,12 @@ function rewriteStructuredProjection(
     }
 
     const insertEvent = db.prepare(`
-      INSERT INTO runtime_events (task_id, type, at, summary, payload_json)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO runtime_events (event_id, task_id, type, at, summary, payload_json)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
     for (const event of state.events) {
       insertEvent.run(
+        event.eventId ?? null,
         event.taskId,
         event.type,
         event.at,
@@ -653,11 +713,6 @@ function rewriteStructuredProjection(
       );
     }
 
-    db.exec("COMMIT;");
-  } catch (error) {
-    db.exec("ROLLBACK;");
-    throw error;
-  }
 }
 
 export function loadRuntimeState(stateDir: string): RuntimeState {
@@ -915,11 +970,15 @@ export function readStructuredRuntimeState(stateDir: string): RuntimeState {
       taskIds: fromJson(row.task_ids_json, []),
     }));
 
+    const runtimeEventIdSelect = hasColumn(db, "runtime_events", "event_id")
+      ? "event_id"
+      : "NULL AS event_id";
     base.events = db.prepare(`
-      SELECT task_id, type, at, summary, payload_json
+      SELECT ${runtimeEventIdSelect}, task_id, type, at, summary, payload_json
       FROM runtime_events
       ORDER BY seq
     `).all().map((row: any) => ({
+      eventId: row.event_id ?? undefined,
       taskId: row.task_id,
       type: row.type,
       at: row.at,
@@ -958,9 +1017,82 @@ export function readStructuredRuntimeState(stateDir: string): RuntimeState {
       base.version = parsed.version;
       base.updatedAt = parsed.updatedAt;
       base.sequence = parsed.sequence;
+      base.eventSequence = parsed.eventSequence;
     }
 
-    return base;
+    return ensureRuntimeEventIdentities(base);
+  } finally {
+    db.close();
+  }
+}
+
+export function readRuntimeAuditEvents(
+  stateDir: string,
+  options: RuntimeAuditEventQueryOptions = {},
+): RuntimeAuditEventPage {
+  const filePath = dbFilePath(stateDir);
+  const limit = resolveRuntimeAuditEventPageLimit(options.limit);
+  if (!fs.existsSync(filePath)) {
+    return {
+      events: [],
+      total: 0,
+      limit,
+      hasMore: false,
+      nextBeforeSequence: null,
+      scope: "runtime_window",
+    };
+  }
+
+  const db = new DatabaseSync(readOnlyDbUri(filePath), { readOnly: true });
+  try {
+    applyReadOnlyPragmas(db);
+    const hasAuditTable = Boolean(db.prepare(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'runtime_audit_events'
+    `).get());
+    const tableName = hasAuditTable ? "runtime_audit_events" : "runtime_events";
+    const sequenceColumn = hasAuditTable ? "sequence" : "seq";
+    const eventIdSelect = hasAuditTable || hasColumn(db, "runtime_events", "event_id")
+      ? "event_id"
+      : "NULL AS event_id";
+    const totalRow = db.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).get() as { count: number };
+    const beforeSequence = Number.isSafeInteger(options.beforeSequence) && (options.beforeSequence ?? 0) > 0
+      ? options.beforeSequence
+      : undefined;
+    const rows = (beforeSequence
+      ? db.prepare(`
+          SELECT ${sequenceColumn} AS audit_sequence, ${eventIdSelect}, task_id, type, at, summary, payload_json
+          FROM ${tableName}
+          WHERE ${sequenceColumn} < ?
+          ORDER BY ${sequenceColumn} DESC
+          LIMIT ?
+        `).all(beforeSequence, limit + 1)
+      : db.prepare(`
+          SELECT ${sequenceColumn} AS audit_sequence, ${eventIdSelect}, task_id, type, at, summary, payload_json
+          FROM ${tableName}
+          ORDER BY ${sequenceColumn} DESC
+          LIMIT ?
+        `).all(limit + 1)) as any[];
+    const hasMore = rows.length > limit;
+    const events = rows.slice(0, limit).reverse().map((row: any): Event => ({
+      eventId: row.event_id ?? undefined,
+      auditSequence: Number(row.audit_sequence),
+      taskId: row.task_id,
+      type: row.type,
+      at: row.at,
+      summary: row.summary ?? null,
+      payload: fromJson(row.payload_json, null),
+    }));
+
+    return {
+      events,
+      total: Number(totalRow.count ?? 0),
+      limit,
+      hasMore,
+      nextBeforeSequence: hasMore ? events[0]?.auditSequence ?? null : null,
+      scope: hasAuditTable ? "durable_audit" : "runtime_window",
+    };
   } finally {
     db.close();
   }
@@ -1008,6 +1140,7 @@ export function compareStructuredProjection(stateDir: string): {
 export const sqliteStore: RuntimeStateStore & {
   importFromJson: typeof importFromJson;
   readStructuredRuntimeState: typeof readStructuredRuntimeState;
+  readRuntimeAuditEvents: typeof readRuntimeAuditEvents;
   compareStructuredProjection: typeof compareStructuredProjection;
 } = {
   load: loadRuntimeState,
@@ -1015,5 +1148,6 @@ export const sqliteStore: RuntimeStateStore & {
   createEmpty: createEmptyRuntimeState,
   importFromJson,
   readStructuredRuntimeState,
+  readRuntimeAuditEvents,
   compareStructuredProjection,
 };

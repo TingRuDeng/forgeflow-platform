@@ -6,7 +6,7 @@ import os from "node:os";
 const CONFIG_FILENAME = ".forgeflow-dispatcher.json";
 
 function getConfigPath() {
-  return path.join(os.homedir(), CONFIG_FILENAME);
+  return process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH || path.join(os.homedir(), CONFIG_FILENAME);
 }
 
 function loadConfig() {
@@ -23,7 +23,11 @@ function loadConfig() {
 
 function saveConfig(config) {
   const configPath = getConfigPath();
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  if (process.platform !== "win32") {
+    fs.chmodSync(configPath, 0o600);
+  }
   console.log(`Config saved to ${configPath}`);
 }
 

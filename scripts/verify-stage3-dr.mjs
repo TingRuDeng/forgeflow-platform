@@ -123,7 +123,7 @@ function readRestoredRuntimeState(stateDir) {
   }
 }
 
-function main() {
+async function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-stage3-dr-"));
   const stateDir = path.join(root, "state");
   const backupDir = path.join(root, "backup");
@@ -132,7 +132,7 @@ function main() {
 
   let backup;
   try {
-    backup = backupRuntimeState({ stateDir, backupDir });
+    backup = await backupRuntimeState({ stateDir, backupDir });
   } finally {
     writer.db.close();
   }
@@ -140,7 +140,7 @@ function main() {
   for (const fileName of ["runtime-state.db", "runtime-state.db-wal", "runtime-state.db-shm"]) {
     fs.writeFileSync(path.join(stateDir, fileName), "corrupted");
   }
-  const restore = restoreRuntimeState({ backupDir, stateDir });
+  const restore = await restoreRuntimeState({ backupDir, stateDir });
   const restored = readRestoredRuntimeState(stateDir);
 
   if (!backup.copiedFiles.includes("runtime-state.db")) {
@@ -154,6 +154,15 @@ function main() {
   }
   if (!restore.restoredFiles.includes("runtime-state.db-wal")) {
     throw new Error("restore did not include runtime-state.db-wal");
+  }
+  if (!restore.manifestVerified) {
+    throw new Error("restore did not verify the backup manifest");
+  }
+  if (restore.verifiedFiles.length !== backup.copiedFiles.length) {
+    throw new Error("restore did not verify every copied backup file");
+  }
+  if (backup.sqliteWatermark?.integrityCheck !== "ok") {
+    throw new Error("backup manifest did not capture a valid SQLite watermark");
   }
   for (const fileName of CUTOVER_EVIDENCE_FILES) {
     if (!backup.copiedFiles.includes(fileName)) {
@@ -181,10 +190,13 @@ function main() {
     copiedFiles: backup.copiedFiles,
     restoredFiles: restore.restoredFiles,
     manifestPath: backup.manifestPath,
+    manifestVerified: restore.manifestVerified,
+    verifiedFiles: restore.verifiedFiles,
+    sqliteWatermark: backup.sqliteWatermark,
     integrityCheck: restored.integrityCheck,
     snapshotCount: restored.snapshotCount,
     restoredState: restored.restoredState,
   }, null, 2));
 }
 
-main();
+await main();

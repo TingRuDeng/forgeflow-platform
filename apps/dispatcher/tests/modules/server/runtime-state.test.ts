@@ -460,7 +460,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
         branchName: "ai/codex/task-1-auth-api",
         repo: "TingRuDeng/openclaw-multi-agent-mvp",
         defaultBranch: "master",
-        mode: "run",
+        mode: "run" as const,
         output: "done",
         generatedAt: "2026-03-16T10:02:00.000Z",
         verification: {
@@ -599,7 +599,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
       startedAt: "2026-05-12T10:00:30.000Z",
     });
 
-    state = recordWorkerResult(state, {
+    const resultInput = {
       workerId: "codex-attempt-worker",
       ...workerEnvelope(firstAttempt),
       result: {
@@ -610,7 +610,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
         branchName: "ai/codex/task-attempt",
         repo: "TingRuDeng/openclaw-multi-agent-mvp",
         defaultBranch: "main",
-        mode: "run",
+        mode: "run" as const,
         output: "done",
         generatedAt: "2026-05-12T10:01:00.000Z",
         verification: {
@@ -618,13 +618,35 @@ describe("dispatcher runtime state (TypeScript)", () => {
           commands: [],
         },
       },
-    });
+    };
+    state = recordWorkerResult(state, resultInput);
 
     expect(state.taskAttempts[0]).toMatchObject({
       attemptId,
       status: "succeeded",
       endedAt: "2026-05-12T10:01:00.000Z",
     });
+    const recordedState = state;
+    expect(recordWorkerResult(recordedState, resultInput)).toBe(recordedState);
+    expect(() => recordWorkerResult(recordedState, {
+      ...resultInput,
+      idempotencyKey: "worker-v1:wrong",
+    })).toThrow(`idempotency key mismatch: ${taskId}`);
+    expect(() => recordWorkerResult(recordedState, {
+      ...resultInput,
+      result: {
+        ...resultInput.result,
+        output: "different replay payload",
+      },
+    })).toThrow(`idempotency replay mismatch for task: ${taskId}`);
+    expect(() => recordWorkerResult(recordedState, {
+      ...resultInput,
+      changedFiles: ["src/replayed-change.ts"],
+    })).toThrow(`idempotency replay mismatch for task: ${taskId}`);
+    expect(() => recordWorkerResult({
+      ...recordedState,
+      artifactBundles: [],
+    }, resultInput)).toThrow(`idempotency replay mismatch for task: ${taskId}`);
   });
 
   it("rejects vNext start and result writes with stale attempt lease data", () => {
@@ -2146,6 +2168,28 @@ describe("dispatcher runtime state (TypeScript)", () => {
       id: "codex-heartbeat-test",
       status: "busy",
     });
+  });
+
+  it("does not move a worker heartbeat backwards when an older request arrives late", () => {
+    let state = createEmptyRuntimeState();
+    state = registerWorker(state, {
+      workerId: "codex-heartbeat-order",
+      pool: "codex",
+      hostname: "test-host",
+      at: "2026-03-17T10:00:10.000Z",
+    });
+
+    state = heartbeatWorker(state, {
+      workerId: "codex-heartbeat-order",
+      at: "2026-03-17T10:00:20.000Z",
+    });
+    state = heartbeatWorker(state, {
+      workerId: "codex-heartbeat-order",
+      at: "2026-03-17T10:00:15.000Z",
+    });
+
+    expect(state.workers[0].lastHeartbeatAt).toBe("2026-03-17T10:00:20.000Z");
+    expect(state.updatedAt).toBe("2026-03-17T10:00:20.000Z");
   });
 
   it("heartbeat returns idle worker to idle (not busy)", () => {

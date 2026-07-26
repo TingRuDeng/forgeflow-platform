@@ -13,6 +13,8 @@ export const logger = pino({
             "*.token",
             "*.apiToken",
             "*.DISPATCHER_API_TOKEN",
+            "*.DISPATCHER_WORKER_TOKEN",
+            "*.DISPATCHER_WORKER_TOKENS",
             "*.GITHUB_TOKEN",
         ],
         censor: "[REDACTED]",

@@ -31,12 +31,25 @@ export function buildDefaultConfig(): DispatcherRuntimeConfig {
   };
 }
 
+function assertSecureConfigFilePermissions(configPath: string): void {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  if ((fs.statSync(configPath).mode & 0o077) !== 0) {
+    throw new Error(
+      `insecure dispatcher config permissions for ${configPath} (expected 600). Fix: chmod 600 ${configPath}`,
+    );
+  }
+}
+
 export function loadConfig(): DispatcherRuntimeConfig {
   const configPath = getConfigPath();
   if (!fs.existsSync(configPath)) {
     return buildDefaultConfig();
   }
 
+  assertSecureConfigFilePermissions(configPath);
   const raw = JSON.parse(fs.readFileSync(configPath, "utf8")) as Partial<DispatcherRuntimeConfig>;
   return {
     ...buildDefaultConfig(),
@@ -47,6 +60,9 @@ export function loadConfig(): DispatcherRuntimeConfig {
 export function saveConfig(config: DispatcherRuntimeConfig): string {
   const configPath = getConfigPath();
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  if (process.platform !== "win32") {
+    fs.chmodSync(configPath, 0o600);
+  }
   return configPath;
 }

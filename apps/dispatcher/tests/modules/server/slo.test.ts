@@ -30,6 +30,13 @@ function snapshotWithMetrics(metrics: Partial<DashboardSnapshot["metrics"]>): Da
       repoConcurrencySaturation: {},
       failureCodes: {},
       reviewReasonCodes: {},
+      eventWindow: {
+        scope: "retained_runtime_events",
+        retentionLimit: 500,
+        retainedCount: 0,
+        oldestAt: null,
+        newestAt: null,
+      },
       ...metrics,
     },
     workers: [],

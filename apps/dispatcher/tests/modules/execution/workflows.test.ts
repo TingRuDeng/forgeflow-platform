@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { describe, expect, it } from "vitest";
 
@@ -12,11 +13,51 @@ function readWorkflow(name: string): string {
   return fs.readFileSync(path.join(repoRoot, ".github", "workflows", name), "utf8");
 }
 
+function manualReleaseJob(workflow: string): string {
+  const start = workflow.indexOf("  publish-manual:");
+  const end = workflow.indexOf("\n  publish-disabled-summary:", start);
+  return workflow.slice(start, end);
+}
+
+function workflowRunScripts(job: string): string {
+  const scripts: string[] = [];
+  let inRunBlock = false;
+
+  for (const line of job.split("\n")) {
+    const runMatch = line.match(/^        run:\s*(.*)$/);
+    if (runMatch) {
+      inRunBlock = true;
+      scripts.push(runMatch[1]);
+      continue;
+    }
+
+    if (inRunBlock && (line.startsWith("          ") || line.length === 0)) {
+      scripts.push(line);
+      continue;
+    }
+
+    inRunBlock = false;
+  }
+
+  return scripts.join("\n");
+}
+
 describe("workflow quality gates", () => {
   it("runs documentation validation in CI", () => {
     const workflow = readWorkflow("ci.yml");
 
     expect(workflow).toContain("pnpm docs:validate");
+  });
+
+  it("runs Console lint and production dependency audit in CI and release workflows", () => {
+    const ciWorkflow = readWorkflow("ci.yml");
+    const releaseWorkflow = readWorkflow("release.yml");
+    const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+
+    expect(packageJson.scripts.lint).toContain("pnpm --filter console lint");
+    expect(ciWorkflow).toContain("Audit production dependencies");
+    expect(ciWorkflow).toContain("pnpm audit --prod --audit-level high");
+    expect(releaseWorkflow.match(/pnpm audit --prod --audit-level high/g)?.length).toBe(2);
   });
 
   it("checks runtime package readiness in CI and release workflows", () => {
@@ -61,12 +102,73 @@ describe("workflow quality gates", () => {
     expect(workflow).toContain("pnpm verify:shadow-drift");
     expect(workflow).toContain("Verify published provider runtime smoke");
     expect(workflow).toContain("node scripts/verify-published-runtime-smoke.mjs");
-    expect(workflow).toContain("--package ${{ inputs.package }}");
+    expect(workflow).toContain('--package "$RELEASE_PACKAGE"');
     expect(workflow.match(/pnpm verify:shadow-drift/g)?.length).toBe(2);
     expect(workflow.indexOf("pnpm verify:shadow-drift")).toBeLessThan(workflow.indexOf("npm publish"));
     expect(workflow.indexOf("npm publish")).toBeLessThan(workflow.indexOf("git push"));
-    expect(workflow.indexOf("npm publish")).toBeLessThan(workflow.indexOf("--package ${{ inputs.package }}"));
-    expect(workflow.indexOf("--package ${{ inputs.package }}")).toBeLessThan(workflow.indexOf("git commit"));
+    expect(workflow.indexOf("npm publish")).toBeLessThan(workflow.indexOf('--package "$RELEASE_PACKAGE"'));
+    expect(workflow.indexOf('--package "$RELEASE_PACKAGE"')).toBeLessThan(workflow.indexOf("git commit"));
+  });
+
+  it("keeps manual release inputs out of shell expressions", () => {
+    const workflow = readWorkflow("release.yml");
+    const manualJob = manualReleaseJob(workflow);
+    const runSteps = workflowRunScripts(manualJob);
+
+    expect(manualJob).toContain("RELEASE_PACKAGE: ${{ inputs.package }}");
+    expect(manualJob).toContain("NPM_DIST_TAG: ${{ inputs.tag }}");
+    expect(manualJob).toContain("RELEASE_REF: ${{ github.ref }}");
+    expect(runSteps).not.toMatch(/\$\{\{\s*inputs\.(?:package|tag|bump)\s*\}\}/);
+    expect(runSteps).not.toContain("${{ github.ref }}");
+    expect(runSteps).toContain('[[ "$RELEASE_REF" != "refs/heads/main" ]]');
+    expect(runSteps).toContain('git push origin "HEAD:main" --follow-tags');
+    expect(runSteps).toContain('validate-release-inputs.mjs "$RELEASE_PACKAGE" "$NPM_DIST_TAG"');
+    expect(runSteps).toContain('npm publish --access public --provenance --tag "$NPM_DIST_TAG"');
+  });
+
+  it("checks the bumped manual release version before build and publish", () => {
+    const manualJob = manualReleaseJob(readWorkflow("release.yml"));
+    const bumpIndex = manualJob.indexOf("- name: Bump package version");
+    const availabilityIndex = manualJob.indexOf("- name: Verify bumped version is available");
+    const buildIndex = manualJob.indexOf("- name: Build package");
+    const publishIndex = manualJob.indexOf("- name: Publish to npm with Trusted Publishing");
+
+    expect(bumpIndex).toBeGreaterThanOrEqual(0);
+    expect(availabilityIndex).toBeGreaterThan(bumpIndex);
+    expect(buildIndex).toBeGreaterThan(availabilityIndex);
+    expect(publishIndex).toBeGreaterThan(buildIndex);
+    expect(manualJob.slice(availabilityIndex, buildIndex)).toContain("--require-version-available");
+  });
+
+  it("validates manual release packages and npm dist-tags", () => {
+    const scriptPath = path.join(repoRoot, "scripts", "validate-release-inputs.mjs");
+    const valid = spawnSync(process.execPath, [scriptPath, "trae-beta-runtime", "beta"], {
+      encoding: "utf8",
+    });
+    const validDispatcher = spawnSync(process.execPath, [scriptPath, "forgeflow-dispatcher", "beta"], {
+      encoding: "utf8",
+    });
+    const validOrchestrator = spawnSync(
+      process.execPath,
+      [scriptPath, "worker-review-orchestrator-cli", "beta"],
+      { encoding: "utf8" },
+    );
+    const invalidPackage = spawnSync(process.execPath, [scriptPath, "console", "beta"], {
+      encoding: "utf8",
+    });
+    const invalidTag = spawnSync(process.execPath, [scriptPath, "trae-beta-runtime", "beta;echo-pwned"], {
+      encoding: "utf8",
+    });
+
+    expect(valid.status).toBe(0);
+    expect(validDispatcher.status).toBe(0);
+    expect(validOrchestrator.status).toBe(0);
+    expect(invalidPackage.status).toBe(1);
+    expect(invalidPackage.stderr).toContain("unsupported release package");
+    expect(invalidTag.status).toBe(1);
+    expect(invalidTag.stderr).toContain("invalid npm dist-tag");
+    expect(readWorkflow("release.yml")).toContain("          - forgeflow-dispatcher");
+    expect(readWorkflow("release.yml")).toContain("          - worker-review-orchestrator-cli");
   });
 
   it("runs full verification before automatic npm publish", () => {
@@ -76,7 +178,7 @@ describe("workflow quality gates", () => {
 
     expect(publishAutoIndex).toBeGreaterThanOrEqual(0);
     expect(npmPublishIndex).toBeGreaterThan(publishAutoIndex);
-    const publishedSmokeIndex = workflow.indexOf("--package ${{ matrix.package.name }}", publishAutoIndex);
+    const publishedSmokeIndex = workflow.indexOf('--package "$RELEASE_PACKAGE"', publishAutoIndex);
     expect(publishedSmokeIndex).toBeGreaterThan(npmPublishIndex);
     for (const gate of [
       "Run lint",
@@ -89,6 +191,27 @@ describe("workflow quality gates", () => {
       expect(gateIndex).toBeGreaterThan(publishAutoIndex);
       expect(gateIndex).toBeLessThan(npmPublishIndex);
     }
+    const autoJob = workflow.slice(publishAutoIndex);
+    const autoRunSteps = workflowRunScripts(autoJob);
+    expect(autoJob).toContain("RELEASE_PACKAGE: ${{ matrix.package.name }}");
+    expect(autoJob).toContain("RELEASE_VERSION: ${{ matrix.package.version }}");
+    expect(autoRunSteps).not.toMatch(/\$\{\{\s*matrix\.package\.(?:name|version)\s*\}\}/);
+    expect(autoRunSteps).not.toContain("${{ steps.preflight.outputs.dist_tag }}");
+    expect(autoRunSteps).toContain('npm publish --access public --provenance --tag "$NPM_DIST_TAG"');
+  });
+
+  it("fails releases unless npm confirms the exact version is available", () => {
+    const workflow = readWorkflow("release.yml");
+    const publishAutoIndex = workflow.indexOf("publish-auto:");
+    const autoJob = workflow.slice(publishAutoIndex);
+    const manualJob = manualReleaseJob(workflow);
+
+    expect(autoJob).toContain("--require-version-available");
+    expect(manualJob).toContain("--require-version-available");
+    expect(workflow.match(/--require-version-available/g)?.length).toBe(2);
+    expect(autoJob).not.toContain("npm view");
+    expect(autoJob).not.toContain("already_published");
+    expect(autoJob).not.toContain("steps.version_check.outputs");
   });
 
   it("keeps brand-new npm package names out of the automatic publish matrix", () => {

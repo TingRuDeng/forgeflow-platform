@@ -61,7 +61,7 @@ forgeflow-gemini-beta --version
 - gemini CLI
 - 目标项目仓库的本地 checkout
 - 可访问的 dispatcher server
-- dispatcher 使用默认 `token` 认证模式时，必须设置 `DISPATCHER_API_TOKEN`
+- dispatcher 使用默认 `token` 认证模式时，必须为该 worker 配置 `DISPATCHER_WORKER_TOKEN`
 
 ## 配置
 
@@ -84,11 +84,15 @@ runtime 读写以下配置文件：
 
 worker daemon 通过 `POST /api/workers/:workerId/claim-task` 显式领取任务，不再依赖只读的 assigned-task 查询路径。领取成功后，runtime 会把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 v1 envelope 回写到 start/result mutation。
 
-dispatcher 默认 `token` 模式要求所有非 `/health` 接口携带 `Authorization: Bearer <DISPATCHER_API_TOKEN>`。远程机器启动 worker 前应设置：
+dispatcher 默认 `token` 模式要求 worker 请求携带与自身 `workerId` 绑定的 bearer token。远程机器启动 worker 前应设置：
 
 ```bash
-export DISPATCHER_API_TOKEN="your-secret-token"
+export DISPATCHER_WORKER_TOKEN="worker-specific-token"
 ```
+
+dispatcher 侧用 `DISPATCHER_WORKER_TOKENS='{"worker-id":"worker-specific-token"}'` 配置映射。`DISPATCHER_API_TOKEN` 仅作为迁移兼容回退，不应分发到 worker 主机。
+
+每个 assignment 子进程默认最多运行 30 分钟。可设置 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 为正整数毫秒值覆盖默认值；`SIGINT` / `SIGTERM` 会取消 dispatcher 请求和结果重试等待，并终止完整子进程树。
 
 ## Gemini 集成选项
 

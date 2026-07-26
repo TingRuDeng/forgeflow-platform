@@ -16,8 +16,18 @@ const dispatcherServerDistPath = path.join(
 );
 
 await import("./dispatcher-state.js");
-const { handleDispatcherHttpRequest, readJsonBody, startDispatcherServer } = await import(
-  pathToFileURL(dispatcherServerDistPath).href
-);
+const {
+  acquireStateLock,
+  getStateLockFilePath,
+  handleDispatcherHttpRequest,
+  readJsonBody,
+  startDispatcherServer,
+} = await import(pathToFileURL(dispatcherServerDistPath).href);
 
-export { handleDispatcherHttpRequest, readJsonBody, startDispatcherServer };
+export {
+  acquireStateLock,
+  getStateLockFilePath,
+  handleDispatcherHttpRequest,
+  readJsonBody,
+  startDispatcherServer,
+};

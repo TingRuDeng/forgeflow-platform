@@ -5,12 +5,12 @@
   "dependencies": {
     "@tingrudeng/automation-gateway-core": "workspace:*",
     "pino": "^9.6.0",
-    "ws": "^8.18.3"
+    "ws": "^8.21.0"
   },
   "scripts": {
     "docs:validate": "python3 scripts/validate_docs.py",
-    "lint": "eslint \"apps/dispatcher/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/**/*.ts\" \"services/*/src/**/*.ts\"",
-    "lint:fix": "eslint \"apps/dispatcher/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/**/*.ts\" \"services/*/src/**/*.ts\" --fix",
+    "lint": "eslint \"apps/dispatcher/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/**/*.ts\" \"services/*/src/**/*.ts\" && pnpm --filter console lint",
+    "lint:fix": "eslint \"apps/dispatcher/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/**/*.ts\" \"services/*/src/**/*.ts\" --fix && pnpm --filter console exec eslint . --fix",
     "coverage:critical": "node scripts/run-critical-coverage.mjs",
     "verify:stage2": "pnpm --filter @forgeflow/dispatcher test tests/modules/server/runtime-state.test.ts tests/modules/server/dispatcher-server.test.ts tests/modules/server/review-memory.test.ts tests/modules/server/task-worktree.test.ts tests/modules/server/run-worker-daemon.test.ts tests/modules/server/trae-automation-worker.test.ts && pnpm --filter @tingrudeng/worker-review-orchestrator-cli test tests/watch.test.ts tests/inspect.test.ts && pnpm --filter console exec vitest run src/components/__tests__/MetricsGrid.test.tsx src/components/__tests__/Lists.test.tsx src/components/__tests__/TerminalPanel.test.tsx && pnpm --filter @tingrudeng/trae-beta-runtime test && pnpm typecheck",
     "verify:stage3": "pnpm --filter @forgeflow/dispatcher test tests/modules/server/runtime-state.test.ts tests/modules/server/runtime-state-sqlite.test.ts tests/modules/server/dispatcher-server.test.ts && pnpm --filter @forgeflow/dispatcher-store-core test && pnpm --filter @forgeflow/dispatcher-store-postgres test && pnpm --filter @forgeflow/dispatcher-queue-postgres test && pnpm --filter @forgeflow/provider-registry test && pnpm verify:shadow-drift && node scripts/verify-stage3-dr.mjs && pnpm typecheck",
@@ -36,7 +36,7 @@
     "verify:runtime-packages:published-smoke": "node scripts/verify-published-runtime-smoke.mjs --require-published",
     "report:runtime-packages:setup": "node scripts/report-runtime-package-setup.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test"
+    "test": "pnpm --workspace-concurrency=1 -r --if-present test"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn, ChildProcess } from "node:child_process";
+import { ChildProcess } from "node:child_process";
 
 import { safeTaskDirName } from "./task-worktree.js";
 import { ensureSuccess, runGit } from "./git.js";
 import { buildWorkerEnv } from "./worker-env.js";
+import { spawnProcessTree, terminateProcessTree } from "./process-tree.js";
 import { readJson, writeJson } from "./utils.js";
 import type { PullRequestInfo, TaskPayload, WorkerResult } from "./types.js";
 
@@ -217,6 +218,8 @@ export interface RunWorkerAssignmentScriptInput {
   outputDir: string;
   runtimeScriptPath?: string;
   runtimeScriptCwd?: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 interface WorkerProcessResultHandlers {
@@ -240,14 +243,25 @@ export function runWorkerAssignmentScript(input: RunWorkerAssignmentScriptInput)
       reject(new Error(`run-worker-assignment runtime script not found: ${scriptPath}`));
       return;
     }
+    if (input.signal?.aborted) {
+      reject(new Error("worker execution aborted before launch"));
+      return;
+    }
     const proc = spawnWorkerAssignmentProcess(input);
-    collectWorkerAssignmentResult(proc, { outputDir: input.outputDir, resolve, reject });
+    collectWorkerAssignmentResult(proc, {
+      outputDir: input.outputDir,
+      resolve,
+      reject,
+    }, {
+      signal: input.signal,
+      timeoutMs: input.timeoutMs,
+    });
   });
 }
 
 function spawnWorkerAssignmentProcess(input: RunWorkerAssignmentScriptInput) {
   const scriptPath = input.runtimeScriptPath ?? path.join(input.packageRoot, "dist/runtime/run-worker-assignment.js");
-  return spawn("node", [
+  return spawnProcessTree("node", [
     scriptPath,
     "--assignment-dir",
     input.assignmentDir,
@@ -261,17 +275,59 @@ function spawnWorkerAssignmentProcess(input: RunWorkerAssignmentScriptInput) {
   }) as ChildProcess & { stdout?: NodeJS.ReadableStream; stderr?: NodeJS.ReadableStream };
 }
 
-function collectWorkerAssignmentResult(proc: ChildProcess & { stdout?: NodeJS.ReadableStream; stderr?: NodeJS.ReadableStream }, handlers: WorkerProcessResultHandlers): void {
+function collectWorkerAssignmentResult(
+  proc: ChildProcess & { stdout?: NodeJS.ReadableStream; stderr?: NodeJS.ReadableStream },
+  handlers: WorkerProcessResultHandlers,
+  lifecycle: { signal?: AbortSignal; timeoutMs?: number },
+): void {
   let stdout = "";
   let stderr = "";
+  let aborted = false;
+  let timedOut = false;
+  let settled = false;
+  const timeoutId = Number.isSafeInteger(lifecycle.timeoutMs) && (lifecycle.timeoutMs ?? 0) > 0
+    ? setTimeout(() => {
+        timedOut = true;
+        terminateProcessTree(proc);
+      }, lifecycle.timeoutMs)
+    : null;
+  const onAbort = () => {
+    aborted = true;
+    terminateProcessTree(proc);
+  };
+  lifecycle.signal?.addEventListener("abort", onAbort, { once: true });
+  const cleanup = () => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    lifecycle.signal?.removeEventListener("abort", onAbort);
+  };
   proc.stdout?.on("data", (data) => {
     stdout += data.toString();
   });
   proc.stderr?.on("data", (data) => {
     stderr += data.toString();
   });
-  proc.on("close", (code) => resolveOrRejectWorkerResult({ code, stdout, stderr, ...handlers }));
-  proc.on("error", (error) => handlers.reject(new Error(`worker execution error: ${error.message}`)));
+  proc.on("close", (code) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    if (aborted) {
+      handlers.reject(new Error("worker execution aborted"));
+      return;
+    }
+    if (timedOut) {
+      handlers.reject(new Error(`worker execution timed out after ${lifecycle.timeoutMs}ms`));
+      return;
+    }
+    resolveOrRejectWorkerResult({ code, stdout, stderr, ...handlers });
+  });
+  proc.on("error", (error) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    handlers.reject(new Error(`worker execution error: ${error.message}`));
+  });
 }
 
 function resolveOrRejectWorkerResult(input: WorkerProcessResultHandlers & { code: number | null; stdout: string; stderr: string }): void {

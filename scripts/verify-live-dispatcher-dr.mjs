@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,7 +12,9 @@ import { startDispatcherServer } from "./lib/dispatcher-server.js";
 const { DatabaseSync } = await import("node:sqlite");
 
 const LIVE_EVENT_COUNT = 16;
+const ACKNOWLEDGED_EVENT_COUNT_BEFORE_BACKUP = 4;
 const CHILD_START_TIMEOUT_MS = 30_000;
+const MAX_LOCAL_RECOVERY_DURATION_MS = 30_000;
 const __filename = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(__filename), "..");
 
@@ -199,7 +202,7 @@ async function startLiveWrites(baseUrl) {
   });
   const dispatch = await requestJson(baseUrl, "POST", "/api/dispatches", createDispatchPayload());
   const taskId = dispatch.taskIds[0];
-  const eventPromises = Array.from({ length: LIVE_EVENT_COUNT }, (_, index) => requestJson(
+  const eventRequests = Array.from({ length: LIVE_EVENT_COUNT }, (_, index) => () => requestJson(
     baseUrl,
     "POST",
     "/api/workers/codex-live-dr/events",
@@ -210,7 +213,15 @@ async function startLiveWrites(baseUrl) {
       payload: { sequence: index + 1 },
     },
   ));
-  return { taskId, eventPromises };
+  const acknowledgedEventResults = await Promise.all(
+    eventRequests
+      .slice(0, ACKNOWLEDGED_EVENT_COUNT_BEFORE_BACKUP)
+      .map((request) => request()),
+  );
+  const eventPromises = eventRequests
+    .slice(ACKNOWLEDGED_EVENT_COUNT_BEFORE_BACKUP)
+    .map((request) => request());
+  return { taskId, acknowledgedEventResults, eventPromises };
 }
 
 function openWalKeeper(stateDir) {
@@ -268,17 +279,38 @@ function assertRestoredState(restored, taskId) {
   }
 }
 
+function assertAcknowledgedEventsRestored(restored, acknowledgedEventCount) {
+  const restoredSequences = new Set(
+    restored.restoredState.events
+      .filter((event) => event.type === "progress_reported")
+      .map((event) => Number(event.payload?.data?.sequence)),
+  );
+  for (let sequence = 1; sequence <= acknowledgedEventCount; sequence += 1) {
+    if (!restoredSequences.has(sequence)) {
+      throw new Error(`restored live state lost acknowledged event sequence ${sequence}`);
+    }
+  }
+}
+
+function runtimeStateSha256(state) {
+  return crypto.createHash("sha256").update(JSON.stringify(state), "utf8").digest("hex");
+}
+
 async function backupLiveState(instance, stateDir, backupDir) {
   let walKeeper = null;
   try {
     const live = await startLiveWrites(instance.baseUrl);
     walKeeper = openWalKeeper(stateDir);
     // 备份发生在 live server 仍运行且事件写入 burst 已发起之后，用来覆盖真实 HTTP 写入压力下的 WAL 文件复制路径。
-    const backup = backupRuntimeState({ stateDir, backupDir });
-    const eventResults = await Promise.all(live.eventPromises);
+    const backup = await backupRuntimeState({ stateDir, backupDir });
+    const eventResults = [
+      ...live.acknowledgedEventResults,
+      ...await Promise.all(live.eventPromises),
+    ];
     const metrics = await requestJson(instance.baseUrl, "GET", "/api/metrics");
     return {
       taskId: live.taskId,
+      acknowledgedBeforeBackupCount: live.acknowledgedEventResults.length,
       backup,
       eventResults,
       metrics,
@@ -290,11 +322,12 @@ async function backupLiveState(instance, stateDir, backupDir) {
   }
 }
 
-function restoreBackedUpState(stateDir, backupDir, taskId) {
+async function restoreBackedUpState(stateDir, backupDir, taskId) {
   const corruptedFiles = corruptRuntimeFiles(stateDir);
-  const restore = restoreRuntimeState({ backupDir, stateDir });
+  const restore = await restoreRuntimeState({ backupDir, stateDir });
   const restored = readRestoredRuntimeState(stateDir);
   assertRestoredState(restored, taskId);
+  assertAcknowledgedEventsRestored(restored, ACKNOWLEDGED_EVENT_COUNT_BEFORE_BACKUP);
   return {
     restore,
     restored,
@@ -319,14 +352,48 @@ async function runCrashRestartDrill(root) {
     childInstance.child.kill("SIGKILL");
     crashExit = await waitForProcessExit(childInstance.child);
 
-    restoreRuntimeState({ backupDir, stateDir: recoveredStateDir });
+    const recoveryStartedAtMs = Date.now();
+    await restoreRuntimeState({ backupDir, stateDir: recoveredStateDir });
     const restored = readRestoredRuntimeState(recoveredStateDir);
     assertRestoredState(restored, liveBackup.taskId);
+    assertAcknowledgedEventsRestored(restored, liveBackup.acknowledgedBeforeBackupCount);
 
     recoveredInstance = await startDispatcherServer({ host: "127.0.0.1", port: 0, stateDir: recoveredStateDir });
     const recoveredSnapshot = await requestJson(recoveredInstance.baseUrl, "GET", "/api/dashboard/snapshot");
     if (!recoveredSnapshot.tasks.some((task) => task.id === liveBackup.taskId)) {
       throw new Error(`recovered dispatcher snapshot does not contain task ${liveBackup.taskId}`);
+    }
+    const recoveryDurationMs = Date.now() - recoveryStartedAtMs;
+    if (recoveryDurationMs > MAX_LOCAL_RECOVERY_DURATION_MS) {
+      throw new Error(
+        `local recovery exceeded ${MAX_LOCAL_RECOVERY_DURATION_MS}ms: ${recoveryDurationMs}ms`,
+      );
+    }
+
+    const recoveryProbeWorkerId = "codex-recovery-probe";
+    await requestJson(recoveredInstance.baseUrl, "POST", "/api/workers/register", {
+      workerId: recoveryProbeWorkerId,
+      pool: "codex",
+      hostname: "localhost",
+      labels: ["recovery-write-probe"],
+      repoDir: "/tmp/forgeflow-recovery-probe",
+    });
+    await recoveredInstance.close();
+    recoveredInstance = await startDispatcherServer({
+      host: "127.0.0.1",
+      port: 0,
+      stateDir: recoveredStateDir,
+    });
+    const postRestartSnapshot = await requestJson(
+      recoveredInstance.baseUrl,
+      "GET",
+      "/api/dashboard/snapshot",
+    );
+    const recoveryWritePersistedAfterRestart = postRestartSnapshot.workers.some(
+      (worker) => worker.id === recoveryProbeWorkerId,
+    );
+    if (!recoveryWritePersistedAfterRestart) {
+      throw new Error("recovered dispatcher write did not persist across a second restart");
     }
 
     return {
@@ -336,6 +403,10 @@ async function runCrashRestartDrill(root) {
       recoveredTaskCount: recoveredSnapshot.tasks.length,
       recoveredEventCount: recoveredSnapshot.events.length,
       recoveredIntegrityCheck: restored.integrityCheck,
+      recoveryDurationMs,
+      maxRecoveryDurationMs: MAX_LOCAL_RECOVERY_DURATION_MS,
+      recoveryWritePersistedAfterRestart,
+      acknowledgedBeforeBackupCount: liveBackup.acknowledgedBeforeBackupCount,
       replacementStateDir: recoveredStateDir,
     };
   } finally {
@@ -356,7 +427,7 @@ async function runMultiNodeRestoreDrill(root, backupDir, taskId) {
   try {
     for (const nodeName of nodeNames) {
       const nodeStateDir = path.join(root, `${nodeName}-state`);
-      const restore = restoreRuntimeState({ backupDir, stateDir: nodeStateDir });
+      const restore = await restoreRuntimeState({ backupDir, stateDir: nodeStateDir });
       const restored = readRestoredRuntimeState(nodeStateDir);
       assertRestoredState(restored, taskId);
       const instance = await startDispatcherServer({ host: "127.0.0.1", port: 0, stateDir: nodeStateDir });
@@ -370,6 +441,8 @@ async function runMultiNodeRestoreDrill(root, backupDir, taskId) {
         snapshotCount: restored.snapshotCount,
         taskCount: snapshot.tasks.length,
         eventCount: snapshot.events.length,
+        runtimeStateSha256: runtimeStateSha256(restored.restoredState),
+        manifestVerified: restore.manifestVerified,
         restoredFiles: restore.restoredFiles,
       });
     }
@@ -379,6 +452,9 @@ async function runMultiNodeRestoreDrill(root, backupDir, taskId) {
       nodes,
       consistentTaskCounts: new Set(nodes.map((node) => node.taskCount)).size === 1,
       consistentEventCounts: new Set(nodes.map((node) => node.eventCount)).size === 1,
+      consistentRuntimeStateHashes: new Set(
+        nodes.map((node) => node.runtimeStateSha256),
+      ).size === 1,
     };
   } finally {
     await Promise.all(instances.map((instance) => instance.close()));
@@ -405,7 +481,11 @@ async function runLiveDrill() {
     await instance.close();
     instance = null;
 
-    const { restore, restored, diskCorruption } = restoreBackedUpState(stateDir, backupDir, liveBackup.taskId);
+    const { restore, restored, diskCorruption } = await restoreBackedUpState(
+      stateDir,
+      backupDir,
+      liveBackup.taskId,
+    );
     const crashRestart = await runCrashRestartDrill(root);
     const multiNodeRestore = await runMultiNodeRestoreDrill(root, backupDir, liveBackup.taskId);
 
@@ -416,9 +496,14 @@ async function runLiveDrill() {
       backupDuringServerOpen: true,
       liveWriteAttemptCount: LIVE_EVENT_COUNT,
       liveWriteSuccessCount: liveBackup.eventResults.length,
+      acknowledgedBeforeBackupCount: liveBackup.acknowledgedBeforeBackupCount,
+      acknowledgedEventsRecovered: true,
       copiedFiles: liveBackup.backup.copiedFiles,
       restoredFiles: restore.restoredFiles,
       manifestPath: liveBackup.backup.manifestPath,
+      manifestVerified: restore.manifestVerified,
+      verifiedFiles: restore.verifiedFiles,
+      sqliteWatermark: liveBackup.backup.sqliteWatermark,
       integrityCheck: restored.integrityCheck,
       snapshotCount: restored.snapshotCount,
       restoredTaskCount: restored.restoredState.tasks.length,
