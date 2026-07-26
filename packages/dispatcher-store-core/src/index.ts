@@ -10,6 +10,7 @@ export interface SqlProjectionTable {
 export interface SqlProjectionSnapshot {
   tables: SqlProjectionTable[];
   counts: Record<string, number>;
+  sourceRevision?: number;
 }
 
 export function normalizeShadowMode(value: string | undefined | null): ShadowMode {

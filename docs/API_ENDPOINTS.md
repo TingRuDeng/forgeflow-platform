@@ -97,6 +97,8 @@ Dispatcher 当前会在状态目录下维护 `.runtime-state.lock`，状态型 e
 - Caller expectation:
   - 把它当作暂时性竞争错误并重试，不要误判成认证或 payload 问题
 
+Postgres primary backend 还会用独立 storage revision 防止多节点 stale writer 覆盖新状态。并发 mutation 先提交后，持有旧 revision 的请求返回 HTTP `409`，错误文本包含 `runtime state revision conflict`；调用方应重新读取最新状态并重新发起业务 mutation，不应重放旧的完整 snapshot。
+
 Current endpoint families:
 
 - `GET /health`
@@ -242,6 +244,7 @@ Current endpoint families:
 - `DISPATCHER_QUEUE_SHADOW_MODE=shadow-write`
   - Enable best-effort Postgres / queue shadow projection.
   - SQLite remains the main runtime truth source.
+  - Each shadow write carries the committed SQLite snapshot revision; projection and queue advance in one PostgreSQL transaction, stale revisions do not roll shadow state backwards, and unchanged tables skip full rewrites.
 
 ### Generic worker endpoints
 

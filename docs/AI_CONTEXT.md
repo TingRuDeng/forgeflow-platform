@@ -30,7 +30,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - 当前定位：`dispatcher` 是任务、分配、状态流转和审计记录的真相源。
 - 当前推荐路径：源码仓运行读 `scripts/start-control-plane.sh`；install-and-run 读 `packages/forgeflow-dispatcher/README.md`。
 - Worker 定位：Trae automation gateway + Trae automation worker 是首选无人值守路径，Trae MCP worker 是 fallback。
-- 持久化定位：SQLite snapshot 是当前 runtime state 真相源；runtime 只保留最近 500 条事件窗口，SQLite/PostgreSQL audit table 另存可分页历史；Postgres / queue shadow path 不是 primary store。
+- 持久化定位：SQLite snapshot 是默认 runtime state 真相源，并默认保留最近 128 个 revision；runtime 只保留最近 500 条事件窗口，SQLite/PostgreSQL audit table 另存可分页历史。Postgres / queue 默认是 revision-gated shadow path；只有完成 cutover evidence 且显式选择 `RUNTIME_STATE_BACKEND=postgres` 时才使用 Postgres primary。
 - 发布包定位：`@tingrudeng/codex-beta-runtime` 与 `@tingrudeng/trae-beta-runtime` 当前在 npm registry 可安装；`@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 源码已存在，但仍需 npm 包名和 Trusted Publisher 外部配置。
 
 ## Core Directories
@@ -74,7 +74,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - `DISPATCHER_READ_ONLY_MODE=1` 默认冻结 `/api/` 写方法；它覆盖 dispatcher HTTP API 写入，但不覆盖直接文件、外部数据库或绕过 HTTP 的写入。
 - 控制层使用 `DISPATCHER_API_TOKEN`；远程 worker 应使用按 workerId 绑定的 `DISPATCHER_WORKER_TOKEN`。Codex / Gemini 默认是 `trusted-host`；`isolated-container` 必须由 operator 显式启用并 fail closed，Docker `bridge` 不是域名级网络 allowlist。
 - `/api/metrics` 的事件型计数只覆盖 `metrics.eventWindow` 标出的最近 500 条运行窗口；完整审计应分页读取 `/api/query/events`。
-- Postgres / queue shadow path 是 best-effort shadow；SQLite snapshot 仍是真相源。
+- Postgres / queue shadow path 是 best-effort shadow；每次同步绑定已持久化 SQLite revision，projection 与 queue 原子推进并拒绝旧 revision 回退。SQLite snapshot 默认仍是真相源。
 - shadow drift 的 `--record-alert` 写入与 dispatcher 共用本机 `.runtime-state.lock` 并在锁内重读最新状态；它不提供跨主机互斥。
 - Trae `sessions.json` mutation 通过本机 `sessions.json.lock` 串行化并在锁内重读；它解决 lost update，不代表多 gateway 或跨主机 session ownership。
 - 不要把源码中存在的 `@tingrudeng/gemini-beta-runtime` / `@tingrudeng/beta-runtime-core` 误写成当前已公开 npm 安装入口；npm registry 返回 E404 时先处理包名权限和 Trusted Publisher 配置。

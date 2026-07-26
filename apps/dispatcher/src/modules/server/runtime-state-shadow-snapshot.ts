@@ -1,6 +1,9 @@
 import type { RuntimeState } from "./runtime-state.js";
 
-export function buildRuntimeStateProjectionSnapshot(state: RuntimeState) {
+export function buildRuntimeStateProjectionSnapshot(
+  state: RuntimeState,
+  sourceRevision?: number,
+) {
   return {
     tables: [
       {
@@ -47,7 +50,7 @@ export function buildRuntimeStateProjectionSnapshot(state: RuntimeState) {
           VALUES ($1, $2, $3, $4::jsonb)
         `,
         rows: state.events.map((event, index) => [
-          `${event.taskId}:${event.type}:${event.at}:${index}`,
+          event.eventId ?? `${event.taskId}:${event.type}:${event.at}:${index}`,
           event.taskId,
           event.at,
           JSON.stringify(event),
@@ -71,10 +74,14 @@ export function buildRuntimeStateProjectionSnapshot(state: RuntimeState) {
       dispatcher_events: state.events.length,
       dispatcher_leases: (state.leases ?? []).length,
     },
+    sourceRevision,
   };
 }
 
-export function buildAssignmentQueueShadowSnapshot(state: RuntimeState) {
+export function buildAssignmentQueueShadowSnapshot(
+  state: RuntimeState,
+  sourceRevision?: number,
+) {
   const availableAt = state.updatedAt;
   return {
     queueName: "assignment_delivery",
@@ -89,6 +96,7 @@ export function buildAssignmentQueueShadowSnapshot(state: RuntimeState) {
         availableAt,
         payload: assignment.assignment as unknown as Record<string, unknown>,
       })),
+    sourceRevision,
   };
 }
 

@@ -23,6 +23,7 @@ const { DatabaseSync } = await import("node:sqlite");
 const tempRoots: string[] = [];
 const originalShadowMode = process.env.DISPATCHER_SHADOW_MODE;
 const originalPostgresUrl = process.env.DISPATCHER_POSTGRES_URL;
+const originalSnapshotRetention = process.env.DISPATCHER_SQLITE_SNAPSHOT_RETENTION;
 const dispatcherRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const runtimeStateSqliteDistUrl = pathToFileURL(
   path.join(dispatcherRoot, "dist/modules/server/runtime-state-sqlite.js"),
@@ -47,6 +48,11 @@ afterEach(() => {
     delete process.env.DISPATCHER_POSTGRES_URL;
   } else {
     process.env.DISPATCHER_POSTGRES_URL = originalPostgresUrl;
+  }
+  if (originalSnapshotRetention === undefined) {
+    delete process.env.DISPATCHER_SQLITE_SNAPSHOT_RETENTION;
+  } else {
+    process.env.DISPATCHER_SQLITE_SNAPSHOT_RETENTION = originalSnapshotRetention;
   }
 });
 
@@ -266,6 +272,19 @@ function readSnapshotState(stateDir: string): {
       maxRevision: stats.maxRevision,
       latest,
     };
+  } finally {
+    db.close();
+  }
+}
+
+function readProjectionRewriteCounts(stateDir: string): Record<string, number> {
+  const db = new DatabaseSync(path.join(stateDir, "runtime-state.db"), { readOnly: true });
+  try {
+    const rows = db.prepare(`
+      SELECT table_name, rewrite_count
+      FROM projection_table_hashes
+    `).all() as Array<{ table_name: string; rewrite_count: number }>;
+    return Object.fromEntries(rows.map((row) => [row.table_name, Number(row.rewrite_count)]));
   } finally {
     db.close();
   }
@@ -766,6 +785,71 @@ describe("runtime-state-sqlite", () => {
     expect(snapshotState.latest?.checksum_sha256).toBe(
       crypto.createHash("sha256").update(snapshotState.latest?.data ?? "", "utf8").digest("hex"),
     );
+  });
+
+  it("retains only the configured number of recent snapshots", () => {
+    const stateDir = makeTempDir();
+    process.env.DISPATCHER_SQLITE_SNAPSHOT_RETENTION = "2";
+
+    saveRuntimeState(stateDir, createTestState());
+    saveRuntimeState(stateDir, { ...createTestState(), sequence: 2 });
+    saveRuntimeState(stateDir, { ...createTestState(), sequence: 3 });
+
+    const snapshotState = readSnapshotState(stateDir);
+    expect(snapshotState.count).toBe(2);
+    expect(snapshotState.minRevision).toBe(2);
+    expect(snapshotState.maxRevision).toBe(3);
+    expect(loadRuntimeState(stateDir).sequence).toBe(3);
+  });
+
+  it("rewrites only projection tables whose source rows changed", () => {
+    const stateDir = makeTempDir();
+    const initialState = createTestState();
+
+    saveRuntimeState(stateDir, initialState);
+    const initialCounts = readProjectionRewriteCounts(stateDir);
+
+    saveRuntimeState(stateDir, {
+      ...initialState,
+      workers: [
+        ...initialState.workers,
+        {
+          ...initialState.workers[0],
+          id: "test-worker-2",
+          hostname: "test-host-2",
+        },
+      ],
+    });
+    const updatedCounts = readProjectionRewriteCounts(stateDir);
+
+    expect(initialCounts.workers).toBe(1);
+    expect(initialCounts.tasks).toBe(1);
+    expect(updatedCounts.workers).toBe(2);
+    expect(updatedCounts.tasks).toBe(1);
+    expect(updatedCounts.assignments).toBe(1);
+    expect(updatedCounts.runtime_events).toBe(1);
+  });
+
+  it("rebuilds an unchanged projection when its stored row count drifts", () => {
+    const stateDir = makeTempDir();
+    const state = createTestState();
+    saveRuntimeState(stateDir, state);
+
+    const dbPath = path.join(stateDir, "runtime-state.db");
+    const db = new DatabaseSync(dbPath);
+    db.exec("DELETE FROM workers;");
+    db.close();
+
+    saveRuntimeState(stateDir, state);
+
+    const repairedDb = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const count = repairedDb.prepare("SELECT COUNT(*) AS count FROM workers").get() as { count: number };
+      expect(Number(count.count)).toBe(1);
+    } finally {
+      repairedDb.close();
+    }
+    expect(readProjectionRewriteCounts(stateDir).workers).toBe(2);
   });
 
   it("throws when the snapshot table is empty", () => {

@@ -283,7 +283,7 @@ vNext runtime reliability 推进：
   - `legacy`：兼容模式，当 `DISPATCHER_API_TOKEN` 未设置时只允许 loopback 匿名访问，但仍接受已配置的远程 worker token；设置控制层 token 后需认证
   - `open`：完全开放模式，所有接口可匿名访问，适合本地开发
 - dispatcher 状态型 HTTP 路径现在共享跨进程 `.runtime-state.lock`；锁竞争超时会返回 `503`。锁 metadata 会保护存活 PID，释放时核对 inode 和 owner token，只有无存活 owner 的遗留锁才按 `DISPATCHER_STATE_LOCK_*` 阈值回收。
-- dispatcher 默认 SQLite snapshot 现在按 revision 追加落盘，并携带 `checksum_sha256`；读取默认 fail-closed，只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 时才允许从 JSON 救援。
+- dispatcher 默认 SQLite snapshot 现在按 revision 追加落盘、携带 `checksum_sha256`，并默认保留最近 128 个 revision；`DISPATCHER_SQLITE_SNAPSHOT_RETENTION` 可在 2 到 10000 之间调整。读取默认 fail-closed，只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 时才允许从 JSON 救援。
 - 控制中枢当前推荐入口有两条：
   - 源码仓运行：`../scripts/start-control-plane.sh`
   - install-and-run runtime 包：`../packages/forgeflow-dispatcher/README.md`
@@ -306,7 +306,7 @@ vNext runtime reliability 推进：
 - dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，同时输出 `retryRatePct`、失败码聚合、review reason 聚合和 `eventWindow`。这些事件型指标只代表最近 500 条 runtime window；SQLite/PostgreSQL append-only audit table 保存完整可分页历史，读取入口是 `/api/query/events?limit=&beforeSequence=`。
 - vNext runtime reliability 的目标契约已落地到 `@forgeflow/worker-protocol`，当前 dispatcher worker start/result mutation 已强制完整 `TaskAttempt` / `LeaseToken` envelope；`@tingrudeng/codex-beta-runtime` 和 `@tingrudeng/gemini-beta-runtime` 会通过 `POST /api/workers/:workerId/claim-task` 领取任务，并把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 start/result envelope 回写。该包还提供 start/result payload helper 作为内部 Worker SDK 契约。
 - dispatcher 任务状态机现在包含 `cancelled` 和 `waiting_for_input`；控制面和 Console 都可以显式作废非终态任务，worker result 可携带 `waitingForInput` 主动进入 HITL 暂停，控制面 / Console 可通过 `/api/tasks/:taskId/interrupt` / `/api/tasks/:taskId/resume` 暂停任务、保存 `resumePayload` 并恢复到 `ready`；Console 会按 `resumePayloadSchema` 渲染恢复表单，支持 `string` / `number` / `integer` / `boolean` / `array` 字段、textarea、范围和数组数量校验，未提供 schema 时保留 JSON fallback；dispatcher resume API 也会按任务保存的 `resumePayloadSchema` 做服务端校验，非法恢复输入返回 `400`；任务详情也会展示 task-level `terminationPolicy`，让 reviewer 直接看到 maxAttempts、attempt lease、heartbeat 和 assignment timeout；beta runtime 会把 resume payload 写入 assignment package 供下一轮 worker 消费。
-- 阶段三核心底座现在已进入主线：runtime state 增加显式 `leases[]`，SQLite 真相源同步维护 query-first 结构化投影，dispatcher 可选启用 structured reads、read-only 降级、Postgres / queue shadow write、SLO / burn-rate 与 DR 状态检查；task 生命周期内的 `assignment` / `repo` / `branch` lease 已接入强约束，continuation 或 follow-up 任务还会获取 `session` lease。read-only 默认冻结 `/api/` 写方法，但直接文件、外部数据库或绕过 dispatcher HTTP 的写入仍需运维流程管控。
+- 阶段三核心底座现在已进入主线：runtime state 增加显式 `leases[]`，SQLite 真相源同步维护 query-first 结构化投影，dispatcher 可选启用 structured reads、read-only 降级、Postgres / queue shadow write、SLO / burn-rate 与 DR 状态检查；shadow 同步以已持久化 SQLite revision 排序，projection 与 queue 原子推进并跳过未变化表，Postgres primary 也用独立 storage revision CAS 拒绝陈旧 writer。task 生命周期内的 `assignment` / `repo` / `branch` lease 已接入强约束，continuation 或 follow-up 任务还会获取 `session` lease。read-only 默认冻结 `/api/` 写方法，但直接文件、外部数据库或绕过 dispatcher HTTP 的写入仍需运维流程管控。
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - `codex` / `gemini` 多机执行主线是 `worker daemon`。
 - Codex 远程机器优先入口是 `@tingrudeng/codex-beta-runtime`。

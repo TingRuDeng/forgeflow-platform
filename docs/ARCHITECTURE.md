@@ -15,7 +15,7 @@
 - `dispatcher` 是任务和状态真相源，`scripts/lib/*` 仍是 live adapter / bootstrap 层。
 - `apps/dispatcher/src/modules/server/*` 承载 dispatcher TypeScript runtime foundation。
 - Trae 首选 automation gateway + automation worker；Trae MCP worker 是 fallback。
-- SQLite snapshot 是当前真相源，结构化投影和 Postgres / queue shadow 不是 primary store。
+- SQLite snapshot 是默认真相源；Postgres / queue 默认只做 revision-gated shadow，只有完成 cutover evidence 并显式选择 backend 时 Postgres 才成为 primary。
 - 阶段三 lease 强约束已接入 dispatcher 管理的 task 生命周期：claim 获取 assignment / repo / branch，continuation 或 follow-up 任务还会获取 session。
 
 ```yaml
@@ -109,11 +109,11 @@ Do not assume `apps/dispatcher/src/index.ts` is the live server entry. It is not
 
 Current mainline persistence is hybrid, with SQLite now active for dispatcher runtime state and structured reads:
 
-- Dispatcher runtime state truth source: `.forgeflow-dispatcher/runtime-state.db`
+- Default / SQLite-backend dispatcher runtime state truth source: `.forgeflow-dispatcher/runtime-state.db`
   - Default backend in `apps/dispatcher/src/modules/server/runtime-state.ts`
   - Implemented through `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts`
   - Uses `node:sqlite`
-  - Stores append-only snapshots, append-only runtime audit events, and dispatcher-owned structured projection tables
+  - Stores a bounded recent snapshot revision window, append-only runtime audit events, and dispatcher-owned structured projection tables
 - Dispatcher JSON fallback and import source: `.forgeflow-dispatcher/runtime-state.json`
   - Only used when `RUNTIME_STATE_BACKEND=json` or `--persistence-backend json` is explicitly selected
   - Also used as one-time import source when SQLite is the default but only a JSON snapshot exists
@@ -126,7 +126,10 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
   - 本机 mutation 通过同目录 `sessions.json.lock` 串行化并在锁内重读；它不是跨主机 lease，多 active gateway 仍不受支持
 - Optional Postgres / queue shadow path:
   - enabled with `DISPATCHER_SHADOW_MODE` / `DISPATCHER_POSTGRES_URL`
-  - current role is shadow projection / queue shadow, not dispatcher truth source
+  - default role is shadow projection / queue shadow; persisted SQLite revisions prevent stale replay, and projection plus queue advance atomically
+- Guarded Postgres primary path:
+  - enabled only with `RUNTIME_STATE_BACKEND=postgres` / `DISPATCHER_PRIMARY_POSTGRES_URL` after cutover approval and ready evidence checks
+  - primary full-state writes use a separate storage revision CAS so stale multi-node writers cannot overwrite a newer snapshot
 
 Dispatcher runtime persistence is owned by the runtime-state SQLite backend. Standalone dispatcher schema constants are intentionally not kept outside that live module.
 
@@ -190,14 +193,14 @@ Current stage-3 ownership additions:
 - reconcile may reclaim expired leases and emit audit events
 - read paths can prefer structured projection when `DISPATCHER_STRUCTURED_READS=1`
 - write paths can be blocked by `DISPATCHER_READ_ONLY_MODE=1` for dispatcher HTTP `/api` mutation methods; direct file or external database writes remain operator-controlled
-- SQLite writes may best-effort shadow to Postgres / queue, but those external stores are not the primary authority yet
+- SQLite writes may best-effort shadow to Postgres / queue; Postgres becomes primary only through the guarded, explicitly selected cutover path
 
 The control layer should not rewrite state arbitrarily. It should go through the dispatcher review flow.
 
 ## 6. What This Repo Is Not
 
 - It is not a repo where Trae is the top-level scheduler.
-- It is not yet a fully externalized Postgres-first control plane; dispatcher now has a query-first SQLite projection and optional Postgres / queue shadow path, but SQLite snapshots remain the truth source.
+- It is not a Postgres-first control plane by default; SQLite remains the default authority, while the Postgres primary path is an explicit evidence-gated cutover mode.
 - It is not a single-service API with one uniform response envelope.
 - It is not a complete knowledge-base system; review memory is selective injection, not a general long-term memory layer.
 

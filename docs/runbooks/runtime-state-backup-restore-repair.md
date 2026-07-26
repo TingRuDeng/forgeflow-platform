@@ -45,6 +45,8 @@ node scripts/backup-runtime-state.mjs \
 - 对 SQLite 备份副本执行 `PRAGMA integrity_check`，校验最新 snapshot checksum，并把 snapshot count、revision、state sequence 和 checksum 写入 manifest
 - 只有文件复制与 SQLite watermark 校验都成功后才原子发布 manifest；空 stateDir 不会生成伪成功备份
 
+SQLite snapshot 默认只保留最近 128 个 revision，可用 `DISPATCHER_SQLITE_SNAPSHOT_RETENTION` 调整到 2 至 10000。manifest 的 snapshot count 表示备份当时的保留窗口，不是实例启动以来的累计写入次数；旧 revision 被清理后出现最小 revision 大于 1 或 revision 缺口是正常现象。完整事件历史应通过 `runtime_audit_events` / `/api/query/events` 核对。
+
 手工最小备份只适合作为额外的紧急副本：
 
 ```bash
@@ -88,6 +90,8 @@ curl -s http://127.0.0.1:8787/api/dashboard/snapshot
 curl -s http://127.0.0.1:8787/api/query/projection-health
 curl -s http://127.0.0.1:8787/api/dr/status
 ```
+
+结构化 projection 会在下一次状态保存时比较 source hash、metadata row count 与实际 row count；缺行或多行会触发该表重建。若实际内容被人工修改但行数未变化，先保留备份并停止写入者，再清空 `projection_table_hashes` 后触发一次正常 dispatcher 状态保存，使全部 projection 从最新 snapshot 重建。
 
 ## 4. 救援模式
 

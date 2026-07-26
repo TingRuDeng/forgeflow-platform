@@ -5,13 +5,17 @@ import crypto from "node:crypto";
 import {
   createPgClient,
   listRuntimeAuditEvents,
-  loadPrimaryRuntimeStateSnapshot,
+  loadPrimaryRuntimeStateSnapshotWithRevision,
   savePrimaryRuntimeStateSnapshot,
 } from "@forgeflow/dispatcher-store-postgres";
 
 import { createEmptyRuntimeState } from "./runtime-state-json.js";
 import type { RuntimeState } from "./runtime-state.js";
 import { ensureRuntimeEventIdentities } from "./runtime-events.js";
+import {
+  attachRuntimeStateStorageRevision,
+  readRuntimeStateStorageRevision,
+} from "./runtime-state-revision.js";
 import type {
   RuntimeAuditEventPage,
   RuntimeAuditEventQueryOptions,
@@ -170,11 +174,12 @@ export async function loadRuntimeStateFromPostgres(stateDir: string): Promise<Ru
   validatePrimaryCutoverFiles(stateDir);
   const client = await createPgClient(postgresUrl);
   try {
-    const snapshot = await loadPrimaryRuntimeStateSnapshot<Partial<RuntimeState>>(client);
-    return ensureRuntimeEventIdentities({
+    const snapshot = await loadPrimaryRuntimeStateSnapshotWithRevision<Partial<RuntimeState>>(client);
+    const state = ensureRuntimeEventIdentities({
       ...createEmptyRuntimeState(),
-      ...(snapshot ?? {}),
+      ...(snapshot?.state ?? {}),
     });
+    return attachRuntimeStateStorageRevision(state, snapshot?.revision ?? null);
   } finally {
     await client.end?.();
   }
@@ -185,6 +190,12 @@ export async function saveRuntimeStateToPostgres(stateDir: string, state: Runtim
   validatePrimaryCutoverFiles(stateDir);
   const client = await createPgClient(postgresUrl);
   try {
+    const expectedRevision = readRuntimeStateStorageRevision(state);
+    if (expectedRevision === undefined) {
+      throw new Error(
+        "postgres runtime state must be loaded before it can be saved",
+      );
+    }
     const normalizedState = ensureRuntimeEventIdentities(state);
     const auditEvents = normalizedState.events.map((event) => {
       if (!event.eventId) {
@@ -199,11 +210,14 @@ export async function saveRuntimeStateToPostgres(stateDir: string, state: Runtim
         payload: event.payload,
       };
     });
-    await savePrimaryRuntimeStateSnapshot(
+    const revision = await savePrimaryRuntimeStateSnapshot(
       client,
       normalizedState as unknown as Record<string, unknown>,
+      expectedRevision,
       auditEvents,
     );
+    attachRuntimeStateStorageRevision(normalizedState, revision);
+    attachRuntimeStateStorageRevision(state, revision);
   } finally {
     await client.end?.();
   }

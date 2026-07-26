@@ -200,7 +200,7 @@ PostgreSQL primary backend 会在同一 transaction 内提交 primary snapshot �
 
 当前落地行为：
 
-- SQLite snapshot + SQLite structured projection 仍是真相源
+- 在默认 SQLite backend 与 `shadow-write` 模式下，SQLite snapshot + SQLite structured projection 仍是真相源；显式切换到 `RUNTIME_STATE_BACKEND=postgres` 后以 Postgres primary snapshot 为准
 - 开启 shadow write 后，dispatcher 会 best-effort 写入：
   - `dispatcher_workers`
   - `dispatcher_tasks`
@@ -210,6 +210,9 @@ PostgreSQL primary backend 会在同一 transaction 内提交 primary snapshot �
   - `dispatcher_leases`
 - 如果 queue shadow 启用，还会写入 assignment delivery queue 影子表
 - PostgreSQL primary backend 另用 `dispatcher_runtime_audit_events` 保存完整审计历史；它不等同于上述 shadow projection 的 `dispatcher_events`
+- SQLite shadow write 会把刚提交的 snapshot revision 作为 `sourceRevision` 同步到 projection 与 queue metadata
+- projection 与 queue 在同一个 PostgreSQL transaction 内推进；旧 `sourceRevision` 不会回退较新的 shadow，内容未变化的表不会重复 `TRUNCATE + INSERT`
+- PostgreSQL primary snapshot 使用独立 storage revision 做 CAS；并发 writer 持有旧 revision 时返回 `409 runtime_state_revision_conflict`，不会覆盖新状态
 
 当前边界：
 

@@ -177,4 +177,13 @@ describe("runtime-state-shadow-health", () => {
 
     await expect(syncRuntimeStateShadow(createEmptyRuntimeState())).rejects.toThrow("primary_backend_not_selected");
   });
+
+  it("rejects shadow writes that are not tied to a persisted source revision", async () => {
+    process.env.DISPATCHER_SHADOW_MODE = "shadow-write";
+    process.env.DISPATCHER_POSTGRES_URL = "postgres://example.invalid/forgeflow";
+
+    await expect(syncRuntimeStateShadow(createEmptyRuntimeState())).rejects.toThrow(
+      "shadow projection requires a persisted source revision",
+    );
+  });
 });
