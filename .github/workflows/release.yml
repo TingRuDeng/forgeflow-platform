@@ -36,7 +36,7 @@ on:
       - 'packages/*/package.json'
 
 concurrency:
-  group: release-${{ github.ref_name }}-${{ inputs.package || 'auto' }}
+  group: release-${{ github.repository }}
   cancel-in-progress: false
 
 permissions:
@@ -52,19 +52,21 @@ jobs:
       has-packages: ${{ steps.detect.outputs.has-packages }}
       new-packages: ${{ steps.detect.outputs.new-packages }}
       has-new-packages: ${{ steps.detect.outputs.has-new-packages }}
+      release-sha: ${{ steps.detect.outputs.release-sha }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 2
+          ref: ${{ github.sha }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           version: 10.23.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: "22"
           package-manager-cache: false
@@ -78,6 +80,7 @@ jobs:
           PACKAGES=$(jq -c '.packages' "$REPORT_JSON")
           NEW_PACKAGES=$(jq -c '.newPackages' "$REPORT_JSON")
           
+          echo "release-sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
           echo "new-packages=$NEW_PACKAGES" >> $GITHUB_OUTPUT
           if [ "$PACKAGES" != "[]" ]; then
@@ -101,6 +104,7 @@ jobs:
       NPM_DIST_TAG: ${{ inputs.tag }}
       RELEASE_REF: ${{ github.ref }}
       RELEASE_REPOSITORY: ${{ github.repository }}
+      RELEASE_SHA: ${{ github.sha }}
     permissions:
       contents: write
       id-token: write
@@ -114,21 +118,31 @@ jobs:
           fi
 
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify release checkout
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          if [[ "$CURRENT_SHA" != "$RELEASE_SHA" ]]; then
+            echo "Release checkout mismatch: expected $RELEASE_SHA, got $CURRENT_SHA" >&2
+            exit 1
+          fi
 
       - name: Validate release inputs
         run: node scripts/validate-release-inputs.mjs "$RELEASE_PACKAGE" "$NPM_DIST_TAG"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           version: 10.23.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: "22"
-          cache: pnpm
+          package-manager-cache: false
           registry-url: 'https://registry.npmjs.org'
 
       - name: Upgrade npm for Trusted Publishing
@@ -202,23 +216,55 @@ jobs:
           node scripts/release-publish-preflight.mjs
           --package-dir "packages/${RELEASE_PACKAGE}"
           --expected-repo "$RELEASE_REPOSITORY"
+          --expected-dist-tag "$NPM_DIST_TAG"
           --require-version-available
 
       - name: Build package
         run: pnpm --filter "@tingrudeng/${RELEASE_PACKAGE}" build
 
-      - name: Publish to npm with Trusted Publishing (OIDC)
+      - name: Prepare exact release tarball
+        id: release-artifact
+        run: |
+          RELEASE_MANIFEST="$RUNNER_TEMP/release-artifact.json"
+          node scripts/prepare-release-tarball.mjs \
+            --package-dir "packages/${RELEASE_PACKAGE}" \
+            --output-dir "$RUNNER_TEMP/release-tarballs" \
+            --manifest "$RELEASE_MANIFEST"
+          echo "tarball=$(jq -r '.tarball' "$RELEASE_MANIFEST")" >> "$GITHUB_OUTPUT"
+
+      - name: Require unchanged main and publish exact tarball
         id: publish
         env:
           GITHUB_ACTIONS: "true"
           NPM_CONFIG_PROVENANCE: "true"
+          RELEASE_TARBALL: ${{ steps.release-artifact.outputs.tarball }}
         run: |
-          cd "packages/${RELEASE_PACKAGE}"
-          cp package.json "$RUNNER_TEMP/release-package-json-before-publish"
-          npm publish --access public --provenance --tag "$NPM_DIST_TAG"
-          cp "$RUNNER_TEMP/release-package-json-before-publish" package.json
+          git fetch --no-tags origin main
+          REMOTE_MAIN=$(git rev-parse origin/main)
+          if [[ "$REMOTE_MAIN" != "$RELEASE_SHA" ]]; then
+            echo "main advanced before publish: expected $RELEASE_SHA, got $REMOTE_MAIN" >&2
+            exit 1
+          fi
+          npm publish "$RELEASE_TARBALL" --ignore-scripts --access public --provenance --tag "$NPM_DIST_TAG"
           echo "published=true" >> "$GITHUB_OUTPUT"
           echo "✅ Published @tingrudeng/${RELEASE_PACKAGE}@${NEW_VERSION}"
+
+      - name: Verify exact registry tarball
+        run: >
+          node scripts/verify-published-package-tarball.mjs
+          --package "$RELEASE_PACKAGE"
+          --version "$NEW_VERSION"
+          --expected-dist-tag "$NPM_DIST_TAG"
+          --expected-manifest "$RUNNER_TEMP/release-artifact.json"
+
+      - name: Verify main remained unchanged during publish
+        run: |
+          git fetch --no-tags origin main
+          REMOTE_MAIN=$(git rev-parse origin/main)
+          if [[ "$REMOTE_MAIN" != "$RELEASE_SHA" ]]; then
+            echo "main advanced during publish: expected $RELEASE_SHA, got $REMOTE_MAIN" >&2
+            exit 1
+          fi
 
       - name: Verify published provider runtime smoke
         run: >
@@ -327,6 +373,7 @@ jobs:
       RELEASE_PACKAGE: ${{ matrix.package.name }}
       RELEASE_VERSION: ${{ matrix.package.version }}
       RELEASE_REPOSITORY: ${{ github.repository }}
+      RELEASE_SHA: ${{ needs.detect-changes.outputs.release-sha }}
     permissions:
       contents: read
       id-token: write
@@ -337,21 +384,36 @@ jobs:
       fail-fast: false
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ needs.detect-changes.outputs.release-sha }}
+
+      - name: Verify detected release identity
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          CURRENT_VERSION=$(node -p "require('./packages/${RELEASE_PACKAGE}/package.json').version")
+          if [[ "$CURRENT_SHA" != "$RELEASE_SHA" ]]; then
+            echo "Release checkout mismatch: expected $RELEASE_SHA, got $CURRENT_SHA" >&2
+            exit 1
+          fi
+          if [[ "$CURRENT_VERSION" != "$RELEASE_VERSION" ]]; then
+            echo "Release version mismatch: expected $RELEASE_VERSION, got $CURRENT_VERSION" >&2
+            exit 1
+          fi
 
       - name: Validate release package
         run: node scripts/validate-release-inputs.mjs "$RELEASE_PACKAGE" beta
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           version: 10.23.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: "22"
-          cache: pnpm
+          package-manager-cache: false
           registry-url: 'https://registry.npmjs.org'
 
       - name: Upgrade npm for Trusted Publishing
@@ -405,17 +467,71 @@ jobs:
       - name: Build package
         run: pnpm --filter "@tingrudeng/${RELEASE_PACKAGE}" build
 
-      - name: Publish to npm with Trusted Publishing (OIDC)
+      - name: Prepare exact release tarball
+        id: release-artifact
+        run: |
+          RELEASE_MANIFEST="$RUNNER_TEMP/release-artifact.json"
+          node scripts/prepare-release-tarball.mjs \
+            --package-dir "packages/${RELEASE_PACKAGE}" \
+            --output-dir "$RUNNER_TEMP/release-tarballs" \
+            --manifest "$RELEASE_MANIFEST"
+          echo "tarball=$(jq -r '.tarball' "$RELEASE_MANIFEST")" >> "$GITHUB_OUTPUT"
+
+      - name: Require unchanged main and publish exact tarball
+        id: publish
         env:
           GITHUB_ACTIONS: "true"
           NPM_DIST_TAG: ${{ steps.preflight.outputs.dist_tag }}
+          NPM_CONFIG_PROVENANCE: "true"
+          RELEASE_TARBALL: ${{ steps.release-artifact.outputs.tarball }}
         run: |
-          cd "packages/${RELEASE_PACKAGE}"
-          npm publish --access public --provenance --tag "$NPM_DIST_TAG"
+          git fetch --no-tags origin main
+          REMOTE_MAIN=$(git rev-parse origin/main)
+          if [[ "$REMOTE_MAIN" != "$RELEASE_SHA" ]]; then
+            echo "main advanced before publish: expected $RELEASE_SHA, got $REMOTE_MAIN" >&2
+            exit 1
+          fi
+          npm publish "$RELEASE_TARBALL" --ignore-scripts --access public --provenance --tag "$NPM_DIST_TAG"
+          echo "published=true" >> "$GITHUB_OUTPUT"
           echo "✅ Published @tingrudeng/${RELEASE_PACKAGE}@${RELEASE_VERSION}"
+
+      - name: Verify exact registry tarball
+        env:
+          EXPECTED_DIST_TAG: ${{ steps.preflight.outputs.dist_tag }}
+        run: >
+          node scripts/verify-published-package-tarball.mjs
+          --package "$RELEASE_PACKAGE"
+          --version "$RELEASE_VERSION"
+          --expected-dist-tag "$EXPECTED_DIST_TAG"
+          --expected-manifest "$RUNNER_TEMP/release-artifact.json"
+
+      - name: Verify main remained unchanged during publish
+        run: |
+          git fetch --no-tags origin main
+          REMOTE_MAIN=$(git rev-parse origin/main)
+          if [[ "$REMOTE_MAIN" != "$RELEASE_SHA" ]]; then
+            echo "main advanced during publish: expected $RELEASE_SHA, got $REMOTE_MAIN" >&2
+            exit 1
+          fi
 
       - name: Verify published provider runtime smoke
         run: >
           node scripts/verify-published-runtime-smoke.mjs
           --package "$RELEASE_PACKAGE"
           --require-published
+
+      - name: Summarize automatic post-publish recovery
+        if: ${{ failure() && steps.publish.outcome == 'success' }}
+        run: |
+          {
+            echo "## 自动发布后验证失败"
+            echo ""
+            echo "npm publish 已成功，但后续 registry、main identity 或 provider smoke 验证失败。"
+            echo ""
+            echo "- package: @tingrudeng/${RELEASE_PACKAGE}"
+            echo "- version: ${RELEASE_VERSION}"
+            echo "- release sha: ${RELEASE_SHA}"
+            echo "- workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo ""
+            echo "请先确认 npm 上的精确版本、dist-tag 与 tarball，再按本次 workflow 日志处理 main 漂移或 smoke 失败。"
+          } >> "$GITHUB_STEP_SUMMARY"

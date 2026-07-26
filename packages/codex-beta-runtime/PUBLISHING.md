@@ -1,6 +1,6 @@
 # 发布 @tingrudeng/codex-beta-runtime
 
-该包面向 **公开 beta npm 发布**准备，但不会由本仓库自动发布。
+该包面向 **公开 beta npm 发布**准备，正式入口是 `.github/workflows/release.yml` 的 GitHub Actions Trusted Publishing。
 
 ## 前置条件
 
@@ -50,16 +50,14 @@ git diff --check
 
 ## 发布流程
 
-从仓库根目录执行：
+先用本地 preview-only helper 预览 core 与 provider 的版本，再通过 Release workflow 按依赖顺序发布：
 
 ```bash
-pnpm --filter @tingrudeng/beta-runtime-core build
-pnpm --filter @tingrudeng/beta-runtime-core publish --access public --no-git-checks
-pnpm --filter @tingrudeng/codex-beta-runtime build
-pnpm --filter @tingrudeng/codex-beta-runtime publish --access public --no-git-checks
+node scripts/release-package.js --package beta-runtime-core --bump prerelease --dry-run
+node scripts/release-package.js --package codex-beta-runtime --bump prerelease --dry-run
 ```
 
-当 Codex runtime 依赖新的 core 版本时，必须先发布 `@tingrudeng/beta-runtime-core`。Codex 包会在 `prepublishOnly` 阶段把 `workspace:*` runtime 依赖重写为具体 npm 版本，避免发布包携带 workspace 协议。
+当 Codex runtime 依赖新的 core 版本时，必须先发布 `@tingrudeng/beta-runtime-core`。Release workflow 会生成唯一 tarball，把 `workspace:*` runtime 依赖改写为具体版本，以 OIDC + provenance 发布该 tarball，并从 registry 下载精确产物复核 integrity、内容与安装结果。
 
 ## 远端机器安装流程
 

@@ -40,6 +40,10 @@ const requireTrustedPublishing = args["require-trusted-publishing"] === true;
 const requirePackageExists = args["require-package-exists"] === true;
 const requirePublishedWorkspaceDeps = args["require-published-workspace-deps"] === true;
 const requireVersionAvailable = args["require-version-available"] === true;
+const expectedDistTag = typeof args["expected-dist-tag"] === "string" ? args["expected-dist-tag"] : "";
+const registryUrl = typeof args["registry-url"] === "string"
+  ? args["registry-url"]
+  : "https://registry.npmjs.org";
 
 if (!packageDir) {
   console.error("Error: --package-dir is required");
@@ -114,7 +118,7 @@ function readPublishedPackageVersion(packageName) {
 function readPublishedPackageTargetVersion(packageName, version) {
   const target = version ? `${packageName}@${version}` : packageName;
   try {
-    const output = execFileSync("npm", ["view", target, "version"], {
+    const output = execFileSync("npm", ["view", target, "version", "--registry", registryUrl], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 15000,
@@ -196,6 +200,11 @@ if (requirePublishedWorkspaceDeps) {
 }
 
 const distTag = typeof packageJson.version === "string" && packageJson.version.includes("-") ? "beta" : "latest";
+if (expectedDistTag && expectedDistTag !== distTag) {
+  issues.push(
+    `dist-tag mismatch for ${packageJson.name}@${packageJson.version}: expected ${distTag}, got ${expectedDistTag}`,
+  );
+}
 
 setGithubOutput("package_name", packageJson.name);
 setGithubOutput("package_version", packageJson.version);
@@ -213,6 +222,7 @@ if (issues.length > 0) {
 
 console.log(`Release preflight passed for ${packageJson.name}@${packageJson.version}`);
 console.log(`- expected repo: ${expectedRepo}`);
+console.log(`- registry: ${registryUrl}`);
 console.log(`- publish dist-tag: ${distTag}`);
 console.log(`- trusted publishing gate: ${publishEnabled ? "enabled" : "disabled"}`);
 console.log(`- package exists on npm: ${publishedPackage.status === "published" ? `yes (${publishedPackage.version})` : publishedPackage.status}`);

@@ -7,3 +7,6 @@ node_modules/
 dist/
 node_modules
 .pnpm-store/
+coverage/
+__pycache__/
+*.pyc

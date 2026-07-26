@@ -13,7 +13,7 @@ The repository release path is GitHub Actions only:
 
 - Node 22+
 - pnpm installed
-- npm access to publish the `@tingrudeng` scope
+- the npm package name and Trusted Publisher binding for the `@tingrudeng` scope
 - a clean checkout of the ForgeFlow repository
 - npm must already trust GitHub repo `TingRuDeng/forgeflow-platform` as a Trusted Publisher for `@tingrudeng/trae-beta-runtime`
 
@@ -82,19 +82,15 @@ Preferred path:
 2. Set repository/org variable `NPM_TRUSTED_PUBLISHING_ENABLED=true`
 3. Trigger `.github/workflows/release.yml`
 
-Local `publish` commands below are for debugging and package validation only; they are not the supported release path for this repository.
-
-From the repository root:
+Preview the version changes from the repository root:
 
 ```bash
-pnpm --filter @tingrudeng/automation-gateway-core build
-pnpm --filter @tingrudeng/automation-gateway-core publish --access public --no-git-checks
-pnpm --filter @tingrudeng/trae-beta-runtime build
-pnpm --filter @tingrudeng/trae-beta-runtime publish --access public --no-git-checks
+node scripts/release-package.js --package automation-gateway-core --bump prerelease --dry-run
+node scripts/release-package.js --package trae-beta-runtime --bump prerelease --dry-run
 ```
 
-If your registry requires an explicit host, configure npm/pnpm auth first and then publish with the registry your environment expects.
 If `automation-gateway-core` did not change for this release and the published dependency version already exists on npm, you can skip republishing it.
+The workflow prepares one tarball, publishes that exact file with OIDC provenance, then verifies npm `dist.integrity`, `dist.shasum`, contents, bin links, and installability before the release is complete.
 
 ## Install flow on a remote machine
 

@@ -215,6 +215,38 @@ describe("release publish preflight", () => {
     expect(result.stdout).toContain("Release preflight passed");
   });
 
+  it("rejects a manual dist-tag that does not match the package version", () => {
+    const tempDir = makeTempDir();
+    writePackageJson(tempDir);
+    const fakeNpmBin = createVersionAvailabilityFakeNpm(tempDir, "missing");
+
+    const result = spawnSync(
+      "node",
+      [
+        preflightScriptPath,
+        "--package-dir",
+        "packages/beta-runtime-core",
+        "--expected-repo",
+        "TingRuDeng/forgeflow-platform",
+        "--require-version-available",
+        "--expected-dist-tag",
+        "latest",
+      ],
+      {
+        cwd: tempDir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${fakeNpmBin}:${process.env.PATH || ""}`,
+        },
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("dist-tag mismatch");
+    expect(result.stderr).toContain("expected beta, got latest");
+  });
+
   it.each([
     ["published", "already exists on npm"],
     ["error", "availability check failed"],
