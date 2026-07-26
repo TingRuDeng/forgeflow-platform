@@ -14,7 +14,7 @@ Only confirmed, still-active debt belongs here.
 
 - 本文件只写仍然存在的债务，不写愿望清单。
 - 当前债务集中在 runtime bridge、持久化 fallback / shadow 边界、Trae gateway 发布适配层和 Stage 3 边界。
-- 近期审查确认 dispatcher 外部资源锁、DR drill 深度和手动发布版本落账仍需后续修复。
+- 近期审查确认 dispatcher 外部资源锁、跨主机生产 DR 和手动发布后的 git 版本落账恢复仍需后续修复。
 - 修复债务时必须同步 `README.md`、`docs/README.md` 和相关稳定文档。
 
 ```yaml
@@ -107,7 +107,7 @@ Desired direction:
 - `@tingrudeng/automation-gateway-core` 已提供共享 `startAutomationGatewayHttpServer`，统一处理 Node HTTP server、JSON body 读取、错误响应和 server close
 - `@tingrudeng/automation-gateway-core` 已提供共享 `createAutomationGatewayDebugLogger` 和 `isAutomationGatewayDebugEnabled`，统一处理 `TRAE_AUTOMATION_DEBUG` / `debug` 开关与 `[trae-gateway][debug]` 结构化日志格式
 - `@tingrudeng/automation-gateway-core` 已提供共享 `resolveAutomationGatewayDriver`，统一处理已注入 driver、automationOptions 透传和 gateway debug / driver debug 归一化
-- `@tingrudeng/automation-gateway-core` 已提供共享 `createPersistentAutomationSessionStore`，统一处理 session 持久化、重启中断、TTL 清理、request fingerprint / target 解析和 public shape 裁剪
+- `@tingrudeng/automation-gateway-core` 已提供共享 `createPersistentAutomationSessionStore`，统一处理 session 持久化、重启中断、TTL 清理、request fingerprint / target 解析和 public shape 裁剪；本机 mutation 通过 `sessions.json.lock` 串行化，并在锁内重读最新文件后再更新，损坏 JSON 会 fail closed
 - `@tingrudeng/automation-gateway-core` 已提供共享 Trae CDP / DOM driver，统一 target discovery、CDP session、DOM 表达式、response extraction、activity snapshot 和 final report completion 判断
 - `@tingrudeng/automation-gateway-core` 已提供共享 Trae clean relaunch 原语，统一 `.app` 名称解析、macOS app quit 和旧 CDP 端口 drain
 - `@tingrudeng/automation-gateway-core` 已提供共享 Trae launcher helper，统一 launch 参数解析、remote debugging port 注入、project path 注入、macOS `.app` 到 `Contents/MacOS/*` 可执行文件解析、debugger wait / reuse、clean relaunch 后 spawn 和 spawn error race
@@ -119,12 +119,15 @@ Desired direction:
 影响：
 
 - 默认 session-store 路径、持久化解析和 chat 调用关键行为已经对齐
+- 同一状态目录内的重叠本机进程不再因各自持有旧 Map 而覆盖其他 session；唯一临时文件加 rename 继续防止 torn write
 - route / session / chat 语义、HTTP JSON IO、debug logger、driver 创建规则、持久化 session-store 和 Trae DOM driver 已经集中到共享 core；后续 handler、request IO、debug 日志、driver debug 归一化、session 文件语义或 DOM driver 行为修复不应再分别修改脚本侧和 packaged runtime
+- session store 仍是单机文件存储；该锁不是跨主机 lease，多个 active gateway 也不受 dispatcher session lease 协调
 - 剩余漂移风险主要来自发布适配层：发布前 dist / workspace 依赖同步，以及 wrapper test 读取 workspace 依赖 dist 时必须先构建共享 core
 
 期望方向：
 
 - 后续不要再在两侧扩写 route handler、HTTP request IO、debug logger、driver 创建规则、session-store 或 DOM driver 逻辑；发布前重点验证 dist / workspace 依赖同步
+- 需要多主或跨主机 session 协调时，把状态和 ownership 迁入共享 store / lease 协议，不要把本机 lock 扩写成分布式能力
 
 ## 5. Stable agent-facing docs were previously concentrated in rule/nav docs but lacked a durable knowledge layer
 
@@ -180,12 +183,13 @@ Desired direction:
 
 当前情况：
 
-- `packages/worker-protocol` 提供 Worker Protocol v1、TaskAttempt、RuntimeEvent 和 ArtifactBundle 的目标 schema
+- `packages/worker-protocol` 提供 Worker Protocol v1、TaskAttempt 和 RuntimeEvent schema；ArtifactBundle 直接重导出 `packages/result-contracts` 的 canonical schema，不再维护第二份定义
 - `packages/task-schema` 已接纳当前 dispatcher runtime 使用的 `trae` pool、Task/Worker 扩展字段和 AssignmentPayload 形态
 - `packages/worker-protocol` 已提供当前 runtime 事件名到 vNext RuntimeEvent taxonomy 的 normalize helper
 - `packages/worker-protocol` 已提供 start/result payload helper，统一第三方 worker adapter 需要回写的 envelope 字段
 - dispatcher runtime state 已有 `taskAttempts[]`，SQLite `task_attempts` projection 会保存 synthetic attempt
 - dispatcher start/result mutation 已强制完整 v1 envelope，并会拒绝缺少 active attempt、缺字段或携带历史终态 `attemptId` 的 stale result
+- `succeeded` / `failed` result 的精确网络重放现在幂等返回原状态；同一 key 若改变 canonical result、PR metadata 或 ArtifactBundle 会明确冲突
 - 通用 dispatcher worker start/result 会校验 `protocolVersion`、`traceId` 和 `idempotencyKey` 与 active attempt 一致
 - Trae 兼容主链的 `fetch-task` / `start-task` / `submit-result` 已回显并校验 `protocolVersion`、`traceId`、`idempotencyKey`、`attemptId` 和 `leaseToken`
 - dispatcher runtime state 已有 `artifactBundles[]`，SQLite `artifact_bundles` projection 会保存 ArtifactBundle 摘要、refs、结构化 trajectory 和可选 retainedContent 正文片段
@@ -197,7 +201,7 @@ Desired direction:
 
 - 代码审查和文档阅读时容易把 vNext 目标契约误读为当前已执行的 runtime 保护
 - 空 envelope / 无 active attempt 的 worker mutation 已被拒绝，历史夹具或迁移脚本必须先补 claim / attempt 语义
-- ArtifactBundle 已支持结构化 `trajectory` 和受限 `retainedContent`，dispatcher 会把 trajectory / retained diff / log / test result 写入本地 artifact store，并同时生成 `trajectory.json` 与 `trajectory.traj` 回放文件，通过 manifest、retention 和 `/api/artifacts/:bundleId/files/:fileName` 支持按需读取；generic Codex/Gemini assignment runner 已在 `worker-result.json` 内主动产出 preflight / action / verification / result trajectory 和 retained logs / test results，Trae automation worker 的成功与失败 submitResult 路径也会把当前 task 的真实 phase events 映射进同类 trajectory 和 retained logs / test results
+- ArtifactBundle 已支持结构化 `trajectory` 和受限 `retainedContent`，dispatcher 会把 `result.json`、trajectory / retained diff / log / test result 写入本地 artifact store，生成真实 bundle refs，并同时生成 `trajectory.json` 与 `trajectory.traj` 回放文件；retention 删除正文时会同步裁剪 runtime bundle index；generic Codex/Gemini assignment runner 已在 `worker-result.json` 内主动产出 preflight / action / verification / result trajectory 和 retained logs / test results，Trae automation worker 的成功与失败 submitResult 路径也会把当前 task 的真实 phase events 映射进同类 trajectory 和 retained logs / test results
 - Console 任务详情可通过摘要 / 引用 / 正文 / 轨迹 tabs 查看审查证据，runtime events 默认展示 10 条摘要、支持按 event type 筛选并可展开完整列表，Artifact Review Workbench 也会跨任务展示 runtime event type 聚合、trajectory action / observation / command 搜索、跨任务轨迹并排详情、全文搜索和按事件类型筛选，轨迹 tab 与 Workbench 轨迹并排详情均支持从 step `artifactRef` 直接展开或下载对应观察文件；任务处于 `review` 状态时可直接提交带 `reasonCode`、`mustFix[]`、重驱动策略和高风险确认的 `merge` / `rework` / `block` 决策；Console 审查队列支持对多个 `review` 任务批量提交共享证据的 `merge` / `rework` / `block` 决策，批量 merge 会要求确认已选高风险任务，批量提交结果会在队列内展示成功数和逐项 taskId / error 明细；审查队列也会单独列出 `waiting_for_input` 任务供点击定位；`waiting_for_input` 任务可在 Console 详情页按 `resumePayloadSchema` 提交结构化恢复输入，未提供 schema 时保留 JSON fallback；任务详情会展示 task-level `terminationPolicy`，让 reviewer 直接看到 maxAttempts、attempt lease、heartbeat 和 assignment timeout
 - HITL 当前已接通 dispatcher 状态语义、worker 主动 `waitingForInput`、Console schema 驱动 resume payload 编辑、dispatcher resume API schema 校验和 beta runtime assignment package 消费；`resumePayloadSchema` 已支持 `string` / `number` / `integer` / `boolean` / `array`、textarea、范围和数组数量校验，Console 会在页面内展示校验文案，Codex / Gemini worker prompt 已写入共享 schema 子集约束
 
@@ -223,7 +227,7 @@ Current situation:
 - `scripts/check-shadow-drift.mjs` compares SQLite expected counts with Postgres projection / queue shadow counts
 - `scripts/check-shadow-drift.mjs --max-mismatches <n> --max-delta <n>` emits a stable `alert` summary with `none` / `warning` / `critical` levels; rollout / release environments can also set `DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES` and `DISPATCHER_SHADOW_DRIFT_MAX_DELTA`
 - `scripts/check-shadow-drift.mjs <stateDir> --reconcile` replays current SQLite truth into the configured shadow projection / queue and checks drift again
-- `scripts/check-shadow-drift.mjs <stateDir> --record-alert` can append a `shadow_drift_detected` system event when drift is present
+- `scripts/check-shadow-drift.mjs <stateDir> --record-alert` appends a `shadow_drift_detected` system event when drift is present; it shares `.runtime-state.lock` with dispatcher mutations and reloads the latest state inside the lock, so concurrent local writers do not overwrite one another
 - `DISPATCHER_SHADOW_DRIFT_AUTO_RECONCILE=1`, `pnpm verify:shadow-drift:reconcile`, and long-running `pnpm verify:shadow-drift:reconciler` provide explicit automatic reconciliation cadence hooks without changing the default read-only gate; root reconciler scripts now write `.forgeflow-dispatcher/shadow-reconciler-status.json` as a durable `shadow-reconciler-status/v1` latest-run snapshot for production monitors; `pnpm verify:shadow-cutover:reconciler` runs the same reconciler with `--require-configured --require-primary-backend --max-mismatches 0 --max-delta 0` for strict production cutover window 巡检
 - `pnpm verify:shadow-cutover` is a strict production cutover preflight: shadow must be configured and zero-drift under `--max-mismatches 0 --max-delta 0`, and the primary backend must be configured as `RUNTIME_STATE_BACKEND=postgres` with `DISPATCHER_PRIMARY_POSTGRES_URL`
 - `pnpm verify:shadow-cutover:drill` runs drift gate, explicit reconcile + alert recording, and strict cutover preflight as one production rehearsal command; `pnpm verify:shadow-cutover:drill:evidence` writes the same phase payload to `.forgeflow-dispatcher/shadow-cutover-drill.json`
@@ -244,6 +248,7 @@ Current situation:
 Impact:
 
 - process restart keeps both the last shadow health record and runtime event history
+- shadow alert recording is serialized with local dispatcher state mutations; this file lock does not coordinate independent hosts
 - shadow-write rollout / release 已有 drift gate、阈值告警摘要、显式自动 reconciliation cadence hook、长期 reconciler 入口、默认 reconciler durable status snapshot、strict cutover reconciler 模式、strict cutover preflight、production cutover drill、cutover evidence file、primary approval marker、approval marker 独立校验、最终 ready 组合门禁、post-cutover completion evidence、ready evidence primary backend guard、rollback revocation marker、Postgres primary snapshot 原语、primary-mode 兼容状态、HTTP route async state path 和 `/api/query/*` Postgres primary snapshot reads；真实生产执行仍需要 operator 在变更窗口切换 `RUNTIME_STATE_BACKEND=postgres` / `DISPATCHER_PRIMARY_POSTGRES_URL` 并保留 evidence
 - Console 首屏已展示 `/api/dr/status` 的 shadow write、shadow reconciler 运行次数 / 更新时间 / 最近一轮 reconciliation request-attempt-reason 证据、primary cutover / completion evidence、projection、backup、read-only 和 structured reads 摘要，reviewer 可以在同一工作台看到 cutover 前后轻量状态
 
@@ -258,21 +263,26 @@ Current situation:
 
 - `scripts/verify-stage3-dr.mjs` creates a real SQLite `runtime-state.db`
 - it writes multiple `snapshots` rows while the SQLite connection remains open in WAL mode
+- source scripts and the packaged dispatcher CLI now share one backup / restore core instead of maintaining duplicate file-copy implementations
+- backup / restore serializes with dispatcher mutations through `.runtime-state.lock`; v1 manifests record file sizes, SHA-256 values, and a validated SQLite snapshot watermark
+- restore verifies the complete manifest before changing the target, stages every file, rolls back on apply failure, and removes stale runtime files that are absent from the backup
 - it verifies that backup / restore includes `runtime-state.db-wal`, then validates `PRAGMA integrity_check`, snapshot count, latest sequence, and checksum
 - `scripts/verify-live-dispatcher-dr.mjs` starts a real dispatcher HTTP server, writes through live endpoints, backs up while the server is still open, then restores and validates SQLite integrity
 - the live drill also starts a dispatcher child process, writes / backs up during live traffic, kills it with `SIGKILL`, restores the backup into a second state directory, and restarts dispatcher against the restored state
+- the live drill treats writes acknowledged before backup as the local RPO floor, records local recovery duration, and verifies a post-recovery write survives a second restart
 - the live drill corrupts the current runtime SQLite files before restore and verifies the restored database passes `PRAGMA integrity_check`
-- the live drill restores the same backup into two independent state directories, starts both dispatchers, and checks task / event counts stay consistent
+- the live drill restores the same backup into two independent state directories, starts both dispatchers, and checks task / event counts plus the complete runtime-state SHA-256 stay consistent
 
 Impact:
 
-- `pnpm verify:stage3` proves the source DR script path, WAL-backed restore, and restored SQLite queryability
-- `pnpm verify:stage3:live` proves the live dispatcher HTTP write path, WAL restore, SIGKILL replacement recovery, local disk-corruption restore, and two-node restore consistency can be exercised locally
+- `pnpm verify:stage3` proves the shared source/package backup core, verified manifest, WAL-backed restore, and restored SQLite queryability
+- `pnpm verify:stage3:live` proves the live dispatcher HTTP write path, acknowledged-write RPO floor, measured local recovery, post-recovery write persistence, WAL restore, SIGKILL replacement recovery, local disk-corruption restore, and two-node state-hash consistency can be exercised locally
 - it is not yet a full production exercise for physical power loss, quorum fencing, DNS cutover, or cross-host storage failure
 
 Desired direction:
 
 - keep the source DR script as the fast gate and run the live drill before risky runtime releases
+- archive drill output in the production release system when production rollout evidence becomes mandatory
 - add real cross-host failover, quorum restore, and cutover runbooks if production RTO / RPO requirements tighten
 
 ## 11. Manual release recovery is tracked, but still manual
@@ -280,6 +290,8 @@ Desired direction:
 Current situation:
 
 - `.github/workflows/release.yml` manual path publishes to npm before committing the release version and tag
+- manual releases now reject non-`main` refs before checkout and always record the published version back to `main`
+- after the version bump, the workflow reuses the canonical preflight to require the exact new npm version to be available before build and publish
 - if `npm publish` fails, git history no longer advances ahead of npm
 - if `npm publish` succeeds but the later commit / tag / push step fails, npm can contain a version that still needs a matching git record
 - the workflow writes an Actions summary and opens a recovery issue when that post-publish git record step fails
@@ -323,7 +335,7 @@ Desired direction:
 已完成的收口：
 
 - **`scripts/lib` 构建可重建已修复（P0 完成）**：`scripts/lib/review-memory.ts` 的 type-only re-export 改从 `apps/dispatcher/dist` 的 `.d.ts` 取（消除 rootDir 违规），`worker-daemon.ts` 的 `startTime` 已提到 try 外（修复 latent ReferenceError），`scripts/lib/tsconfig.json` 改为非严格并排除 `*.test.ts`。现在 `tsc -p scripts/lib/tsconfig.json` 可干净、幂等地 emit；committed `.js` 已与 `.ts` 对齐（含此前缺失从未提交的 `logger.js` / `metrics.js` / `dispatcher-auth.js` 运行时依赖）。CI 新增 `Verify scripts/lib build is in sync` 步骤（`tsc` + `git diff --exit-code`）防止再次漂移。`.ts` 现在是真相源。
-- **daemon 主循环、worker CLI、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到共享 runtime core（P2 主体完成）**：`packages/beta-runtime-core/src/runtime/worker-daemon-cycle.ts` 是唯一 daemon cycle 实现，`scripts/lib/worker-daemon.ts`、dispatcher `runtime-glue-worker-daemon-cycle.ts` 与 packaged Codex/Gemini runtime 都只做 adapter；completed submitResult retry / delivery_failed 事件由 shared cycle 负责；dispatcher HTTP / state-dir client lazy adapter 已拆到 `worker-daemon-dispatcher-client.ts`，claimed task execution / failed result fallback adapter 已拆到 `worker-daemon-task-executor.ts`；`run-worker-assignment` 的 prompt 拼接、verification shell / nvm 包装、执行 timeout、workspace dependency symlink、Codex/Gemini launch builder、worker-result 文件写入已下沉到 `packages/beta-runtime-core/src/runtime/run-worker-assignment.ts` 与 `run-worker-assignment-cli.ts`；provider worker CLI 参数解析、help、pool 校验和 provider binary env wiring 已下沉到 `packages/beta-runtime-core/src/runtime/provider-worker-cli.ts`；执行期 heartbeat、完成/失败 callbacks 和失败 result 回写已下沉到 `executeManagedWorkerTask` / shared cycle；worktree / commit / push / PR / cleanup live executor 已下沉到 `executeLiveWorkerTask`；失败 result 构建、落盘、submitResult retry 和 evidence 分类已下沉到 `submitFailedWorkerResult`。root `scripts/run-worker-assignment.ts` 只保留 env / CLI wiring，beta-runtime-core dist、dispatcher runtime factory dist 和 src/dist freshness 检查都由 `scripts/lib/runtime-bootstrap.ts` 负责；`@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 只保留 provider 配置型薄入口。
+- **daemon 主循环、worker CLI、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到共享 runtime core（P2 主体完成）**：`packages/beta-runtime-core/src/runtime/worker-daemon-cycle.ts` 是唯一 daemon cycle 实现，`scripts/lib/worker-daemon.ts`、dispatcher `runtime-glue-worker-daemon-cycle.ts` 与 packaged Codex/Gemini runtime 都只做 adapter；completed submitResult retry / delivery_failed 事件由 shared cycle 负责。每个 task 由 shared cycle 维护一条 single-flight heartbeat，覆盖执行与结果提交重试，脚本 executor 不再重复启动第二条 heartbeat；assignment 子进程默认总超时为 30 分钟，可通过 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 调整；SIGINT / SIGTERM / execution timeout 会通过 AbortSignal 取消 dispatcher HTTP 请求和重试等待，并通过 process-group / taskkill 终止完整子进程树。dispatcher HTTP / state-dir client lazy adapter 已拆到 `worker-daemon-dispatcher-client.ts`，claimed task execution / failed result fallback adapter 已拆到 `worker-daemon-task-executor.ts`；`run-worker-assignment` 的 prompt 拼接、verification shell / nvm 包装、执行 timeout、workspace dependency symlink、Codex/Gemini launch builder、worker-result 文件写入已下沉到 `packages/beta-runtime-core/src/runtime/run-worker-assignment.ts` 与 `run-worker-assignment-cli.ts`；provider worker CLI 参数解析、help、pool 校验和 provider binary env wiring 已下沉到 `packages/beta-runtime-core/src/runtime/provider-worker-cli.ts`；worktree / commit / push / PR / cleanup live executor 已下沉到 `executeLiveWorkerTask`；失败 result 构建、落盘、submitResult retry 和 evidence 分类已下沉到 `submitFailedWorkerResult`，重试耗尽会抛出 `WorkerResultDeliveryError`。root `scripts/run-worker-assignment.ts` 只保留 env / CLI wiring，beta-runtime-core dist、dispatcher runtime factory dist 和 src/dist freshness 检查都由 `scripts/lib/runtime-bootstrap.ts` 负责；`@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 只保留 provider 配置型薄入口。
 - **runtime 包发布清单门禁已落地（P2 完成）**：`pnpm verify:runtime-packages` 会校验 `automation-gateway-core`、`beta-runtime-core`、`codex-beta-runtime`、`gemini-beta-runtime`、`trae-beta-runtime` 的 public package 元数据、`dist`/README/PUBLISHING 发布范围、build/typecheck/test 脚本、provider CLI bin 和源码内 `workspace:*` 依赖重写规则；CI 与 release workflow 都会执行该门禁。生产发布窗口可执行 `pnpm verify:runtime-packages:published`，用只读 `npm view` 强制校验 npm registry 包名、当前本地版本和已发布依赖元数据；该检查会把源码内 `workspace:*` 依赖转换为本地 workspace 版本后，与已发布包的 `dependencies` 对比，避免远端安装包仍停留在旧依赖形态。
 - **runtime tarball 安装 smoke 已落地（P2 完成）**：`pnpm verify:runtime-packages:install` 会构建并本地 staging `codex`、`gemini`、`trae` runtime 组，重写 `workspace:*` 依赖为本地 workspace 版本，使用临时 npm cache 执行 `npm pack` / `npm install --ignore-scripts`，并校验 provider CLI bin 安装成功、安装后的 package 不含 `workspace:*` 依赖。CI 与 release workflow 都会执行该门禁，证明发布前 tarball 形态可安装且不依赖外部 registry。
 - **release preflight 会提前阻断未配置包名和未发布 workspace 依赖（P2 完成）**：`release-publish-preflight.mjs --require-package-exists --require-published-workspace-deps` 会在手动发布和自动发布进入 typecheck / test / build / publish 前执行只读 `npm view <package> version`，并把当前 package.json 的 `workspace:*` 依赖解析为本地 workspace 版本后校验对应精确版本已发布。包名不存在、权限不足、registry 查询失败或 provider 依赖的 shared core 版本未发布时，workflow 会停在 preflight，避免在 `npm publish` PUT 阶段或发布后 smoke 才暴露依赖缺口。

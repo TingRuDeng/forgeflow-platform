@@ -15,7 +15,7 @@ const IconButton: React.FC<{
     type="button"
     aria-label={label}
     title={label}
-    className="grid h-7 w-7 place-items-center rounded-md border border-white/10 text-white/65 hover:border-cyan-300/45 hover:text-cyan-100"
+    className="grid h-9 w-9 place-items-center rounded-md border border-white/10 text-white/65 hover:border-cyan-300/45 hover:text-cyan-100"
     onClick={onClick}
   >
     {children}
@@ -33,7 +33,7 @@ const StepNavButton: React.FC<{
     aria-label={label}
     title={label}
     disabled={disabled}
-    className="grid h-8 w-8 place-items-center rounded-md border border-white/10 text-white/65 hover:border-cyan-300/45 hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-35"
+    className="grid h-9 w-9 place-items-center rounded-md border border-white/10 text-white/65 hover:border-cyan-300/45 hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-35"
     onClick={onClick}
   >
     {children}

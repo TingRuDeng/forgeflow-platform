@@ -27,7 +27,7 @@ const IconButton: React.FC<{
     type="button"
     aria-label={label}
     title={label}
-    className="grid h-6 w-6 place-items-center rounded border border-white/10 text-white/60 hover:border-cyan-300/45 hover:text-cyan-100"
+    className="grid h-9 w-9 place-items-center rounded border border-white/10 text-white/60 hover:border-cyan-300/45 hover:text-cyan-100"
     onClick={onClick}
   >
     {children}

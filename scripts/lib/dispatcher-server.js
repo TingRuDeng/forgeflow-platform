@@ -6,5 +6,5 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
 const dispatcherServerDistPath = path.join(repoRoot, "apps", "dispatcher", "dist", "modules", "server", "dispatcher-server.js");
 await import("./dispatcher-state.js");
-const { handleDispatcherHttpRequest, readJsonBody, startDispatcherServer } = await import(pathToFileURL(dispatcherServerDistPath).href);
-export { handleDispatcherHttpRequest, readJsonBody, startDispatcherServer };
+const { acquireStateLock, getStateLockFilePath, handleDispatcherHttpRequest, readJsonBody, startDispatcherServer, } = await import(pathToFileURL(dispatcherServerDistPath).href);
+export { acquireStateLock, getStateLockFilePath, handleDispatcherHttpRequest, readJsonBody, startDispatcherServer, };

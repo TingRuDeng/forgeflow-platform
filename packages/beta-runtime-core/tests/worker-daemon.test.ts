@@ -38,7 +38,9 @@ const tempRoots: string[] = [];
 const originalEnv = {
   CUSTOM_SECRET: process.env.CUSTOM_SECRET,
   DISPATCHER_API_TOKEN: process.env.DISPATCHER_API_TOKEN,
+  DISPATCHER_WORKER_TOKEN: process.env.DISPATCHER_WORKER_TOKEN,
   GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+  WORKER_DAEMON_EXECUTION_TIMEOUT_MS: process.env.WORKER_DAEMON_EXECUTION_TIMEOUT_MS,
 };
 const workerDaemonSourcePath = path.resolve("src/runtime/worker-daemon.ts");
 
@@ -72,7 +74,10 @@ function createRepoWithOrigin(rootDir: string): string {
   return repoDir;
 }
 
-function createFakePackageRoot(rootDir: string, options: { breakPush?: boolean; captureEnv?: boolean } = {}): string {
+function createFakePackageRoot(
+  rootDir: string,
+  options: { breakPush?: boolean; captureEnv?: boolean; hang?: boolean } = {},
+): string {
   const packageRoot = path.join(rootDir, "fake-package");
   const runtimeDir = path.join(packageRoot, "dist", "runtime");
   fs.mkdirSync(runtimeDir, { recursive: true });
@@ -93,8 +98,9 @@ function createFakePackageRoot(rootDir: string, options: { breakPush?: boolean; 
       'fs.mkdirSync(path.join(worktreeDir, "docs"), { recursive: true });',
       'fs.writeFileSync(path.join(worktreeDir, "docs", "smoke.md"), "# smoke\\n");',
       'fs.mkdirSync(outputDir, { recursive: true });',
+      options.hang ? "setInterval(() => {}, 1000);" : "",
       options.captureEnv
-        ? 'fs.writeFileSync(path.join(outputDir, "captured-env.json"), JSON.stringify({ GITHUB_TOKEN: process.env.GITHUB_TOKEN ?? null, DISPATCHER_API_TOKEN: process.env.DISPATCHER_API_TOKEN ?? null, CUSTOM_SECRET: process.env.CUSTOM_SECRET ?? null, PATH: process.env.PATH ?? null, HOME: process.env.HOME ?? null }, null, 2));'
+        ? 'fs.writeFileSync(path.join(outputDir, "captured-env.json"), JSON.stringify({ GITHUB_TOKEN: process.env.GITHUB_TOKEN ?? null, DISPATCHER_API_TOKEN: process.env.DISPATCHER_API_TOKEN ?? null, DISPATCHER_WORKER_TOKEN: process.env.DISPATCHER_WORKER_TOKEN ?? null, CUSTOM_SECRET: process.env.CUSTOM_SECRET ?? null, PATH: process.env.PATH ?? null, HOME: process.env.HOME ?? null }, null, 2));'
         : "",
       'const result = {',
       '  taskId: assignment.taskId,',
@@ -174,6 +180,96 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
       expect(source).not.toContain("processTaskAssignment({");
     });
 
+    it("aborts an in-flight dispatcher request without waiting for the request timeout", async () => {
+      const fetchMock = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        const signal = init.signal as AbortSignal;
+        signal.addEventListener("abort", () => reject(new Error("fetch aborted")), { once: true });
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      const abortController = new AbortController();
+      const client = createDispatcherClient("http://127.0.0.1:8787");
+
+      const pending = client.registerWorker({
+        workerId: "codex-worker-abort",
+        pool: "codex",
+        hostname: "host",
+        labels: [],
+        repoDir: "/tmp/project",
+        at: "2026-07-26T00:00:00.000Z",
+      }, { signal: abortController.signal });
+      abortController.abort();
+
+      await expect(pending).rejects.toMatchObject({
+        name: "AbortError",
+        message: expect.stringContaining("dispatcher request aborted"),
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("propagates the daemon signal through the shared dispatcher cycle", async () => {
+      const abortController = new AbortController();
+      const client = {
+        registerWorker: vi.fn().mockResolvedValue({ status: "registered" }),
+        heartbeat: vi.fn().mockResolvedValue({ status: "heartbeat" }),
+        getAssignedTask: vi.fn(),
+        claimTask: vi.fn().mockResolvedValue(null),
+        startTask: vi.fn(),
+        submitResult: vi.fn(),
+      } as unknown as DispatcherClient;
+
+      await runWorkerDaemonCycle({
+        client,
+        workerId: "codex-worker-signal",
+        pool: "codex",
+        repoDir: "/tmp/project",
+        signal: abortController.signal,
+      });
+
+      expect(client.registerWorker).toHaveBeenCalledWith(
+        expect.any(Object),
+        { signal: abortController.signal },
+      );
+      expect(client.claimTask).toHaveBeenCalledWith(
+        "codex-worker-signal",
+        expect.any(Object),
+        { signal: abortController.signal },
+      );
+    });
+
+    it("stops heartbeat retries when the daemon signal is aborted", async () => {
+      const fetchMock = vi.fn().mockRejectedValue(new Error("dispatcher unavailable"));
+      vi.stubGlobal("fetch", fetchMock);
+      const abortController = new AbortController();
+      const client = createDispatcherClient("http://127.0.0.1:8787");
+
+      const pending = client.heartbeat(
+        "codex-worker-retry-abort",
+        { at: "2026-07-26T00:00:00.000Z" },
+        { signal: abortController.signal },
+      );
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      abortController.abort();
+
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("applies the configured default timeout to the assignment subprocess", async () => {
+      process.env.WORKER_DAEMON_EXECUTION_TIMEOUT_MS = "50";
+      const tempDir = makeTempDir("worker-timeout-");
+      const repoDir = createRepoWithOrigin(tempDir);
+      const packageRoot = createFakePackageRoot(tempDir, { hang: true });
+      const payload = buildPayload(providerCases[0], "task-timeout");
+
+      await expect(executeLiveWorkerTask({
+        client: createClient(payload),
+        packageRoot,
+        workerId: providerCases[0].workerId,
+        repoDir,
+        payload,
+        dryRunExecution: false,
+      })).rejects.toThrow("worker execution timed out after 50ms");
+    });
   });
 
   for (const testCase of providerCases) {
@@ -223,6 +319,32 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
           expect.objectContaining({
             headers: expect.objectContaining({
               Authorization: "Bearer dispatcher-token",
+            }),
+          }),
+        );
+      });
+
+      it("prefers the worker-scoped dispatcher token", async () => {
+        process.env.DISPATCHER_API_TOKEN = "operator-token";
+        process.env.DISPATCHER_WORKER_TOKEN = "worker-token";
+        const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+        vi.stubGlobal("fetch", fetchMock);
+
+        const client = createDispatcherClient("http://127.0.0.1:8787");
+        await client.registerWorker({
+          workerId: testCase.workerId,
+          pool: testCase.pool,
+          hostname: "host",
+          labels: [],
+          repoDir: "/tmp/project",
+          at: "2026-07-25T00:00:00.000Z",
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+          "http://127.0.0.1:8787/api/workers/register",
+          expect.objectContaining({
+            headers: expect.objectContaining({
+              Authorization: "Bearer worker-token",
             }),
           }),
         );
@@ -293,6 +415,7 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
       it("keeps dispatcher and GitHub tokens out of the assignment process", async () => {
         process.env.CUSTOM_SECRET = "custom-secret";
         process.env.DISPATCHER_API_TOKEN = "dispatcher-token";
+        process.env.DISPATCHER_WORKER_TOKEN = "worker-token";
         process.env.GITHUB_TOKEN = "github-token";
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
           JSON.stringify({ number: 1, html_url: "https://example.test/pr/1" }),
@@ -317,12 +440,14 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
         const capturedEnv = JSON.parse(fs.readFileSync(path.join(outputDir, "captured-env.json"), "utf8")) as {
           CUSTOM_SECRET: string | null;
           DISPATCHER_API_TOKEN: string | null;
+          DISPATCHER_WORKER_TOKEN: string | null;
           GITHUB_TOKEN: string | null;
           HOME: string | null;
           PATH: string | null;
         };
         expect(capturedEnv.CUSTOM_SECRET).toBeNull();
         expect(capturedEnv.DISPATCHER_API_TOKEN).toBeNull();
+        expect(capturedEnv.DISPATCHER_WORKER_TOKEN).toBeNull();
         expect(capturedEnv.GITHUB_TOKEN).toBeNull();
         expect(capturedEnv.HOME).toBeTruthy();
         expect(capturedEnv.PATH).toBeTruthy();

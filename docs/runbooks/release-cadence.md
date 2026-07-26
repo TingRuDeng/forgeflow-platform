@@ -39,7 +39,11 @@ hotfix 要求：
 
 手动包发布入口是 `.github/workflows/release.yml`。
 
-- workflow 先执行 preflight、依赖安装、类型检查、测试、shadow drift gate、版本 bump、构建和 `npm publish`。
+- 手动发布只允许从 `main` ref 触发；非 `main` ref 会在 checkout 和发布动作前显式失败，版本记录固定推回 `main`。
+- `package` 只能从当前受支持的 runtime 包列表选择；workflow 还会复用 `scripts/lib/runtime-package-specs.mjs` 做二次校验。
+- npm `dist-tag` 会在任何构建或发布命令前校验，只接受字母、数字、点、下划线和连字符组成的安全名称。
+- workflow 输入只通过环境变量传给 shell，不应在 `run` 块中直接插入 `${{ inputs.* }}`。
+- workflow 先执行 preflight、依赖安装、`pnpm audit --prod --audit-level high`、类型检查、测试、shadow drift gate 和版本 bump；bump 后会用 canonical preflight 查询精确新版本，只有 npm 对该版本返回 E404 才继续构建和 `npm publish`，已发布版本、权限错误、超时或其他 registry 错误都会阻断。
 - `npm publish` 成功后，workflow 才提交对应 `packages/<name>/package.json` 版本变更、创建 `release/<name>@<version>` tag 并推送。
 - 如果 `npm publish` 失败，git commit / tag 不会提前推进；修复 npm 或 Trusted Publishing 配置后重新触发发布即可。
 - 如果 `npm publish` 已成功但 git 记录失败，GitHub Actions summary 会标记 `手动发布需要恢复`，并自动创建一个恢复 issue。此时先确认 npm 上该版本存在，再在 `main` 上补交同一个 `package.json` 版本变更，并创建同名 release tag；完成后关闭该 issue。
@@ -50,6 +54,8 @@ push 自动发布入口会先区分两类包：
 
 - npm 上已经存在包名，但当前 `package.json` 版本尚未发布：进入自动发布矩阵。
 - npm 上还不存在包名：不进入自动发布矩阵，Actions summary 标记为 `自动发布等待 npm 包名配置`。
+
+自动发布进入矩阵后会在 publish 前再次查询精确版本。若该版本已存在，job 会显式失败并要求先递增 `package.json` 版本；不会跳过 build/publish 后仍返回绿色结果。
 
 看到 `自动发布等待 npm 包名配置` 时，先处理外部前置条件：
 

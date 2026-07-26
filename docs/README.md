@@ -278,17 +278,17 @@ vNext runtime reliability 推进：
 - `scripts/` 根目录当前保留主线入口、`codex/gemini` worker daemon 入口和少量兼容脚本；旧的本地 codex drill 脚本、staging shell wrapper、`trigger-ai-dispatch.*` 与未消费的 checked-in `.d.ts` 已清理或归档。
 - Phase 2 持久化主线已切到 SQLite：dispatcher 默认写 `.forgeflow-dispatcher/runtime-state.db`，显式 `--persistence-backend json` 或 `RUNTIME_STATE_BACKEND=json` 才回退到 JSON。
 - dispatcher HTTP 面支持三种认证模式（通过 `DISPATCHER_AUTH_MODE` 控制）：
-  - `token`（默认）：强制认证模式，必须设置 `DISPATCHER_API_TOKEN`，除 `/health` 外所有接口需要认证
-  - `legacy`：兼容模式，当 `DISPATCHER_API_TOKEN` 未设置时，只允许 loopback 地址（127.0.0.1、::1）访问；设置后需认证
+  - `token`（默认）：强制认证模式，必须设置控制层 `DISPATCHER_API_TOKEN`；worker 自有路由也可使用 `DISPATCHER_WORKER_TOKENS` 中与 workerId 绑定的 token
+  - `legacy`：兼容模式，当 `DISPATCHER_API_TOKEN` 未设置时只允许 loopback 匿名访问，但仍接受已配置的远程 worker token；设置控制层 token 后需认证
   - `open`：完全开放模式，所有接口可匿名访问，适合本地开发
-- dispatcher 状态型 HTTP 路径现在共享跨进程 `.runtime-state.lock`；锁竞争超时会返回 `503`，陈旧锁会按 `DISPATCHER_STATE_LOCK_*` 环境变量自动回收。
+- dispatcher 状态型 HTTP 路径现在共享跨进程 `.runtime-state.lock`；锁竞争超时会返回 `503`。锁 metadata 会保护存活 PID，释放时核对 inode 和 owner token，只有无存活 owner 的遗留锁才按 `DISPATCHER_STATE_LOCK_*` 阈值回收。
 - dispatcher 默认 SQLite snapshot 现在按 revision 追加落盘，并携带 `checksum_sha256`；读取默认 fail-closed，只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 时才允许从 JSON 救援。
 - 控制中枢当前推荐入口有两条：
   - 源码仓运行：`../scripts/start-control-plane.sh`
   - install-and-run runtime 包：`../packages/forgeflow-dispatcher/README.md`
 - `start-control-plane.sh` 现在默认把 dispatcher 绑定到 `127.0.0.1`；监听非 loopback 地址必须显式传 `FORGEFLOW_DISPATCHER_HOST` 或 `--host`。
 - `codex` / `gemini` 的 `worker daemon` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `../packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。worker-daemon 主循环、worker CLI、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到 `@tingrudeng/beta-runtime-core`，dispatcher runtime-glue 与源码脚本复用同一个 shared daemon cycle，脚本侧 dist bootstrap 已收敛到 `../scripts/lib/runtime-bootstrap.ts`，本地日志 / metrics hook 组装已拆到 `../scripts/lib/worker-daemon-hooks.ts`；CI 和 release workflow 会运行 `pnpm verify:runtime-packages` 校验 runtime 包发布清单，并运行 `pnpm verify:runtime-packages:install` 本地打包 / 安装 codex、gemini、trae runtime tarball；`pnpm report:runtime-packages:setup` 会输出 npm 包名、当前版本、发布顺序和 Trusted Publisher 配置缺口；生产发布窗口可用 `pnpm verify:runtime-packages:published` 强制校验 npm registry 包名、版本和已发布依赖元数据，并用 `pnpm verify:runtime-packages:published-smoke` 从 registry 安装已发布 provider runtime 后验证 CLI；剩余边界是未发布包的外部 npm 配置和生产部署证据。
-- `worker-daemon` / Trae runtime 现在只有在结果成功回写到 dispatcher 后才会对外呈现“完成”；`submitResult`、`git push`、自动 PR 创建失败都属于显式失败，而不是假完成。
+- `worker-daemon` / Trae runtime 现在只有在结果成功回写到 dispatcher 后才会对外呈现“完成”；`submitResult`、`git push`、自动 PR 创建失败都属于显式失败，而不是假完成。shared daemon cycle 只维持一条 single-flight heartbeat 并覆盖结果重试；assignment 子进程默认总超时为 30 分钟，可用 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 覆盖。执行 timeout / SIGINT / SIGTERM 会取消 dispatcher HTTP 请求与重试等待，并终止完整子进程树。
 - `dependsOn` 现在进入 dispatcher 调度门控：依赖未满足时任务保持 `planned`，满足后自动解锁为 `ready`。
 - generic worker claim 已从副作用 GET 收口为显式 POST：
   - `GET /api/workers/:workerId/assigned-task` 只读
@@ -299,9 +299,9 @@ vNext runtime reliability 推进：
 - dispatcher 现在会 canonicalize worker result 的 `workerId/pool/repo/defaultBranch/branchName`，worker 不能再覆盖这些 dispatcher-owned 字段。
 - dispatcher 现在会给每个任务生成稳定 `traceId`，并在 snapshot、Trae fetch-task、worker events、CLI summary 与 console drill-down 暴露该关联键。
 - dashboard snapshot 现在附带阶段二控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`、`retryRatePct`、`branchProtectionHitCount`、`repoConcurrencySaturation`、`failureCodes`、`reviewReasonCodes`。
-- dashboard snapshot 现在暴露 `taskAttempts` 与 `artifactBundles`，Console 任务详情可直接查看 attempt timeline、runtime events、artifact summary、refs、retained content 和结构化 trajectory；runtime events 默认展示 10 条摘要，可按 event type 筛选并展开完整事件列表；refs tab 支持复制 artifact 引用并按需展开 manifest 登记的 artifact 文件，trajectory tab 支持按步骤前后回放结构化 step，并可从当前 step 的 `artifactRef` 直接展开或下载对应观察文件；Artifact Workbench 支持跨任务筛选 artifact、review reasonCode、risk、mustFix、artifact ref、runtime event 和 trajectory step 证据，并展示 runtime event type、reasonCode / risk 计数对比摘要、差异高亮、轨迹步骤摘要和跨任务轨迹并排详情，卡片内可直接复制、展开和下载 `artifact://...` 引用文件，轨迹并排详情也可直接展开 / 下载 step `artifactRef` 文件。dispatcher 会把 retained diff / log / test result / trajectory 写入本地 artifact store，并同时生成 `trajectory.json` 与 `trajectory.traj` 回放文件，通过 artifact 文件 API 和 `artifact-get --file <name>` 按需读取。
+- dashboard snapshot 现在暴露 `taskAttempts` 与 `artifactBundles`，Console 任务详情可直接查看 attempt timeline、runtime events、artifact summary、refs、retained content 和结构化 trajectory；runtime events 默认展示 10 条摘要，可按 event type 筛选并展开完整事件列表；refs tab 支持复制 artifact 引用并按需展开 manifest 登记的 artifact 文件，trajectory tab 支持按步骤前后回放结构化 step，并可从当前 step 的 `artifactRef` 直接展开或下载对应观察文件；Artifact Workbench 支持跨任务筛选 artifact、review reasonCode、risk、mustFix、artifact ref、runtime event 和 trajectory step 证据，并展示 runtime event type、reasonCode / risk 计数对比摘要、差异高亮、轨迹步骤摘要和跨任务轨迹并排详情，卡片内可直接复制、展开和下载 `artifact://...` 引用文件，轨迹并排详情也可直接展开 / 下载 step `artifactRef` 文件。dispatcher 会把 `result.json`、retained diff / log / test result、`trajectory.json` 与 `trajectory.traj` 写入本地 artifact store，重建真实 refs，并在 retention 删除正文时同步裁剪 state index。
 - dispatcher reconcile 现在会扫描离线 worker 的过期 running attempt，按默认最多 2 次 attempt 的最小策略自动 redrive 或把任务显式置为 `failed`。
-- dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，同时输出 `retryRatePct`、失败码聚合和 review reason 聚合。
+- dispatcher 现在还会把 worker 侧关键失败信号回写成 runtime events，并在 `/api/metrics` 暴露 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，同时输出 `retryRatePct`、失败码聚合、review reason 聚合和 `eventWindow`。这些事件型指标只代表最近 500 条 runtime window；SQLite/PostgreSQL append-only audit table 保存完整可分页历史，读取入口是 `/api/query/events?limit=&beforeSequence=`。
 - vNext runtime reliability 的目标契约已落地到 `@forgeflow/worker-protocol`，当前 dispatcher worker start/result mutation 已强制完整 `TaskAttempt` / `LeaseToken` envelope；`@tingrudeng/codex-beta-runtime` 和 `@tingrudeng/gemini-beta-runtime` 会通过 `POST /api/workers/:workerId/claim-task` 领取任务，并把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 start/result envelope 回写。该包还提供 start/result payload helper 作为内部 Worker SDK 契约。
 - dispatcher 任务状态机现在包含 `cancelled` 和 `waiting_for_input`；控制面和 Console 都可以显式作废非终态任务，worker result 可携带 `waitingForInput` 主动进入 HITL 暂停，控制面 / Console 可通过 `/api/tasks/:taskId/interrupt` / `/api/tasks/:taskId/resume` 暂停任务、保存 `resumePayload` 并恢复到 `ready`；Console 会按 `resumePayloadSchema` 渲染恢复表单，支持 `string` / `number` / `integer` / `boolean` / `array` 字段、textarea、范围和数组数量校验，未提供 schema 时保留 JSON fallback；dispatcher resume API 也会按任务保存的 `resumePayloadSchema` 做服务端校验，非法恢复输入返回 `400`；任务详情也会展示 task-level `terminationPolicy`，让 reviewer 直接看到 maxAttempts、attempt lease、heartbeat 和 assignment timeout；beta runtime 会把 resume payload 写入 assignment package 供下一轮 worker 消费。
 - 阶段三核心底座现在已进入主线：runtime state 增加显式 `leases[]`，SQLite 真相源同步维护 query-first 结构化投影，dispatcher 可选启用 structured reads、read-only 降级、Postgres / queue shadow write、SLO / burn-rate 与 DR 状态检查；task 生命周期内的 `assignment` / `repo` / `branch` lease 已接入强约束，continuation 或 follow-up 任务还会获取 `session` lease。read-only 默认冻结 `/api/` 写方法，但直接文件、外部数据库或绕过 dispatcher HTTP 的写入仍需运维流程管控。
@@ -328,13 +328,15 @@ vNext runtime reliability 推进：
 - `../.github/workflows/release.yml`
   - GitHub Actions 发布入口。
   - 用 OIDC + provenance 执行 npm 发布。
+  - 手动发布只允许从 `main` ref 触发，版本 bump 后会再次查询精确新版本；只有该版本尚未发布且 registry 查询可信时才继续 build / publish，版本记录固定推回 `main`。
   - 发布前会校验包元数据是否与当前仓库 `TingRuDeng/forgeflow-platform` 对齐，并要求 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 作为自动发布显式门禁；手动发布和自动发布都会先用 `npm view <package> version` 确认目标包名已在 npm registry 创建，避免跑完构建后才在 `npm publish` 阶段暴露包名 / Trusted Publisher 权限缺口；preflight 还会把 `workspace:*` 依赖解析为本地 workspace 版本，并要求该精确依赖版本已经发布。
   - CI 和 release workflow 会执行 `pnpm verify:runtime-packages:install`，在不访问 npm registry 的情况下本地打包并安装 runtime tarball，确认 provider 包不会泄漏 `workspace:*` 依赖且 CLI bin 可安装。
   - `pnpm report:runtime-packages:setup` 会只读查询 npm registry，输出 runtime 包 package/version 状态、发布顺序和 Trusted Publisher 绑定要求；发布窗口可加 `-- --require-ready` 把缺口转成硬失败。
   - 生产发布窗口可额外执行 `pnpm verify:runtime-packages:published`，校验 runtime 包名、当前本地版本和已发布依赖元数据是否与源码发布清单一致。
   - 生产发布完成后可执行 `pnpm verify:runtime-packages:published-smoke`，从 registry 安装当前源码版本的 codex/gemini/trae provider runtime，并验证 CLI bin、`--version` 和 `--help`。
   - push 自动发布只发布 npm 上已存在包名的缺失版本；全新包名会进入 `自动发布等待 npm 包名配置` summary。
-  - push 自动发布会先运行 lint、文档校验、typecheck、测试和 shadow drift gate，再执行 `npm publish`。
+  - push 自动发布会先运行生产依赖审计、lint、文档校验、typecheck、测试和 shadow drift gate，再执行 `npm publish`。
+  - 如果进入发布矩阵后发现精确版本已存在，workflow 会失败并要求递增版本，不会以“skip”伪装成功。
   - `@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 当前属于全新包名配置缺口，不应在配置完成前写成已公开安装入口。
 - `../.github/workflows/release-scorecard.yml`
   - Release 成功后的独立 OpenSSF Scorecard workflow。
@@ -367,7 +369,7 @@ vNext runtime reliability 推进：
   - 当前用于仓库内 `pnpm --filter @tingrudeng/gemini-beta-runtime exec ...` 验证；npm 包名配置完成前不要写成公开安装入口。
 - `../packages/automation-gateway-core/README.md`
   - 远程 Trae runtime 依赖的共享协议 helper 包。
-  - 不是远程机器直接安装入口，主要用于发布和复用报告解析/任务 ID 校验逻辑。
+  - 不是远程机器直接安装入口，主要用于复用 gateway 协议、session 持久化、报告解析和任务 ID 校验逻辑。
 - `../packages/mcp-*/README.md`
   - MCP thin-wrapper 包入口（`mcp-scheduler`、`mcp-trae-worker`、`mcp-review-gate`、`mcp-github`、`mcp-repo-policy`）。
   - 都是 thin wrapper：工具定义和 deps 注入委托，实际逻辑在 dispatcher 层。
@@ -402,7 +404,7 @@ vNext runtime reliability 推进：
 - `runbooks/auth-and-state-lock.md`
   - 阶段一认证与状态锁排障入口。
 - `runbooks/runtime-state-backup-restore-repair.md`
-  - SQLite 备份、恢复、manifest 与显式救援入口。
+  - SQLite 备份、v1 manifest 哈希 / watermark、恢复前校验与 staging / rollback、显式救援入口。
 - `runbooks/worktree-cleanup.md`
   - worktree 巡检与清理入口。
 - `runbooks/delivery-failed-recovery.md`
@@ -444,7 +446,7 @@ vNext runtime reliability 推进：
 
 ## Repo Maintenance Baseline
 
-- 仓库根目录现在提供共享的 `pnpm lint` / `pnpm lint:fix`，用于检查 `apps/dispatcher`、`packages/*`、`scripts/`、`services/*` 的主源码路径。
+- 仓库根目录现在提供共享的 `pnpm lint` / `pnpm lint:fix`，用于检查 `apps/dispatcher`、`packages/*`、`scripts/`、`services/*` 的主源码路径，并串联 `apps/console` 自己的 ESLint 配置。
 - 仓库根目录同时提供 `pnpm coverage:critical`，用于为 `apps/dispatcher`、`packages/trae-beta-runtime`、`packages/worker-review-orchestrator-cli` 生成关键覆盖率产物，并与 CI artifact 对齐。
-- `apps/console` 继续使用自己的本地 `eslint.config.js`，暂不并入这条根级 lint 基线。
+- `apps/console` 继续使用自己的本地 `eslint.config.js`，但已由根级 `pnpm lint` 和 CI 调用；Console 的 `test` 固定为一次性 `vitest run`，不会在 CI 进入 watch。
 - 根目录同时提供 `.editorconfig`，作为仓库级最小编辑器规范；这不是 Prettier 替代品，也不意味着当前仓库已经启用统一格式化门禁。

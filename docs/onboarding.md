@@ -168,7 +168,7 @@ ai_summary:
 2. 把 `.orchestrator` 发布到 dispatcher
 3. 在各机器上启动 worker runtime（`scripts/run-worker-daemon.js` 本地/调试，或已公开的 `@tingrudeng/codex-beta-runtime` 远程包；Gemini npm 包发布前用 `packages/gemini-beta-runtime/` 源码入口）
 
-worker daemon 会上报 `progress_reported` 运行阶段事件，可用 `watch --summary` / `inspect --summary` 与 Console 观察进度。源码层 worker-daemon 构建收敛仍是后续债务（见 `TECH_DEBT.md`）。
+worker daemon 会上报 `progress_reported` 运行阶段事件，可用 `watch --summary` / `inspect --summary` 与 Console 观察进度。daemon 主循环、dispatcher client、assignment runner 和 provider 入口已经收敛到共享 runtime core；源码脚本与 packaged runtime 只保留适配层。
 
 远程 Codex 机器推荐 npm 入口：
 
@@ -176,7 +176,7 @@ worker daemon 会上报 `progress_reported` 运行阶段事件，可用 `watch -
 npm install -g @tingrudeng/codex-beta-runtime
 forgeflow-codex-beta init
 forgeflow-codex-beta doctor
-export DISPATCHER_API_TOKEN="your-secret-token"
+export DISPATCHER_WORKER_TOKEN="worker-specific-token"
 forgeflow-codex-beta start worker
 ```
 
@@ -185,11 +185,13 @@ forgeflow-codex-beta start worker
 ```bash
 pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta init
 pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta doctor
-export DISPATCHER_API_TOKEN="your-secret-token"
+export DISPATCHER_WORKER_TOKEN="worker-specific-token"
 pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta start worker
 ```
 
-远程 `codex` / `gemini` runtime 通过 `POST /api/workers/:workerId/claim-task` 领取任务，并在 start/result 回写时携带 dispatcher 返回的 v1 envelope。dispatcher 使用默认 `token` 认证模式时，远程机器必须设置同一个 `DISPATCHER_API_TOKEN`；只有显式切到 `open` 或满足 `legacy` loopback 条件时才可匿名访问。
+远程 `codex` / `gemini` runtime 通过 `POST /api/workers/:workerId/claim-task` 领取任务，并在 start/result 回写时携带 dispatcher 返回的 v1 envelope。远程机器应配置自己的 `DISPATCHER_WORKER_TOKEN`；旧的 `DISPATCHER_API_TOKEN` 仅作为迁移回退，不应继续分发到 worker 主机。只有显式切到 `open` 或满足 `legacy` loopback 条件时才可匿名访问。
+
+每个 assignment 子进程默认最多运行 30 分钟；如需调整，设置正整数毫秒值 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS`。worker 收到 `SIGINT` / `SIGTERM` 后会取消 dispatcher HTTP 请求和结果重试等待，并终止完整子进程树。
 
 脚本方式仅用于在 ForgeFlow 仓库内做开发或调试：
 
@@ -207,13 +209,14 @@ Dispatcher 支持三种认证模式，通过 `DISPATCHER_AUTH_MODE` 环境变量
 
 | 模式 | 描述 |
 |------|------|
-| `token` (默认) | 强制认证模式，除 `/health` 外所有接口需要 `Authorization: Bearer <token>`，必须设置 `DISPATCHER_API_TOKEN` |
-| `legacy` | 兼容模式，当 `DISPATCHER_API_TOKEN` 未设置时，只允许 loopback 地址访问；设置后，除 `/health` 外需认证 |
+| `token` (默认) | 强制认证模式，必须设置控制层 `DISPATCHER_API_TOKEN`；worker 自有路由可使用 `DISPATCHER_WORKER_TOKENS` 中匹配 workerId 的 token |
+| `legacy` | 兼容模式，当控制层 token 未设置时只允许 loopback 匿名访问，但仍接受已配置的远程 worker token；设置后，除 `/health` 外需认证 |
 | `open` | 完全开放模式，所有接口可匿名访问，适合本地开发 |
 
 ```bash
 # 示例：使用默认 token 模式（推荐生产环境）
 export DISPATCHER_API_TOKEN="your-secret-token"
+export DISPATCHER_WORKER_TOKENS='{"codex-mac-mini":"codex-worker-token","trae-remote-01":"trae-worker-token"}'
 node scripts/run-dispatcher-server.js \
   --host 127.0.0.1 \
   --port 8787 \
@@ -229,7 +232,7 @@ node scripts/run-dispatcher-server.js \
 
 各模式行为说明：
 
-- **token 模式** (默认): 除 `/health` 外所有 endpoint 需要 `Authorization: Bearer <DISPATCHER_API_TOKEN>`，必须设置 `DISPATCHER_API_TOKEN` 否则返回 500
+- **token 模式** (默认): 必须设置控制层 `DISPATCHER_API_TOKEN`，否则返回 500；控制面使用该 token，worker 自有路由可改用匹配 workerId 的 scoped token
 - **legacy 模式**:
   - 当 `DISPATCHER_API_TOKEN` 未设置时，只允许 loopback 地址（127.0.0.1、::1、::ffff:127.0.0.1）访问
   - 当 `DISPATCHER_API_TOKEN` 设置后，除 `/health` 外其他 endpoint 需要 `Authorization: Bearer <token>`
@@ -238,10 +241,14 @@ node scripts/run-dispatcher-server.js \
 通用行为：
 - `/health` 在所有模式下均可匿名访问
 - 认证失败返回 `401` + `{ "error": "unauthorized" }`
+- `DISPATCHER_API_TOKEN` 是控制层 token，可访问全部 API
+- `DISPATCHER_WORKER_TOKENS` 是 `workerId -> token` JSON 映射；值必须唯一、无首尾空白且不能与 `DISPATCHER_API_TOKEN` 相同。worker token 只能注册自己并访问自己的 worker 路由，跨 worker 或 dashboard/control API 返回 `403`
+- worker runtime 优先读取 `DISPATCHER_WORKER_TOKEN`，没有设置时才兼容回退到 `DISPATCHER_API_TOKEN`
+- `forgeflow-dispatcher init` 与源码侧 config CLI 在 Unix 上会把凭据配置创建或修正为 `0600`；服务端拒绝 group / other 可读的配置文件
 - POST 路径收到非法 JSON body 时返回 `400` + `{ "error": "invalid_json_body" }`
-- dispatcher 当前会在状态目录下维护 `.runtime-state.lock`；锁竞争超时返回 `503`，调用方应重试。相关环境变量为 `DISPATCHER_STATE_LOCK_TIMEOUT_MS`、`DISPATCHER_STATE_LOCK_RETRY_MS`、`DISPATCHER_STATE_LOCK_STALE_MS`
+- dispatcher 当前会在状态目录下维护 `.runtime-state.lock`；锁竞争超时返回 `503`，调用方应重试。锁 metadata 会保护存活 PID，释放时核对 inode / owner token；相关环境变量为 `DISPATCHER_STATE_LOCK_TIMEOUT_MS`、`DISPATCHER_STATE_LOCK_RETRY_MS`、`DISPATCHER_STATE_LOCK_STALE_MS`
 - 阶段二新增只读 `GET /api/metrics`，适合脚本直接获取 `queueDepth/reviewBacklog/assignment lag/retryRatePct`
-- `/api/metrics` 现在还会给出 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`failureCodes`、`reviewReasonCodes`
+- `/api/metrics` 现在还会给出 `submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`failureCodes`、`reviewReasonCodes` 和 `eventWindow`；事件型计数只覆盖最近 500 条，完整历史从 `/api/query/events` 分页读取
 - 阶段二还新增了 `POST /api/tasks/:taskId/cancel`，可手动作废非终态任务；console 页面现在也提供了任务详情和作废按钮
 
 调用方连通性检查示例：
@@ -390,6 +397,7 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 补充：
 
 - `start gateway` 默认启用 session store，并将会话状态落在 `~/.forgeflow-trae-beta/sessions/sessions.json`。
+- 同一状态目录内的本机 session mutation 会通过 `sessions.json.lock` 串行化；这只防止文件更新丢失，不支持跨主机或多个 active gateway。
 - 源码脚本 `run-trae-automation-launch.js --force-clean-launch` 与 packaged runtime 一样，会先退出既有 macOS Trae app 并等待旧 CDP 端口释放，再拉起新进程。
 - Trae worker 的软超时恢复依赖这份会话状态；如需改目录，可在 gateway 启动时传 `--state-dir /abs/path/to/state-dir`。
 - `forgeflow-trae-beta doctor` 会输出 dispatcher/gateway/CDP 连通性检查（标记为 optional），用于快速排查部署连通性问题。

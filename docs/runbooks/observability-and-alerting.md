@@ -37,6 +37,9 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 
 curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
   http://127.0.0.1:8787/api/dr/status
+
+curl -i -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
+  "http://127.0.0.1:8787/api/query/events?limit=500"
 ```
 
 ## 2. `/api/metrics` 字段
@@ -62,6 +65,7 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `repoConcurrencySaturation`
 - `failureCodes`
 - `reviewReasonCodes`
+- `eventWindow`
 - `workers`
 - `tasks`
 
@@ -85,6 +89,7 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - `repoConcurrencySaturation`: 按 `repoDir` 聚合的活跃 worker 并发饱和度
 - `failureCodes`: 基于 worker evidence / blocker code 的失败码聚合
 - `reviewReasonCodes`: 基于 review evidence `reasonCode` 的阻断原因聚合
+- `eventWindow`: 事件型指标所覆盖的 retained runtime window，包含固定 retention limit、当前条数和最早/最新时间
 
 ## 3. 指标来源
 
@@ -122,6 +127,8 @@ dispatcher 进程内还会记录：
 注意：
 
 - worker 事件上送是 best-effort
+- runtime state 和 `/api/metrics` 只聚合最近 500 条事件；不要把它误读为全历史计数
+- SQLite/PostgreSQL 会把带稳定 `eventId` 的事件追加到独立 audit table；`/api/query/events` 用 `beforeSequence` 和响应头 `x-forgeflow-event-next-before-sequence` 向前分页
 - `/api/metrics` 的零值不等于“全链路绝对无故障”
 - 排障时仍要联合 worker 日志与 `.worktrees/failed/` 证据看
 
@@ -129,7 +136,7 @@ dispatcher 进程内还会记录：
 
 当前已落地：
 
-- 脚本侧 logger 默认会 redact `Authorization`、`DISPATCHER_API_TOKEN`、`GITHUB_TOKEN` 等敏感字段
+- 脚本侧 logger 默认会 redact `Authorization`、`DISPATCHER_API_TOKEN`、`DISPATCHER_WORKER_TOKEN`、`DISPATCHER_WORKER_TOKENS`、`GITHUB_TOKEN` 等敏感字段
 - dispatcher events、task state、worker id、task id、trace id、session id 已能提供最小相关性线索
 - console 现在支持 task drill-down，可直接查看 failure summary、reasonCode、canRedrive、lineage 和最近任务事件
 
@@ -190,8 +197,8 @@ dispatcher 进程内还会记录：
 5. shadow rollout 前执行 `pnpm verify:shadow-drift` 或 `node scripts/check-shadow-drift.mjs <stateDir>`，确认 `drift.status` 不是 `drifted`；release workflow 也会执行同一 gate
 6. 需要阈值化告警时执行 `node scripts/check-shadow-drift.mjs <stateDir> --max-mismatches 0 --max-delta 0`，或在 release / rollout gate 设置 `DISPATCHER_SHADOW_DRIFT_MAX_MISMATCHES` 与 `DISPATCHER_SHADOW_DRIFT_MAX_DELTA`，查看 `alert.level` 和 `alert.reasonCodes`
 7. 长期自动 reconciliation 应通过 `/api/dr/status.shadowReconciler` 复核最近状态；`failedRunCount > 0` 或 `status=failed` 时按 shadow drift 失败处理
-7. 需要主动对账时执行 `node scripts/check-shadow-drift.mjs <stateDir> --reconcile`；需要落运行时证据时追加 `--record-alert` 写入 `shadow_drift_detected`
-8. 最后再看 worker 日志和 `.worktrees/failed/`
+8. 需要主动对账时执行 `node scripts/check-shadow-drift.mjs <stateDir> --reconcile`；需要落运行时证据时追加 `--record-alert` 写入 `shadow_drift_detected`。该写入会获取本机 `.runtime-state.lock` 并在锁内重读最新状态，不提供跨主机锁语义
+9. 最后再看 worker 日志和 `.worktrees/failed/`
 
 常见入口：
 

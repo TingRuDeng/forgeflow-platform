@@ -318,6 +318,7 @@ describe("dispatcher runtime state", () => {
       type: "seeded",
     });
     expect(state.events[499]).toMatchObject({
+      eventId: "event-501",
       taskId: "task-501",
       type: "progress_reported",
       payload: {
@@ -325,6 +326,7 @@ describe("dispatcher runtime state", () => {
         worker_id: "trae-1",
       },
     });
+    expect(state.eventSequence).toBe(501);
   });
 
   it("marks stale workers as offline in dashboard snapshots", async () => {

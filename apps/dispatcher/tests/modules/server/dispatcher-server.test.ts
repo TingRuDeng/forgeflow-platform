@@ -13,6 +13,7 @@ const serverModulePath = path.join(repoRoot, "scripts/lib/dispatcher-server.js")
 const tempRoots: string[] = [];
 
 const originalEnv = process.env.DISPATCHER_API_TOKEN;
+const originalWorkerTokens = process.env.DISPATCHER_WORKER_TOKENS;
 const originalAuthMode = process.env.DISPATCHER_AUTH_MODE;
 const originalConfigPath = process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH;
 const originalStateLockTimeout = process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS;
@@ -20,6 +21,7 @@ const originalStateLockRetry = process.env.DISPATCHER_STATE_LOCK_RETRY_MS;
 const originalStateLockStale = process.env.DISPATCHER_STATE_LOCK_STALE_MS;
 const originalStructuredReads = process.env.DISPATCHER_STRUCTURED_READS;
 const originalReadOnlyMode = process.env.DISPATCHER_READ_ONLY_MODE;
+const originalRuntimeStateBackend = process.env.RUNTIME_STATE_BACKEND;
 
 function makeTempDir() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-dispatcher-server-"));
@@ -49,6 +51,11 @@ afterEach(() => {
     delete process.env.DISPATCHER_API_TOKEN;
   } else {
     process.env.DISPATCHER_API_TOKEN = originalEnv;
+  }
+  if (originalWorkerTokens === undefined) {
+    delete process.env.DISPATCHER_WORKER_TOKENS;
+  } else {
+    process.env.DISPATCHER_WORKER_TOKENS = originalWorkerTokens;
   }
   if (originalAuthMode === undefined) {
     delete process.env.DISPATCHER_AUTH_MODE;
@@ -80,10 +87,69 @@ afterEach(() => {
   } else {
     process.env.DISPATCHER_READ_ONLY_MODE = originalReadOnlyMode;
   }
+  if (originalRuntimeStateBackend === undefined) {
+    delete process.env.RUNTIME_STATE_BACKEND;
+  } else {
+    process.env.RUNTIME_STATE_BACKEND = originalRuntimeStateBackend;
+  }
   process.env.DISPATCHER_AUTH_MODE = "open";
 });
 
 describe("dispatcher server", () => {
+  it("rejects duplicate task IDs before persisting a dispatch", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    const duplicateTask = {
+      id: "duplicate-task",
+      title: "duplicate task",
+      pool: "codex",
+      allowedPaths: ["src/**"],
+      acceptance: ["passes"],
+      dependsOn: [],
+      branchName: "ai/codex/duplicate-task",
+      verification: { mode: "run" },
+    };
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "TingRuDeng/forgeflow-platform",
+        defaultBranch: "main",
+        tasks: [duplicateTask, { ...duplicateTask }],
+        packages: [
+          {
+            taskId: "duplicate-task",
+            assignment: {
+              taskId: "duplicate-task",
+              workerId: null,
+              pool: "codex",
+              status: "pending",
+              branchName: "ai/codex/duplicate-task",
+              allowedPaths: ["src/**"],
+              repo: "TingRuDeng/forgeflow-platform",
+              defaultBranch: "main",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.json).toMatchObject({
+      error: "duplicate task id in dispatch: duplicate-task",
+    });
+
+    const snapshot = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dashboard/snapshot",
+    });
+    expect(snapshot.json.tasks).toHaveLength(0);
+    expect(snapshot.json.dispatches).toHaveLength(0);
+  });
+
   it("serves worker, dispatch, result, review, and dashboard endpoints", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);
@@ -508,6 +574,11 @@ describe("dispatcher server", () => {
       },
       failureCodes: {},
       reviewReasonCodes: {},
+      eventWindow: {
+        scope: "retained_runtime_events",
+        retentionLimit: 500,
+        retainedCount: expect.any(Number),
+      },
       workers: {
         total: 1,
       },
@@ -571,6 +642,33 @@ describe("dispatcher server", () => {
     expect(tasksResponse.status).toBe(200);
     expect(tasksResponse.json).toHaveLength(1);
 
+    const eventsResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/query/events",
+      query: { limit: "1" },
+    });
+    expect(eventsResponse.status).toBe(200);
+    expect(eventsResponse.json).toHaveLength(1);
+    expect(eventsResponse.json[0]).toMatchObject({
+      eventId: expect.stringMatching(/^event-\d+$/),
+      auditSequence: expect.any(Number),
+    });
+    expect(eventsResponse.headers).toMatchObject({
+      "x-forgeflow-event-scope": "durable_audit",
+      "x-forgeflow-event-returned": "1",
+      "x-forgeflow-event-limit": "1",
+      "x-forgeflow-event-retention-limit": "500",
+    });
+
+    const invalidEventsResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/query/events",
+      query: { limit: "5001" },
+    });
+    expect(invalidEventsResponse.status).toBe(400);
+
     const snapshotResponse = await mod.handleDispatcherHttpRequest({
       stateDir,
       method: "GET",
@@ -586,6 +684,50 @@ describe("dispatcher server", () => {
     });
     expect(projectionHealth.status).toBe(200);
     expect(projectionHealth.json.matches).toBe(true);
+  });
+
+  it("serves the retained event window when the JSON backend is selected", async () => {
+    process.env.RUNTIME_STATE_BACKEND = "json";
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "json-worker",
+        pool: "codex",
+        hostname: "json-host",
+        labels: [],
+        repoDir: "/repos/json",
+      },
+    });
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/json-worker/events",
+      body: {
+        taskId: "json-task",
+        type: "phase_reported",
+        summary: "JSON backend event",
+      },
+    });
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/query/events",
+      query: { limit: "1" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.json).toHaveLength(1);
+    expect(response.json[0]).toMatchObject({
+      eventId: expect.stringMatching(/^event-\d+$/),
+      auditSequence: expect.any(Number),
+    });
+    expect(response.headers["x-forgeflow-event-scope"]).toBe("runtime_window");
   });
 
   it("exposes stage-three slo and dr status endpoints", async () => {
@@ -1016,6 +1158,58 @@ describe("dispatcher server", () => {
     expect(response.status).toBe(200);
     expect(response.json.status).toBe("registered");
     expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("does not reclaim an old runtime lock while its owner process is alive", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS = "5";
+    process.env.DISPATCHER_STATE_LOCK_RETRY_MS = "1";
+    process.env.DISPATCHER_STATE_LOCK_STALE_MS = "1";
+
+    const lockPath = mod.getStateLockFilePath(stateDir);
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(lockPath, JSON.stringify({
+      pid: process.pid,
+      ownerToken: "active-owner",
+      createdAt: "2026-07-25T00:00:00.000Z",
+    }));
+    const staleAt = new Date(Date.now() - 10_000);
+    fs.utimesSync(lockPath, staleAt, staleAt);
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/register",
+      body: {
+        workerId: "codex-live-lock",
+        pool: "codex",
+        hostname: "host",
+        labels: [],
+        repoDir: "/repo",
+      },
+    });
+
+    expect(response.status).toBe(503);
+    expect(fs.existsSync(lockPath)).toBe(true);
+  });
+
+  it("does not let an old release callback remove a replacement runtime lock", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    const releaseOldLock = await mod.acquireStateLock(stateDir);
+    const lockPath = mod.getStateLockFilePath(stateDir);
+
+    fs.unlinkSync(lockPath);
+    fs.writeFileSync(lockPath, JSON.stringify({
+      pid: process.pid,
+      ownerToken: "replacement-owner",
+      createdAt: "2026-07-25T00:00:00.000Z",
+    }));
+    releaseOldLock();
+
+    expect(fs.existsSync(lockPath)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(lockPath, "utf8")).ownerToken).toBe("replacement-owner");
   });
 
   it("returns 409 when review decision task is not in review", async () => {
@@ -1508,11 +1702,7 @@ describe("dispatcher server", () => {
       },
     });
 
-    const resultResponse = await mod.handleDispatcherHttpRequest({
-      stateDir,
-      method: "POST",
-      pathname: "/api/workers/codex-artifact-http/result",
-      body: {
+    const resultBody = {
         attemptId: attempt.attemptId,
         leaseToken: attempt.leaseToken,
         protocolVersion: attempt.protocolVersion,
@@ -1553,9 +1743,35 @@ describe("dispatcher server", () => {
           nextActions: [],
           createdAt: "2026-06-12T09:00:00.000Z",
         },
-      },
+      };
+    const resultResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-artifact-http/result",
+      body: resultBody,
     });
     expect(resultResponse.status).toBe(200);
+    const replayResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-artifact-http/result",
+      body: resultBody,
+    });
+    expect(replayResponse.status).toBe(200);
+    const conflictingReplayResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-artifact-http/result",
+      body: {
+        ...resultBody,
+        result: {
+          ...resultBody.result,
+          output: "conflicting replay",
+        },
+      },
+    });
+    expect(conflictingReplayResponse.status).toBe(409);
+    expect(conflictingReplayResponse.json.error).toMatch(/idempotency replay mismatch/);
 
     const artifactResponse = await mod.handleDispatcherHttpRequest({
       stateDir,
@@ -1564,6 +1780,8 @@ describe("dispatcher server", () => {
     });
     expect(artifactResponse.status).toBe(200);
     expect(artifactResponse.json.refs.diff).toBe("artifact://bundle-http-artifact/diff.patch");
+    expect(artifactResponse.json.refs.structuredReport).toBe("artifact://bundle-http-artifact/result.json");
+    expect(artifactResponse.json.refs.terminalTranscript).toBe("artifact://bundle-http-artifact/session.log");
 
     const diffResponse = await mod.handleDispatcherHttpRequest({
       stateDir,
@@ -1575,6 +1793,18 @@ describe("dispatcher server", () => {
       bundleId: "bundle-http-artifact",
       fileName: "diff.patch",
       content: "diff --git a/docs/test.md b/docs/test.md",
+    });
+
+    const reportResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/artifacts/bundle-http-artifact/files/result.json",
+    });
+    expect(reportResponse.status).toBe(200);
+    expect(JSON.parse(reportResponse.json.content)).toMatchObject({
+      schemaVersion: "artifact-bundle/v1",
+      bundleId: "bundle-http-artifact",
+      taskId,
     });
 
     const traversalResponse = await mod.handleDispatcherHttpRequest({
@@ -3409,6 +3639,87 @@ describe("dispatcher server", () => {
         authHeader: "Bearer test-secret-token",
       });
       expect(response.status).toBe(200);
+    });
+
+    it("limits worker-scoped tokens to their own worker routes", async () => {
+      process.env.DISPATCHER_AUTH_MODE = "token";
+      process.env.DISPATCHER_API_TOKEN = "operator-token";
+      process.env.DISPATCHER_WORKER_TOKENS = JSON.stringify({
+        "worker-a": "worker-a-token",
+        "worker-b": "worker-b-token",
+      });
+      const stateDir = makeTempDir();
+      const mod = await import(serverModulePath);
+      const instance = await mod.startDispatcherServer({
+        host: "127.0.0.1",
+        port: 0,
+        stateDir,
+      });
+      const workerHeaders = {
+        Authorization: "Bearer worker-a-token",
+        "content-type": "application/json",
+      };
+
+      try {
+        const registerOwn = await fetch(`${instance.baseUrl}/api/workers/register`, {
+          method: "POST",
+          headers: workerHeaders,
+          body: JSON.stringify({
+            workerId: "worker-a",
+            pool: "codex",
+            hostname: "worker-a-host",
+            labels: [],
+            repoDir: "/tmp/worker-a",
+          }),
+        });
+        expect(registerOwn.status).toBe(200);
+
+        const registerOther = await fetch(`${instance.baseUrl}/api/workers/register`, {
+          method: "POST",
+          headers: workerHeaders,
+          body: JSON.stringify({
+            workerId: "worker-b",
+            pool: "codex",
+            hostname: "worker-b-host",
+            labels: [],
+            repoDir: "/tmp/worker-b",
+          }),
+        });
+        expect(registerOther.status).toBe(403);
+
+        const heartbeatOwn = await fetch(`${instance.baseUrl}/api/workers/worker-a/heartbeat`, {
+          method: "POST",
+          headers: workerHeaders,
+          body: "{}",
+        });
+        expect(heartbeatOwn.status).toBe(200);
+
+        const heartbeatOther = await fetch(`${instance.baseUrl}/api/workers/worker-b/heartbeat`, {
+          method: "POST",
+          headers: workerHeaders,
+          body: "{}",
+        });
+        expect(heartbeatOther.status).toBe(403);
+
+        const dashboard = await fetch(`${instance.baseUrl}/api/dashboard/snapshot`, {
+          headers: { Authorization: "Bearer worker-a-token" },
+        });
+        expect(dashboard.status).toBe(403);
+
+        const traeOther = await fetch(`${instance.baseUrl}/api/trae/heartbeat`, {
+          method: "POST",
+          headers: workerHeaders,
+          body: JSON.stringify({ worker_id: "worker-b" }),
+        });
+        expect(traeOther.status).toBe(403);
+
+        const operatorWorkers = await fetch(`${instance.baseUrl}/api/workers`, {
+          headers: { Authorization: "Bearer operator-token" },
+        });
+        expect(operatorWorkers.status).toBe(200);
+      } finally {
+        await instance.close();
+      }
     });
 
     it("allows /health without authentication (default token mode)", async () => {

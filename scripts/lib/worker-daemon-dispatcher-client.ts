@@ -27,6 +27,7 @@ interface DispatcherClientBridge {
     repoDir: string;
     dryRunExecution?: boolean;
     at?: string;
+    signal?: AbortSignal;
     taskExecutor: {
       executeTask: (task: unknown, assignment: unknown, assigned: unknown) => Promise<{
         result: WorkerResult;
@@ -74,26 +75,26 @@ export function createStateDirDispatcherClient(stateDir: string): DispatcherClie
 
 function createLazyDispatcherClient(resolveClient: () => Promise<DispatcherClient>): DispatcherClient {
   return {
-    async registerWorker(worker) {
-      return (await resolveClient()).registerWorker(worker);
+    async registerWorker(worker, options) {
+      return (await resolveClient()).registerWorker(worker, options);
     },
-    async heartbeat(workerId, payload) {
-      return (await resolveClient()).heartbeat(workerId, payload);
+    async heartbeat(workerId, payload, options) {
+      return (await resolveClient()).heartbeat(workerId, payload, options);
     },
-    async getAssignedTask(workerId) {
-      return (await resolveClient()).getAssignedTask(workerId);
+    async getAssignedTask(workerId, options) {
+      return (await resolveClient()).getAssignedTask(workerId, options);
     },
-    async claimTask(workerId, payload = {}) {
-      return (await resolveClient()).claimTask(workerId, payload);
+    async claimTask(workerId, payload = {}, options) {
+      return (await resolveClient()).claimTask(workerId, payload, options);
     },
-    async startTask(workerId, payload) {
-      return (await resolveClient()).startTask(workerId, payload);
+    async startTask(workerId, payload, options) {
+      return (await resolveClient()).startTask(workerId, payload, options);
     },
-    async submitResult(workerId, payload) {
-      return (await resolveClient()).submitResult(workerId, payload);
+    async submitResult(workerId, payload, options) {
+      return (await resolveClient()).submitResult(workerId, payload, options);
     },
-    async reportEvent(workerId, payload) {
-      return (await resolveClient()).reportEvent?.(workerId, payload);
+    async reportEvent(workerId, payload, options) {
+      return (await resolveClient()).reportEvent?.(workerId, payload, options);
     },
   };
 }

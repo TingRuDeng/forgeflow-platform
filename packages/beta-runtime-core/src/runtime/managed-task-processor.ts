@@ -1,5 +1,7 @@
+import { requestOptions } from "./abort-signal.js";
 import { executeLiveWorkerTask, submitFailedWorkerResult } from "./task-processor.js";
 import { nowIso } from "./utils.js";
+import { startSingleFlightInterval } from "./single-flight-interval.js";
 import type {
   ExecuteLiveWorkerTaskInput,
   SubmitFailedWorkerResultInput,
@@ -24,6 +26,7 @@ export interface ManagedWorkerTaskCallbacks {
 
 export interface ExecuteManagedWorkerTaskInput extends ExecuteLiveWorkerTaskInput {
   heartbeatIntervalMs?: number;
+  heartbeatManagedExternally?: boolean;
   maxFailedResultRetries?: number;
   failedResultRetryDelayMs?: number;
   callbacks?: ManagedWorkerTaskCallbacks;
@@ -37,22 +40,30 @@ export function resolveManagedWorkerTaskRetryPolicy(env: NodeJS.ProcessEnv = pro
   maxFailedResultRetries: number;
   failedResultRetryDelayMs: number;
 } {
+  const maxRetries = Number(env.WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES);
+  const retryDelayMs = Number(env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS);
   return {
-    maxFailedResultRetries: Number(env.WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES || DEFAULT_SUBMIT_RESULT_MAX_RETRIES),
-    failedResultRetryDelayMs: Number(env.WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS || DEFAULT_SUBMIT_RESULT_RETRY_DELAY_MS),
+    maxFailedResultRetries: Number.isSafeInteger(maxRetries) && maxRetries > 0
+      ? maxRetries
+      : DEFAULT_SUBMIT_RESULT_MAX_RETRIES,
+    failedResultRetryDelayMs: Number.isSafeInteger(retryDelayMs) && retryDelayMs >= 0
+      ? retryDelayMs
+      : DEFAULT_SUBMIT_RESULT_RETRY_DELAY_MS,
   };
 }
 
 export async function executeManagedWorkerTask(input: ExecuteManagedWorkerTaskInput): Promise<TaskExecutionResult> {
   const taskId = input.payload.task.id;
   const startedAtMs = Date.now();
-  const stopHeartbeat = startManagedHeartbeat(input, taskId);
+  const stopHeartbeat = input.heartbeatManagedExternally
+    ? async () => {}
+    : startManagedHeartbeat(input, taskId);
   let result: TaskExecutionResult;
   try {
     result = await executeLiveWorkerTask(input);
-    stopHeartbeat();
+    await stopHeartbeat();
   } catch (error) {
-    stopHeartbeat();
+    await stopHeartbeat();
     const errorMessage = error instanceof Error ? error.message : String(error);
     await handleManagedFailure(input, taskId, startedAtMs, errorMessage);
     throw error;
@@ -65,16 +76,19 @@ export async function executeManagedWorkerTask(input: ExecuteManagedWorkerTaskIn
   return result;
 }
 
-function startManagedHeartbeat(input: ExecuteManagedWorkerTaskInput, taskId: string): () => void {
-  const intervalId = setInterval(async () => {
-    try {
-      await input.client.heartbeat(input.workerId, { at: nowIso() });
-    } catch (error) {
+function startManagedHeartbeat(input: ExecuteManagedWorkerTaskInput, taskId: string): () => Promise<void> {
+  return startSingleFlightInterval({
+    intervalMs: input.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS,
+    run: () => input.client.heartbeat(
+      input.workerId,
+      { at: nowIso() },
+      ...requestOptions(input.signal),
+    ).then(() => undefined),
+    onError: async (error) => {
       const message = error instanceof Error ? error.message : String(error);
       await input.callbacks?.onHeartbeatFailed?.({ taskId, error: message });
-    }
-  }, input.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
-  return () => clearInterval(intervalId);
+    },
+  });
 }
 
 async function handleManagedFailure(

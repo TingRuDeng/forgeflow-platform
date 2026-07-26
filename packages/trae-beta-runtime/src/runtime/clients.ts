@@ -134,7 +134,9 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
 
     try {
       const method = init.method || "GET";
-      const authToken = typeof process !== "undefined" ? process.env.DISPATCHER_API_TOKEN : undefined;
+      const authToken = typeof process !== "undefined"
+        ? (process.env.DISPATCHER_WORKER_TOKEN || process.env.DISPATCHER_API_TOKEN)
+        : undefined;
       const configToken = !authToken ? (options.dispatcherToken || readDispatcherTokenFromConfig()) : undefined;
       const headers: Record<string, string> = {};
       if (init.body) headers["content-type"] = "application/json";

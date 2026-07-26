@@ -465,15 +465,26 @@ describe("worker daemon cycle", () => {
       },
     };
 
-    await expect(daemonMod.runWorkerDaemonCycle({
-      client,
-      workerId: "codex-submit-fail",
-      pool: "codex",
-      hostname: "host",
-      repoDir,
-      dryRunExecution: true,
-      at: new Date().toISOString(),
-    })).rejects.toThrow("submitResult failed after 3 attempts");
+    let deliveryError: unknown;
+    try {
+      await daemonMod.runWorkerDaemonCycle({
+        client,
+        workerId: "codex-submit-fail",
+        pool: "codex",
+        hostname: "host",
+        repoDir,
+        dryRunExecution: true,
+        at: new Date().toISOString(),
+      });
+    } catch (error) {
+      deliveryError = error;
+    }
+    expect(deliveryError).toMatchObject({
+      message: expect.stringContaining("submitResult failed after 3 attempts"),
+      cause: {
+        message: expect.stringContaining("failed to submit error result for task-submit-fail after 3 attempts"),
+      },
+    });
 
     expect(submitAttempts).toBe(6);
     expect(reportedEvents.some((event) => event.type === "submit_result_retry_failed")).toBe(true);

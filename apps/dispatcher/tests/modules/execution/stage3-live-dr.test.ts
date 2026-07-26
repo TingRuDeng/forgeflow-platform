@@ -22,8 +22,14 @@ describe("stage3 live dispatcher DR verification", () => {
     expect(payload.ok).toBe(true);
     expect(payload.backupDuringServerOpen).toBe(true);
     expect(payload.liveWriteSuccessCount).toBe(payload.liveWriteAttemptCount);
+    expect(payload.acknowledgedBeforeBackupCount).toBeGreaterThan(0);
+    expect(payload.acknowledgedEventsRecovered).toBe(true);
     expect(payload.copiedFiles).toContain("runtime-state.db-wal");
     expect(payload.restoredFiles).toContain("runtime-state.db-wal");
+    expect(payload.manifestVerified).toBe(true);
+    expect(payload.verifiedFiles).toEqual(payload.copiedFiles);
+    expect(payload.sqliteWatermark.integrityCheck).toBe("ok");
+    expect(payload.sqliteWatermark.snapshotCount).toBe(payload.snapshotCount);
     expect(payload.integrityCheck).toBe("ok");
     expect(payload.snapshotCount).toBeGreaterThan(1);
     expect(payload.restoredTaskCount).toBeGreaterThan(0);
@@ -33,6 +39,13 @@ describe("stage3 live dispatcher DR verification", () => {
     expect(payload.crashRestart.recoveredIntegrityCheck).toBe("ok");
     expect(payload.crashRestart.recoveredTaskCount).toBeGreaterThan(0);
     expect(payload.crashRestart.recoveredEventCount).toBeGreaterThan(0);
+    expect(payload.crashRestart.recoveryDurationMs).toBeLessThanOrEqual(
+      payload.crashRestart.maxRecoveryDurationMs,
+    );
+    expect(payload.crashRestart.recoveryWritePersistedAfterRestart).toBe(true);
+    expect(payload.crashRestart.acknowledgedBeforeBackupCount).toBe(
+      payload.acknowledgedBeforeBackupCount,
+    );
     expect(payload.hostFailure.simulatedHostLost).toBe(true);
     expect(payload.hostFailure.replacementDispatcherRestarted).toBe(true);
     expect(payload.hostFailure.recoveredIntegrityCheck).toBe("ok");
@@ -43,5 +56,11 @@ describe("stage3 live dispatcher DR verification", () => {
     expect(payload.multiNodeRestore.nodes.every((node: { integrityCheck: string }) => node.integrityCheck === "ok")).toBe(true);
     expect(payload.multiNodeRestore.consistentTaskCounts).toBe(true);
     expect(payload.multiNodeRestore.consistentEventCounts).toBe(true);
+    expect(payload.multiNodeRestore.consistentRuntimeStateHashes).toBe(true);
+    expect(
+      payload.multiNodeRestore.nodes.every((node: { manifestVerified: boolean }) => (
+        node.manifestVerified
+      )),
+    ).toBe(true);
   }, 60_000);
 });

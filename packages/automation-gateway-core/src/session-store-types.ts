@@ -41,6 +41,9 @@ export interface AutomationSessionStoreOptions {
   randomUUID?: () => string;
   includeResponseText?: boolean;
   restartErrorMessage?: string;
+  lockTimeoutMs?: number;
+  lockRetryMs?: number;
+  lockStaleMs?: number;
 }
 
 export interface AutomationSessionStore {

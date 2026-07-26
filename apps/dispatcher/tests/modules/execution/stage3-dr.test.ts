@@ -21,6 +21,11 @@ describe("stage3 DR verification", () => {
     expect(payload.ok).toBe(true);
     expect(payload.integrityCheck).toBe("ok");
     expect(payload.walIncluded).toBe(true);
+    expect(payload.manifestVerified).toBe(true);
+    expect(payload.verifiedFiles).toEqual(payload.copiedFiles);
+    expect(payload.sqliteWatermark.integrityCheck).toBe("ok");
+    expect(payload.sqliteWatermark.snapshotCount).toBe(payload.snapshotCount);
+    expect(payload.sqliteWatermark.latestStateSequence).toBe(payload.restoredState.sequence);
     expect(payload.snapshotCount).toBeGreaterThan(1);
     expect(payload.restoredState.version).toBe(1);
     expect(payload.restoredState.sequence).toBe(payload.snapshotCount);

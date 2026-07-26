@@ -63,9 +63,12 @@ export const TaskList: React.FC<{
     <div className="flex flex-col h-full">
       <div className="divide-y divide-white/5">
         {currentTasks.map(task => (
-          <div
+          <button
             key={task.id}
-            className={`group relative p-4 border-l-[3px] transition-all duration-200 ${selectedTaskId === task.id ? 'border-cyan-400 bg-cyan-500/10' : 'border-transparent hover:border-cyan-400 hover:bg-white/5'} ${onSelect ? 'cursor-pointer' : ''}`}
+            type="button"
+            disabled={!onSelect}
+            aria-pressed={onSelect ? selectedTaskId === task.id : undefined}
+            className={`group relative w-full p-4 text-left border-l-[3px] transition-all duration-200 ${selectedTaskId === task.id ? 'border-cyan-400 bg-cyan-500/10' : 'border-transparent hover:border-cyan-400 hover:bg-white/5'} ${onSelect ? 'cursor-pointer' : ''}`}
             onClick={() => onSelect?.(task.id)}
           >
             <div className="flex justify-between items-start mb-2">
@@ -99,7 +102,7 @@ export const TaskList: React.FC<{
                 )}
               </div>
             </div>
-          </div>
+          </button>
         ))}
       </div>
 

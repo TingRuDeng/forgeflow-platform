@@ -2,6 +2,8 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { withRuntimeStateLock } from "./runtime-state-backup-core.mjs";
+
 const __filename = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(__filename), "..");
 const shadowDistPath = path.join(repoRoot, "apps", "dispatcher", "dist", "modules", "server", "runtime-state-shadow.js");
@@ -132,29 +134,33 @@ function buildCutoverStatus(requireConfigured, health, drift, primaryBackend) {
 }
 
 // 告警事件默认不写入，只有 operator 显式传入 --record-alert 才会修改 runtime-state。
-function recordShadowDriftAlert(stateModule, stateDir, state, alert, drift) {
+async function recordShadowDriftAlert(stateModule, stateDir, alert, drift) {
   if (alert.level === "none") {
-    return;
+    return false;
   }
-  const at = new Date().toISOString();
-  stateModule.saveRuntimeState(stateDir, {
-    ...state,
-    updatedAt: at,
-    sequence: Number(state.sequence ?? 0) + 1,
-    events: [
-      ...(state.events ?? []),
-      {
-        taskId: "__system__",
-        type: "shadow_drift_detected",
-        at,
-        summary: `shadow drift ${alert.level}: ${alert.mismatchCount} mismatches`,
-        payload: {
-          alert,
-          drift,
+  await withRuntimeStateLock(stateDir, async () => {
+    const state = await stateModule.loadRuntimeStateAsync(stateDir);
+    const at = new Date().toISOString();
+    await stateModule.saveRuntimeStateAsync(stateDir, {
+      ...state,
+      updatedAt: at,
+      sequence: Number(state.sequence ?? 0) + 1,
+      events: [
+        ...(state.events ?? []),
+        {
+          taskId: "__system__",
+          type: "shadow_drift_detected",
+          at,
+          summary: `shadow drift ${alert.level}: ${alert.mismatchCount} mismatches`,
+          payload: {
+            alert,
+            drift,
+          },
         },
-      },
-    ].slice(-500),
+      ].slice(-500),
+    });
   });
+  return true;
 }
 
 async function readDriftResult(stateModule, shadowModule, stateDir, thresholds) {
@@ -162,7 +168,7 @@ async function readDriftResult(stateModule, shadowModule, stateDir, thresholds) 
   const postgresUrl = process.env.DISPATCHER_POSTGRES_URL?.trim();
   const state = shadowMode === "disabled" || !postgresUrl
     ? stateModule.createEmptyRuntimeState()
-    : stateModule.loadRuntimeState(stateDir);
+    : await stateModule.loadRuntimeStateAsync(stateDir);
   const health = await shadowModule.readRuntimeStateShadowHealth(state);
   const drift = shadowModule.summarizeRuntimeStateShadowDrift(health);
   const alert = shadowModule.evaluateRuntimeStateShadowDriftAlert(drift, thresholds);
@@ -185,7 +191,12 @@ async function checkShadowDrift(options) {
     reconciliation = buildReconciliationStatus(true, true, result.drift.status === "drifted" ? "drift_persists" : "drift_resolved");
   }
   if (options.recordAlert) {
-    recordShadowDriftAlert(stateModule, options.stateDir, result.state, result.alert, result.drift);
+    await recordShadowDriftAlert(
+      stateModule,
+      options.stateDir,
+      result.alert,
+      result.drift,
+    );
   }
   const primaryBackend = buildPrimaryBackendStatus(options.requirePrimaryBackend);
   const cutover = buildCutoverStatus(options.requireConfigured, result.health, result.drift, primaryBackend);
@@ -213,9 +224,11 @@ async function main() {
   printResult(await checkShadowDrift(options));
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}
 
-export { parseArgs };
+export { checkShadowDrift, parseArgs, recordShadowDriftAlert };

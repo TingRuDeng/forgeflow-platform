@@ -41,6 +41,7 @@ Default values:
 - `authMode=token`
 
 `init` generates and saves a token by default when `authMode=token`.
+On Unix, config writers create or repair this file with mode `0600`; the runtime rejects credential config that is readable by group or others.
 
 ## Commands
 
@@ -59,8 +60,8 @@ Command notes:
 - `start` runs the dispatcher in the foreground
 - `doctor` validates config, auth expectations, state-dir writability, and optional local `/health`
 - `status` prints configured base URL and best-effort local health reachability
-- `backup` copies `runtime-state.db`, WAL/SHM sidecars, `runtime-state.json` rescue files, shadow status, reconciler status, and cutover evidence files when present
-- `restore` copies those files back into the configured `stateDir`
+- `backup` shares the repository backup core: it serializes with dispatcher mutations, copies SQLite/WAL/SHM, JSON rescue, shadow/reconciler status, and cutover evidence files, then writes a v1 manifest with file size/SHA-256 and a validated SQLite snapshot watermark
+- `restore` verifies the complete v1 manifest before changing `stateDir`, stages replacements, rolls back a failed apply, and removes stale runtime sidecars absent from the backup; stop the dispatcher and direct file/SQLite writers before a production restore
 
 ## Authentication
 

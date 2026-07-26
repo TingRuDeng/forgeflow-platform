@@ -115,7 +115,7 @@ async function runBackup(options: Record<string, string | boolean>) {
   const backupDir = typeof options.backupDir === "string"
     ? options.backupDir
     : path.join(config.stateDir, "backups", new Date().toISOString().replace(/[:]/g, "-"));
-  const result = backupRuntimeState({
+  const result = await backupRuntimeState({
     stateDir: config.stateDir,
     backupDir,
   });
@@ -127,7 +127,7 @@ async function runRestore(options: Record<string, string | boolean>) {
   if (typeof options.backupDir !== "string") {
     throw new Error("--backup-dir is required for restore");
   }
-  const result = restoreRuntimeState({
+  const result = await restoreRuntimeState({
     backupDir: options.backupDir,
     stateDir: config.stateDir,
   });

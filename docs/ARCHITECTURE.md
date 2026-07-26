@@ -56,7 +56,7 @@ Current active building blocks:
   - Current truth source for task state, worker state, assignments, reviews, PR metadata, and audit events.
   - Active runtime entry still lives in `scripts/lib/dispatcher-server.js`.
   - Trae-specific dispatcher route handling, review-memory loading, and task-worktree ownership now live in the TypeScript runtime foundation under `apps/dispatcher/dist/modules/server/*.js`; `scripts/lib/*` only bootstraps or re-exports those modules.
-  - HTTP surface supports optional bearer-token protection via `DISPATCHER_API_TOKEN`; `/health` remains public.
+  - HTTP surface separates the all-access control-plane `DISPATCHER_API_TOKEN` from per-worker credentials configured by `DISPATCHER_WORKER_TOKENS`; `/health` remains public.
 - `worker daemon`
   - Preferred unattended path for `codex` and `gemini`.
   - Pulls tasks from dispatcher, materializes per-task worktrees, runs assignment execution, and reports results.
@@ -113,7 +113,7 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
   - Default backend in `apps/dispatcher/src/modules/server/runtime-state.ts`
   - Implemented through `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts`
   - Uses `node:sqlite`
-  - Stores both append-only snapshots and dispatcher-owned structured projection tables
+  - Stores append-only snapshots, append-only runtime audit events, and dispatcher-owned structured projection tables
 - Dispatcher JSON fallback and import source: `.forgeflow-dispatcher/runtime-state.json`
   - Only used when `RUNTIME_STATE_BACKEND=json` or `--persistence-backend json` is explicitly selected
   - Also used as one-time import source when SQLite is the default but only a JSON snapshot exists
@@ -123,6 +123,7 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
 - Trae gateway sessions: `~/.forgeflow-trae-beta/sessions/sessions.json`
   - `scripts/lib` 和发布包默认使用同一用户级目录
   - `scripts/run-trae-automation-gateway.js --state-dir <path>` 仍可显式覆盖
+  - 本机 mutation 通过同目录 `sessions.json.lock` 串行化并在锁内重读；它不是跨主机 lease，多 active gateway 仍不受支持
 - Optional Postgres / queue shadow path:
   - enabled with `DISPATCHER_SHADOW_MODE` / `DISPATCHER_POSTGRES_URL`
   - current role is shadow projection / queue shadow, not dispatcher truth source
@@ -140,8 +141,8 @@ Dispatcher runtime persistence is owned by the runtime-state SQLite backend. Sta
 3. Worker daemon registers and heartbeats against dispatcher.
 4. Worker daemon claims an assigned task or a ready task in its pool.
 5. Worker daemon creates a per-task worktree from the latest fetched default branch.
-6. Worker executes assignment scripts inside the worktree.
-7. Worker reports verification results, changed files, and optional PR metadata back to dispatcher.
+6. Worker executes assignment scripts inside the worktree. The shared daemon cycle owns one single-flight heartbeat through execution and result delivery; timeout or process termination kills the full child process tree.
+7. Worker reports verification results, changed files, and optional PR metadata back to dispatcher. An exact retry after a lost response is idempotent; a changed replay with the same attempt key is rejected.
 8. Worker may additionally report best-effort runtime events such as delivery failure, cleanup failure, session interruption, and structured failure codes back to dispatcher metrics.
 9. Dispatcher moves the task to `review` or `failed`.
 10. Control layer submits `merge` or `block`.

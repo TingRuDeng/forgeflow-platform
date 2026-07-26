@@ -3,7 +3,6 @@ import type {
   Worker,
   Task,
   Assignment,
-  Event,
   Review,
 } from "./runtime-state.js";
 import {
@@ -14,6 +13,7 @@ import {
   recordWorkerResult as recordWorkerResultFn,
   reconcileRuntimeState as reconcileRuntimeStateFn,
 } from "./runtime-state.js";
+import { appendRuntimeEvent } from "./runtime-events.js";
 
 import type {
   JsonResponse,
@@ -32,20 +32,12 @@ function nowIso(): string {
   return formatLocalTimestamp();
 }
 
-const RUNTIME_EVENTS_RETENTION_LIMIT = 500;
 const TERMINAL_ATTEMPT_STATUSES = new Set(["succeeded", "failed", "expired", "cancelled", "superseded"]);
 
 function findActiveTaskAttempt(state: RuntimeState, taskId: string) {
   return (state.taskAttempts ?? []).find((attempt) =>
     attempt.taskId === taskId && !TERMINAL_ATTEMPT_STATUSES.has(attempt.status)
   ) ?? null;
-}
-
-function appendRuntimeEvent(state: RuntimeState, event: Event): void {
-  state.events.push(event);
-  if (state.events.length > RUNTIME_EVENTS_RETENTION_LIMIT) {
-    state.events.splice(0, state.events.length - RUNTIME_EVENTS_RETENTION_LIMIT);
-  }
 }
 
 function isSessionInterrupted(input: {
@@ -124,6 +116,7 @@ function overwriteRuntimeState(target: RuntimeState, source: RuntimeState): void
   target.version = source.version;
   target.updatedAt = source.updatedAt;
   target.sequence = source.sequence;
+  target.eventSequence = source.eventSequence;
   target.workers = source.workers;
   target.tasks = source.tasks;
   target.taskAttempts = source.taskAttempts;
@@ -352,7 +345,7 @@ export function applyTraeSubmitResult(
   }
 
   try {
-    const nextState = recordWorkerResultFn(state, {
+    let nextState = recordWorkerResultFn(state, {
       workerId,
       attemptId: input.attemptId,
       leaseToken: input.leaseToken,
@@ -396,7 +389,7 @@ export function applyTraeSubmitResult(
         : null,
     });
     if (input.status === "failed" && isSessionInterrupted(input)) {
-      appendRuntimeEvent(nextState, {
+      nextState = appendRuntimeEvent(nextState, {
         taskId: input.taskId,
         type: "session_interrupted",
         at: nowIso(),
@@ -450,12 +443,13 @@ export function applyTraeReportProgress(
   message: string,
   workerId?: string
 ): RuntimeState {
-  appendRuntimeEvent(state, {
+  const nextState = appendRuntimeEvent(state, {
     taskId,
     type: "progress_reported",
     at: nowIso(),
     payload: { message, worker_id: workerId },
   });
+  overwriteRuntimeState(state, nextState);
   return state;
 }
 

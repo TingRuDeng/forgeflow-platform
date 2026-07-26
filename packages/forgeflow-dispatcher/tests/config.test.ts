@@ -30,5 +30,22 @@ describe("dispatcher runtime config", () => {
     expect(fs.existsSync(configPath)).toBe(true);
     expect(mod.loadConfig().host).toBe("127.0.0.1");
     expect(mod.loadConfig().apiToken).toBeTruthy();
+    if (process.platform !== "win32") {
+      expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it("rejects config files readable by group or others on unix", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    withConfigPath();
+    const mod = await import("../src/config.ts");
+    const configPath = mod.getConfigPath();
+    fs.writeFileSync(configPath, `${JSON.stringify(mod.buildDefaultConfig())}\n`, { mode: 0o644 });
+    fs.chmodSync(configPath, 0o644);
+
+    expect(() => mod.loadConfig()).toThrow(/insecure dispatcher config permissions/i);
   });
 });

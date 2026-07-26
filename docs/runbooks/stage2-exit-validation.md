@@ -67,6 +67,8 @@ git diff --check
   - `/api/metrics` 暴露 `branchProtectionHitCount`
   - `/api/metrics` 暴露 `repoConcurrencySaturation`
   - `/api/metrics` 暴露 `failureCodes` / `reviewReasonCodes`
+  - `/api/metrics.eventWindow` 明确事件型指标只覆盖 retained runtime window
+  - `/api/query/events` 可用 `beforeSequence` 分页读取持久审计事件
 - failure taxonomy：
   - Trae runtime phase events 已结构化回写
   - Trae worker evidence 带 blocker code
@@ -93,6 +95,8 @@ forgeflow-review-orchestrator watch --state-dir .forgeflow-dispatcher --task-id 
 - `latestProgressSummary`
 - `branchProtectionHitCount`
 - `repoConcurrencySaturation`
+- `eventWindow`
+- `/api/query/events` 的 `x-forgeflow-event-scope` / `x-forgeflow-event-has-more`
 
 ## 5. 当前边界
 

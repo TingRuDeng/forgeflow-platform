@@ -18,12 +18,20 @@ const mocks = vi.hoisted(() => {
       updatedAt: "2026-07-05T10:00:00.000Z",
       tasks: [{ id: "task-1", title: "Task 1", status: "ready" }],
     })),
+    listRuntimeAuditEvents: vi.fn(async () => ({
+      events: [],
+      total: 0,
+      limit: 500,
+      hasMore: false,
+      nextBeforeSequence: null,
+    })),
     savePrimaryRuntimeStateSnapshot: vi.fn(async () => {}),
   };
 });
 
 vi.mock("@forgeflow/dispatcher-store-postgres", () => ({
   createPgClient: mocks.createPgClient,
+  listRuntimeAuditEvents: mocks.listRuntimeAuditEvents,
   loadPrimaryRuntimeStateSnapshot: mocks.loadPrimaryRuntimeStateSnapshot,
   savePrimaryRuntimeStateSnapshot: mocks.savePrimaryRuntimeStateSnapshot,
 }));
@@ -154,7 +162,7 @@ describe("runtime-state postgres backend", () => {
 
     await saveRuntimeStateAsync(stateDir, state);
 
-    expect(mocks.savePrimaryRuntimeStateSnapshot).toHaveBeenCalledWith(mocks.client, state);
+    expect(mocks.savePrimaryRuntimeStateSnapshot).toHaveBeenCalledWith(mocks.client, state, []);
     expect(mocks.client.end).toHaveBeenCalled();
   });
 

@@ -4,8 +4,8 @@ import { recordTaskMetric } from "./metrics.js";
 function nowIso() {
     return formatLocalTimestamp();
 }
-export async function reportWorkerEventBestEffort(client, workerId, event) {
-    if (typeof client.reportEvent !== "function") {
+export async function reportWorkerEventBestEffort(client, workerId, event, signal) {
+    if (signal?.aborted || typeof client.reportEvent !== "function") {
         return;
     }
     try {
@@ -14,7 +14,7 @@ export async function reportWorkerEventBestEffort(client, workerId, event) {
             taskId: event.taskId,
             payload: event.payload,
             at: event.at ?? nowIso(),
-        });
+        }, ...(signal ? [{ signal }] : []));
     }
     catch (error) {
         logger.warn({
@@ -81,7 +81,7 @@ export function buildFailedResultCallbacks(input, taskId) {
                     error: event.error,
                     fallback: true,
                 },
-            });
+            }, input.signal);
         },
         onFallbackFailed: async (event) => {
             logger.error({ operation: "submitResult", taskId, error: event.error, event: "submitResult_fallback_failed" });
@@ -93,7 +93,7 @@ export function buildFailedResultCallbacks(input, taskId) {
                     error: event.error,
                     failureCode: "delivery_failed",
                 },
-            });
+            }, input.signal);
         },
     };
 }

@@ -35,6 +35,24 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function sleepUntilAborted(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return sleep(ms);
+  }
+  if (signal.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(finish, ms);
+    function finish() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal.addEventListener("abort", finish, { once: true });
+  });
+}
+
 export async function runWorkerDaemonCycle(
   input: CreateWorkerDaemonCycleOptions,
 ): Promise<WorkerDaemonCycleResult> {
@@ -54,6 +72,7 @@ export async function runWorkerDaemonCycle(
     dryRunExecution: input.dryRunExecution,
     at: input.at,
     now: formatLocalTimestamp,
+    signal: input.signal,
     taskExecutor: input.taskExecutor
       ? {
           executeTask: (task, assignment, assigned) =>
@@ -68,24 +87,34 @@ export async function runWorkerDaemon(
 ): Promise<WorkerDaemonCycleResult> {
   const pollIntervalMs = input.pollIntervalMs ?? 5000;
 
-  while (true) {
-    const summary = await runWorkerDaemonCycle({
-      client: input.client,
-      dispatcherUrl: input.dispatcherUrl,
-      workerId: input.workerId,
-      pool: input.pool,
-      hostname: input.hostname,
-      labels: input.labels,
-      repoDir: input.repoDir,
-      repoRoot: input.repoRoot,
-      dryRunExecution: input.dryRunExecution,
-      at: input.at,
-    });
+  while (!input.signal?.aborted) {
+    let summary: WorkerDaemonCycleResult;
+    try {
+      summary = await runWorkerDaemonCycle({
+        client: input.client,
+        dispatcherUrl: input.dispatcherUrl,
+        workerId: input.workerId,
+        pool: input.pool,
+        hostname: input.hostname,
+        labels: input.labels,
+        repoDir: input.repoDir,
+        repoRoot: input.repoRoot,
+        dryRunExecution: input.dryRunExecution,
+        at: input.at,
+        signal: input.signal,
+      });
+    } catch (error) {
+      if (input.signal?.aborted) {
+        return { status: "stopped", workerId: input.workerId };
+      }
+      throw error;
+    }
 
     if (input.once) {
       return summary;
     }
 
-    await sleep(pollIntervalMs);
+    await sleepUntilAborted(pollIntervalMs, input.signal);
   }
+  return { status: "stopped", workerId: input.workerId };
 }

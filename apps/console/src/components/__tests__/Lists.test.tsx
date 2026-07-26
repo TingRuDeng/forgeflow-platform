@@ -113,8 +113,14 @@ describe('Task drill-down', () => {
       <TaskList tasks={mockTasks(2)} selectedTaskId="T-2" onSelect={onSelect} />
     );
 
-    fireEvent.click(screen.getByText('Task 1'));
+    const firstTask = screen.getByRole('button', { name: /Task 1/i });
+    const selectedTask = screen.getByRole('button', { name: /Task 2/i });
+    firstTask.focus();
 
+    expect(firstTask).toHaveFocus();
+    expect(firstTask).toHaveAttribute('aria-pressed', 'false');
+    expect(selectedTask).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(firstTask);
     expect(onSelect).toHaveBeenCalledWith('T-1');
   });
 

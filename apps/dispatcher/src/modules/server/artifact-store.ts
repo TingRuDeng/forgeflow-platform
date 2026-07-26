@@ -9,6 +9,7 @@ const TEXT_FILE_ENCODING = "utf8";
 const DEFAULT_MAX_BUNDLES = 100;
 
 const RETAINED_FILE_NAMES = {
+  structuredReport: "result.json",
   diff: "diff.patch",
   logs: "session.log",
   testResults: "test-results.txt",
@@ -41,6 +42,7 @@ export interface ArtifactStoreRetentionOptions {
 export interface PersistedArtifactBundle {
   bundle: ArtifactBundle;
   manifest: ArtifactStoreManifest;
+  removedBundleIds: string[];
 }
 
 function artifactStoreRoot(stateDir: string): string {
@@ -87,6 +89,8 @@ function retainedEntries(bundle: ArtifactBundle): Array<[RetainedContentKey, str
 
 function retainedEntryContent(bundle: ArtifactBundle, key: RetainedContentKey): string | undefined {
   switch (key) {
+    case "structuredReport":
+      return buildStructuredReportContent(bundle);
     case "trajectory":
       return bundle.trajectory
         ? JSON.stringify(bundle.trajectory, null, 2)
@@ -100,6 +104,18 @@ function retainedEntryContent(bundle: ArtifactBundle, key: RetainedContentKey): 
     case "testResults":
       return bundle.retainedContent?.testResults;
   }
+}
+
+function buildStructuredReportContent(bundle: ArtifactBundle): string {
+  const {
+    refs: _refs,
+    retainedContent: _retainedContent,
+    ...report
+  } = bundle;
+  return `${JSON.stringify({
+    ...report,
+    bundleId: bundle.bundleId ?? `${bundle.attemptId}:artifact-bundle`,
+  }, null, 2)}\n`;
 }
 
 function buildReplayableTrajContent(bundle: ArtifactBundle): string {
@@ -137,14 +153,45 @@ function writeTextFile(filePath: string, content: string): number {
 }
 
 function buildRefs(bundle: ArtifactBundle, files: ArtifactStoreFileManifest[]): ArtifactBundle["refs"] {
-  return files.reduce<ArtifactBundle["refs"]>((refs, file) => ({
-    ...refs,
+  const refs: ArtifactBundle["refs"] = {};
+  for (const [key, value] of Object.entries(bundle.refs)) {
+    if (key === "screenshots" && Array.isArray(value)) {
+      const screenshots = value.filter((ref) => !ref.startsWith("artifact://"));
+      if (screenshots.length > 0) {
+        refs.screenshots = screenshots;
+      }
+      continue;
+    }
+    if (typeof value === "string" && !value.startsWith("artifact://")) {
+      (refs as Record<string, unknown>)[key] = value;
+    }
+  }
+  const generatedRefs = files.reduce<ArtifactBundle["refs"]>((currentRefs, file) => ({
+    ...currentRefs,
     [file.kind]: file.ref,
-  }), bundle.refs);
+  }), refs);
+  const logFile = files.find((file) => file.kind === "logs");
+  if (logFile) {
+    generatedRefs.terminalTranscript = logFile.ref;
+  }
+  return generatedRefs;
+}
+
+function rewriteTestResultRefs(
+  bundle: ArtifactBundle,
+  files: ArtifactStoreFileManifest[],
+): ArtifactBundle["testResults"] {
+  const testResultsRef = files.find((file) => file.kind === "testResults")?.ref;
+  return bundle.testResults?.map((result) => ({
+    ...result,
+    ...((!result.outputRef || result.outputRef.startsWith("artifact://"))
+      ? { outputRef: testResultsRef }
+      : {}),
+  }));
 }
 
 // 保留最新 artifact bundle，避免本地 stateDir 因日志和 diff 正文无限增长。
-function applyRetention(stateDir: string, options?: ArtifactStoreRetentionOptions): void {
+function applyRetention(stateDir: string, options?: ArtifactStoreRetentionOptions): string[] {
   const maxBundles = resolveMaxBundles(options);
   const manifests = listArtifactStoreManifests(stateDir);
   const removable = manifests
@@ -153,6 +200,7 @@ function applyRetention(stateDir: string, options?: ArtifactStoreRetentionOption
   for (const manifest of removable) {
     fs.rmSync(bundleDirectoryPath(stateDir, manifest.bundleId), { recursive: true, force: true });
   }
+  return removable.map((manifest) => manifest.bundleId);
 }
 
 // 将 ArtifactBundle 的 retainedContent 落成独立文件，并返回 refs 已指向文件 store 的 bundle。
@@ -179,14 +227,16 @@ export function persistArtifactBundleFiles(
     files,
   };
   fs.writeFileSync(manifestPath(stateDir, bundleId), `${JSON.stringify(manifest, null, 2)}\n`, TEXT_FILE_ENCODING);
-  applyRetention(stateDir, options);
+  const removedBundleIds = applyRetention(stateDir, options);
   return {
     bundle: {
       ...bundle,
       bundleId,
       refs: buildRefs(bundle, files),
+      testResults: rewriteTestResultRefs(bundle, files),
     },
     manifest,
+    removedBundleIds,
   };
 }
 

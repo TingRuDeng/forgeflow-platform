@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { RuntimeState } from "./runtime-state.js";
+import { ensureRuntimeEventIdentities } from "./runtime-events.js";
 import { formatLocalTimestamp } from "../time.js";
 
 function nowIso(): string {
@@ -26,6 +27,7 @@ export function createEmptyRuntimeState(): RuntimeState {
     version: 1,
     updatedAt: nowIso(),
     sequence: 0,
+    eventSequence: 0,
     workers: [],
     tasks: [],
     taskAttempts: [],
@@ -46,10 +48,10 @@ export function loadRuntimeState(stateDir: string): RuntimeState {
   }
 
   const parsed = parseRuntimeStateJsonContent(fs.readFileSync(filePath, "utf8"), "runtime-state.json");
-  return {
+  return ensureRuntimeEventIdentities({
     ...createEmptyRuntimeState(),
     ...parsed,
-  };
+  });
 }
 
 export function saveRuntimeState(stateDir: string, state: RuntimeState): void {
@@ -57,7 +59,7 @@ export function saveRuntimeState(stateDir: string, state: RuntimeState): void {
   const filePath = stateFilePath(stateDir);
   const tmpFilePath = `${filePath}.tmp`;
   const content = `${JSON.stringify({
-    ...state,
+    ...ensureRuntimeEventIdentities(state),
     updatedAt: nowIso(),
   }, null, 2)}\n`;
   fs.writeFileSync(tmpFilePath, content);

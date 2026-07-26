@@ -57,13 +57,13 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - `.orchestrator` assignment package、本地执行脚本、结果回写与 review 决策链路仍然可用。
 - review memory 已有文件存储契约，并会在 dispatcher 创建 dispatch 时按 repo/scope/worker 条件注入上下文。
 - Trae 的首选无人值守路径是 `Trae automation gateway` + `Trae automation worker`。
-- Trae automation gateway 的 route/session/chat handler、HTTP JSON IO、debug logger、driver 创建规则、持久化 session-store、Trae CDP / DOM driver、clean relaunch 原语、launch target 构建和 debugger wait / spawn 编排已下沉到 `@tingrudeng/automation-gateway-core`；源码脚本和 packaged runtime 只保留默认值、时间格式 / 默认目录等薄适配。
+- Trae automation gateway 的 route/session/chat handler、HTTP JSON IO、debug logger、driver 创建规则、持久化 session-store、Trae CDP / DOM driver、clean relaunch 原语、launch target 构建和 debugger wait / spawn 编排已下沉到 `@tingrudeng/automation-gateway-core`；源码脚本和 packaged runtime 只保留默认值、时间格式 / 默认目录等薄适配。session-store 的本机写入使用 `sessions.json.lock` 串行化，并在锁内重读最新文件后变更，避免重叠进程覆盖其他 session。
 - `worker daemon` 与 `Trae automation worker` 现在都会先基于最新抓取的默认分支物化每任务独立 worktree，避免跨任务串味。
 - `forgeflow-review-orchestrator dispatch-task` 在 `pool=trae` 时会默认按结构化任务规范自动渲染 worker prompt，并把最终 prompt 连同 `workerPromptMode/reportSchemaVersion` 一起持久化到 dispatcher assignment；自定义 Trae prompt 若缺少 `任务完成/结果/任务ID` 会在 dispatch 前被拒绝。
 - follow-up / rework 任务只有在源任务已经交付过可验证的远端分支产物、且 worker 不变时才允许复用原分支；否则控制层应改用新的 `-rN` 分支继续修复。
 - Trae runtime 的 `new_chat` 采样现在会优先收窄到最后一个可见聊天根节点，并在基线里检测是否仍持续读到上一个任务的完成回执；发现旧 `任务ID` 污染时会提前失败，而不是继续误读旧会话。
 - Trae runtime 现在只有在远端分支 HEAD 与最终回执里的 commit SHA 完全一致时才会把成功结果提升为 `review_ready`；遇到远端 ref 传播延迟时，会先进入短暂重试窗口，而不是立刻把产物交给 review。
-- dispatcher 的状态型 HTTP 路径现在共用一把跨进程文件锁（`.runtime-state.lock`）；锁竞争超时会显式返回 `503`，陈旧锁会自动回收。
+- dispatcher 的状态型 HTTP 路径现在共用一把跨进程文件锁（`.runtime-state.lock`）；锁竞争超时会显式返回 `503`。锁文件记录 PID、owner token 和创建时间，存活进程持有的锁不会仅因超过 stale 阈值被回收，释放时也会核对 inode 与 owner token，避免旧 callback 删除替换锁。
 - dispatcher SQLite snapshot 现在按 revision 追加落盘，并保存 `checksum_sha256`；读取默认 fail-closed，只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 时才允许从 JSON 救援导入。
 - `dependsOn` 现在进入调度门控：依赖未满足的任务保持 `planned`，依赖满足后由 dispatcher 自动解锁到 `ready` 并写状态事件。
 - generic worker claim 已收口为显式副作用路径：`GET /api/workers/:workerId/assigned-task` 现在只读，真正的 claim / assign 走 `POST /api/workers/:workerId/claim-task`。
@@ -74,7 +74,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - dispatcher 现在额外暴露只读 `GET /api/context`：一次性聚合控制层关心的 active 任务、review backlog（含确定性风险分级）、可 redrive 的 blocked 任务和带 traceId 的 recent events，支持 `since` / `eventLimit` 过滤，减少控制层多次拉取 snapshot/query。
 - dispatcher 现在会 canonicalize worker result 的 `taskId/workerId/pool/repo/defaultBranch/branchName/mode`，worker 只能上送 `output/verification/evidence` 等执行证据；不合法元数据会被拒绝。
 - dispatcher 任务状态机现在接上了 `cancelled` 和 `waiting_for_input`：控制面可通过 `POST /api/tasks/:taskId/cancel` 手动作废非终态任务；worker result 可携带 `waitingForInput` 主动请求 HITL 暂停，dispatcher 会 checkpoint active attempt 并释放 worker / lease；Console 详情页会按 `resumePayloadSchema` 渲染恢复表单，支持 `string` / `number` / `integer` / `boolean` / `array` 字段、textarea、范围和数组数量校验，未提供 schema 时保留 JSON `resumePayload` fallback；dispatcher resume API 也会按任务保存的 `resumePayloadSchema` 做服务端校验，非法恢复输入返回 `400`；同一详情页也会展示任务级 `terminationPolicy`，用于审查 maxAttempts、attempt lease、heartbeat 和 assignment timeout 边界。
-- `worker-daemon` 不再把 `submitResult` 重试耗尽、`git push` 失败或自动 PR 创建失败记成“completed”；这些路径现在都会保留在显式 failed 语义里。
+- `worker-daemon` 不再把 `submitResult` 重试耗尽、`git push` 失败或自动 PR 创建失败记成“completed”；这些路径现在都会保留在显式 failed 语义里。每个 task 只由 shared daemon cycle 维持一条 single-flight heartbeat，覆盖执行和结果回写重试；执行超时或 daemon 收到终止信号时会终止完整子进程树，避免遗留 provider / verification 进程。
 - `worker-daemon` 子进程现在使用 env allowlist，而不是继承完整 `process.env`；自动 PR 创建也改成显式 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - `forgeflow-review-orchestrator` 现在补齐了阶段二控制层闭环：`dispatch/dispatch-task/watch/inspect/decide` 都支持 `--state-dir` 本地 dispatcher fallback；`watch --summary` 与 `inspect --summary` 统一输出 review/failure/redrive/progress/trace 摘要，并会附带结构化 `failureCode`。
 - `inspect --summary` / `watch --summary` 现在还会带上 review 风险分级；`decide --decision merge` 受该分级软门禁：风险非 `low` 时拒绝合并，需 `--acknowledge-risk` 显式覆盖（fail-open，无法读取风险时放行，仅约束 merge）。Console 任务详情也会展示该风险分级 badge 与合并前人工确认提示。
@@ -82,16 +82,17 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - dispatcher 现在会为每个任务生成稳定 `traceId`；dashboard snapshot、CLI 摘要、console drill-down 和 Trae worker evidence 都会携带该关联键，便于跨 dispatcher / worker / session 做最小闭环排障。
 - dashboard snapshot 现在附带阶段二控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`、`retryRatePct`、`branchProtectionHitCount`、`repoConcurrencySaturation`、`failureCodes`、`reviewReasonCodes`。
 - Console Artifact Workbench 支持跨任务筛选 artifact、review reasonCode、risk、mustFix、artifact ref、runtime event 和 trajectory step 证据，并展示 runtime event type、reasonCode / risk 计数对比摘要、差异高亮、轨迹步骤摘要和跨任务轨迹并排详情；工作台卡片可直接复制、展开和下载 `artifact://...` 引用文件，轨迹并排详情也可直接展开 / 下载 step `artifactRef` 文件，便于在进入批量审查前按事件、风险、修复要求、执行轨迹和产物证据定位任务。
-- dispatcher 现在额外暴露只读 `/api/metrics`，便于控制层和告警脚本直接读取阶段二最小指标，而不必解析完整 dashboard snapshot。
-- `/api/metrics` 现在还会汇总关键失败信号：`submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，并输出 `retryRatePct`、`failureCodes`、`reviewReasonCodes` 这组阶段二收口指标。
-- 脚本侧 pino logger 现在默认对 `Authorization`、`DISPATCHER_API_TOKEN`、`GITHUB_TOKEN` 等敏感字段做 redact，减少 worker / dispatcher 日志泄露风险。
-- Trae runtime 现在会通过 `POST /api/workers/:workerId/events` 回写结构化 phase events 与 failure blocker codes；Trae automation worker 会把同一批 phase events 写入结构化 trajectory artifact 和受限 retained content，generic Codex/Gemini assignment runner 也会在结果里附带 trajectory artifact；dispatcher artifact store 会同时落盘 `trajectory.json` 和可下载的 `trajectory.traj` 回放文件，控制层不必再只靠 regex 猜测失败类型。
+- dispatcher 现在额外暴露只读 `/api/metrics`，便于控制层和告警脚本直接读取阶段二最小指标，而不必解析完整 dashboard snapshot；`metrics.eventWindow` 会明确标出这些事件型计数来自最近 500 条运行窗口。
+- `/api/metrics` 现在还会汇总关键失败信号：`submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，并输出 `retryRatePct`、`failureCodes`、`reviewReasonCodes`。完整历史审计事件独立写入 SQLite/PostgreSQL audit 表，可通过 `GET /api/query/events?limit=<n>&beforeSequence=<seq>` 分页读取。
+- 脚本侧 pino logger 现在默认对 `Authorization`、`DISPATCHER_API_TOKEN`、`DISPATCHER_WORKER_TOKEN`、`DISPATCHER_WORKER_TOKENS`、`GITHUB_TOKEN` 等敏感字段做 redact，减少 worker / dispatcher 日志泄露风险。
+- Trae runtime 现在会通过 `POST /api/workers/:workerId/events` 回写结构化 phase events 与 failure blocker codes；Trae automation worker 会把同一批 phase events 写入结构化 trajectory artifact 和受限 retained content，generic Codex/Gemini assignment runner 也会在结果里附带 trajectory artifact；dispatcher artifact store 会落盘 `result.json`、retained diff / log / test result、`trajectory.json` 和可下载的 `trajectory.traj`，生成真实 `artifact://<bundleId>/<file>` 引用，并在 retention 删除正文时同步裁剪 runtime bundle 索引。
 - 阶段三核心底座现在已进入主线：dispatcher 运行时状态引入显式 `leases[]`，task claim 生命周期会获取 `assignment` / `repo` / `branch` lease；continuation 或 follow-up 任务还会基于会话锚点获取 `session` lease。该强约束只覆盖 dispatcher 管理的 task 生命周期，不覆盖绕过 dispatcher HTTP 或直接操作 repo、branch、Trae session store 的外部脚本。
 - dispatcher SQLite 真相源现在同时维护 query-first 结构化投影；可用 `DISPATCHER_STRUCTURED_READS=1` 切换只读查询到 projection 路径，并通过 `/api/query/*` 与 `/api/query/projection-health` 做一致性核对。
 - dispatcher 现在支持可回滚的 Postgres / queue shadow path：`DISPATCHER_SHADOW_MODE=shadow-write` 与 `DISPATCHER_POSTGRES_URL` 打开后，SQLite 仍是真相源，外部库只承接 best-effort shadow projection；shadow 写失败会进入 durable health record、runtime event、metrics 和 SLO。
+- `scripts/check-shadow-drift.mjs --record-alert` 写入 drift 事件时会与 dispatcher 共用本机 `.runtime-state.lock`，并在锁内重读最新状态，避免本机并发写覆盖；该文件锁不提供跨主机互斥。
 - dispatcher 现在额外暴露 `GET /api/slo` 和 `GET /api/dr/status`，用于读取 burn-rate、只读状态、shadow 写入 / 自动对账最近一轮证据、primary cutover / completion evidence、projection 健康度和备份清单。
 - `DISPATCHER_READ_ONLY_MODE=1` 是当前只读降级开关；`dispatcher-server.ts:isMutationRequest` 默认冻结 `/api/` 下的 `POST` / `PUT` / `PATCH` / `DELETE` 写方法，当前 HTTP mutation 路由已被覆盖。它仍不是独立路由注册系统，直接改运行时文件、外部数据库或绕过 dispatcher HTTP 的写入需要由运维流程单独管控。
-- 仓库现在内置阶段三参考部署和演练入口：`pnpm verify:stage3`、`pnpm verify:stage3:live`、`pnpm verify:shadow-drift:reconciler`、`pnpm verify:shadow-cutover:reconciler`、`pnpm verify:shadow-cutover:drill`、`pnpm verify:shadow-cutover:drill:evidence`、`pnpm verify:shadow-cutover:approve`、`pnpm verify:shadow-cutover:approval`、`pnpm verify:shadow-cutover:ready`、`pnpm verify:shadow-cutover:ready:evidence`、`pnpm verify:shadow-cutover:complete`、`pnpm verify:shadow-cutover:complete:evidence`、`pnpm verify:shadow-cutover:revoke`、`scripts/backup-runtime-state.mjs`、`scripts/restore-runtime-state.mjs`、`scripts/verify-stage3-dr.mjs`、`scripts/verify-live-dispatcher-dr.mjs`、`deploy/compose/*`、`deploy/helm/forgeflow/*`；`verify:shadow-cutover:reconciler` 会以 strict cutover 条件长期巡检 shadow 配置、primary backend 配置和零 drift，`verify:shadow-drift:reconciler` 与 `verify:shadow-cutover:reconciler` 会原子写入 `.forgeflow-dispatcher/shadow-reconciler-status.json` 的 `shadow-reconciler-status/v1` 最近一轮状态快照，`verify:shadow-cutover:approval` 会独立校验 approval marker、drill evidence SHA-256 和 revocation marker，`verify:shadow-cutover:ready` 会把 strict preflight 与 approval evidence 校验合成最终切换前门禁，`verify:shadow-cutover:ready:evidence` 会把同一最终门禁 payload 原子写入 `.forgeflow-dispatcher/shadow-cutover-ready.json`，`verify:shadow-cutover:complete:evidence` 会在切换后确认 Postgres primary snapshot 可读并写入 `.forgeflow-dispatcher/shadow-cutover-complete.json`；Postgres primary backend 会在连接前同时校验 approval marker、drill evidence hash、ready evidence 和 revocation marker；源码备份/恢复脚本使用位置参数，打包 runtime CLI 才使用 `--backup-dir` 形式。
+- 仓库现在内置阶段三参考部署和演练入口：`pnpm verify:stage3`、`pnpm verify:stage3:live`、`pnpm verify:shadow-drift:reconciler`、`pnpm verify:shadow-cutover:reconciler`、`pnpm verify:shadow-cutover:drill`、`pnpm verify:shadow-cutover:drill:evidence`、`pnpm verify:shadow-cutover:approve`、`pnpm verify:shadow-cutover:approval`、`pnpm verify:shadow-cutover:ready`、`pnpm verify:shadow-cutover:ready:evidence`、`pnpm verify:shadow-cutover:complete`、`pnpm verify:shadow-cutover:complete:evidence`、`pnpm verify:shadow-cutover:revoke`、`scripts/backup-runtime-state.mjs`、`scripts/restore-runtime-state.mjs`、`scripts/verify-stage3-dr.mjs`、`scripts/verify-live-dispatcher-dr.mjs`、`deploy/compose/*`、`deploy/helm/forgeflow/*`；`verify:shadow-cutover:reconciler` 会以 strict cutover 条件长期巡检 shadow 配置、primary backend 配置和零 drift，`verify:shadow-drift:reconciler` 与 `verify:shadow-cutover:reconciler` 会原子写入 `.forgeflow-dispatcher/shadow-reconciler-status.json` 的 `shadow-reconciler-status/v1` 最近一轮状态快照，`verify:shadow-cutover:approval` 会独立校验 approval marker、drill evidence SHA-256 和 revocation marker，`verify:shadow-cutover:ready` 会把 strict preflight 与 approval evidence 校验合成最终切换前门禁，`verify:shadow-cutover:ready:evidence` 会把同一最终门禁 payload 原子写入 `.forgeflow-dispatcher/shadow-cutover-ready.json`，`verify:shadow-cutover:complete:evidence` 会在切换后确认 Postgres primary snapshot 可读并写入 `.forgeflow-dispatcher/shadow-cutover-complete.json`；Postgres primary backend 会在连接前同时校验 approval marker、drill evidence hash、ready evidence 和 revocation marker；源码脚本和打包 CLI 复用同一个备份核心，v1 manifest 会记录文件哈希与 SQLite watermark，restore 在改动目标前完成全量校验并使用 staging / rollback；源码脚本使用位置参数，打包 runtime CLI 才使用 `--backup-dir` 形式。
 - `packages/provider-registry` 现在把 `trae` 作为正式 provider capability 记录在 registry 中，并提供默认拒绝、白名单放行的第三方 provider admission gate；`packages/worker-protocol` 提供 start/result payload helper 作为内部 Worker SDK 契约。公网 API / SDK 稳定性承诺仍后置。
 - Trae MCP worker 仍保留，但现在只应视为交互式、人工值守或兼容性 fallback，不是首选未来路径。
 
@@ -294,7 +295,7 @@ forgeflow-dispatcher start
 npm install -g @tingrudeng/codex-beta-runtime
 forgeflow-codex-beta init
 forgeflow-codex-beta doctor
-export DISPATCHER_API_TOKEN="your-secret-token"
+export DISPATCHER_WORKER_TOKEN="worker-specific-token"
 forgeflow-codex-beta start worker
 ```
 
@@ -303,11 +304,11 @@ forgeflow-codex-beta start worker
 ```bash
 pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta init
 pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta doctor
-export DISPATCHER_API_TOKEN="your-secret-token"
+export DISPATCHER_WORKER_TOKEN="worker-specific-token"
 pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta start worker
 ```
 
-`codex` / `gemini` 远程 runtime 会通过 `POST /api/workers/:workerId/claim-task` 领取任务，并把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 v1 envelope 回写到 start/result mutation。dispatcher 使用默认 `token` 认证模式时，远程机器必须设置同一个 `DISPATCHER_API_TOKEN`。
+`codex` / `gemini` 远程 runtime 会通过 `POST /api/workers/:workerId/claim-task` 领取任务，并把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 v1 envelope 回写到 start/result mutation。远程机器应设置自己的 `DISPATCHER_WORKER_TOKEN`；仅迁移期继续兼容 `DISPATCHER_API_TOKEN`，不要把控制层主 token 分发到 worker 主机。
 
 远程 Trae 运行时：
 
@@ -377,7 +378,7 @@ node scripts/release-package.js --package automation-gateway-core --bump prerele
 node scripts/release-package.js --package trae-beta-runtime --bump prerelease --tag beta --publish --ci
 ```
 
-该助手默认为 dry-run 模式，只有显式传入 `--publish` 才会真正修改 `package.json` 并发布到 npm。`--publish` 现在是 CI-only 门禁，本地直接执行会失败；推荐入口是 `.github/workflows/release.yml`，由 GitHub Actions 用 OIDC + provenance 执行发布；发布后的 OpenSSF Scorecard 改由独立的 `.github/workflows/release-scorecard.yml` 在 `Release` 成功后跟跑。发包前还会校验 npm `dist-tag`；包含 shell 元字符或非法字符的 tag 会在改版本号之前直接失败。手动发布路径会先完成 `npm publish`，再提交版本变更并推送 release tag，避免 npm 发布失败时 git 历史提前记录未发布版本。
+该助手默认为 dry-run 模式，只有显式传入 `--publish` 才会真正修改 `package.json` 并发布到 npm。`--publish` 现在是 CI-only 门禁，本地直接执行会失败；推荐入口是 `.github/workflows/release.yml`，由 GitHub Actions 用 OIDC + provenance 执行发布；发布后的 OpenSSF Scorecard 改由独立的 `.github/workflows/release-scorecard.yml` 在 `Release` 成功后跟跑。发包前还会校验 npm `dist-tag`；包含 shell 元字符或非法字符的 tag 会在改版本号之前直接失败。手动发布只允许从 `main` ref 触发，会在版本 bump 后确认精确新版本仍可发布；它先完成 `npm publish`，再提交版本变更并把 release tag 推回 `main`，避免 npm 发布失败时 git 历史提前记录未发布版本。
 
 自动发布还有几条硬门禁：
 
@@ -385,6 +386,7 @@ node scripts/release-package.js --package trae-beta-runtime --bump prerelease --
 - 只有当 npm 已把当前仓库 `TingRuDeng/forgeflow-platform` 配置成 `@tingrudeng/*` 包的 Trusted Publisher，且仓库或组织变量 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 时，push 自动发包才会真正执行；否则 workflow 会成功结束并明确写出“已跳过自动发布”。
 - push 自动发布只会把 npm 上已经存在的包名纳入发布矩阵；全新包名会在 Actions summary 标记为 `自动发布等待 npm 包名配置`，先完成 npm 包名和 Trusted Publisher 配置后再由后续版本自动发布。
 - 手动发布和自动发布的 release preflight 会在 publish 前校验目标包名存在，并把当前 package.json 内 `workspace:*` 依赖解析为本地 workspace 版本，要求对应依赖版本已经发布；例如 provider runtime 会在 `@tingrudeng/beta-runtime-core@<本地版本>` 未发布时提前失败。
+- 手动发布会在 bump 后再次查询 `@tingrudeng/<package>@<new-version>`；只有明确的 npm E404 表示版本可用，已发布版本或 registry 查询异常都会在 build / publish 前失败。
 - push 自动发布在 `npm publish` 前会先运行 `pnpm lint`、`pnpm docs:validate`、`pnpm typecheck`、`pnpm test` 和 `pnpm verify:shadow-drift`，避免 main 分支直接绕过常规验证发包。
 - release job 会先把 npm CLI 升到 `11.12.1`；npm Trusted Publishing 至少要求 `npm 11.5.1+`，不要再用 Node 自带的 npm 10.x 直接判断发布链是否可用。
 - `pnpm report:runtime-packages:setup` 会只读查询 npm registry，输出 runtime 包的 package/version 状态、发布顺序和 Trusted Publisher 配置要求；需要把缺口作为硬失败时可加 `-- --require-ready`。
@@ -420,6 +422,7 @@ node scripts/run-dispatcher-server.js \
 ```bash
 # 默认 token 模式（推荐生产环境）
 export DISPATCHER_API_TOKEN="your-secret-token"
+export DISPATCHER_WORKER_TOKENS='{"codex-mac-mini":"codex-worker-token","trae-remote-01":"trae-worker-token"}'
 node scripts/run-dispatcher-server.js \
   --host 127.0.0.1 \
   --port 8787 \
@@ -427,15 +430,20 @@ node scripts/run-dispatcher-server.js \
 ```
 
 认证模式说明（通过 `DISPATCHER_AUTH_MODE` 控制）：
-- `token`（默认）：强制认证模式，必须设置 `DISPATCHER_API_TOKEN`，除 `/health` 外所有接口需要认证
-- `legacy`：兼容模式，当 `DISPATCHER_API_TOKEN` 未设置时，只允许 loopback 地址（127.0.0.1、::1）访问；设置后需认证
+- `token`（默认）：强制认证模式，必须设置控制层 `DISPATCHER_API_TOKEN`；除 `/health` 外请求需携带控制层 token，或在 worker 路由携带匹配的 worker token
+- `legacy`：兼容模式，当 `DISPATCHER_API_TOKEN` 未设置时，只允许 loopback 匿名访问，也接受已配置的远程 worker token；设置控制层 token 后需认证
 - `open`：完全开放模式，所有接口可匿名访问，适合本地开发
+
+`DISPATCHER_API_TOKEN` 是控制层 token，可访问全部 API。`DISPATCHER_WORKER_TOKENS` 是 `workerId -> token` 的 JSON 映射；每个 token 必须唯一、不得带首尾空白，也不能与控制层 token 相同。映射中的 token 只能注册对应 worker，并访问该 worker 自己的 claim/start/result/event/heartbeat 路由，不能读取 dashboard 或其他 worker。worker runtime 会优先读取 `DISPATCHER_WORKER_TOKEN`，再兼容回退到 `DISPATCHER_API_TOKEN`。
+
+`forgeflow-dispatcher init` 与源码侧 config CLI 在 Unix 上会把 dispatcher 配置文件创建或修正为 `0600`；服务端也会拒绝 group / other 可读的凭据配置。不要用手工复制重新放宽该文件权限。
 
 dispatcher 状态锁说明：
 - 所有基于状态目录的 dispatcher 路径当前共用 `.runtime-state.lock`
 - `DISPATCHER_STATE_LOCK_TIMEOUT_MS` 控制获取锁的总超时时间，默认 `2000`
 - `DISPATCHER_STATE_LOCK_RETRY_MS` 控制重试间隔，默认 `25`
 - `DISPATCHER_STATE_LOCK_STALE_MS` 控制陈旧锁回收阈值，默认 `30000`
+- stale 阈值只用于判定无存活 PID 保护的遗留锁；仍存活的 owner 不会被强制回收
 - 锁竞争超时返回 `503`，调用方应重试而不是把它当作鉴权或参数错误
 
 如需显式回退到 JSON 持久化：
@@ -457,6 +465,8 @@ node scripts/run-worker-daemon.js \
   --pool codex \
   --repo-dir /abs/path/to/business-repo
 ```
+
+每个 assignment 子进程默认最多运行 30 分钟，可用 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 覆盖为正整数毫秒值。`SIGINT` / `SIGTERM` 会同时取消 dispatcher HTTP 请求、结果重试等待和完整子进程树，避免 worker 停止时继续等待网络超时。
 
 远程机器推荐的 Codex npm 入口：
 
@@ -485,7 +495,8 @@ forgeflow-trae-beta start all
 
 - `start all` 会按 `launch -> gateway -> worker` 顺序启动，并等待关键就绪检查通过后再返回。
 - 源码脚本 `run-trae-automation-launch.js --force-clean-launch` 与 packaged runtime 一样，会先退出既有 macOS Trae app 并等待旧 CDP 端口释放，再拉起新进程。
-- `start gateway` 默认启用 session store，并将会话状态落在 `.forgeflow-trae-gateway/sessions.json`。
+- `start gateway` 默认启用 session store，并将会话状态落在 `~/.forgeflow-trae-beta/sessions/sessions.json`。
+- session store 的文件锁只保证同一状态目录的本机写入完整性，不提供跨主机 lease 或多 active gateway 协调；gateway 启动仍会把已有非终态 session 标记为 `interrupted`。
 - Trae worker 的软超时恢复依赖该会话状态；如需修改目录可显式传 `--state-dir /abs/path/to/state-dir`。
 - `forgeflow-trae-beta doctor` 现在会额外输出 dispatcher/gateway/CDP 连通性检查（标记为 optional），用于快速定位部署环境问题。
 
@@ -577,8 +588,13 @@ This tells git to use SSH over port 443 via GitHub's `ssh.github.com` endpoint, 
 
 本项目使用 GitHub Actions 作为持续集成门禁。每次推送到 `main` 分支或创建 Pull Request 时，CI 会自动执行：
 
+- `pnpm audit --prod --audit-level high`
+- `pnpm lint`（包含 Console 本地 lint）
+- `pnpm docs:validate`
 - `pnpm typecheck`
+- `pnpm -r --if-present build`
 - `pnpm test`
+- `pnpm coverage:critical`
 - `git diff --check`
 
 CI 配置见 `.github/workflows/ci.yml`。

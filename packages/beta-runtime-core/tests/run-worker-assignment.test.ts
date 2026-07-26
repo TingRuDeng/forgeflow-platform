@@ -76,6 +76,11 @@ describe("shared run-worker-assignment runner", () => {
     expect(summary.verificationCommands).toHaveLength(1);
     expect(summary.verificationCommands[0]).toMatchObject({
       command: "node -e 'console.log(\"verify ok\")'",
+      argv: [
+        expect.any(String),
+        "-c",
+        expect.stringContaining("process.versions.node"),
+      ],
       cwd: worktreeDir,
     });
   });
@@ -188,6 +193,57 @@ describe("shared run-worker-assignment runner", () => {
     expect(workerResult.artifactBundle.trajectory.steps.at(-1)).toMatchObject({
       phase: "result",
       status: "failed",
+    });
+  });
+
+  it("terminates the launch process tree on timeout and skips verification", async () => {
+    const { assignmentDir, worktreeDir, outputDir } = writeAssignmentPackage(makeTempDir());
+    const grandchildMarker = path.join(worktreeDir, "grandchild-finished");
+    const verificationMarker = path.join(worktreeDir, "verification-ran");
+    fs.writeFileSync(path.join(assignmentDir, "assignment.json"), JSON.stringify({
+      taskId: "dispatch-1:task-1",
+      workerId: "codex-worker",
+      pool: "codex",
+      branchName: "ai/codex/task-1",
+      repo: "owner/repo",
+      defaultBranch: "main",
+      commands: {
+        test: `node -e "require('fs').writeFileSync(${JSON.stringify(verificationMarker)}, 'ran')"`,
+      },
+    }));
+    const grandchildCode = `setTimeout(() => require("fs").writeFileSync(${JSON.stringify(grandchildMarker)}, "done"), 200)`;
+    const parentCode = [
+      'const { spawn } = require("node:child_process");',
+      `spawn(process.execPath, ["-e", ${JSON.stringify(grandchildCode)}], { stdio: "ignore" });`,
+      "setInterval(() => {}, 1000);",
+    ].join("");
+
+    const summary = await runWorkerAssignment({
+      assignmentDir,
+      worktreeDir,
+      outputDir,
+      execTimeoutMs: 30,
+      buildLaunchCommand(): AssignmentLaunchCommand {
+        return {
+          provider: "codex",
+          argv: ["node", "-e", parentCode],
+          cwd: worktreeDir,
+        };
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(summary).toMatchObject({
+      status: "failed",
+      timedOut: true,
+      verificationPassed: false,
+    });
+    expect(fs.existsSync(grandchildMarker)).toBe(false);
+    expect(fs.existsSync(verificationMarker)).toBe(false);
+    const workerResult = JSON.parse(fs.readFileSync(path.join(outputDir, "worker-result.json"), "utf8"));
+    expect(workerResult.verification).toEqual({
+      allPassed: false,
+      commands: [],
     });
   });
 

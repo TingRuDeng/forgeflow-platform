@@ -12,8 +12,13 @@ import {
 import {
   buildStructuredDashboardSnapshotAsync,
   loadStructuredRuntimeStateAsync,
+  readRuntimeAuditEventPageAsync,
   readStructuredProjectionHealthAsync,
 } from "./runtime-state-query-store.js";
+import {
+  MAX_RUNTIME_AUDIT_EVENT_PAGE_LIMIT,
+  RUNTIME_EVENTS_RETENTION_LIMIT,
+} from "./runtime-events.js";
 import { readRuntimeStatePrimaryCutoverStatus } from "./runtime-state-primary-cutover.js";
 import { readPersistedRuntimeStateShadowReconcilerStatus } from "./runtime-state-shadow-health.js";
 import { getRuntimeStateShadowMode, readRuntimeStateShadowWriteStatus } from "./runtime-state-shadow.js";
@@ -29,6 +34,7 @@ import {
   getAssignedTaskForWorker,
   heartbeatWorker,
   interruptTaskForInput,
+  InvalidDispatchInputError,
   loadRuntimeStateAsync,
   markWorkerOffline,
   reconcileRuntimeState,
@@ -49,7 +55,11 @@ import {
 import { buildStage3SloStatus } from "./slo.js";
 import { safeTaskDirName } from "./task-worktree.js";
 import { formatLocalTimestamp } from "../time.js";
-import { getDispatcherAuthMode, getDispatcherApiToken } from "./dispatcher-config.js";
+import {
+  getDispatcherAuthMode,
+  getDispatcherApiToken,
+  getDispatcherWorkerTokens,
+} from "./dispatcher-config.js";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
 const STATE_LOCK_FILENAME = ".runtime-state.lock";
@@ -59,11 +69,19 @@ const DEFAULT_STATE_LOCK_STALE_MS = 30000;
 const STRUCTURED_READS_ENV = "DISPATCHER_STRUCTURED_READS";
 const READ_ONLY_MODE_ENV = "DISPATCHER_READ_ONLY_MODE";
 const ARTIFACT_RETENTION_MAX_BUNDLES_ENV = "DISPATCHER_ARTIFACT_RETENTION_MAX_BUNDLES";
-const STATE_LOCK_SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 let stateLockTimeoutCount = 0;
 
 const AUTH_WHITELIST_PATHS = ["/health"];
+const TRAE_WORKER_PATHS = new Set([
+  "/api/trae/register",
+  "/api/trae/fetch-task",
+  "/api/trae/start-task",
+  "/api/trae/report-progress",
+  "/api/trae/submit-result",
+  "/api/trae/heartbeat",
+]);
+const SCOPED_WORKER_ROUTE_PATTERN = /^\/api\/workers\/([^/]+)\/(?:heartbeat|offline|assigned-task|claim-task|start-task|result|events)$/;
 
 type AuthMode = "legacy" | "token" | "open";
 type HeaderMap = Record<string, string>;
@@ -83,6 +101,7 @@ type DispatcherRequestInput = {
   authHeader?: string;
   clientAddress?: string;
   internalCall?: boolean;
+  authenticatedWorkerId?: string;
 };
 
 function useStructuredReads() {
@@ -110,11 +129,12 @@ function persistAttemptArtifactFiles(stateDir: string, state: RuntimeState, atte
   const persisted = persistArtifactBundleFiles(stateDir, bundle, {
     maxBundles: resolveArtifactMaxBundles(),
   });
+  const removedBundleIds = new Set(persisted.removedBundleIds);
   return {
     ...state,
     artifactBundles: (state.artifactBundles ?? []).map((candidate) => (
       candidate.bundleId === persisted.bundle.bundleId ? persisted.bundle : candidate
-    )),
+    )).filter((candidate) => !candidate.bundleId || !removedBundleIds.has(candidate.bundleId)),
   };
 }
 
@@ -148,68 +168,122 @@ function safeTokenCompare(a: string, b: string): boolean {
   }
 }
 
-function checkAuthToken(authHeader: string | undefined, apiToken: string): boolean {
+function readBearerToken(authHeader: string | undefined): string | null {
   if (!authHeader) {
-    return false;
+    return null;
   }
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!match) {
-    return false;
+    return null;
   }
-  const token = match[1];
-  return safeTokenCompare(token, apiToken);
+  return match[1];
 }
 
-function createAuthMiddleware(input: { method: string; pathname: string; authHeader?: string; clientAddress?: string; internalCall?: boolean }): null | { status: number; error: string } {
-  if (input.internalCall) {
+function checkAuthToken(authHeader: string | undefined, apiToken: string): boolean {
+  const token = readBearerToken(authHeader);
+  return token !== null && safeTokenCompare(token, apiToken);
+}
+
+type AuthResult =
+  | { workerId?: string }
+  | { status: number; error: string };
+
+function workerIdFromScopedRoute(pathname: string): string | null {
+  const match = pathname.match(SCOPED_WORKER_ROUTE_PATTERN);
+  if (!match) {
     return null;
+  }
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function workerIdFromToken(authHeader: string | undefined, workerTokens: Record<string, string>): string | null {
+  const token = readBearerToken(authHeader);
+  if (!token) {
+    return null;
+  }
+  return Object.entries(workerTokens).find(([, candidate]) => safeTokenCompare(token, candidate))?.[0] ?? null;
+}
+
+function authorizeWithConfiguredTokens(input: {
+  pathname: string;
+  authHeader?: string;
+  apiToken: string | null;
+  workerTokens: Record<string, string>;
+}): AuthResult {
+  if (input.apiToken && checkAuthToken(input.authHeader, input.apiToken)) {
+    return {};
+  }
+
+  const authenticatedWorkerId = workerIdFromToken(input.authHeader, input.workerTokens);
+  if (!authenticatedWorkerId) {
+    return { status: 401, error: "unauthorized" };
+  }
+
+  const routeWorkerId = workerIdFromScopedRoute(input.pathname);
+  if (
+    routeWorkerId === authenticatedWorkerId
+    || input.pathname === "/api/workers/register"
+    || TRAE_WORKER_PATHS.has(input.pathname)
+  ) {
+    return { workerId: authenticatedWorkerId };
+  }
+
+  return { status: 403, error: "forbidden" };
+}
+
+function createAuthMiddleware(input: { method: string; pathname: string; authHeader?: string; clientAddress?: string; internalCall?: boolean }): AuthResult {
+  if (input.internalCall) {
+    return {};
   }
 
   const authMode = getDispatcherAuthMode();
 
   if (authMode === "open") {
-    return null;
+    return {};
   }
 
+  if (AUTH_WHITELIST_PATHS.includes(input.pathname)) {
+    return {};
+  }
+
+  const apiToken = getDispatcherApiToken();
+  const workerTokens = getDispatcherWorkerTokens();
+
   if (authMode === "token") {
-    const apiToken = getDispatcherApiToken();
     if (!apiToken) {
       return {
         status: 500,
         error: "DISPATCHER_API_TOKEN is required when auth mode is 'token'",
       };
     }
-
-    if (AUTH_WHITELIST_PATHS.includes(input.pathname)) {
-      return null;
-    }
-
-    if (!checkAuthToken(input.authHeader, apiToken)) {
-      return {
-        status: 401,
-        error: "unauthorized",
-      };
-    }
-    return null;
+    return authorizeWithConfiguredTokens({
+      pathname: input.pathname,
+      authHeader: input.authHeader,
+      apiToken,
+      workerTokens,
+    });
   }
 
-  const apiToken = getDispatcherApiToken();
   if (apiToken) {
-    if (AUTH_WHITELIST_PATHS.includes(input.pathname)) {
-      return null;
-    }
-
-    if (!checkAuthToken(input.authHeader, apiToken)) {
-      return {
-        status: 401,
-        error: "unauthorized",
-      };
-    }
-    return null;
+    return authorizeWithConfiguredTokens({
+      pathname: input.pathname,
+      authHeader: input.authHeader,
+      apiToken,
+      workerTokens,
+    });
   }
 
-  if (AUTH_WHITELIST_PATHS.includes(input.pathname)) {
-    return null;
+  if (workerIdFromToken(input.authHeader, workerTokens)) {
+    return authorizeWithConfiguredTokens({
+      pathname: input.pathname,
+      authHeader: input.authHeader,
+      apiToken: null,
+      workerTokens,
+    });
   }
 
   if (!isLoopbackAddress(input.clientAddress)) {
@@ -219,7 +293,29 @@ function createAuthMiddleware(input: { method: string; pathname: string; authHea
     };
   }
 
-  return null;
+  return {};
+}
+
+function isScopedTraeRequestAuthorized(
+  state: RuntimeState,
+  pathname: string,
+  body: Record<string, any>,
+  authenticatedWorkerId: string,
+): boolean {
+  if (pathname !== "/api/trae/submit-result") {
+    return body.worker_id === authenticatedWorkerId;
+  }
+
+  const taskId = typeof body.task_id === "string" ? body.task_id : "";
+  const attemptId = typeof body.attempt_id === "string" ? body.attempt_id : "";
+  const attempt = attemptId
+    ? (state.taskAttempts ?? []).find((candidate) => candidate.attemptId === attemptId)
+    : [...(state.taskAttempts ?? [])].reverse().find((candidate) => candidate.taskId === taskId);
+  const assignedWorkerId = attempt?.workerId
+    ?? state.assignments.find((assignment) => assignment.taskId === taskId)?.workerId
+    ?? state.tasks.find((task) => task.id === taskId)?.assignedWorkerId;
+
+  return assignedWorkerId === authenticatedWorkerId;
 }
 
 function nowIso(): string {
@@ -296,9 +392,14 @@ function createJsonResponse(status: number, value: unknown, extraHeaders: Header
   };
 }
 
-function createNoStoreJsonResponse(status: number, value: unknown): JsonResponse {
+function createNoStoreJsonResponse(
+  status: number,
+  value: unknown,
+  extraHeaders: HeaderMap = {},
+): JsonResponse {
   return createJsonResponse(status, value, {
     "cache-control": "no-store",
+    ...extraHeaders,
   });
 }
 
@@ -731,41 +832,118 @@ class StateLockTimeoutError extends Error {
 }
 
 function getStateLockTimeoutMs() {
-  return Number(process.env.DISPATCHER_STATE_LOCK_TIMEOUT_MS || DEFAULT_STATE_LOCK_TIMEOUT_MS);
+  return resolvePositiveIntegerEnv("DISPATCHER_STATE_LOCK_TIMEOUT_MS", DEFAULT_STATE_LOCK_TIMEOUT_MS);
 }
 
 function getStateLockRetryMs() {
-  return Number(process.env.DISPATCHER_STATE_LOCK_RETRY_MS || DEFAULT_STATE_LOCK_RETRY_MS);
+  return resolvePositiveIntegerEnv("DISPATCHER_STATE_LOCK_RETRY_MS", DEFAULT_STATE_LOCK_RETRY_MS);
 }
 
 function getStateLockStaleMs() {
-  return Number(process.env.DISPATCHER_STATE_LOCK_STALE_MS || DEFAULT_STATE_LOCK_STALE_MS);
+  return resolvePositiveIntegerEnv("DISPATCHER_STATE_LOCK_STALE_MS", DEFAULT_STATE_LOCK_STALE_MS);
 }
 
-function sleepSync(ms: number): void {
-  if (ms <= 0) {
-    return;
+function resolvePositiveIntegerEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+interface StateLockMetadata {
+  pid: number;
+  ownerToken: string;
+  createdAt: string;
+}
+
+interface StateLockSnapshot {
+  stats: fs.Stats;
+  metadata: StateLockMetadata | null;
+}
+
+function readStateLockSnapshot(lockPath: string): StateLockSnapshot | null {
+  try {
+    const stats = fs.statSync(lockPath);
+    let metadata: StateLockMetadata | null = null;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(lockPath, "utf8")) as Partial<StateLockMetadata>;
+      if (
+        Number.isSafeInteger(parsed.pid)
+        && (parsed.pid ?? 0) > 0
+        && typeof parsed.ownerToken === "string"
+        && parsed.ownerToken.length > 0
+        && typeof parsed.createdAt === "string"
+      ) {
+        metadata = parsed as StateLockMetadata;
+      }
+    } catch {}
+    return { stats, metadata };
+  } catch (error: any) {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+    throw error;
   }
-  Atomics.wait(STATE_LOCK_SLEEP_BUFFER, 0, 0, ms);
 }
 
 export function getStateLockFilePath(stateDir: string): string {
   return path.join(stateDir, STATE_LOCK_FILENAME);
 }
 
-function isLockStale(lockPath: string, staleMs: number): boolean {
+function isProcessAlive(pid: number): boolean {
   try {
-    const stats = fs.statSync(lockPath);
-    return Date.now() - stats.mtimeMs >= staleMs;
+    process.kill(pid, 0);
+    return true;
+  } catch (error: any) {
+    if (error?.code === "ESRCH") {
+      return false;
+    }
+    return true;
+  }
+}
+
+function isSameLockFile(left: fs.Stats, right: fs.Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function unlinkMatchingStateLock(
+  lockPath: string,
+  expected: StateLockSnapshot,
+  requireOwnerToken: boolean,
+): boolean {
+  const current = readStateLockSnapshot(lockPath);
+  if (
+    !current
+    || !isSameLockFile(current.stats, expected.stats)
+    || (requireOwnerToken && current.metadata?.ownerToken !== expected.metadata?.ownerToken)
+  ) {
+    return false;
+  }
+  fs.unlinkSync(lockPath);
+  return true;
+}
+
+function tryReclaimStaleStateLock(lockPath: string, staleMs: number): boolean {
+  const snapshot = readStateLockSnapshot(lockPath);
+  if (!snapshot || Date.now() - snapshot.stats.mtimeMs < staleMs) {
+    return false;
+  }
+  if (snapshot.metadata && isProcessAlive(snapshot.metadata.pid)) {
+    return false;
+  }
+  try {
+    return unlinkMatchingStateLock(lockPath, snapshot, Boolean(snapshot.metadata));
   } catch (error: any) {
     if (error?.code === "ENOENT") {
-      return false;
+      return true;
     }
     throw error;
   }
 }
 
-function acquireStateLock(stateDir: string): () => void {
+export async function acquireStateLock(stateDir: string): Promise<() => void> {
   fs.mkdirSync(stateDir, { recursive: true });
   const lockPath = getStateLockFilePath(stateDir);
   const timeoutMs = getStateLockTimeoutMs();
@@ -774,22 +952,40 @@ function acquireStateLock(stateDir: string): () => void {
   const deadline = Date.now() + timeoutMs;
 
   while (true) {
-    let fd = null;
+    let fd: number | null = null;
+    let createdLock: StateLockSnapshot | null = null;
     try {
       fd = fs.openSync(lockPath, "wx");
+      const ownerToken = crypto.randomUUID();
+      createdLock = {
+        stats: fs.fstatSync(fd),
+        metadata: {
+          pid: process.pid,
+          ownerToken,
+          createdAt: nowIso(),
+        },
+      };
       const metadata = JSON.stringify({
-        pid: process.pid,
-        createdAt: nowIso(),
+        ...createdLock.metadata,
       });
       fs.writeFileSync(fd, metadata);
       fs.closeSync(fd);
+      fd = null;
 
+      let released = false;
       return () => {
+        if (released) {
+          return;
+        }
+        released = true;
         try {
-          fs.unlinkSync(lockPath);
+          unlinkMatchingStateLock(lockPath, createdLock!, true);
         } catch (error: any) {
           if (error?.code !== "ENOENT") {
-            throw error;
+            console.error(
+              "[dispatcher-state-lock] release failed:",
+              error instanceof Error ? error.message : String(error),
+            );
           }
         }
       };
@@ -801,25 +997,23 @@ function acquireStateLock(stateDir: string): () => void {
       }
 
       if (error?.code !== "EEXIST") {
+        if (createdLock) {
+          try {
+            unlinkMatchingStateLock(lockPath, createdLock, false);
+          } catch {}
+        }
         throw error;
       }
 
-      if (isLockStale(lockPath, staleMs)) {
-        try {
-          fs.unlinkSync(lockPath);
-          continue;
-        } catch (unlinkError: any) {
-          if (unlinkError?.code === "ENOENT") {
-            continue;
-          }
-        }
+      if (tryReclaimStaleStateLock(lockPath, staleMs)) {
+        continue;
       }
 
       if (Date.now() >= deadline) {
         throw new StateLockTimeoutError(lockPath, timeoutMs);
       }
 
-      sleepSync(retryMs);
+      await sleep(retryMs);
     }
   }
 }
@@ -847,7 +1041,7 @@ export async function readJsonBody(request: AsyncIterable<Buffer | string>, maxB
 }
 
 async function withStateAsync<T>(stateDir: string, callback: (state: RuntimeState) => T | Promise<T>): Promise<T> {
-  const releaseLock = acquireStateLock(stateDir);
+  const releaseLock = await acquireStateLock(stateDir);
   try {
     const state = await loadRuntimeStateAsync(stateDir);
     const result = await callback(state);
@@ -891,12 +1085,22 @@ function listBackupManifests(stateDir: string): Array<{ name: string; path: stri
 }
 
 export async function handleDispatcherHttpRequest(input: DispatcherRequestInput): Promise<JsonResponse> {
-  const { stateDir, method, pathname, query = {}, body = {}, authHeader, clientAddress, internalCall } = input;
+  const {
+    stateDir,
+    method,
+    pathname,
+    query = {},
+    body = {},
+    authHeader,
+    clientAddress,
+    internalCall,
+  } = input;
 
-  const authError = createAuthMiddleware({ method, pathname, authHeader, clientAddress, internalCall });
-  if (authError) {
-    return createJsonResponse(authError.status, { error: authError.error });
+  const authResult = createAuthMiddleware({ method, pathname, authHeader, clientAddress, internalCall });
+  if ("status" in authResult) {
+    return createJsonResponse(authResult.status, { error: authResult.error });
   }
+  const authenticatedWorkerId = input.authenticatedWorkerId ?? authResult.workerId;
 
   try {
     if (isReadOnlyModeEnabled() && isMutationRequest(method, pathname)) {
@@ -977,6 +1181,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
               repoConcurrencySaturation: snapshot.metrics.repoConcurrencySaturation,
               failureCodes: snapshot.metrics.failureCodes,
               reviewReasonCodes: snapshot.metrics.reviewReasonCodes,
+              eventWindow: snapshot.metrics.eventWindow,
               workers: snapshot.stats.workers,
               tasks: snapshot.stats.tasks,
             },
@@ -1008,6 +1213,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
               repoConcurrencySaturation: snapshot.metrics.repoConcurrencySaturation,
               failureCodes: snapshot.metrics.failureCodes,
               reviewReasonCodes: snapshot.metrics.reviewReasonCodes,
+              eventWindow: snapshot.metrics.eventWindow,
               workers: snapshot.stats.workers,
               tasks: snapshot.stats.tasks,
             },
@@ -1069,7 +1275,33 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
     }
 
     if (method === "GET" && pathname === "/api/query/events") {
-      return createNoStoreJsonResponse(200, (await loadStructuredRuntimeStateAsync(stateDir)).events);
+      const limit = query.limit === undefined ? undefined : Number(query.limit);
+      const beforeSequence = query.beforeSequence === undefined
+        ? undefined
+        : Number(query.beforeSequence);
+      if (
+        (limit !== undefined && (!Number.isSafeInteger(limit) || limit <= 0 || limit > MAX_RUNTIME_AUDIT_EVENT_PAGE_LIMIT))
+        || (beforeSequence !== undefined && (!Number.isSafeInteger(beforeSequence) || beforeSequence <= 0))
+      ) {
+        return createNoStoreJsonResponse(400, {
+          error: `limit must be an integer from 1 to ${MAX_RUNTIME_AUDIT_EVENT_PAGE_LIMIT}; beforeSequence must be a positive integer`,
+        });
+      }
+      const page = await readRuntimeAuditEventPageAsync(stateDir, {
+        limit,
+        beforeSequence,
+      });
+      return createNoStoreJsonResponse(200, page.events, {
+        "x-forgeflow-event-scope": page.scope,
+        "x-forgeflow-event-total": String(page.total),
+        "x-forgeflow-event-returned": String(page.events.length),
+        "x-forgeflow-event-limit": String(page.limit),
+        "x-forgeflow-event-has-more": String(page.hasMore),
+        "x-forgeflow-event-retention-limit": String(RUNTIME_EVENTS_RETENTION_LIMIT),
+        ...(page.nextBeforeSequence === null
+          ? {}
+          : { "x-forgeflow-event-next-before-sequence": String(page.nextBeforeSequence) }),
+      });
     }
 
     if (method === "GET" && pathname === "/api/query/reviews") {
@@ -1081,7 +1313,8 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
     }
 
     if (method === "GET" && pathname === "/api/query/artifacts") {
-      return createNoStoreJsonResponse(200, (await loadStructuredRuntimeStateAsync(stateDir)).artifactBundles ?? []);
+      const state = await loadStructuredRuntimeStateAsync(stateDir);
+      return createNoStoreJsonResponse(200, state.artifactBundles ?? []);
     }
 
     if (method === "GET" && pathname === "/api/query/dashboard-snapshot") {
@@ -1128,6 +1361,9 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
     if (method === "POST" && pathname === "/api/workers/register") {
       try {
         const validatedBody = validateWorkerRegisterBody(body);
+        if (authenticatedWorkerId && validatedBody.workerId !== authenticatedWorkerId) {
+          return createJsonResponse(403, { error: "forbidden" });
+        }
         const result = await withStateAsync(stateDir, (state) => {
           const nextState = reconcileRuntimeState(registerWorker(state, validatedBody), {
             now: validatedBody.at,
@@ -1420,47 +1656,57 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
     }
 
     if (method === "POST" && pathname === "/api/dispatches") {
-      const memoryStore = loadMemoryStore(stateDir);
-      const normalizedBody = normalizeDispatchBody(body);
+      try {
+        const memoryStore = loadMemoryStore(stateDir);
+        const normalizedBody = normalizeDispatchBody(body);
 
-      const result = await withStateAsync(stateDir, (state) => {
-        const dispatchResult = createDispatch(state, normalizedBody);
+        const result = await withStateAsync(stateDir, (state) => {
+          const dispatchResult = createDispatch(state, normalizedBody);
 
-        if (memoryStore && memoryStore.lessons && memoryStore.lessons.length > 0) {
-          for (const assignment of dispatchResult.state.assignments) {
-            const task = dispatchResult.state.tasks.find((t: Task) => t.id === assignment.taskId);
-            if (!task) continue;
+          if (memoryStore && memoryStore.lessons && memoryStore.lessons.length > 0) {
+            for (const assignment of dispatchResult.state.assignments) {
+              const task = dispatchResult.state.tasks.find((t: Task) => t.id === assignment.taskId);
+              if (!task) continue;
 
-            const criteria = {
-              repo: task.repo,
-              scope: task.allowedPaths || [],
-              category: undefined,
-              worker_type: task.pool,
-            };
+              const criteria = {
+                repo: task.repo,
+                scope: task.allowedPaths || [],
+                category: undefined,
+                worker_type: task.pool,
+              };
 
-            const relevantLessons = filterLessonsForInjection(
-              memoryStore.lessons,
-              criteria,
-            );
-
-            if (relevantLessons.length > 0) {
-              const injectedContext = injectLessonsIntoContext(
-                assignment.contextMarkdown || "",
-                relevantLessons,
+              const relevantLessons = filterLessonsForInjection(
+                memoryStore.lessons,
+                criteria,
               );
-              assignment.contextMarkdown = injectedContext;
+
+              if (relevantLessons.length > 0) {
+                const injectedContext = injectLessonsIntoContext(
+                  assignment.contextMarkdown || "",
+                  relevantLessons,
+                );
+                assignment.contextMarkdown = injectedContext;
+              }
             }
           }
+
+          return dispatchResult;
+        });
+
+        return createJsonResponse(200, {
+          dispatchId: result.dispatchId,
+          taskIds: result.taskIds,
+          assignments: result.assignments,
+        });
+      } catch (error: any) {
+        rethrowStateLockTimeout(error);
+        if (error instanceof InvalidDispatchInputError || error?.code === "invalid_dispatch_input") {
+          return createJsonResponse(400, {
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
-
-        return dispatchResult;
-      });
-
-      return createJsonResponse(200, {
-        dispatchId: result.dispatchId,
-        taskIds: result.taskIds,
-        assignments: result.assignments,
-      });
+        throw error;
+      }
     }
 
     const reviewMatch = method === "POST"
@@ -1493,17 +1739,19 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
       }
     }
 
-    const traeRoutes = [
-      "/api/trae/register",
-      "/api/trae/fetch-task",
-      "/api/trae/start-task",
-      "/api/trae/report-progress",
-      "/api/trae/submit-result",
-      "/api/trae/heartbeat",
-    ];
-    if (method === "POST" && traeRoutes.includes(pathname)) {
+    if (method === "POST" && TRAE_WORKER_PATHS.has(pathname)) {
       try {
         const result = await withStateAsync(stateDir, (state) => {
+          if (authenticatedWorkerId && !isScopedTraeRequestAuthorized(
+            state,
+            pathname,
+            body,
+            authenticatedWorkerId,
+          )) {
+            return {
+              handled: createJsonResponse(403, { error: "forbidden" }),
+            };
+          }
           const handled = handleTraeRoute(state, { method, pathname, body });
           const attemptId = typeof body.attempt_id === "string" ? body.attempt_id : undefined;
           return {
@@ -1549,9 +1797,9 @@ export async function startDispatcherServer(input: { host?: string; port?: numbe
     const authHeader = request.headers.authorization;
 
     try {
-      const authError = createAuthMiddleware({ method, pathname, authHeader, clientAddress });
-      if (authError) {
-        sendJson(response, authError.status, { error: authError.error });
+      const authResult = createAuthMiddleware({ method, pathname, authHeader, clientAddress });
+      if ("status" in authResult) {
+        sendJson(response, authResult.status, { error: authResult.error });
         return;
       }
 
@@ -1565,6 +1813,7 @@ export async function startDispatcherServer(input: { host?: string; port?: numbe
         authHeader,
         clientAddress,
         internalCall: true,
+        authenticatedWorkerId: authResult.workerId,
       });
       if (handled.headers["content-type"]?.startsWith("text/html")) {
         sendHtml(response, handled.text, handled.headers);

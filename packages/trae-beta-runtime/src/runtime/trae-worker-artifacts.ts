@@ -82,10 +82,7 @@ export function buildTraeWorkerArtifactBundle(input: {
       path: filePath,
       changeType: "modified",
     })),
-    refs: {
-      structuredReport: `artifact://${attemptId}/result.json`,
-      ...(input.sessionId ? { terminalTranscript: `artifact://${attemptId}/session-${input.sessionId}.log` } : {}),
-    },
+    refs: {},
     trajectory,
     retainedContent: buildRetainedContent({
       taskId: input.task.task_id,
@@ -100,7 +97,6 @@ export function buildTraeWorkerArtifactBundle(input: {
       ? [{
           name: "trae:test_output",
           status: input.status === "review_ready" ? "passed" : "failed",
-          outputRef: `artifact://${attemptId}/tests.txt`,
         }]
       : undefined,
     riskNotes: input.risks ?? [],

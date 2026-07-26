@@ -1,5 +1,5 @@
 export function getDispatcherAuthHeader() {
-    const token = process.env.DISPATCHER_API_TOKEN;
+    const token = process.env.DISPATCHER_WORKER_TOKEN || process.env.DISPATCHER_API_TOKEN;
     if (!token) {
         return {};
     }

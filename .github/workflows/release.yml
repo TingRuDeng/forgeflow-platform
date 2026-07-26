@@ -6,7 +6,15 @@ on:
       package:
         description: "workspace package name, for example trae-beta-runtime"
         required: true
-        type: string
+        type: choice
+        options:
+          - automation-gateway-core
+          - beta-runtime-core
+          - codex-beta-runtime
+          - forgeflow-dispatcher
+          - gemini-beta-runtime
+          - trae-beta-runtime
+          - worker-review-orchestrator-cli
       bump:
         description: "version bump type"
         required: true
@@ -87,13 +95,29 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: npm
+    env:
+      RELEASE_PACKAGE: ${{ inputs.package }}
+      RELEASE_BUMP: ${{ inputs.bump }}
+      NPM_DIST_TAG: ${{ inputs.tag }}
+      RELEASE_REF: ${{ github.ref }}
+      RELEASE_REPOSITORY: ${{ github.repository }}
     permissions:
       contents: write
       id-token: write
       issues: write
     steps:
+      - name: Require main release ref
+        run: |
+          if [[ "$RELEASE_REF" != "refs/heads/main" ]]; then
+            echo "Manual releases must run from main; got ${RELEASE_REF}" >&2
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      - name: Validate release inputs
+        run: node scripts/validate-release-inputs.mjs "$RELEASE_PACKAGE" "$NPM_DIST_TAG"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6.0.9
@@ -117,8 +141,8 @@ jobs:
           NPM_TRUSTED_PUBLISHING_ENABLED: ${{ vars.NPM_TRUSTED_PUBLISHING_ENABLED }}
         run: >
           node scripts/release-publish-preflight.mjs
-          --package-dir packages/${{ inputs.package }}
-          --expected-repo ${{ github.repository }}
+          --package-dir "packages/${RELEASE_PACKAGE}"
+          --expected-repo "$RELEASE_REPOSITORY"
           --require-trusted-publishing
           --require-package-exists
           --require-published-workspace-deps
@@ -128,6 +152,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high
 
       - name: Run typecheck
         run: pnpm typecheck
@@ -139,16 +166,16 @@ jobs:
         run: pnpm verify:runtime-packages:install
 
       - name: Run tests
-        run: pnpm --filter @tingrudeng/${{ inputs.package }}... --if-present test
+        run: pnpm --filter "@tingrudeng/${RELEASE_PACKAGE}..." --if-present test
 
       - name: Run shadow drift gate
         run: pnpm verify:shadow-drift
 
       - name: Bump package version
         run: |
-          cd packages/${{ inputs.package }}
+          cd "packages/${RELEASE_PACKAGE}"
           CURRENT_VERSION=$(node -p "require('./package.json').version")
-          if [[ "${{ inputs.bump }}" == "prerelease" ]]; then
+          if [[ "$RELEASE_BUMP" == "prerelease" ]]; then
             if [[ "$CURRENT_VERSION" == *"-beta."* ]]; then
               BASE="${CURRENT_VERSION%%-beta.*}"
               PRE="${CURRENT_VERSION##*-beta.}"
@@ -160,7 +187,7 @@ jobs:
             # Strip prerelease suffix first
             CLEAN="${CURRENT_VERSION%%-beta.*}"
             IFS='.' read -r MAJOR MINOR PATCH <<< "$CLEAN"
-            case "${{ inputs.bump }}" in
+            case "$RELEASE_BUMP" in
               major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
               minor) NEW_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
               patch) NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
@@ -168,10 +195,17 @@ jobs:
           fi
           npm version "$NEW_VERSION" --no-git-tag-version --no-commit-hooks
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
-          echo "📦 ${{ inputs.package }}: $CURRENT_VERSION → $NEW_VERSION"
+          echo "📦 ${RELEASE_PACKAGE}: $CURRENT_VERSION → $NEW_VERSION"
+
+      - name: Verify bumped version is available
+        run: >
+          node scripts/release-publish-preflight.mjs
+          --package-dir "packages/${RELEASE_PACKAGE}"
+          --expected-repo "$RELEASE_REPOSITORY"
+          --require-version-available
 
       - name: Build package
-        run: pnpm --filter @tingrudeng/${{ inputs.package }} build
+        run: pnpm --filter "@tingrudeng/${RELEASE_PACKAGE}" build
 
       - name: Publish to npm with Trusted Publishing (OIDC)
         id: publish
@@ -179,31 +213,31 @@ jobs:
           GITHUB_ACTIONS: "true"
           NPM_CONFIG_PROVENANCE: "true"
         run: |
-          cd packages/${{ inputs.package }}
+          cd "packages/${RELEASE_PACKAGE}"
           cp package.json "$RUNNER_TEMP/release-package-json-before-publish"
-          npm publish --access public --provenance --tag ${{ inputs.tag }}
+          npm publish --access public --provenance --tag "$NPM_DIST_TAG"
           cp "$RUNNER_TEMP/release-package-json-before-publish" package.json
           echo "published=true" >> "$GITHUB_OUTPUT"
-          echo "✅ Published @tingrudeng/${{ inputs.package }}@${{ env.NEW_VERSION }}"
+          echo "✅ Published @tingrudeng/${RELEASE_PACKAGE}@${NEW_VERSION}"
 
       - name: Verify published provider runtime smoke
         run: >
           node scripts/verify-published-runtime-smoke.mjs
-          --package ${{ inputs.package }}
+          --package "$RELEASE_PACKAGE"
           --require-published
 
       - name: Record published package version in git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add packages/${{ inputs.package }}/package.json
+          git add "packages/${RELEASE_PACKAGE}/package.json"
           git diff --cached --quiet && {
             echo "No package.json version change to record after publish"
             exit 1
           }
-          git commit -m "chore(release): 发布 @tingrudeng/${{ inputs.package }}@${{ env.NEW_VERSION }} [skip actions]"
-          git tag -a "release/${{ inputs.package }}@${{ env.NEW_VERSION }}" -m "release @tingrudeng/${{ inputs.package }}@${{ env.NEW_VERSION }}"
-          git push origin "HEAD:${{ github.ref_name }}" --follow-tags
+          git commit -m "chore(release): 发布 @tingrudeng/${RELEASE_PACKAGE}@${NEW_VERSION} [skip actions]"
+          git tag -a "release/${RELEASE_PACKAGE}@${NEW_VERSION}" -m "release @tingrudeng/${RELEASE_PACKAGE}@${NEW_VERSION}"
+          git push origin "HEAD:main" --follow-tags
 
       - name: Summarize post-publish git recovery
         if: ${{ failure() && steps.publish.outcome == 'success' }}
@@ -213,21 +247,20 @@ jobs:
             echo ""
             echo "npm publish 已成功，但 git commit/tag/push 记录失败。"
             echo ""
-            echo "- package: @tingrudeng/${{ inputs.package }}"
-            echo "- version: ${{ env.NEW_VERSION }}"
-            echo "- tag: release/${{ inputs.package }}@${{ env.NEW_VERSION }}"
+            echo "- package: @tingrudeng/${RELEASE_PACKAGE}"
+            echo "- version: ${NEW_VERSION}"
+            echo "- tag: release/${RELEASE_PACKAGE}@${NEW_VERSION}"
             echo ""
-            echo "恢复方式：确认 npm 上该版本存在后，在 main 上补交 packages/${{ inputs.package }}/package.json 的版本变更，并创建同名 release tag。"
+            echo "恢复方式：确认 npm 上该版本存在后，在 main 上补交 packages/${RELEASE_PACKAGE}/package.json 的版本变更，并创建同名 release tag。"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 创建发布后 git 恢复 issue
         if: ${{ failure() && steps.publish.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_PACKAGE: ${{ inputs.package }}
-          RELEASE_VERSION: ${{ env.NEW_VERSION }}
-          RELEASE_TAG: release/${{ inputs.package }}@${{ env.NEW_VERSION }}
         run: |
+          RELEASE_VERSION="$NEW_VERSION"
+          RELEASE_TAG="release/${RELEASE_PACKAGE}@${RELEASE_VERSION}"
           ISSUE_BODY="$RUNNER_TEMP/release-recovery-issue.md"
           cat > "$ISSUE_BODY" <<EOF
           npm publish 已成功，但 git commit / tag / push 记录失败，需要人工补齐版本记录。
@@ -290,6 +323,10 @@ jobs:
     if: github.event_name == 'push' && needs.detect-changes.outputs.has-packages == 'true' && vars.NPM_TRUSTED_PUBLISHING_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: npm
+    env:
+      RELEASE_PACKAGE: ${{ matrix.package.name }}
+      RELEASE_VERSION: ${{ matrix.package.version }}
+      RELEASE_REPOSITORY: ${{ github.repository }}
     permissions:
       contents: read
       id-token: write
@@ -301,6 +338,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      - name: Validate release package
+        run: node scripts/validate-release-inputs.mjs "$RELEASE_PACKAGE" beta
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6.0.9
@@ -325,10 +365,11 @@ jobs:
           NPM_TRUSTED_PUBLISHING_ENABLED: ${{ vars.NPM_TRUSTED_PUBLISHING_ENABLED }}
         run: >
           node scripts/release-publish-preflight.mjs
-          --package-dir packages/${{ matrix.package.name }}
-          --expected-repo ${{ github.repository }}
+          --package-dir "packages/${RELEASE_PACKAGE}"
+          --expected-repo "$RELEASE_REPOSITORY"
           --require-trusted-publishing
           --require-package-exists
+          --require-version-available
           --require-published-workspace-deps
 
       - name: Check deprecated entrypoints
@@ -336,6 +377,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high
 
       - name: Run lint
         run: pnpm lint
@@ -353,39 +397,25 @@ jobs:
         run: pnpm verify:runtime-packages:install
 
       - name: Run tests
-        run: pnpm --filter @tingrudeng/${{ matrix.package.name }}... --if-present test
+        run: pnpm --filter "@tingrudeng/${RELEASE_PACKAGE}..." --if-present test
 
       - name: Run shadow drift gate
         run: pnpm verify:shadow-drift
 
-      - name: Check if exact version is already published
-        id: version_check
-        run: |
-          PACKAGE="@tingrudeng/${{ matrix.package.name }}"
-          VERSION="${{ matrix.package.version }}"
-          if npm view "${PACKAGE}@${VERSION}" version >/dev/null 2>&1; then
-            echo "already_published=true" >> "$GITHUB_OUTPUT"
-            echo "⚪ ${PACKAGE}@${VERSION} already exists on npm; skipping build and publish."
-          else
-            echo "already_published=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Build package
-        if: steps.version_check.outputs.already_published != 'true'
-        run: pnpm --filter @tingrudeng/${{ matrix.package.name }} build
+        run: pnpm --filter "@tingrudeng/${RELEASE_PACKAGE}" build
 
       - name: Publish to npm with Trusted Publishing (OIDC)
-        if: steps.version_check.outputs.already_published != 'true'
         env:
           GITHUB_ACTIONS: "true"
+          NPM_DIST_TAG: ${{ steps.preflight.outputs.dist_tag }}
         run: |
-          cd packages/${{ matrix.package.name }}
-          npm publish --access public --provenance --tag ${{ steps.preflight.outputs.dist_tag }}
-          echo "✅ Published @tingrudeng/${{ matrix.package.name }}@${{ matrix.package.version }}"
+          cd "packages/${RELEASE_PACKAGE}"
+          npm publish --access public --provenance --tag "$NPM_DIST_TAG"
+          echo "✅ Published @tingrudeng/${RELEASE_PACKAGE}@${RELEASE_VERSION}"
 
       - name: Verify published provider runtime smoke
-        if: steps.version_check.outputs.already_published != 'true'
         run: >
           node scripts/verify-published-runtime-smoke.mjs
-          --package ${{ matrix.package.name }}
+          --package "$RELEASE_PACKAGE"
           --require-published

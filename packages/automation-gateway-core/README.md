@@ -10,6 +10,7 @@ ForgeFlow automation gateway runtime 的共享协议与 Trae 自动化基础能�
 - 提供共享 Trae clean relaunch 原语，包括 macOS `.app` 名称解析、退出既有 Trae app、等待旧 CDP 端口释放
 - 提供共享 Trae launch target helper，包括 launch 参数解析、remote debugging port 注入、project path 注入，以及 macOS `.app` 到 `Contents/MacOS/*` 可执行文件的解析规则
 - 提供共享 Trae launcher 编排，包括 debugger target 复用、clean relaunch 后 spawn、spawn error race 和 debugger wait
+- session-store mutation 使用本机 `sessions.json.lock`，在锁内重读最新状态后变更，并用唯一临时文件加 rename 发布；损坏 JSON 不会被空状态覆盖
 
 这个包刻意保持小范围：
 - 只包含解析、校验、gateway protocol、本地 JSON session-store helper、Trae browser automation driver helper、clean relaunch 原语、launch target helper 和 launcher 编排
@@ -50,4 +51,5 @@ pnpm --filter @tingrudeng/automation-gateway-core build
 
 - 这是 library package，不是直接机器入口。
 - 当前主要 consumer 是 `@tingrudeng/trae-beta-runtime` 和仓库内 Trae 源码调试脚本。
+- session 文件锁只保护同一主机、同一状态目录的写入完整性；它不是跨主机 lease，也不支持多个 active gateway。
 - 发布步骤见 `PUBLISHING.md`。

@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import { jsonStore } from "./runtime-state-json.js";
 import {
   loadRuntimeStateFromPostgres,
@@ -32,15 +34,22 @@ import {
   resolveDispatchQualityConfig,
 } from "./dispatch-quality.js";
 import { validateResumePayloadAgainstSchema } from "./runtime-state-hitl.js";
+import {
+  appendRuntimeEvent,
+  describeRuntimeEventWindow,
+} from "./runtime-events.js";
 import { compareTimestampAsc, formatLocalTimestamp } from "../time.js";
 
 const defaultStore: RuntimeStateStore = sqliteStore;
 
 const RUNTIME_STATE_BACKEND_ENV = "RUNTIME_STATE_BACKEND";
-const RUNTIME_EVENTS_RETENTION_LIMIT = 500;
 const DEFAULT_MAX_TASK_ATTEMPTS = 2;
 const ATTEMPT_LEASE_EXPIRED_CODE = "attempt_lease_expired";
 const WORKER_PROTOCOL_VERSION = "2026-05-v1";
+
+export class InvalidDispatchInputError extends Error {
+  readonly code = "invalid_dispatch_input";
+}
 
 function resolveStore(): RuntimeStateStore {
   if (process.env[RUNTIME_STATE_BACKEND_ENV] === "json") {
@@ -51,6 +60,10 @@ function resolveStore(): RuntimeStateStore {
 
 export function isRuntimeStatePostgresBackend(): boolean {
   return process.env[RUNTIME_STATE_BACKEND_ENV] === "postgres";
+}
+
+export function isRuntimeStateJsonBackend(): boolean {
+  return process.env[RUNTIME_STATE_BACKEND_ENV] === "json";
 }
 
 export function createEmptyRuntimeState(): RuntimeState {
@@ -187,6 +200,8 @@ export interface ResumePayloadSchema {
 }
 
 export interface Event {
+  eventId?: string;
+  auditSequence?: number;
   taskId: string;
   type: string;
   at: string;
@@ -299,6 +314,7 @@ export interface RuntimeState {
   version: number;
   updatedAt: string;
   sequence: number;
+  eventSequence?: number;
   workers: Worker[];
   tasks: Task[];
   taskAttempts: TaskAttempt[];
@@ -575,6 +591,13 @@ export interface DashboardSnapshot {
     }>;
     failureCodes: Record<string, number>;
     reviewReasonCodes: Record<string, number>;
+    eventWindow: {
+      scope: "retained_runtime_events";
+      retentionLimit: number;
+      retainedCount: number;
+      oldestAt: string | null;
+      newestAt: string | null;
+    };
   };
   workers: Worker[];
   tasks: Task[];
@@ -946,13 +969,7 @@ function appendEvent(state: RuntimeState, event: Event): RuntimeState {
     ...event,
     summary: event.summary ?? summarizeEvent(event.type, event.payload),
   };
-  const nextEvents = [...state.events, nextEvent];
-  return {
-    ...state,
-    events: nextEvents.length > RUNTIME_EVENTS_RETENTION_LIMIT
-      ? nextEvents.slice(-RUNTIME_EVENTS_RETENTION_LIMIT)
-      : nextEvents,
-  };
+  return appendRuntimeEvent(state, nextEvent);
 }
 
 function countEventsByType(events: Event[], type: string): number {
@@ -1289,9 +1306,7 @@ function buildArtifactBundle(input: {
     attemptId: input.attempt.attemptId,
     schemaVersion: "artifact-bundle/v1",
     changedFiles: normalizeArtifactChangedFiles(input.changedFiles),
-    refs: {
-      structuredReport: `artifact://${input.attempt.attemptId}/result.json`,
-    },
+    refs: {},
     ...rawBundle,
     trajectory: rawBundle?.trajectory ?? buildWorkerResultTrajectory(input.result),
     bundleId: rawBundle?.bundleId ?? `${input.attempt.attemptId}:artifact-bundle`,
@@ -1386,6 +1401,122 @@ function assertCompleteWorkerProtocolEnvelope(input: {
   if (input.protocolVersion !== WORKER_PROTOCOL_VERSION) {
     throw new Error(`unsupported worker protocol version: ${input.protocolVersion || "<empty>"}`);
   }
+}
+
+function isIdempotentWorkerResultReplay(
+  state: RuntimeState,
+  task: Task,
+  input: RecordWorkerResultInput,
+): boolean {
+  if (findActiveTaskAttempt(state, task.id) || !input.attemptId) {
+    return false;
+  }
+  const attempt = (state.taskAttempts ?? []).find((candidate) =>
+    candidate.taskId === task.id && candidate.attemptId === input.attemptId
+  );
+  const recordedReview = state.reviews.find((review) => review.taskId === task.id);
+  const latestResult = recordedReview?.latestWorkerResult;
+  if (
+    !attempt
+    || !["succeeded", "failed"].includes(attempt.status)
+    || !latestResult
+    || latestResult.taskId !== task.id
+  ) {
+    return false;
+  }
+
+  assertCompleteWorkerProtocolEnvelope(input);
+  if (attempt.workerId !== input.workerId) {
+    throw new Error(`attempt owned by another worker: ${attempt.workerId}`);
+  }
+  if (input.leaseToken !== attempt.leaseToken) {
+    throw new Error(`lease token mismatch: ${task.id}`);
+  }
+  if (input.protocolVersion !== attempt.protocolVersion) {
+    throw new Error(`protocol version mismatch: ${input.protocolVersion}`);
+  }
+  if (input.traceId !== attempt.traceId) {
+    throw new Error(`trace id mismatch: ${task.id}`);
+  }
+  if (input.idempotencyKey !== attempt.idempotencyKey) {
+    throw new Error(`idempotency key mismatch: ${task.id}`);
+  }
+  if (latestResult.workerId !== input.workerId) {
+    throw new Error(`worker result already recorded by another worker: ${latestResult.workerId}`);
+  }
+
+  const canonicalResult = buildCanonicalWorkerResult(task, input.workerId, input.result);
+  const canonicalPullRequest = canonicalizePullRequest(task, input.pullRequest);
+  const storedPullRequest = state.pullRequests.find((candidate) => candidate.taskId === task.id);
+  const storedPullRequestInput = storedPullRequest
+    ? {
+        number: storedPullRequest.number,
+        url: storedPullRequest.url,
+        headBranch: storedPullRequest.headBranch,
+        baseBranch: storedPullRequest.baseBranch,
+      }
+    : null;
+  const replayBundle = buildArtifactBundle({
+    task,
+    attempt,
+    result: canonicalResult,
+    artifactBundle: input.artifactBundle ?? input.result.artifactBundle,
+    changedFiles: input.changedFiles,
+    pullRequest: canonicalPullRequest,
+  });
+  const storedBundle = (state.artifactBundles ?? []).find((bundle) =>
+    bundle.bundleId === attempt.artifactBundleId
+    || bundle.attemptId === attempt.attemptId
+  );
+  const artifactBundleMatches = storedBundle
+    ? isDeepStrictEqual(
+        comparableArtifactBundle(replayBundle),
+        comparableArtifactBundle(storedBundle),
+      )
+    : !attempt.artifactBundleId
+      && !input.artifactBundle
+      && !input.result.artifactBundle;
+  const changedFilesMatch = !canonicalResult.verification.allPassed
+    || isDeepStrictEqual(
+      input.changedFiles ?? [],
+      recordedReview?.reviewMaterial?.changedFiles ?? [],
+    );
+  if (
+    !isDeepStrictEqual(clone(canonicalResult), latestResult)
+    || !isDeepStrictEqual(canonicalPullRequest, storedPullRequestInput)
+    || !changedFilesMatch
+    || !artifactBundleMatches
+  ) {
+    throw new Error(`idempotency replay mismatch for task: ${task.id}`);
+  }
+  return true;
+}
+
+function comparableArtifactBundle(bundle: ArtifactBundle): unknown {
+  const refs: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(bundle.refs)) {
+    if (key === "screenshots" && Array.isArray(value)) {
+      const externalRefs = value.filter((ref) => !ref.startsWith("artifact://"));
+      if (externalRefs.length > 0) {
+        refs[key] = externalRefs;
+      }
+      continue;
+    }
+    if (typeof value === "string" && !value.startsWith("artifact://")) {
+      refs[key] = value;
+    }
+  }
+  const testResults = bundle.testResults?.map((result) => {
+    const { outputRef, ...summary } = result;
+    return outputRef && !outputRef.startsWith("artifact://")
+      ? { ...summary, outputRef }
+      : summary;
+  });
+  return clone({
+    ...bundle,
+    refs,
+    testResults,
+  });
 }
 
 type TaskResourceLeaseInput = {
@@ -2034,19 +2165,34 @@ export function heartbeatWorker(state: RuntimeState, input: HeartbeatWorkerInput
 
   const hasActiveTask = Boolean(worker.currentTaskId);
   const previousStatus = worker.status;
+  const receivedAt = input.at ?? nowIso();
+  const heartbeatAt = compareTimestampAsc(worker.lastHeartbeatAt, receivedAt) > 0
+    ? worker.lastHeartbeatAt
+    : receivedAt;
+  const updatedAt = compareTimestampAsc(state.updatedAt, heartbeatAt) > 0
+    ? state.updatedAt
+    : heartbeatAt;
 
   return {
     ...state,
-    updatedAt: input.at ?? nowIso(),
+    updatedAt,
     workers: upsertWorker(state.workers, {
       ...worker,
-      lastHeartbeatAt: input.at ?? nowIso(),
+      lastHeartbeatAt: heartbeatAt,
       status: hasActiveTask ? "busy" : (previousStatus === "offline" ? "idle" : previousStatus),
     }),
   };
 }
 
 export function createDispatch(state: RuntimeState, input: CreateDispatchInput): CreateDispatchResult {
+  const seenTaskIds = new Set<string>();
+  for (const task of input.tasks) {
+    if (seenTaskIds.has(task.id)) {
+      throw new InvalidDispatchInputError(`duplicate task id in dispatch: ${task.id}`);
+    }
+    seenTaskIds.add(task.id);
+  }
+
   const dispatchSeed = nextDispatchId(state);
   let nextState = dispatchSeed.state;
   const dispatchId = dispatchSeed.dispatchId;
@@ -2660,6 +2806,9 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   const worker = state.workers.find((candidate) => candidate.id === input.workerId);
   if (!worker) {
     throw new Error(`worker not found: ${input.workerId}`);
+  }
+  if (isIdempotentWorkerResultReplay(state, task, input)) {
+    return state;
   }
   assertActiveAttemptLease({
     state,
@@ -3360,6 +3509,7 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
       repoConcurrencySaturation,
       failureCodes,
       reviewReasonCodes,
+      eventWindow: describeRuntimeEventWindow(reconciledState.events),
     },
     workers,
     tasks: clone([...reconciledState.tasks].reverse()),
