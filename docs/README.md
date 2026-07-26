@@ -237,10 +237,11 @@ dispatcher / worker / runtime 变更：
    - `contracts/worker-prompt-layering-v1.md`
    - `contracts/review-memory-v1.md`
    - `contracts/provider-capabilities-v1.md`
-5. 对应模块入口：
+   - `contracts/execution-profile-v1.md`
+6. 对应模块入口：
    - `../apps/dispatcher/README.md`
    - `../scripts/lib/README.md`
-6. 对应 `scripts/`、`apps/dispatcher/`、`packages/`
+7. 对应 `scripts/`、`apps/dispatcher/`、`packages/`
 
 Trae 无人值守链路：
 
@@ -289,6 +290,7 @@ vNext runtime reliability 推进：
 - `start-control-plane.sh` 现在默认把 dispatcher 绑定到 `127.0.0.1`；监听非 loopback 地址必须显式传 `FORGEFLOW_DISPATCHER_HOST` 或 `--host`。
 - `codex` / `gemini` 的 `worker daemon` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `../packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。worker-daemon 主循环、worker CLI、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到 `@tingrudeng/beta-runtime-core`，dispatcher runtime-glue 与源码脚本复用同一个 shared daemon cycle，脚本侧 dist bootstrap 已收敛到 `../scripts/lib/runtime-bootstrap.ts`，本地日志 / metrics hook 组装已拆到 `../scripts/lib/worker-daemon-hooks.ts`；CI 和 release workflow 会运行 `pnpm verify:runtime-packages` 校验 runtime 包发布清单，并运行 `pnpm verify:runtime-packages:install` 本地打包 / 安装 codex、gemini、trae runtime tarball；`pnpm report:runtime-packages:setup` 会输出 npm 包名、当前版本、发布顺序和 Trusted Publisher 配置缺口；生产发布窗口可用 `pnpm verify:runtime-packages:published` 强制校验 npm registry 包名、版本和已发布依赖元数据，并用 `pnpm verify:runtime-packages:published-smoke` 从 registry 安装已发布 provider runtime 后验证 CLI；剩余边界是未发布包的外部 npm 配置和生产部署证据。
 - `worker-daemon` / Trae runtime 现在只有在结果成功回写到 dispatcher 后才会对外呈现“完成”；`submitResult`、`git push`、自动 PR 创建失败都属于显式失败，而不是假完成。Trae terminal result 与 shared daemon cycle 默认都最多尝试 3 次、间隔 2 秒，可用 `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` / `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS` 调整；Trae 在结果未获确认时保留 session，停止任务轮询并以非零状态退出。shared daemon cycle 只维持一条 single-flight heartbeat 并覆盖结果重试；assignment 子进程默认总超时为 30 分钟，可用 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 覆盖。执行 timeout / SIGINT / SIGTERM 会取消 dispatcher HTTP 请求与重试等待，并终止完整子进程树。
+- Codex / Gemini shared runtime 默认使用向后兼容的 `trusted-host` profile；操作者可通过 `FORGEFLOW_EXECUTION_PROFILE=isolated-container` 和固定本地镜像，把 provider 与 verification 一起放入 fail-closed 容器边界。策略由 worker 启动环境拥有，task payload 不能覆盖；完整挂载、secret、资源和网络边界见 `contracts/execution-profile-v1.md`。
 - `dependsOn` 现在进入 dispatcher 调度门控：依赖未满足时任务保持 `planned`，满足后自动解锁为 `ready`。
 - generic worker claim 已从副作用 GET 收口为显式 POST：
   - `GET /api/workers/:workerId/assigned-task` 只读

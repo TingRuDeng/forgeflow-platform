@@ -193,6 +193,8 @@ pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta start w
 
 每个 assignment 子进程默认最多运行 30 分钟；如需调整，设置正整数毫秒值 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS`。worker 收到 `SIGINT` / `SIGTERM` 后会取消 dispatcher HTTP 请求和结果重试等待，并终止完整子进程树。
 
+Codex / Gemini 默认使用 `trusted-host`。生产 worker 如需容器边界，应由操作者显式设置 `FORGEFLOW_EXECUTION_PROFILE=isolated-container` 和固定的 `FORGEFLOW_EXECUTION_CONTAINER_IMAGE`；镜像必须包含 provider CLI 与 verification 工具链，preflight 失败不会回退宿主机。配置与安全边界见 `contracts/execution-profile-v1.md`。
+
 脚本方式仅用于在 ForgeFlow 仓库内做开发或调试：
 
 ```bash
@@ -382,6 +384,7 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - 自动创建 PR 现在还是显式 opt-in：只有设置 `FORGEFLOW_WORKER_CREATE_PR=1` 的 worker 才会尝试建 draft PR
 - rework / follow-up 只有在源任务已经交付过可验证的远端分支产物、且 worker 不变时才允许复用原分支；否则应新开 `-rN` 分支继续
 - worker 子进程默认只继承 allowlist 环境变量，不会把 `GITHUB_TOKEN`、`DISPATCHER_API_TOKEN` 之类的上层 secrets 原样透传进 assignment 执行进程
+- execution policy 由 worker 环境拥有，task payload 不能覆盖；isolated profile 只给对应 provider 容器注入 API key，verification 不接收 provider key
 
 当前边界：
 

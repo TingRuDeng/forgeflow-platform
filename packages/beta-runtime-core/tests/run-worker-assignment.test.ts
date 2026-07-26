@@ -11,6 +11,7 @@ import {
   runWorkerAssignment,
   type AssignmentLaunchCommand,
 } from "../src/runtime/run-worker-assignment.js";
+import { resolveExecutionProfile } from "../src/runtime/execution-profile.js";
 
 const tempRoots: string[] = [];
 
@@ -38,6 +39,34 @@ function writeAssignmentPackage(root: string): { assignmentDir: string; worktree
   fs.writeFileSync(path.join(assignmentDir, "worker-prompt.md"), "Do the work.");
   fs.writeFileSync(path.join(assignmentDir, "context.md"), "# Context");
   return { assignmentDir, worktreeDir, outputDir };
+}
+
+function writeFakeContainerRuntime(root: string, logPath: string): string {
+  const runtimePath = path.join(root, "fake-container-runtime.mjs");
+  fs.writeFileSync(runtimePath, `#!/usr/bin/env node
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(args) + "\\n");
+if (args[0] === "version" || (args[0] === "image" && args[1] === "inspect")) {
+  process.exit(0);
+}
+if (args[0] !== "run") {
+  process.exit(2);
+}
+const imageIndex = args.indexOf("forgeflow-worker:test");
+if (imageIndex < 0 || !args[imageIndex + 1]) {
+  process.exit(3);
+}
+const result = spawnSync(args[imageIndex + 1], args.slice(imageIndex + 2), {
+  cwd: process.cwd(),
+  env: process.env,
+  stdio: "inherit",
+});
+process.exit(result.status ?? 1);
+`);
+  fs.chmodSync(runtimePath, 0o755);
+  return runtimePath;
 }
 
 describe("shared run-worker-assignment runner", () => {
@@ -83,6 +112,128 @@ describe("shared run-worker-assignment runner", () => {
       ],
       cwd: worktreeDir,
     });
+  });
+
+  it("wraps provider and verification commands with one isolated execution profile", async () => {
+    const { assignmentDir, worktreeDir, outputDir } = writeAssignmentPackage(makeTempDir());
+    const executionEnv = {
+      FORGEFLOW_EXECUTION_PROFILE: "isolated-container",
+      FORGEFLOW_EXECUTION_CONTAINER_IMAGE: "forgeflow-worker:test",
+      OPENAI_API_KEY: "provider-secret",
+      GEMINI_API_KEY: "other-provider-secret",
+    };
+
+    const summary = await runWorkerAssignment({
+      assignmentDir,
+      worktreeDir,
+      outputDir,
+      dryRun: true,
+      executionEnv,
+      executionProfile: resolveExecutionProfile(executionEnv),
+      buildLaunchCommand(input): AssignmentLaunchCommand {
+        return {
+          provider: "codex",
+          argv: ["codex", "exec", input.prompt],
+          cwd: input.worktreeDir,
+        };
+      },
+    });
+
+    expect(summary.status).toBe("dry_run");
+    if (summary.status !== "dry_run") {
+      throw new Error(`expected dry_run, got ${summary.status}`);
+    }
+    expect(summary.executionProfile).toBe("isolated-container");
+    expect(summary.launch.argv.slice(0, 4)).toEqual(["docker", "run", "--rm", "--init"]);
+    expect(summary.launch.argv).toContain("OPENAI_API_KEY");
+    expect(summary.launch.argv).not.toContain("GEMINI_API_KEY");
+    expect(summary.launch.argv).not.toContain("provider-secret");
+    expect(summary.verificationCommands).toHaveLength(1);
+    expect(summary.verificationCommands[0]).toMatchObject({
+      command: "node -e 'console.log(\"verify ok\")'",
+      executionProfile: "isolated-container",
+    });
+    expect(summary.verificationCommands[0].argv.slice(0, 4)).toEqual([
+      "docker",
+      "run",
+      "--rm",
+      "--init",
+    ]);
+    expect(summary.verificationCommands[0].argv).not.toContain("OPENAI_API_KEY");
+  });
+
+  it("rejects an explicit profile that weakens the operator environment", async () => {
+    const { assignmentDir, worktreeDir, outputDir } = writeAssignmentPackage(makeTempDir());
+    const executionEnv = {
+      FORGEFLOW_EXECUTION_PROFILE: "isolated-container",
+      FORGEFLOW_EXECUTION_CONTAINER_IMAGE: "forgeflow-worker:test",
+    };
+
+    await expect(runWorkerAssignment({
+      assignmentDir,
+      worktreeDir,
+      outputDir,
+      dryRun: true,
+      executionEnv,
+      executionProfile: { name: "trusted-host" },
+      buildLaunchCommand(input): AssignmentLaunchCommand {
+        return {
+          provider: "codex",
+          argv: ["codex", "exec", input.prompt],
+          cwd: input.worktreeDir,
+        };
+      },
+    })).rejects.toThrow("does not match the operator-owned worker environment");
+  });
+
+  it("keeps the other provider key and all provider keys out of trusted-host child commands", async () => {
+    const root = makeTempDir();
+    const { assignmentDir, worktreeDir, outputDir } = writeAssignmentPackage(root);
+    fs.writeFileSync(path.join(assignmentDir, "assignment.json"), JSON.stringify({
+      taskId: "dispatch-1:task-secrets",
+      workerId: "codex-worker",
+      pool: "codex",
+      branchName: "ai/codex/task-secrets",
+      repo: "owner/repo",
+      defaultBranch: "main",
+      commands: {
+        test: `${JSON.stringify(process.execPath)} -e 'console.log(JSON.stringify({openai: process.env.OPENAI_API_KEY, gemini: process.env.GEMINI_API_KEY}))'`,
+      },
+    }));
+
+    await runWorkerAssignment({
+      assignmentDir,
+      worktreeDir,
+      outputDir,
+      executionEnv: {
+        ...process.env,
+        OPENAI_API_KEY: "openai-secret",
+        GEMINI_API_KEY: "gemini-secret",
+      },
+      buildLaunchCommand(input): AssignmentLaunchCommand {
+        return {
+          provider: "codex",
+          argv: [
+            process.execPath,
+            "-e",
+            "console.log(JSON.stringify({openai: process.env.OPENAI_API_KEY, gemini: process.env.GEMINI_API_KEY}))",
+          ],
+          cwd: input.worktreeDir,
+        };
+      },
+    });
+
+    const workerResult = JSON.parse(
+      fs.readFileSync(path.join(outputDir, "worker-result.json"), "utf8"),
+    );
+    expect(workerResult.artifactBundle.retainedContent.logs).toContain(
+      '{"openai":"openai-secret"}',
+    );
+    expect(workerResult.artifactBundle.retainedContent.logs).not.toContain("gemini-secret");
+    expect(workerResult.artifactBundle.retainedContent.testResults).toContain("{}");
+    expect(workerResult.artifactBundle.retainedContent.testResults).not.toContain(
+      "openai-secret",
+    );
   });
 
   it("runs launch and verification commands and writes worker result files", async () => {
@@ -164,6 +315,52 @@ describe("shared run-worker-assignment runner", () => {
       },
     });
     expect(fs.readFileSync(path.join(outputDir, "worker-output.raw.txt"), "utf8")).toContain("# Context");
+  });
+
+  it("runs provider and verification through a ready isolated container adapter", async () => {
+    const root = makeTempDir();
+    const { assignmentDir, worktreeDir, outputDir } = writeAssignmentPackage(root);
+    const runtimeLog = path.join(root, "container-runtime.jsonl");
+    const runtime = writeFakeContainerRuntime(root, runtimeLog);
+    const executionEnv = {
+      ...process.env,
+      FORGEFLOW_EXECUTION_PROFILE: "isolated-container",
+      FORGEFLOW_EXECUTION_CONTAINER_RUNTIME: runtime,
+      FORGEFLOW_EXECUTION_CONTAINER_IMAGE: "forgeflow-worker:test",
+    };
+
+    const summary = await runWorkerAssignment({
+      assignmentDir,
+      worktreeDir,
+      outputDir,
+      executionEnv,
+      buildLaunchCommand(input): AssignmentLaunchCommand {
+        return {
+          provider: "codex",
+          argv: ["node", "-e", `console.log(${JSON.stringify(input.prompt)})`],
+          cwd: input.worktreeDir,
+        };
+      },
+    });
+
+    expect(summary).toMatchObject({
+      status: "completed",
+      executionProfile: "isolated-container",
+      verificationPassed: true,
+    });
+    const runtimeCalls = fs.readFileSync(runtimeLog, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]);
+    expect(runtimeCalls.slice(0, 2)).toEqual([
+      ["version", "--format", "{{.Server.Version}}"],
+      ["image", "inspect", "forgeflow-worker:test"],
+    ]);
+    expect(runtimeCalls.filter((args) => args[0] === "run")).toHaveLength(2);
+    const workerResult = JSON.parse(fs.readFileSync(path.join(outputDir, "worker-result.json"), "utf8"));
+    expect(workerResult.artifactBundle.trajectory.steps[0].observation).toContain(
+      "profile=isolated-container",
+    );
   });
 
   it("marks the trajectory action step failed when the launch command exits non-zero", async () => {
@@ -382,6 +579,26 @@ describe("shared run-worker-assignment runner", () => {
       provider: "gemini",
       argv: ["node", "-m", "gemini-test", "--approval-mode", "auto", "-p", "Do the Gemini work."],
       cwd: "/tmp/gemini-worktree",
+    });
+
+    expect(buildCodexLaunchCommand({
+      assignment: {
+        taskId: "task-isolated",
+        branchName: "ai/codex/task-isolated",
+        defaultBranch: "main",
+        pool: "codex",
+        repo: "owner/repo",
+      },
+      prompt: "Run inside the image.",
+      worktreeDir: "/tmp/isolated-worktree",
+    }, {
+      env: {
+        FORGEFLOW_EXECUTION_PROFILE: "isolated-container",
+        FORGEFLOW_CODEX_BIN: "/opt/forgeflow/bin/codex",
+      },
+    })).toMatchObject({
+      provider: "codex",
+      argv: ["/opt/forgeflow/bin/codex", "exec", "--sandbox", "workspace-write", "Run inside the image."],
     });
   });
 });

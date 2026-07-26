@@ -141,7 +141,7 @@ Dispatcher runtime persistence is owned by the runtime-state SQLite backend. Sta
 3. Worker daemon registers and heartbeats against dispatcher.
 4. Worker daemon claims an assigned task or a ready task in its pool.
 5. Worker daemon creates a per-task worktree from the latest fetched default branch.
-6. Worker executes assignment scripts inside the worktree. The shared daemon cycle owns one single-flight heartbeat through execution and result delivery; timeout or process termination kills the full child process tree.
+6. Worker executes assignment scripts inside the worktree. The operator-owned execution profile defaults to `trusted-host`; `isolated-container` wraps both provider and verification in one fixed-image, resource-bounded, fail-closed container boundary. The shared daemon cycle owns one single-flight heartbeat through execution and result delivery; timeout or process termination kills the full child process tree.
 7. Worker reports verification results, changed files, and optional PR metadata back to dispatcher. An exact retry after a lost response is idempotent; a changed replay with the same attempt key is rejected.
 8. Worker may additionally report best-effort runtime events such as delivery failure, cleanup failure, session interruption, and structured failure codes back to dispatcher metrics.
 9. Dispatcher moves the task to `review` or `failed`.

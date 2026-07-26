@@ -40,6 +40,8 @@ const originalEnv = {
   DISPATCHER_API_TOKEN: process.env.DISPATCHER_API_TOKEN,
   DISPATCHER_WORKER_TOKEN: process.env.DISPATCHER_WORKER_TOKEN,
   GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   WORKER_DAEMON_EXECUTION_TIMEOUT_MS: process.env.WORKER_DAEMON_EXECUTION_TIMEOUT_MS,
 };
 const workerDaemonSourcePath = path.resolve("src/runtime/worker-daemon.ts");
@@ -100,7 +102,7 @@ function createFakePackageRoot(
       'fs.mkdirSync(outputDir, { recursive: true });',
       options.hang ? "setInterval(() => {}, 1000);" : "",
       options.captureEnv
-        ? 'fs.writeFileSync(path.join(outputDir, "captured-env.json"), JSON.stringify({ GITHUB_TOKEN: process.env.GITHUB_TOKEN ?? null, DISPATCHER_API_TOKEN: process.env.DISPATCHER_API_TOKEN ?? null, DISPATCHER_WORKER_TOKEN: process.env.DISPATCHER_WORKER_TOKEN ?? null, CUSTOM_SECRET: process.env.CUSTOM_SECRET ?? null, PATH: process.env.PATH ?? null, HOME: process.env.HOME ?? null }, null, 2));'
+        ? 'fs.writeFileSync(path.join(outputDir, "captured-env.json"), JSON.stringify({ GITHUB_TOKEN: process.env.GITHUB_TOKEN ?? null, DISPATCHER_API_TOKEN: process.env.DISPATCHER_API_TOKEN ?? null, DISPATCHER_WORKER_TOKEN: process.env.DISPATCHER_WORKER_TOKEN ?? null, OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? null, GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? null, CUSTOM_SECRET: process.env.CUSTOM_SECRET ?? null, PATH: process.env.PATH ?? null, HOME: process.env.HOME ?? null }, null, 2));'
         : "",
       'const result = {',
       '  taskId: assignment.taskId,',
@@ -417,6 +419,8 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
         process.env.DISPATCHER_API_TOKEN = "dispatcher-token";
         process.env.DISPATCHER_WORKER_TOKEN = "worker-token";
         process.env.GITHUB_TOKEN = "github-token";
+        process.env.OPENAI_API_KEY = "openai-key";
+        process.env.GEMINI_API_KEY = "gemini-key";
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
           JSON.stringify({ number: 1, html_url: "https://example.test/pr/1" }),
           { status: 201 },
@@ -442,6 +446,8 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
           DISPATCHER_API_TOKEN: string | null;
           DISPATCHER_WORKER_TOKEN: string | null;
           GITHUB_TOKEN: string | null;
+          OPENAI_API_KEY: string | null;
+          GEMINI_API_KEY: string | null;
           HOME: string | null;
           PATH: string | null;
         };
@@ -449,6 +455,12 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
         expect(capturedEnv.DISPATCHER_API_TOKEN).toBeNull();
         expect(capturedEnv.DISPATCHER_WORKER_TOKEN).toBeNull();
         expect(capturedEnv.GITHUB_TOKEN).toBeNull();
+        expect(capturedEnv.OPENAI_API_KEY).toBe(
+          testCase.pool === "codex" ? "openai-key" : null,
+        );
+        expect(capturedEnv.GEMINI_API_KEY).toBe(
+          testCase.pool === "gemini" ? "gemini-key" : null,
+        );
         expect(capturedEnv.HOME).toBeTruthy();
         expect(capturedEnv.PATH).toBeTruthy();
       });

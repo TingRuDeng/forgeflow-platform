@@ -153,6 +153,18 @@ In particular, values such as:
 
 should be treated as absent unless they are explicitly added to `FORGEFLOW_WORKER_ENV_ALLOWLIST`.
 
+Execution policy variables are an exception: `FORGEFLOW_EXECUTION_PROFILE` and its container settings are always forwarded, even when a legacy custom allowlist omits them. This prevents an isolated daemon from silently downgrading its assignment child to host execution.
+
+Provider keys are narrower than the generic allowlist: Codex assignment 只接收 `OPENAI_API_KEY`，Gemini assignment 只接收 `GEMINI_API_KEY`，verification command 两者都不接收。不要通过自定义 allowlist 把另一 provider 或控制面 secret 重新引入任务进程。
+
+## 10.1 Container isolation is explicit and does not imply domain-level egress control
+
+Codex / Gemini default to `trusted-host`. `isolated-container` only activates when the operator sets both `FORGEFLOW_EXECUTION_PROFILE=isolated-container` and an existing `FORGEFLOW_EXECUTION_CONTAINER_IMAGE`.
+
+The image must contain the provider CLI, `/bin/sh`, Git, and every verification tool. Provider binary overrides refer to paths inside that image. Missing runtime or image readiness fails closed and never falls back to the host.
+
+Docker `bridge` is broad default container networking, not a hostname allowlist. `FORGEFLOW_EXECUTION_NETWORK=none` disables all container networking and therefore blocks normal provider API access. Do not claim domain-filtered egress, microVM isolation, or an untrusted multi-tenant boundary from this profile alone.
+
 ## 11. Automatic PR creation is opt-in, not implied by `GITHUB_TOKEN`
 
 `worker-daemon` no longer treats a parent-side `GITHUB_TOKEN` as enough to open PRs.

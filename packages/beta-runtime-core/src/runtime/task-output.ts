@@ -216,6 +216,7 @@ export interface RunWorkerAssignmentScriptInput {
   assignmentDir: string;
   worktreeDir: string;
   outputDir: string;
+  provider?: string;
   runtimeScriptPath?: string;
   runtimeScriptCwd?: string;
   timeoutMs?: number;
@@ -271,7 +272,7 @@ function spawnWorkerAssignmentProcess(input: RunWorkerAssignmentScriptInput) {
     input.outputDir,
   ], {
     cwd: input.runtimeScriptCwd ?? input.packageRoot,
-    env: buildWorkerEnv(),
+    env: buildWorkerEnv(process.env, input.provider),
   }) as ChildProcess & { stdout?: NodeJS.ReadableStream; stderr?: NodeJS.ReadableStream };
 }
 

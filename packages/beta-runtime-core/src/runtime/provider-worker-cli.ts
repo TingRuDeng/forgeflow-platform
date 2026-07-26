@@ -1,4 +1,10 @@
 import { runWorkerDaemon, type RunWorkerDaemonInput, type RunWorkerDaemonCycleResult } from "./worker-daemon.js";
+import {
+  assertExecutionProfileReady,
+  executionProfilePolicyId,
+  resolveExecutionProfile,
+  type ExecutionProfileProbe,
+} from "./execution-profile.js";
 
 export interface ProviderWorkerCliConfig {
   pool: string;
@@ -16,6 +22,7 @@ export interface ProviderWorkerCliArgs {
   hostname?: string;
   labels?: string[];
   providerBin?: string;
+  executionPolicyId?: string;
   pollIntervalMs: number;
   dryRunExecution: boolean;
   once: boolean;
@@ -26,9 +33,16 @@ export interface ProviderWorkerCliDeps {
   env?: Record<string, string | undefined>;
   writeStdout?: (value: string) => void;
   runWorkerDaemon?: (input: RunWorkerDaemonInput) => Promise<RunWorkerDaemonCycleResult>;
+  executionProfileProbe?: ExecutionProfileProbe;
 }
 
-type StringArgKey = "dispatcherUrl" | "workerId" | "pool" | "repoDir" | "hostname";
+type StringArgKey =
+  | "dispatcherUrl"
+  | "workerId"
+  | "pool"
+  | "repoDir"
+  | "hostname"
+  | "executionPolicyId";
 
 const STRING_FLAGS: Record<string, StringArgKey> = {
   "--dispatcher-url": "dispatcherUrl",
@@ -36,6 +50,7 @@ const STRING_FLAGS: Record<string, StringArgKey> = {
   "--pool": "pool",
   "--repo-dir": "repoDir",
   "--hostname": "hostname",
+  "--execution-policy-id": "executionPolicyId",
 };
 
 function readNext(argv: string[], index: number, flag: string): string {
@@ -90,6 +105,7 @@ Usage:
     [${config.binFlag} ${config.pool}] \\
     [--hostname mac-mini] \\
     [--labels ${config.exampleLabels}] \\
+    [--execution-policy-id <sha256>] (managed wrapper internal) \\
     [--poll-interval-ms 5000] \\
     [--dry-run-execution] \\
     [--once]
@@ -127,6 +143,17 @@ export async function runProviderWorkerCli(
   if (args.providerBin) {
     (deps.env ?? process.env)[config.binEnv] = args.providerBin;
   }
+  const executionEnv = deps.env ?? process.env;
+  const actualPolicyId = executionProfilePolicyId(executionEnv);
+  if (args.executionPolicyId && args.executionPolicyId !== actualPolicyId) {
+    throw new Error(
+      "execution policy id does not match the worker environment; restart with the current execution profile",
+    );
+  }
+  assertExecutionProfileReady(
+    resolveExecutionProfile(executionEnv),
+    deps.executionProfileProbe,
+  );
   const runDaemon = deps.runWorkerDaemon ?? runWorkerDaemon;
   const abortController = deps.runWorkerDaemon ? null : new AbortController();
   const stop = () => abortController?.abort();
