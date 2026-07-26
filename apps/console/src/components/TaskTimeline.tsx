@@ -64,9 +64,11 @@ export const AttemptTimeline: React.FC<{ attempts: TaskAttempt[] }> = ({ attempt
           <div key={attempt.attemptId} className="rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="font-mono text-sm text-cyan-200 break-all">{attempt.attemptId}</div>
-              <div className="text-xs uppercase tracking-wide text-white/55">{attempt.status || '--'}</div>
+              <div className="text-xs uppercase tracking-wide text-white/55">
+                {attempt.status ? t(`status.${attempt.status}`) : '--'}
+              </div>
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-white/65">
+            <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-white/65 sm:grid-cols-2">
               <div>{t('attemptNo')}: <span className="font-mono">{attempt.attemptNo ?? '--'}</span></div>
               <div>{t('worker')}: <span className="font-mono break-all">{attempt.workerId || '--'}</span></div>
               <div>{t('startedAt')}: <span className="font-mono">{formatTime(attempt.startedAt)}</span></div>
@@ -90,12 +92,33 @@ export const RuntimeEventList: React.FC<{ events: EventRecord[] }> = ({ events }
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [eventTypeFilter, setEventTypeFilter] = useState('all');
-  const eventTypes = [...new Set(events.map((event) => event.type).filter(Boolean))].sort();
+  const orderedEvents = events
+    .map((event, index) => ({ event, index }))
+    .sort((left, right) => {
+      const leftAt = Date.parse(left.event.at || '');
+      const rightAt = Date.parse(right.event.at || '');
+      const leftHasTime = Number.isFinite(leftAt);
+      const rightHasTime = Number.isFinite(rightAt);
+      if (leftHasTime !== rightHasTime) {
+        return rightHasTime ? 1 : -1;
+      }
+      if (leftHasTime && rightHasTime && leftAt !== rightAt) {
+        return rightAt - leftAt;
+      }
+      return right.index - left.index;
+    })
+    .map(({ event }) => event);
+  const eventTypes = [...new Set(orderedEvents.map((event) => event.type).filter(Boolean))].sort();
   const filteredEvents = eventTypeFilter === 'all'
-    ? events
-    : events.filter((event) => event.type === eventTypeFilter);
+    ? orderedEvents
+    : orderedEvents.filter((event) => event.type === eventTypeFilter);
   const hasOverflow = filteredEvents.length > RUNTIME_EVENT_PREVIEW_LIMIT;
   const visibleEvents = expanded ? filteredEvents : filteredEvents.slice(0, RUNTIME_EVENT_PREVIEW_LIMIT);
+  const formatEventType = (eventType: string) => {
+    const key = `eventType.${eventType}`;
+    const translated = t(key);
+    return translated === key ? eventType : translated;
+  };
 
   return (
     <section className="glass-card rounded-xl p-4">
@@ -122,7 +145,7 @@ export const RuntimeEventList: React.FC<{ events: EventRecord[] }> = ({ events }
               >
                 <option value="all">{t('allRuntimeEventTypes')}</option>
                 {eventTypes.map((eventType) => (
-                  <option key={eventType} value={eventType}>{eventType}</option>
+                  <option key={eventType} value={eventType}>{formatEventType(eventType)}</option>
                 ))}
               </select>
             </label>
@@ -140,10 +163,10 @@ export const RuntimeEventList: React.FC<{ events: EventRecord[] }> = ({ events }
         </div>
       </div>
       <div className="space-y-3">
-        {visibleEvents.length > 0 ? visibleEvents.map((event) => (
-          <div key={`${event.type}-${event.at || 'unknown'}`} className="border-l border-cyan-400/30 pl-3">
+        {visibleEvents.length > 0 ? visibleEvents.map((event, index) => (
+          <div key={`${event.type}-${event.at || 'unknown'}-${index}`} className="border-l border-cyan-400/30 pl-3">
             <div className="text-xs font-mono text-white/45">{formatTime(event.at)}</div>
-            <div className="text-sm text-white/85">{event.type}</div>
+            <div className="text-sm text-white/85">{formatEventType(event.type)}</div>
             <div className="text-xs text-white/55 break-all">{extractEventSummary(event)}</div>
           </div>
         )) : (

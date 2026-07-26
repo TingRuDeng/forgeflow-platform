@@ -127,6 +127,7 @@ Current endpoint families:
     - tasks now carry stable `traceId`
     - recent events may include derived `summary`
     - `taskAttempts` 和 `artifactBundles` 可被 Console 任务详情用于渲染 attempt timeline、artifact summary、refs 和 retained content
+    - each task includes derived `redriveEligibility` (`canRedrive`, `reason`, `failureCode`, `existingTaskId`) so clients consume dispatcher policy instead of duplicating recoverability rules
     - snapshot `reviews[]` 现在可能携带 `riskAssessment`（`level` / `changedFileCount` / `maxChangedFiles` / `protectedPathHits` / `reasons`），由 dispatcher 在任务进入 `review` 时确定性计算；非 `low` 还会出现在 recent events 的 `review_risk_flagged`
 - `GET /api/context`
   - 面向控制层的一次性聚合上下文视图，复用 reconcile 后的 snapshot（structured-read 感知）。
@@ -298,6 +299,8 @@ Current endpoint families:
     - `findings[]`
     - `artifacts`
     - `waitingForInput`
+  - Failed results use one canonical terminal-failure selection rule: the first non-empty `evidence.blockers[]` entry wins; otherwise dispatcher falls back to `evidence.failureType` / `evidence.failureSummary`, then to `verification_failed` and the result output. Provider-specific blocker codes remain compatible and are not narrowed to a fixed enum.
+  - Dispatcher writes the selected `failureType`, `failureCode`, and `failureSummary` to the terminal `status_changed` event, and writes the same code/message to the active `TaskAttempt`. This applies equally to generic and Trae result paths.
   - `result.waitingForInput` may include `requestedBy`, `reason`, `prompt`, and `resumePayloadSchema`; dispatcher treats it as a worker-initiated HITL interrupt, checkpoints the active attempt, releases worker / leases, and moves the task to `waiting_for_input` instead of `review` or `failed`.
   - `resumePayloadSchema` supports object `properties` with `string` / `number` / `integer` / `boolean` / `array` fields, optional string `enum`, `title`, `description`, `default`, `format: "textarea"`, `placeholder`, numeric `minimum` / `maximum`, array `minItems` / `maxItems`, string `items.enum`, and a top-level `required[]` list for Console form rendering and validation.
   - `artifactBundle` may be provided as a top-level field; dispatcher validates ownership against the active attempt and stores the bundle summary, refs, and optional retained content.
@@ -353,6 +356,13 @@ Current endpoint families:
   - 服务端 merge 风险门禁（`DISPATCHER_REVIEW_MERGE_GATE`，默认 `off`）：`enforce` 模式下，对风险非 `low` 的任务提交 `merge` 且未带 `acknowledgeRisk` 时返回 `409`（`merge blocked by risk gate`）；`warn` 模式放行但记 `review_merge_risk_acknowledged` 事件。该门禁覆盖 Console / CLI / 直连 HTTP。
   - 任务或 assignment 不存在时返回 `404`。
   - 任务存在但不在 `review` 状态时返回 `409`。
+- `POST /api/tasks/:taskId/redrive`
+  - Dispatcher-authoritative recovery endpoint used by Console for a failed task or a blocked task whose latest review decision is `rework` / `changes_requested`.
+  - Failed tasks are accepted only for the current recoverable failure policy (workspace/worktree/branch mismatch, transient gateway/model failure, remote artifact/prompt contract failure, delivery failure, or exhausted attempt lease). Unknown execution and verification failures remain fail-closed and return `409`.
+  - A blocked review with `evidence.canRedrive=false`, a non-rework decision, or any non-terminal source state returns `409`; a missing task or assignment returns `404`.
+  - Redrive creates a new task and selects the next repository-state-unique `-rN` branch, targets the prior worker when known, sets `continuationMode=continue` and `continueFromTaskId=<sourceTaskId>`, preserves verification/termination/prompt metadata, and injects review `mustFix` notes for rework.
+  - Response fields include `originalTaskId`, `newTaskId`, `targetWorkerId`, `failureCode`, `failureSummary`, `continuationMode`, and `continueFromTaskId`.
+  - The operation is idempotent per source task: after a manual redrive is recorded, a repeated POST returns the existing dispatch/newTaskId and does not create another task or branch.
 - `POST /api/tasks/:taskId/cancel`
   - Explicitly move a non-terminal task to `cancelled`.
   - Current request body may include:

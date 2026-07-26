@@ -150,6 +150,48 @@ describe("dispatcher server", () => {
     expect(snapshot.json.dispatches).toHaveLength(0);
   });
 
+  it("rejects redrive for a task that has not reached a recoverable terminal state", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+    const dispatch = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "TingRuDeng/forgeflow-platform",
+        defaultBranch: "main",
+        tasks: [{
+          id: "not-terminal",
+          title: "not terminal",
+          pool: "codex",
+          branchName: "codex/not-terminal",
+        }],
+        packages: [{
+          taskId: "not-terminal",
+          assignment: {
+            taskId: "not-terminal",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "codex/not-terminal",
+            repo: "TingRuDeng/forgeflow-platform",
+            defaultBranch: "main",
+          },
+        }],
+      },
+    });
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: `/api/tasks/${encodeURIComponent(dispatch.json.taskIds[0])}/redrive`,
+      body: { actor: "console-ui" },
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.json.error).toContain('state and is not redriveable');
+  });
+
   it("serves worker, dispatch, result, review, and dashboard endpoints", async () => {
     const stateDir = makeTempDir();
     const mod = await import(serverModulePath);
@@ -3097,6 +3139,16 @@ describe("dispatcher server", () => {
         commit_sha: "def789ghi012",
         push_status: "failed",
         push_error: "remote: Permission denied",
+        evidence: {
+          failureType: "execution",
+          failureSummary: "dispatcher gateway timed out",
+          blockers: [{
+            kind: "execution",
+            code: "transient_gateway_timeout",
+            message: "dispatcher gateway timed out",
+          }],
+          findings: [],
+        },
       },
     });
     expect(response.status).toBe(200);
@@ -3117,9 +3169,66 @@ describe("dispatcher server", () => {
       (e: { type: string; taskId: string }) => e.type === "status_changed" && e.taskId === taskId,
     );
     expect(failedEvent).toBeDefined();
-    expect(failedEvent.payload.to).toBe("failed");
+    expect(failedEvent.payload).toMatchObject({
+      to: "failed",
+      failureType: "execution",
+      failureCode: "transient_gateway_timeout",
+      failureSummary: "dispatcher gateway timed out",
+    });
     const review = snapshot.json.reviews.find((item: { taskId: string }) => item.taskId === taskId);
     expect(review.latestWorkerResult.output).toBe("Something went wrong");
+    expect(snapshot.json.taskAttempts.find((item: { taskId: string }) => item.taskId === taskId)).toMatchObject({
+      status: "failed",
+      failureCode: "transient_gateway_timeout",
+      failureMessage: "dispatcher gateway timed out",
+    });
+
+    const redriveResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: `/api/tasks/${encodeURIComponent(taskId)}/redrive`,
+      body: {
+        actor: "console-ui",
+        at: "2026-07-26T14:00:00+08:00",
+      },
+    });
+    expect(redriveResponse.status).toBe(200);
+    expect(redriveResponse.json).toMatchObject({
+      status: "redriven",
+      originalTaskId: taskId,
+      targetWorkerId: "trae-02",
+      failureCode: "transient_gateway_timeout",
+      failureSummary: "dispatcher gateway timed out",
+      continuationMode: "continue",
+      continueFromTaskId: taskId,
+    });
+    const duplicateRedriveResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: `/api/tasks/${encodeURIComponent(taskId)}/redrive`,
+      body: {
+        actor: "console-ui",
+        at: "2026-07-26T14:01:00+08:00",
+      },
+    });
+    expect(duplicateRedriveResponse.status).toBe(200);
+    expect(duplicateRedriveResponse.json.newTaskId).toBe(redriveResponse.json.newTaskId);
+
+    const redrivenSnapshot = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dashboard/snapshot",
+    });
+    expect(redrivenSnapshot.json.tasks.find(
+      (candidate: { id: string }) => candidate.id === redriveResponse.json.newTaskId,
+    )).toMatchObject({
+      branchName: "ai/trae/task-3-r2",
+      continuationMode: "continue",
+      continueFromTaskId: taskId,
+    });
+    expect(redrivenSnapshot.json.dispatches.filter(
+      (candidate: { taskIds: string[] }) => candidate.taskIds.includes(redriveResponse.json.newTaskId),
+    )).toHaveLength(1);
   });
 
   it("heartbeat updates worker lastHeartbeatAt", async () => {

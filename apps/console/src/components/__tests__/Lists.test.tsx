@@ -325,6 +325,30 @@ describe('Task drill-down', () => {
     }));
   });
 
+  it('only exposes recovery when dispatcher marks the task as redriveable', () => {
+    const onRedrive = vi.fn();
+
+    renderWithProviders(
+      <TaskDetailsPanel
+        task={{
+          id: 'dispatch-1:verification-failed',
+          title: 'Non-recoverable verification failure',
+          status: 'failed',
+          redriveEligibility: {
+            canRedrive: false,
+            reason: 'non_redriveable_failure',
+            failureCode: null,
+            existingTaskId: null,
+          },
+        }}
+        onRedrive={onRedrive}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: /重新执行|redrive task/i })).not.toBeInTheDocument();
+    expect(onRedrive).not.toHaveBeenCalled();
+  });
+
   it('submits resume payload for tasks waiting for input', () => {
     const onResume = vi.fn();
 

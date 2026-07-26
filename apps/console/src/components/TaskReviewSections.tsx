@@ -1,17 +1,21 @@
 import React, { useState } from 'react';
+import { RotateCcw } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import {
+  resolveLatestProgress,
+  resolveTaskFailure,
+  type TaskFailureAttempt,
+  type TaskFailureEvent,
+} from '@/lib/taskFailure';
 
 interface Task {
   id: string;
   status: string;
-}
-
-interface EventRecord {
-  type: string;
-  summary?: string;
-  payload?: {
-    message?: string;
-    failureSummary?: string;
+  redriveEligibility?: {
+    canRedrive?: boolean;
+    reason?: string;
+    failureCode?: string | null;
+    existingTaskId?: string | null;
   } | null;
 }
 
@@ -33,9 +37,11 @@ interface Review {
     changedFileCount?: number | null;
   } | null;
   latestWorkerResult?: {
+    generatedAt?: string;
+    output?: string;
     evidence?: {
       failureType?: string;
-      blockers?: Array<{ code?: string }>;
+      blockers?: Array<{ kind?: string; code?: string; message?: string }>;
       failureSummary?: string;
     } | null;
   } | null;
@@ -56,13 +62,6 @@ function formatTime(isoString?: string): string {
   const minutes = String(date.getMinutes()).padStart(2, '0');
   const seconds = String(date.getSeconds()).padStart(2, '0');
   return `${hours}:${minutes}:${seconds}`;
-}
-
-function extractFailureSummary(review: Review | null, events: EventRecord[]) {
-  const reviewFailure = review?.latestWorkerResult?.evidence?.failureSummary?.trim();
-  if (reviewFailure) return reviewFailure;
-  const event = events.find((item) => item.type === 'status_changed' && item.payload?.failureSummary);
-  return event?.payload?.failureSummary?.trim() || null;
 }
 
 const DetailRow: React.FC<{ label: string; value: React.ReactNode; mono?: boolean }> = ({ label, value, mono }) => (
@@ -140,18 +139,49 @@ export const ReviewSection: React.FC<{ review?: Review | null; mustFix: string[]
   );
 };
 
-export const FailureSection: React.FC<{ review?: Review | null; events: EventRecord[] }> = ({ review, events }) => {
+export const FailureSection: React.FC<{
+  taskStatus: string;
+  review?: Review | null;
+  events: TaskFailureEvent[];
+  attempts: TaskFailureAttempt[];
+}> = ({ taskStatus, review, events, attempts }) => {
   const { t } = useTranslation();
-  const latestProgress = events.find((event) => event.type === 'progress_reported') || null;
-  const failureType = review?.latestWorkerResult?.evidence?.failureType || null;
-  const failureCode = review?.latestWorkerResult?.evidence?.blockers?.[0]?.code || null;
+  const latestProgress = resolveLatestProgress(events);
+  const failure = resolveTaskFailure({ taskStatus, review, events, attempts });
+  if (!failure.type && !failure.code && !failure.summary) return null;
 
   return (
     <Section title={t('latestFailure')}>
-      <DetailRow label={t('failureType')} value={failureType} mono />
-      <DetailRow label={t('failureCode')} value={failureCode} mono />
-      <DetailRow label={t('failureSummary')} value={extractFailureSummary(review || null, events)} />
+      <DetailRow label={t('failureType')} value={failure.type} mono />
+      <DetailRow label={t('failureCode')} value={failure.code} mono />
+      <DetailRow label={t('failureSummary')} value={failure.summary} />
+      <DetailRow label={t('failureSource')} value={failure.source ? t(`failureSourceValue.${failure.source}`) : null} mono />
       <DetailRow label={t('latestProgress')} value={latestProgress?.payload?.message || latestProgress?.summary} />
+    </Section>
+  );
+};
+
+export const RecoveryActions: React.FC<{
+  task: Task;
+  redrivingTaskId?: string | null;
+  onRedrive?: () => void;
+}> = ({ task, redrivingTaskId, onRedrive }) => {
+  const { t } = useTranslation();
+  const canRedrive = task.redriveEligibility?.canRedrive === true;
+  if (!canRedrive || !onRedrive) return null;
+
+  return (
+    <Section title={t('recoveryActions')}>
+      <button
+        type="button"
+        title={t('redriveTaskHint')}
+        disabled={redrivingTaskId === task.id}
+        onClick={onRedrive}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-sm font-semibold text-cyan-100 transition-colors hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <RotateCcw size={16} aria-hidden="true" />
+        {redrivingTaskId === task.id ? t('redrivingTask') : t('redriveTask')}
+      </button>
     </Section>
   );
 };

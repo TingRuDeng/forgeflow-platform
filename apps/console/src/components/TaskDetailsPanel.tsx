@@ -4,6 +4,7 @@ import { Badge } from './UI';
 import { ArtifactSummary, AttemptTimeline, RuntimeEventList, type ArtifactBundle, type TaskAttempt } from './TaskTimeline';
 import {
   FailureSection,
+  RecoveryActions,
   ReviewActions,
   ReviewSection,
   RiskSection,
@@ -26,6 +27,12 @@ interface Task {
   followUpOfTaskId?: string;
   lastAssignedWorkerId?: string;
   terminationPolicy?: TerminationPolicy;
+  redriveEligibility?: {
+    canRedrive?: boolean;
+    reason?: string;
+    failureCode?: string | null;
+    existingTaskId?: string | null;
+  } | null;
   waitingForInput?: {
     requestedBy?: string;
     reason?: string;
@@ -62,9 +69,11 @@ interface Review {
     protectedPathHits?: Array<{ pattern?: string; files?: string[] }>;
   } | null;
   latestWorkerResult?: {
+    generatedAt?: string;
+    output?: string;
     evidence?: {
       failureType?: string;
-      blockers?: Array<{ code?: string }>;
+      blockers?: Array<{ kind?: string; code?: string; message?: string }>;
       failureSummary?: string;
     } | null;
   } | null;
@@ -83,8 +92,19 @@ interface EventRecord {
   at?: string;
   summary?: string;
   payload?: {
+    to?: string;
     message?: string;
+    error?: string;
+    failureType?: string;
+    failureCode?: string;
     failureSummary?: string;
+    data?: {
+      message?: string;
+      error?: string;
+      failureType?: string;
+      failureCode?: string;
+      failureSummary?: string;
+    } | null;
   } | null;
 }
 
@@ -99,8 +119,10 @@ interface TaskDetailsPanelProps {
   cancellingTaskId?: string | null;
   reviewingTaskId?: string | null;
   resumingTaskId?: string | null;
+  redrivingTaskId?: string | null;
   onCancel?: (task: Task) => void;
   onResume?: (task: Task, resumePayload: Record<string, unknown>) => void;
+  onRedrive?: (task: Task) => void;
   onReviewDecision?: (decision: 'merge' | 'rework' | 'block', input?: ReviewDecisionInput) => void;
 }
 
@@ -213,8 +235,10 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
   cancellingTaskId,
   reviewingTaskId,
   resumingTaskId,
+  redrivingTaskId,
   onCancel,
   onResume,
+  onRedrive,
   onReviewDecision,
 }) => {
   const { t } = useTranslation();
@@ -242,7 +266,12 @@ export const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
       <RiskSection review={review} />
       <ReviewSection review={review} mustFix={mustFix} canRedriveValue={canRedriveValue} />
       <ReviewActions task={task} review={review} reviewingTaskId={reviewingTaskId} onReviewDecision={onReviewDecision} />
-      <FailureSection review={review} events={events} />
+      <RecoveryActions
+        task={task}
+        redrivingTaskId={redrivingTaskId}
+        onRedrive={onRedrive ? () => onRedrive(task) : undefined}
+      />
+      <FailureSection taskStatus={task.status} review={review} events={events} attempts={attempts} />
       <PullRequestSection pullRequest={pullRequest} />
       <AttemptTimeline attempts={attempts} />
       <ArtifactSummary bundles={artifactBundles} />
