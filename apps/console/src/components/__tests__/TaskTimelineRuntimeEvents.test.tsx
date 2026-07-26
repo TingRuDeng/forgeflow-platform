@@ -25,19 +25,19 @@ describe('RuntimeEventList', () => {
   it('defaults to the latest ten runtime events and can expand all events for review', () => {
     renderWithProviders(<RuntimeEventList events={makeEvents(12)} />);
 
-    expect(screen.getByText('progress_1', { selector: 'div' })).toBeInTheDocument();
-    expect(screen.getByText('progress_10', { selector: 'div' })).toBeInTheDocument();
-    expect(screen.queryByText('progress_11', { selector: 'div' })).not.toBeInTheDocument();
+    expect(screen.queryByText('progress_1', { selector: 'div' })).not.toBeInTheDocument();
+    expect(screen.getByText('progress_3', { selector: 'div' })).toBeInTheDocument();
+    expect(screen.getByText('progress_12', { selector: 'div' })).toBeInTheDocument();
     expect(screen.getByText(/10 \/ 12/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /显示全部|Show all/i }));
 
-    expect(screen.getByText('progress_12', { selector: 'div' })).toBeInTheDocument();
+    expect(screen.getByText('progress_1', { selector: 'div' })).toBeInTheDocument();
     expect(screen.getByText(/12 \/ 12/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /收起|Collapse/i }));
 
-    expect(screen.queryByText('progress_11', { selector: 'div' })).not.toBeInTheDocument();
+    expect(screen.queryByText('progress_1', { selector: 'div' })).not.toBeInTheDocument();
   });
 
   it('filters expanded runtime events by event type', () => {
@@ -66,8 +66,25 @@ describe('RuntimeEventList', () => {
       target: { value: 'delivery_failed' },
     });
 
-    expect(screen.queryByText('progress_reported', { selector: 'div' })).not.toBeInTheDocument();
-    expect(screen.getAllByText('delivery_failed', { selector: 'div' })).toHaveLength(2);
+    expect(screen.queryByText(/进度报告|Progress Reported/i, { selector: 'div' })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/结果交付失败|Result Delivery Failed/i, { selector: 'div' })).toHaveLength(2);
     expect(screen.getByText(/2 \/ 2/)).toBeInTheDocument();
+  });
+
+  it('keeps untimestamped legacy events behind timestamped events in the preview', () => {
+    const events = [
+      {
+        taskId: 'dispatch-1:task-1',
+        type: 'legacy_without_time',
+        summary: 'legacy event',
+      },
+      ...makeEvents(10),
+    ];
+
+    renderWithProviders(<RuntimeEventList events={events} />);
+
+    expect(screen.queryByText('legacy_without_time', { selector: 'div' })).not.toBeInTheDocument();
+    expect(screen.getByText('progress_10', { selector: 'div' })).toBeInTheDocument();
+    expect(screen.getByText(/10 \/ 11/)).toBeInTheDocument();
   });
 });

@@ -26,6 +26,7 @@ import {
   heartbeatWorker,
   interruptTaskForInput,
   loadRuntimeState,
+  redriveTask,
   reconcileRuntimeState,
   recordReviewDecision,
   recordWorkerResult,
@@ -649,6 +650,202 @@ describe("dispatcher runtime state (TypeScript)", () => {
     }, resultInput)).toThrow(`idempotency replay mismatch for task: ${taskId}`);
   });
 
+  it("records the structured terminal failure on the attempt and redrives through the dispatcher policy", () => {
+    let state = createRunningAttemptState("task-terminal-failure", "codex-terminal-worker");
+    const task = state.tasks[0]!;
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-terminal-worker",
+      ...activeWorkerEnvelope(state, task.id),
+      result: {
+        taskId: task.id,
+        workerId: "codex-terminal-worker",
+        provider: "codex",
+        pool: "codex",
+        branchName: task.branchName,
+        repo: task.repo,
+        defaultBranch: task.defaultBranch,
+        mode: "run",
+        output: "dispatcher gateway timed out",
+        generatedAt: "2026-05-12T13:01:00.000Z",
+        verification: {
+          allPassed: false,
+          commands: [],
+        },
+        evidence: {
+          failureType: "execution",
+          failureSummary: "dispatcher gateway timed out",
+          blockers: [{
+            kind: "execution",
+            code: "transient_gateway_timeout",
+            message: "dispatcher gateway timed out",
+          }],
+          findings: [],
+        },
+      },
+    });
+
+    expect(state.taskAttempts[0]).toMatchObject({
+      status: "failed",
+      failureCode: "transient_gateway_timeout",
+      failureMessage: "dispatcher gateway timed out",
+    });
+    expect(state.events).toContainEqual(expect.objectContaining({
+      type: "status_changed",
+      payload: expect.objectContaining({
+        to: "failed",
+        failureType: "execution",
+        failureCode: "transient_gateway_timeout",
+        failureSummary: "dispatcher gateway timed out",
+      }),
+    }));
+    expect(buildDashboardSnapshot(state).tasks.find((candidate) => candidate.id === task.id)?.redriveEligibility).toEqual({
+      canRedrive: true,
+      reason: "recoverable_failure",
+      failureCode: "transient_gateway_timeout",
+      existingTaskId: null,
+    });
+
+    const redrive = redriveTask(state, {
+      taskId: task.id,
+      requestedBy: "console-ui",
+      at: "2026-05-12T13:02:00.000Z",
+    });
+
+    expect(redrive).toMatchObject({
+      originalTaskId: task.id,
+      newTaskId: "dispatch-2:redrive-2",
+      targetWorkerId: "codex-terminal-worker",
+      failureCode: "transient_gateway_timeout",
+      failureSummary: "dispatcher gateway timed out",
+      continuationMode: "continue",
+      continueFromTaskId: task.id,
+    });
+    expect(redrive.state.tasks.find((candidate) => candidate.id === redrive.newTaskId)).toMatchObject({
+      branchName: "ai/codex/task-terminal-failure-r2",
+      continuationMode: "continue",
+      continueFromTaskId: task.id,
+      status: "assigned",
+    });
+    expect(redrive.state.events).toContainEqual(expect.objectContaining({
+      taskId: task.id,
+      type: "task_redriven",
+      payload: expect.objectContaining({ newTaskId: redrive.newTaskId }),
+    }));
+
+    const duplicate = redriveTask(redrive.state, {
+      taskId: task.id,
+      requestedBy: "console-ui",
+      at: "2026-05-12T13:03:00.000Z",
+    });
+    expect(duplicate.newTaskId).toBe(redrive.newTaskId);
+    expect(duplicate.dispatchId).toBe(redrive.dispatchId);
+    expect(duplicate.state).toBe(redrive.state);
+    expect(duplicate.state.dispatches).toHaveLength(redrive.state.dispatches.length);
+    expect(duplicate.state.events.filter((event) => {
+      const payload = event.payload as { newTaskId?: string } | undefined;
+      return event.type === "task_redriven" && payload?.newTaskId === redrive.newTaskId;
+    })).toHaveLength(1);
+    expect(buildDashboardSnapshot(duplicate.state).tasks.find(
+      (candidate) => candidate.id === task.id,
+    )?.redriveEligibility).toEqual({
+      canRedrive: false,
+      reason: "already_redriven",
+      failureCode: null,
+      existingTaskId: redrive.newTaskId,
+    });
+
+    const secondTaskId = "dispatch-99:task-terminal-failure-copy";
+    const sourceAssignment = state.assignments.find((candidate) => candidate.taskId === task.id)!;
+    const sourceReview = state.reviews.find((candidate) => candidate.taskId === task.id)!;
+    const stateWithSecondSource: RuntimeState = {
+      ...redrive.state,
+      tasks: [...redrive.state.tasks, {
+        ...task,
+        id: secondTaskId,
+        externalTaskId: "task-terminal-failure-copy",
+        status: "failed",
+        assignedWorkerId: null,
+        lastAssignedWorkerId: null,
+      }],
+      assignments: [...redrive.state.assignments, {
+        ...sourceAssignment,
+        taskId: secondTaskId,
+        workerId: null,
+        status: "failed",
+        assignment: {
+          ...sourceAssignment.assignment,
+          taskId: secondTaskId,
+          workerId: null,
+          status: "failed",
+          targetWorkerId: null,
+        },
+      }],
+      reviews: [...redrive.state.reviews, {
+        ...sourceReview,
+        taskId: secondTaskId,
+      }],
+    };
+    const secondRedrive = redriveTask(stateWithSecondSource, {
+      taskId: secondTaskId,
+      requestedBy: "console-ui",
+      at: "2026-05-12T13:04:00.000Z",
+    });
+    expect(secondRedrive.state.tasks.find(
+      (candidate) => candidate.id === secondRedrive.newTaskId,
+    )?.branchName).toBe("ai/codex/task-terminal-failure-r3");
+  });
+
+  it("redrives review rework with a new branch and injected must-fix notes", () => {
+    let state = createRunningAttemptState("task-review-rework", "codex-rework-worker");
+    const task = state.tasks[0]!;
+
+    state = recordWorkerResult(state, {
+      workerId: "codex-rework-worker",
+      ...activeWorkerEnvelope(state, task.id),
+      result: {
+        taskId: task.id,
+        workerId: "codex-rework-worker",
+        provider: "codex",
+        pool: "codex",
+        branchName: task.branchName,
+        repo: task.repo,
+        defaultBranch: task.defaultBranch,
+        mode: "run",
+        output: "ready for review",
+        generatedAt: "2026-05-12T13:01:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+      },
+    });
+    state = recordReviewDecision(state, {
+      taskId: task.id,
+      decision: "rework",
+      actor: "reviewer",
+      notes: "address review findings",
+      at: "2026-05-12T13:01:30.000Z",
+      evidence: {
+        reasonCode: "test_failure",
+        mustFix: ["补齐失败路径测试", "保留原始错误码"],
+        canRedrive: true,
+      },
+    });
+
+    const redrive = redriveTask(state, {
+      taskId: task.id,
+      requestedBy: "console-ui",
+      at: "2026-05-12T13:02:00.000Z",
+    });
+    const assignment = redrive.state.assignments.find((candidate) => candidate.taskId === redrive.newTaskId);
+
+    expect(redrive.failureCode).toBeNull();
+    expect(redrive.failureSummary).toBe("rework: 补齐失败路径测试; 保留原始错误码");
+    expect(assignment?.workerPrompt).toContain("## Rework Notes\n\n补齐失败路径测试; 保留原始错误码");
+    expect(assignment?.contextMarkdown).toContain("## Rework Notes\n\n补齐失败路径测试; 保留原始错误码");
+  });
+
   it("rejects vNext start and result writes with stale attempt lease data", () => {
     let state = createEmptyRuntimeState();
     state = registerWorker(state, {
@@ -1074,6 +1271,15 @@ describe("dispatcher runtime state (TypeScript)", () => {
       status: "expired",
       failureCode: "attempt_lease_expired",
     });
+    expect(state.events).toContainEqual(expect.objectContaining({
+      type: "status_changed",
+      payload: expect.objectContaining({
+        to: "failed",
+        failureType: "execution",
+        failureCode: "attempt_lease_expired",
+        failureSummary: "attempt lease expired and the task exhausted its retry policy",
+      }),
+    }));
   });
 
   it("honors task-level termination policy during reconciliation", () => {

@@ -247,6 +247,115 @@ describe('App dashboard loading', () => {
     await waitFor(() => expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('risk_ack_required')));
   });
 
+  it('redrives a failed task through the dispatcher recovery endpoint', async () => {
+    const failedTask = {
+      id: 'dispatch-1:task-failed',
+      title: 'Recover failed task',
+      status: 'failed',
+      branchName: 'codex/task-failed',
+      repo: 'owner/repo',
+      pool: 'codex',
+      redriveEligibility: {
+        canRedrive: true,
+        reason: 'recoverable_failure',
+        failureCode: 'transient_gateway_timeout',
+        existingTaskId: null,
+      },
+    };
+    const failedSnapshot = {
+      ...snapshot,
+      stats: {
+        ...snapshot.stats,
+        tasks: { total: 1, review: 0, merged: 0 },
+      },
+      tasks: [failedTask],
+      assignments: [{
+        taskId: failedTask.id,
+        workerId: 'worker-1',
+        branchName: failedTask.branchName,
+        repo: failedTask.repo,
+        pool: failedTask.pool,
+      }],
+      reviews: [{
+        taskId: failedTask.id,
+        decision: 'pending',
+        latestWorkerResult: {
+          generatedAt: '2026-07-26T10:00:00Z',
+          output: 'gateway timeout',
+          evidence: {
+            failureType: 'execution',
+            failureSummary: 'gateway timeout',
+            blockers: [{
+              kind: 'execution',
+              code: 'transient_gateway_timeout',
+              message: 'gateway timeout',
+            }],
+          },
+        },
+      }],
+      taskAttempts: [{
+        taskId: failedTask.id,
+        attemptId: 'attempt-1',
+        status: 'failed',
+        failureCode: 'transient_gateway_timeout',
+        failureMessage: 'gateway timeout',
+      }],
+    };
+    const newTask = {
+      ...failedTask,
+      id: 'dispatch-2:redrive-2',
+      status: 'assigned',
+      branchName: 'codex/task-failed-r2',
+      continueFromTaskId: failedTask.id,
+      redriveEligibility: {
+        canRedrive: false,
+        reason: 'state_not_redriveable',
+        failureCode: null,
+        existingTaskId: null,
+      },
+    };
+    let snapshotCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/dr/status') {
+        return new Response(JSON.stringify(drStatus), { status: 200 });
+      }
+      if (url === '/api/tasks/dispatch-1%3Atask-failed/redrive') {
+        return new Response(JSON.stringify({
+          status: 'redriven',
+          originalTaskId: failedTask.id,
+          newTaskId: newTask.id,
+          targetWorkerId: 'worker-1',
+          failureCode: 'transient_gateway_timeout',
+          failureSummary: 'gateway timeout',
+          continuationMode: 'continue',
+          continueFromTaskId: failedTask.id,
+        }), { status: 200 });
+      }
+      if (url === '/api/dashboard/snapshot') {
+        snapshotCalls += 1;
+        return new Response(JSON.stringify(
+          snapshotCalls > 1
+            ? { ...failedSnapshot, tasks: [failedTask, newTask] }
+            : failedSnapshot,
+        ), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `unexpected ${url}` }), { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    vi.stubGlobal('alert', vi.fn());
+
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('button', { name: /重新执行|redrive task/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tasks/dispatch-1%3Atask-failed/redrive',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+    expect(await screen.findByText(newTask.id)).toBeInTheDocument();
+  });
+
   it('shows bulk review failures in the review queue instead of an alert', async () => {
     const reviewSnapshot = {
       ...snapshot,

@@ -17,7 +17,9 @@ import type { RuntimeStateStore } from "./runtime-state-store.js";
 import type { LeaseResourceType, RuntimeLease } from "./leases.js";
 import {
   ArtifactBundleSchema,
+  resolveWorkerFailure,
   type ArtifactBundle,
+  type ResolvedWorkerFailure,
 } from "@forgeflow/result-contracts";
 import type {
   ReviewDecisionEvidence,
@@ -46,6 +48,60 @@ const RUNTIME_STATE_BACKEND_ENV = "RUNTIME_STATE_BACKEND";
 const DEFAULT_MAX_TASK_ATTEMPTS = 2;
 const ATTEMPT_LEASE_EXPIRED_CODE = "attempt_lease_expired";
 const WORKER_PROTOCOL_VERSION = "2026-05-v1";
+const REDRIVEABLE_FAILURE_CODES = new Set([
+  "worktree_mismatch",
+  "branch_mismatch",
+  "preflight_workspace_mismatch",
+  "workspace_prepare_failed",
+  "transient_gateway_timeout",
+  "transient_model_3003",
+  "artifact_remote_unverified",
+  "prompt_contract_mismatch",
+  "delivery_failed",
+  ATTEMPT_LEASE_EXPIRED_CODE,
+]);
+const REDRIVEABLE_FAILURE_PATTERNS: Array<{ code: string; patterns: RegExp[] }> = [
+  {
+    code: "worktree_mismatch",
+    patterns: [/worktree[_ ]mismatch/i, /workspace.*worktree.*mismatch/i, /worktree.*workspace.*mismatch/i],
+  },
+  {
+    code: "branch_mismatch",
+    patterns: [/branch[_ ]mismatch/i, /workspace.*branch.*mismatch/i, /branch.*workspace.*mismatch/i],
+  },
+  {
+    code: "preflight_workspace_mismatch",
+    patterns: [/preflight.*workspace.*mismatch/i, /workspace.*preflight.*mismatch/i],
+  },
+  {
+    code: "workspace_prepare_failed",
+    patterns: [/workspace_prepare_failed/i],
+  },
+  {
+    code: "transient_gateway_timeout",
+    patterns: [/request timeout/i, /gateway is not ready/i, /timed out/i],
+  },
+  {
+    code: "transient_model_3003",
+    patterns: [/\b3003\b/],
+  },
+  {
+    code: "artifact_remote_unverified",
+    patterns: [/artifact not reviewable/i, /remote artifact/i, /remote verification failed/i],
+  },
+  {
+    code: "prompt_contract_mismatch",
+    patterns: [/template echo/i, /task id mismatch/i, /required template/i, /placeholder/i],
+  },
+  {
+    code: "delivery_failed",
+    patterns: [/delivery_failed/i, /submit result.*failed/i],
+  },
+  {
+    code: ATTEMPT_LEASE_EXPIRED_CODE,
+    patterns: [/attempt lease expired/i],
+  },
+];
 
 export class InvalidDispatchInputError extends Error {
   readonly code = "invalid_dispatch_input";
@@ -389,6 +445,22 @@ export interface CreateDispatchResult {
   }>;
 }
 
+export interface RedriveTaskInput {
+  taskId: string;
+  requestedBy?: string;
+  at?: string;
+}
+
+export interface RedriveTaskResult extends CreateDispatchResult {
+  originalTaskId: string;
+  newTaskId: string;
+  targetWorkerId: string | null;
+  failureCode: string | null;
+  failureSummary: string;
+  continuationMode: "continue";
+  continueFromTaskId: string;
+}
+
 export interface GetAssignedTaskResult {
   task: Task;
   assignment: AssignmentPayload;
@@ -543,6 +615,24 @@ export interface ReconcileOptions {
   maxTaskAttempts?: number;
 }
 
+export interface TaskRedriveEligibility {
+  canRedrive: boolean;
+  reason:
+    | "recoverable_failure"
+    | "review_rework"
+    | "already_redriven"
+    | "non_redriveable_failure"
+    | "review_redrive_disabled"
+    | "review_decision_not_redriveable"
+    | "state_not_redriveable";
+  failureCode: string | null;
+  existingTaskId: string | null;
+}
+
+export type DashboardTask = Task & {
+  redriveEligibility: TaskRedriveEligibility;
+};
+
 export interface DashboardSnapshot {
   updatedAt: string;
   stats: {
@@ -600,7 +690,7 @@ export interface DashboardSnapshot {
     };
   };
   workers: Worker[];
-  tasks: Task[];
+  tasks: DashboardTask[];
   taskAttempts: TaskAttempt[];
   artifactBundles: ArtifactBundle[];
   assignments: Assignment[];
@@ -657,6 +747,12 @@ function summarizeEvent(type: string, payload: unknown): string | null {
   const message = normalizeString(record?.message).trim() || normalizeString(data?.message).trim();
   if (message) {
     return message;
+  }
+
+  const failureSummary = normalizeString(record?.failureSummary).trim()
+    || normalizeString(data?.failureSummary).trim();
+  if (failureSummary) {
+    return failureSummary;
   }
 
   if (type === "status_changed") {
@@ -1921,7 +2017,13 @@ function markTaskFailedAfterRetries(
     taskId: input.task.id,
     type: "status_changed",
     at: input.at,
-    payload: { from: "in_progress", to: "failed", failureCode: ATTEMPT_LEASE_EXPIRED_CODE },
+    payload: {
+      from: "in_progress",
+      to: "failed",
+      failureType: "execution",
+      failureCode: ATTEMPT_LEASE_EXPIRED_CODE,
+      failureSummary: "attempt lease expired and the task exhausted its retry policy",
+    },
   });
   return {
     ...nextState,
@@ -2423,6 +2525,335 @@ export function createDispatch(state: RuntimeState, input: CreateDispatchInput):
   };
 }
 
+function incrementRedriveBranchName(branchName: string): string {
+  const match = branchName.match(/^(.*?)-r(\d+)$/);
+  if (!match) {
+    return `${branchName}-r2`;
+  }
+  const round = Number.parseInt(match[2], 10);
+  return `${match[1]}-r${Number.isSafeInteger(round) && round > 0 ? round + 1 : 2}`;
+}
+
+function nextAvailableRedriveBranchName(state: RuntimeState, sourceBranchName: string): string {
+  const occupiedBranches = new Set(state.tasks.map((task) => task.branchName));
+  let candidate = incrementRedriveBranchName(sourceBranchName);
+  while (occupiedBranches.has(candidate)) {
+    candidate = incrementRedriveBranchName(candidate);
+  }
+  return candidate;
+}
+
+function classifyRedriveableFailure(code: string, summary: string): string | null {
+  const normalizedCode = code.trim();
+  if (REDRIVEABLE_FAILURE_CODES.has(normalizedCode)) {
+    return normalizedCode;
+  }
+  for (const candidate of REDRIVEABLE_FAILURE_PATTERNS) {
+    if (candidate.patterns.some((pattern) => pattern.test(summary))) {
+      return candidate.code;
+    }
+  }
+  return null;
+}
+
+function resolveFailedTaskFailure(state: RuntimeState, task: Task): ResolvedWorkerFailure {
+  const review = state.reviews.find((candidate) => candidate.taskId === task.id);
+  const workerResult = review?.latestWorkerResult;
+  if (workerResult) {
+    return resolveWorkerFailure(workerResult.evidence, workerResult.output);
+  }
+
+  const latestAttempt = [...(state.taskAttempts ?? [])]
+    .filter((attempt) => attempt.taskId === task.id)
+    .sort((left, right) => right.attemptNo - left.attemptNo)[0];
+  if (latestAttempt?.failureCode || latestAttempt?.failureMessage) {
+    return {
+      kind: latestAttempt.failureCode === ATTEMPT_LEASE_EXPIRED_CODE ? "execution" : "unknown",
+      code: latestAttempt.failureCode?.trim() || "unknown",
+      message: latestAttempt.failureMessage?.trim() || latestAttempt.failureCode?.trim() || "unknown",
+    };
+  }
+
+  const failureEvent = [...state.events].reverse().find((event) => {
+    if (event.taskId !== task.id) {
+      return false;
+    }
+    const payload = isRecord(event.payload) ? event.payload : null;
+    return (
+      (event.type === "status_changed" && payload?.to === "failed")
+      || event.type === "attempt_expired"
+      || event.type === "delivery_failed"
+    );
+  });
+  const payload = isRecord(failureEvent?.payload) ? failureEvent.payload : null;
+  const data = isRecord(payload?.data) ? payload.data : null;
+  const code = normalizeString(payload?.failureCode).trim()
+    || normalizeString(data?.failureCode).trim()
+    || "unknown";
+  const message = normalizeString(payload?.failureSummary).trim()
+    || normalizeString(payload?.message).trim()
+    || normalizeString(payload?.error).trim()
+    || normalizeString(data?.message).trim()
+    || failureEvent?.summary?.trim()
+    || code;
+  return { kind: "unknown", code, message };
+}
+
+function findExistingManualRedrive(state: RuntimeState, sourceTaskId: string): {
+  task: Task;
+  assignment: Assignment;
+  dispatch: Dispatch;
+  event: Event | null;
+} | null {
+  const event = [...state.events].reverse().find((candidate) => {
+    if (candidate.taskId !== sourceTaskId || candidate.type !== "task_redriven") {
+      return false;
+    }
+    const payload = isRecord(candidate.payload) ? candidate.payload : null;
+    return Boolean(normalizeString(payload?.newTaskId).trim());
+  }) ?? null;
+  const eventPayload = isRecord(event?.payload) ? event.payload : null;
+  const eventTaskId = normalizeString(eventPayload?.newTaskId).trim();
+  const task = (
+    eventTaskId
+      ? state.tasks.find((candidate) => candidate.id === eventTaskId)
+      : undefined
+  ) ?? state.tasks.find((candidate) =>
+    candidate.continueFromTaskId === sourceTaskId
+    && candidate.externalTaskId.startsWith("redrive-")
+  );
+  if (!task) {
+    return null;
+  }
+  const assignment = state.assignments.find((candidate) => candidate.taskId === task.id);
+  const dispatch = state.dispatches.find((candidate) => candidate.taskIds.includes(task.id));
+  if (!assignment || !dispatch) {
+    throw new Error(`redrive state incomplete for task: ${sourceTaskId}`);
+  }
+  return { task, assignment, dispatch, event };
+}
+
+function resolveTaskRedriveEligibility(state: RuntimeState, task: Task): TaskRedriveEligibility {
+  const existing = findExistingManualRedrive(state, task.id);
+  if (existing) {
+    return {
+      canRedrive: false,
+      reason: "already_redriven",
+      failureCode: null,
+      existingTaskId: existing.task.id,
+    };
+  }
+  if (task.status === "failed") {
+    const failure = resolveFailedTaskFailure(state, task);
+    const failureCode = classifyRedriveableFailure(failure.code, failure.message);
+    return {
+      canRedrive: Boolean(failureCode),
+      reason: failureCode ? "recoverable_failure" : "non_redriveable_failure",
+      failureCode,
+      existingTaskId: null,
+    };
+  }
+  if (task.status === "blocked") {
+    const review = state.reviews.find((candidate) => candidate.taskId === task.id);
+    if (review?.evidence?.canRedrive === false) {
+      return {
+        canRedrive: false,
+        reason: "review_redrive_disabled",
+        failureCode: null,
+        existingTaskId: null,
+      };
+    }
+    const canRedrive = Boolean(review && ["rework", "changes_requested"].includes(review.decision));
+    return {
+      canRedrive,
+      reason: canRedrive ? "review_rework" : "review_decision_not_redriveable",
+      failureCode: null,
+      existingTaskId: null,
+    };
+  }
+  return {
+    canRedrive: false,
+    reason: "state_not_redriveable",
+    failureCode: null,
+    existingTaskId: null,
+  };
+}
+
+function buildBlockedTaskRedriveReason(review: Review): { reason: string; notes: string | null } {
+  if (!["rework", "changes_requested"].includes(review.decision)) {
+    throw new Error(
+      `task ${review.taskId} is blocked but latest review decision is "${review.decision}" `
+      + '(only "rework" and "changes_requested" are redriveable)',
+    );
+  }
+  if (review.evidence?.canRedrive === false) {
+    throw new Error(`task ${review.taskId} latest review explicitly disabled redrive`);
+  }
+
+  const mustFix = review.evidence?.mustFix?.map((item) => item.trim()).filter(Boolean) ?? [];
+  const notes = mustFix.length > 0
+    ? mustFix.join("; ")
+    : review.notes?.trim() || null;
+  const reason = mustFix.length > 0
+    ? `rework: ${mustFix.join("; ")}`
+    : review.evidence?.reasonCode
+      ? `rework: ${review.evidence.reasonCode}`
+      : `rework: ${notes ?? "no notes"}`;
+  return { reason, notes };
+}
+
+export function redriveTask(state: RuntimeState, input: RedriveTaskInput): RedriveTaskResult {
+  const task = state.tasks.find((candidate) => candidate.id === input.taskId);
+  if (!task) {
+    throw new Error(`task not found: ${input.taskId}`);
+  }
+  const sourceAssignment = state.assignments.find((candidate) => candidate.taskId === task.id);
+  if (!sourceAssignment) {
+    throw new Error(`assignment not found for task: ${task.id}`);
+  }
+  const existingRedrive = findExistingManualRedrive(state, task.id);
+  if (existingRedrive) {
+    const payload = isRecord(existingRedrive.event?.payload) ? existingRedrive.event.payload : null;
+    const targetWorkerId = normalizeString(payload?.targetWorkerId).trim()
+      || existingRedrive.task.targetWorkerId
+      || existingRedrive.assignment.workerId
+      || null;
+    const failureCode = normalizeString(payload?.failureCode).trim() || null;
+    const failureSummary = normalizeString(payload?.failureSummary).trim() || "task already redriven";
+    return {
+      state,
+      dispatchId: existingRedrive.dispatch.id,
+      taskIds: [...existingRedrive.dispatch.taskIds],
+      assignments: existingRedrive.dispatch.taskIds.flatMap((taskId) => {
+        const assignment = state.assignments.find((candidate) => candidate.taskId === taskId);
+        return assignment ? [{
+          taskId,
+          workerId: assignment.workerId,
+          status: assignment.status,
+        }] : [];
+      }),
+      originalTaskId: task.id,
+      newTaskId: existingRedrive.task.id,
+      targetWorkerId,
+      failureCode,
+      failureSummary,
+      continuationMode: "continue",
+      continueFromTaskId: task.id,
+    };
+  }
+
+  let failureCode: string | null = null;
+  let failureSummary: string;
+  let reworkNotes: string | null = null;
+
+  if (task.status === "failed") {
+    const failure = resolveFailedTaskFailure(state, task);
+    failureCode = classifyRedriveableFailure(failure.code, failure.message);
+    if (!failureCode) {
+      throw new Error(
+        `task ${task.id} failed for a non-redriveable reason: ${failure.message.slice(0, 100)}`,
+      );
+    }
+    failureSummary = failure.message.slice(0, 200);
+  } else if (task.status === "blocked") {
+    const review = state.reviews.find((candidate) => candidate.taskId === task.id);
+    if (!review) {
+      throw new Error(`task ${task.id} is blocked but has no review decision`);
+    }
+    const blockedReason = buildBlockedTaskRedriveReason(review);
+    failureSummary = blockedReason.reason;
+    reworkNotes = blockedReason.notes;
+  } else {
+    throw new Error(
+      `task ${task.id} is in "${task.status}" state and is not redriveable `
+      + '(only "failed" and "blocked" with rework/changes_requested are redriveable)',
+    );
+  }
+
+  const targetWorkerId = task.lastAssignedWorkerId
+    ?? task.assignedWorkerId
+    ?? sourceAssignment.workerId
+    ?? sourceAssignment.assignment.targetWorkerId
+    ?? null;
+  const newExternalTaskId = `redrive-${(state.sequence ?? 0) + 1}`;
+  const newBranchName = nextAvailableRedriveBranchName(state, task.branchName);
+  const reworkSection = reworkNotes ? `\n\n## Rework Notes\n\n${reworkNotes}` : "";
+  const workerPrompt = (
+    sourceAssignment.workerPrompt
+    ?? "You are a ForgeFlow worker. Stay within allowedPaths and satisfy acceptance."
+  ) + reworkSection;
+  const contextMarkdown = (
+    sourceAssignment.contextMarkdown
+    ?? "# Context\n\nComplete the assigned task within scope."
+  ) + reworkSection;
+
+  const dispatchResult = createDispatch(state, {
+    repo: task.repo,
+    defaultBranch: task.defaultBranch,
+    requestedBy: input.requestedBy ?? "codex-control",
+    createdAt: input.at,
+    tasks: [{
+      id: newExternalTaskId,
+      title: task.title,
+      pool: task.pool,
+      allowedPaths: [...task.allowedPaths],
+      acceptance: [...task.acceptance],
+      branchName: newBranchName,
+      targetWorkerId,
+      verification: clone(task.verification),
+      terminationPolicy: task.terminationPolicy ? clone(task.terminationPolicy) : undefined,
+      chatMode: task.chatMode,
+      continuationMode: "continue",
+      continueFromTaskId: task.id,
+    }],
+    packages: [{
+      taskId: newExternalTaskId,
+      assignment: {
+        ...clone(sourceAssignment.assignment),
+        taskId: newExternalTaskId,
+        workerId: null,
+        status: "pending",
+        branchName: newBranchName,
+        targetWorkerId,
+        continuationMode: "continue",
+        continueFromTaskId: task.id,
+        followUpOfTaskId: null,
+        workerChangeReason: null,
+        resumePayload: null,
+      },
+      workerPrompt,
+      contextMarkdown,
+      workerPromptMode: sourceAssignment.workerPromptMode,
+      reportSchemaVersion: sourceAssignment.reportSchemaVersion,
+    }],
+  });
+  const newTaskId = dispatchResult.taskIds[0];
+  const redrivenState = appendEvent(dispatchResult.state, {
+    taskId: task.id,
+    type: "task_redriven",
+    at: input.at ?? dispatchResult.state.updatedAt,
+    payload: {
+      newTaskId,
+      targetWorkerId,
+      failureCode,
+      failureSummary,
+      continuationMode: "continue",
+    },
+  });
+
+  return {
+    ...dispatchResult,
+    state: redrivenState,
+    originalTaskId: task.id,
+    newTaskId,
+    targetWorkerId,
+    failureCode,
+    failureSummary,
+    continuationMode: "continue",
+    continueFromTaskId: task.id,
+  };
+}
+
 export function getAssignedTaskForWorker(state: RuntimeState, workerId: string): GetAssignedTaskResult | null {
   const worker = state.workers.find((candidate) => candidate.id === workerId);
   if (!worker || !worker.currentTaskId) {
@@ -2861,6 +3292,9 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     : null;
 
   const nextStatus = canonicalResult.verification.allPassed ? "review" : "failed";
+  const terminalFailure = canonicalResult.verification.allPassed
+    ? null
+    : resolveWorkerFailure(canonicalResult.evidence, canonicalResult.output);
   const reviewChangedFiles = input.changedFiles ?? [];
   const reviewMaterial = canonicalResult.verification.allPassed
     ? {
@@ -2898,6 +3332,11 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     payload: {
       from: "in_progress",
       to: nextStatus,
+      ...(terminalFailure ? {
+        failureType: terminalFailure.kind,
+        failureCode: terminalFailure.code,
+        failureSummary: terminalFailure.message,
+      } : {}),
     },
   });
 
@@ -2987,8 +3426,8 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     status: canonicalResult.verification.allPassed ? "succeeded" : "failed",
     heartbeatAt: canonicalResult.generatedAt,
     endedAt: canonicalResult.generatedAt,
-    failureCode: canonicalResult.verification.allPassed ? undefined : "verification_failed",
-    failureMessage: canonicalResult.verification.allPassed ? undefined : canonicalResult.output,
+    failureCode: terminalFailure?.code,
+    failureMessage: terminalFailure?.message,
     artifactBundleId: artifactBundle?.bundleId ?? attempt.artifactBundleId,
   }));
 
@@ -3512,7 +3951,10 @@ export function buildDashboardSnapshot(state: RuntimeState, options: ReconcileOp
       eventWindow: describeRuntimeEventWindow(reconciledState.events),
     },
     workers,
-    tasks: clone([...reconciledState.tasks].reverse()),
+    tasks: clone([...reconciledState.tasks].reverse().map((task) => ({
+      ...task,
+      redriveEligibility: resolveTaskRedriveEligibility(reconciledState, task),
+    }))),
     taskAttempts: clone(reconciledState.taskAttempts ?? []),
     artifactBundles: clone(reconciledState.artifactBundles ?? []),
     assignments: clone(reconciledState.assignments),

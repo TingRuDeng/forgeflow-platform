@@ -169,3 +169,39 @@ export type ArtifactChangedFile = z.infer<typeof ArtifactChangedFileSchema>;
 export type ArtifactTrajectoryStep = z.infer<typeof ArtifactTrajectoryStepSchema>;
 export type ArtifactTrajectory = z.infer<typeof ArtifactTrajectorySchema>;
 export type ArtifactBundle = z.infer<typeof ArtifactBundleSchema>;
+
+export interface ResolvedWorkerFailure {
+  kind: WorkerFailureType;
+  code: string;
+  message: string;
+}
+
+const FALLBACK_FAILURE_CODE: Record<WorkerFailureType, string> = {
+  preflight: "preflight_failed",
+  execution: "execution_failed",
+  verification: "verification_failed",
+  unknown: "unknown",
+};
+
+/**
+ * Selects the canonical terminal failure without constraining provider-specific
+ * blocker codes. The first structured blocker remains authoritative; older
+ * workers can fall back to the evidence summary or result output.
+ */
+export function resolveWorkerFailure(
+  evidence: WorkerEvidence | null | undefined,
+  fallbackMessage = "",
+  fallbackKind: WorkerFailureType = "verification",
+): ResolvedWorkerFailure {
+  const blocker = evidence?.blockers?.find((candidate) =>
+    Boolean(candidate.code?.trim() || candidate.message?.trim())
+  );
+  const kind = blocker?.kind ?? evidence?.failureType ?? fallbackKind;
+  const code = blocker?.code?.trim() || FALLBACK_FAILURE_CODE[kind];
+  const message = blocker?.message?.trim()
+    || evidence?.failureSummary?.trim()
+    || fallbackMessage.trim()
+    || code;
+
+  return { kind, code, message };
+}

@@ -36,3 +36,32 @@ export async function postTaskResume(input: {
     throw new Error(errorMessage);
   }
 }
+
+export interface TaskRedriveResponse {
+  status: "redriven";
+  originalTaskId: string;
+  newTaskId: string;
+  targetWorkerId: string | null;
+  failureCode: string | null;
+  failureSummary: string;
+  continuationMode: "continue";
+  continueFromTaskId: string;
+}
+
+export async function postTaskRedrive(input: { taskId: string }): Promise<TaskRedriveResponse> {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(input.taskId)}/redrive`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      at: new Date().toISOString(),
+      actor: 'console-ui',
+    }),
+  });
+
+  const body = await parseJsonResponse(res);
+  if (!res.ok) {
+    const errorMessage = extractResponseError(body, 'Failed to redrive task');
+    throw new Error(errorMessage);
+  }
+  return body as TaskRedriveResponse;
+}

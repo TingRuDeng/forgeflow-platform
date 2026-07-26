@@ -38,6 +38,7 @@ import {
   loadRuntimeStateAsync,
   markWorkerOffline,
   reconcileRuntimeState,
+  redriveTask,
   recordReviewDecision,
   recordWorkerEvent,
   recordWorkerResult,
@@ -433,6 +434,26 @@ function classifyTaskCancellationError(error: unknown): number {
   }
   if (message.startsWith("resumePayload.")) {
     return 400;
+  }
+  return 500;
+}
+
+function classifyTaskRedriveError(error: unknown): number {
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    message.startsWith("task not found:")
+    || message.startsWith("assignment not found for task:")
+  ) {
+    return 404;
+  }
+  if (
+    message.includes("is not redriveable")
+    || message.includes("non-redriveable reason")
+    || message.includes("latest review explicitly disabled redrive")
+    || message.includes("blocked but has no review decision")
+    || message.includes("blocked but latest review decision")
+  ) {
+    return 409;
   }
   return 500;
 }
@@ -1594,6 +1615,37 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
       } catch (error: any) {
         rethrowStateLockTimeout(error);
         return createJsonResponse(classifyTaskCancellationError(error), {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const redriveTaskMatch = method === "POST"
+      ? pathname.match(/^\/api\/tasks\/([^/]+)\/redrive$/)
+      : null;
+    if (redriveTaskMatch) {
+      try {
+        const taskId = decodeURIComponent(redriveTaskMatch[1]);
+        const result = await withStateAsync(stateDir, (state) =>
+          redriveTask(state, {
+            taskId,
+            requestedBy: String(body.actor || "").trim() || "codex-control",
+            at: body.at,
+          })
+        );
+        return createJsonResponse(200, {
+          status: "redriven",
+          originalTaskId: result.originalTaskId,
+          newTaskId: result.newTaskId,
+          targetWorkerId: result.targetWorkerId,
+          failureCode: result.failureCode,
+          failureSummary: result.failureSummary,
+          continuationMode: result.continuationMode,
+          continueFromTaskId: result.continueFromTaskId,
+        });
+      } catch (error: any) {
+        rethrowStateLockTimeout(error);
+        return createJsonResponse(classifyTaskRedriveError(error), {
           error: error instanceof Error ? error.message : String(error),
         });
       }

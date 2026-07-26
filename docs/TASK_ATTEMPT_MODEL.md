@@ -48,6 +48,7 @@ ai_summary:
 - worker claim 会为当前 task 创建 synthetic attempt。
 - claim-backed start 必须携带完整 v1 envelope，并会把 active attempt 标记为 `running`。
 - claim-backed result 必须携带完整 v1 envelope，并会把 active attempt 标记为 `succeeded` 或 `failed`。
+- failed result 会优先采用首个非空 `evidence.blockers[]` 的 kind/code/message，并将同一 failure code/message 同步写入终态事件与 active attempt；缺少结构化 evidence 时兼容回退为 `verification_failed` 和 result output。
 - task cancel 会把 active attempt 标记为 `cancelled`。
 - reconcile 会把离线 worker 的过期 running attempt 标记为 `expired`，并按最小 retry policy redrive 或失败。
 - late result 携带历史终态 `attemptId` 时默认会被拒绝，不允许覆盖新 attempt 或 task 状态；唯一例外是已落账 `succeeded` / `failed` result 的精确幂等重放。
@@ -95,9 +96,10 @@ v1 状态集合：
 - claim 创建 attempt 并返回 leaseToken。
 - start/progress/result 都必须携带 attemptId 和 leaseToken。
 - review 必须绑定 attemptId。
-- redrive 创建新 attempt，不覆盖旧 attempt。
+- lease 过期触发的自动 retry 保留同一 Task，并在下一次 claim 时创建新 attempt。
+- `POST /api/tasks/:taskId/redrive` 的人工恢复会创建带 `continueFromTaskId` 的新 Task 和 `-rN` 分支；新 Task 在 claim 时再创建自己的 attempt，原 Task/attempt 不会被覆盖。
 - 过期 attempt 保留历史，不删除审计证据。
-- 当前 retry scheduler 只处理 active running attempt 的 lease 过期；review rework continuation 仍走独立协议。
+- 当前 retry scheduler 只处理 active running attempt 的 lease 过期；failed / review rework 的人工 continuation 统一走 dispatcher redrive endpoint。
 
 ## 兼容迁移
 

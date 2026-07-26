@@ -378,8 +378,10 @@ describe("runtime-dispatcher-server foundation", () => {
       expect(event).toBeDefined();
       expect(event!.payload).toMatchObject({
         to: "failed",
+        failureType: "verification",
+        failureCode: "verification_failed",
+        failureSummary: "Something went wrong",
       });
-      expect((event!.payload as Record<string, unknown>).failureType).toBeUndefined();
       expect(result.state.reviews[0].latestWorkerResult?.evidence).toBeUndefined();
     });
   });

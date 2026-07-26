@@ -8,6 +8,7 @@ import {
   WorkerEvidenceSchema,
   ReviewDecisionEvidenceSchema,
   ReviewReasonCodeSchema,
+  resolveWorkerFailure,
   RunResultSchema,
 } from "../src/index.js";
 
@@ -141,6 +142,48 @@ describe("WorkerEvidenceSchema", () => {
     expect(result.artifacts).toEqual({
       log: "/tmp/test.log",
       screenshot: "/tmp/screen.png",
+    });
+  });
+});
+
+describe("resolveWorkerFailure", () => {
+  it("preserves the first provider-specific blocker as the canonical failure", () => {
+    expect(resolveWorkerFailure({
+      failureType: "verification",
+      failureSummary: "fallback summary",
+      blockers: [
+        {
+          kind: "execution",
+          code: "transient_gateway_timeout",
+          message: "gateway timed out",
+        },
+      ],
+      findings: [],
+    }, "worker output")).toEqual({
+      kind: "execution",
+      code: "transient_gateway_timeout",
+      message: "gateway timed out",
+    });
+  });
+
+  it("falls back to the evidence type and summary for legacy workers", () => {
+    expect(resolveWorkerFailure({
+      failureType: "preflight",
+      failureSummary: "workspace could not be prepared",
+      blockers: [],
+      findings: [],
+    })).toEqual({
+      kind: "preflight",
+      code: "preflight_failed",
+      message: "workspace could not be prepared",
+    });
+  });
+
+  it("uses verification semantics when no structured evidence exists", () => {
+    expect(resolveWorkerFailure(undefined, "tests failed")).toEqual({
+      kind: "verification",
+      code: "verification_failed",
+      message: "tests failed",
     });
   });
 });

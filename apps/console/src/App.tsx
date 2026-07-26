@@ -12,7 +12,7 @@ import { useTranslation } from './lib/i18n';
 import { extractResponseError, parseJsonResponse } from './lib/http';
 import { postReviewDecision, type ReviewDecisionInput } from './lib/reviewDecision';
 import { submitBulkReviewDecision, type BulkReviewResult } from './lib/bulkReviewDecision';
-import { postTaskCancel, postTaskResume } from './lib/taskActions';
+import { postTaskCancel, postTaskRedrive, postTaskResume } from './lib/taskActions';
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -38,6 +38,7 @@ const App: React.FC = () => {
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   const [reviewingTaskId, setReviewingTaskId] = useState<string | null>(null);
   const [resumingTaskId, setResumingTaskId] = useState<string | null>(null);
+  const [redrivingTaskId, setRedrivingTaskId] = useState<string | null>(null);
   const [bulkReviewingTaskIds, setBulkReviewingTaskIds] = useState<string[]>([]);
   const [bulkReviewResult, setBulkReviewResult] = useState<BulkReviewResult | null>(null);
   const [updatingWorkerId, setUpdatingWorkerId] = useState<string | null>(null);
@@ -164,6 +165,23 @@ const App: React.FC = () => {
     }
   };
 
+  const handleTaskRedrive = async (task: { id: string; title?: string }) => {
+    if (!confirm(`${t('confirmRedriveTask')} ${task.title || task.id}?`)) return;
+
+    try {
+      setRedrivingTaskId(task.id);
+      const result = await postTaskRedrive({ taskId: task.id });
+      await mutate();
+      setSelectedTaskId(result.newTaskId);
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : String(err);
+      alert(`${t('taskActionFailed')}: ${message}`);
+    } finally {
+      setRedrivingTaskId(null);
+    }
+  };
+
   const handleReviewDecision = async (decision: 'merge' | 'rework' | 'block', input: ReviewDecisionInput = {}) => {
     if (!selectedTask?.id) return;
 
@@ -247,8 +265,10 @@ const App: React.FC = () => {
                     cancellingTaskId={cancellingTaskId}
                     reviewingTaskId={reviewingTaskId}
                     resumingTaskId={resumingTaskId}
+                    redrivingTaskId={redrivingTaskId}
                     onCancel={handleTaskCancel}
                     onResume={handleTaskResume}
+                    onRedrive={handleTaskRedrive}
                     onReviewDecision={handleReviewDecision}
                   />
                 </div>
