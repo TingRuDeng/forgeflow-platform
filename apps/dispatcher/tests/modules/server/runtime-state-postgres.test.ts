@@ -12,11 +12,14 @@ const mocks = vi.hoisted(() => {
   return {
     client,
     createPgClient: vi.fn(async () => client),
-    loadPrimaryRuntimeStateSnapshot: vi.fn(async () => ({
-      version: 1,
-      sequence: 7,
-      updatedAt: "2026-07-05T10:00:00.000Z",
-      tasks: [{ id: "task-1", title: "Task 1", status: "ready" }],
+    loadPrimaryRuntimeStateSnapshotWithRevision: vi.fn(async () => ({
+      revision: 7,
+      state: {
+        version: 1,
+        sequence: 7,
+        updatedAt: "2026-07-05T10:00:00.000Z",
+        tasks: [{ id: "task-1", title: "Task 1", status: "ready" }],
+      },
     })),
     listRuntimeAuditEvents: vi.fn(async () => ({
       events: [],
@@ -25,14 +28,14 @@ const mocks = vi.hoisted(() => {
       hasMore: false,
       nextBeforeSequence: null,
     })),
-    savePrimaryRuntimeStateSnapshot: vi.fn(async () => {}),
+    savePrimaryRuntimeStateSnapshot: vi.fn(async () => 8),
   };
 });
 
 vi.mock("@forgeflow/dispatcher-store-postgres", () => ({
   createPgClient: mocks.createPgClient,
   listRuntimeAuditEvents: mocks.listRuntimeAuditEvents,
-  loadPrimaryRuntimeStateSnapshot: mocks.loadPrimaryRuntimeStateSnapshot,
+  loadPrimaryRuntimeStateSnapshotWithRevision: mocks.loadPrimaryRuntimeStateSnapshotWithRevision,
   savePrimaryRuntimeStateSnapshot: mocks.savePrimaryRuntimeStateSnapshot,
 }));
 
@@ -142,7 +145,7 @@ describe("runtime-state postgres backend", () => {
     const state = await loadRuntimeStateAsync(stateDir);
 
     expect(mocks.createPgClient).toHaveBeenCalledWith("postgres://localhost/forgeflow");
-    expect(mocks.loadPrimaryRuntimeStateSnapshot).toHaveBeenCalledWith(mocks.client);
+    expect(mocks.loadPrimaryRuntimeStateSnapshotWithRevision).toHaveBeenCalledWith(mocks.client);
     expect(mocks.client.end).toHaveBeenCalled();
     expect(state.sequence).toBe(7);
     expect(state.tasks[0]?.id).toBe("task-1");
@@ -154,15 +157,35 @@ describe("runtime-state postgres backend", () => {
     process.env.DISPATCHER_PRIMARY_POSTGRES_URL = "postgres://localhost/forgeflow";
     const stateDir = makeStateDir();
     writeCutoverApproval(stateDir);
-    const { createEmptyRuntimeState, saveRuntimeStateAsync } = await loadRuntimeStateModule();
+    const { loadRuntimeStateAsync, saveRuntimeStateAsync } = await loadRuntimeStateModule();
+    const loaded = await loadRuntimeStateAsync(stateDir);
     const state = {
-      ...createEmptyRuntimeState(),
+      ...loaded,
       sequence: 11,
     };
 
     await saveRuntimeStateAsync(stateDir, state);
 
-    expect(mocks.savePrimaryRuntimeStateSnapshot).toHaveBeenCalledWith(mocks.client, state, []);
+    expect(mocks.savePrimaryRuntimeStateSnapshot).toHaveBeenCalledWith(
+      mocks.client,
+      expect.objectContaining({ sequence: 11 }),
+      7,
+      [],
+    );
+    expect(mocks.client.end).toHaveBeenCalled();
+  });
+
+  it("rejects a primary save when the state was not loaded with a storage revision", async () => {
+    process.env.RUNTIME_STATE_BACKEND = "postgres";
+    process.env.DISPATCHER_PRIMARY_POSTGRES_URL = "postgres://localhost/forgeflow";
+    const stateDir = makeStateDir();
+    writeCutoverApproval(stateDir);
+    const { createEmptyRuntimeState, saveRuntimeStateAsync } = await loadRuntimeStateModule();
+
+    await expect(saveRuntimeStateAsync(stateDir, createEmptyRuntimeState())).rejects.toThrow(
+      "postgres runtime state must be loaded before it can be saved",
+    );
+    expect(mocks.savePrimaryRuntimeStateSnapshot).not.toHaveBeenCalled();
     expect(mocks.client.end).toHaveBeenCalled();
   });
 

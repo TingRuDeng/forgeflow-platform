@@ -12,6 +12,7 @@ import {
   type RuntimeAuditEventQueryOptions,
 } from "./runtime-events.js";
 import type { RuntimeStateStore } from "./runtime-state-store.js";
+import { attachRuntimeStateStorageRevision } from "./runtime-state-revision.js";
 import {
   readRuntimeStateShadowWriteStatus,
   syncRuntimeStateShadowAndPersistStatus,
@@ -24,6 +25,10 @@ const { DatabaseSync } = await import("node:sqlite");
 const STATE_FALLBACK_ENV = "FORGEFLOW_ALLOW_STATE_FALLBACK_JSON";
 const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 const SHADOW_WRITE_FAILED_EVENT_TYPE = "shadow_write_failed";
+const SNAPSHOT_RETENTION_ENV = "DISPATCHER_SQLITE_SNAPSHOT_RETENTION";
+const DEFAULT_SNAPSHOT_RETENTION = 128;
+const MIN_SNAPSHOT_RETENTION = 2;
+const MAX_SNAPSHOT_RETENTION = 10_000;
 
 type RuntimeStateSnapshotRow = {
   revision: number;
@@ -31,6 +36,11 @@ type RuntimeStateSnapshotRow = {
   checksum_sha256: string;
   created_at: string;
 };
+
+interface PersistedRuntimeStateSnapshot {
+  state: RuntimeState;
+  revision: number;
+}
 
 function nowIso(): string {
   return formatLocalTimestamp();
@@ -53,6 +63,14 @@ function readOnlyDbUri(filePath: string): string {
 
 function checksumSha256(content: string): string {
   return crypto.createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+function snapshotRetentionLimit(): number {
+  const parsed = Number(process.env[SNAPSHOT_RETENTION_ENV]);
+  if (!Number.isSafeInteger(parsed) || parsed < MIN_SNAPSHOT_RETENTION) {
+    return DEFAULT_SNAPSHOT_RETENTION;
+  }
+  return Math.min(parsed, MAX_SNAPSHOT_RETENTION);
 }
 
 function parseJsonContent<T>(value: string, label: string): T {
@@ -115,6 +133,14 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
     CREATE TABLE IF NOT EXISTS metadata (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS projection_table_hashes (
+      table_name TEXT PRIMARY KEY,
+      content_sha256 TEXT NOT NULL,
+      row_count INTEGER NOT NULL DEFAULT 0,
+      rewrite_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS snapshots (
@@ -305,6 +331,8 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
   ensureColumn(db, "reviews", "risk_assessment_json", "TEXT");
   ensureColumn(db, "tasks", "termination_policy_json", "TEXT");
   ensureColumn(db, "runtime_events", "event_id", "TEXT");
+  ensureColumn(db, "projection_table_hashes", "row_count", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "projection_table_hashes", "rewrite_count", "INTEGER NOT NULL DEFAULT 0");
 }
 
 function readLatestRuntimeStateSnapshot(db: InstanceType<typeof DatabaseSync>): RuntimeState {
@@ -323,15 +351,15 @@ function readLatestRuntimeStateSnapshot(db: InstanceType<typeof DatabaseSync>): 
     throw new Error(`snapshot checksum mismatch at revision ${row.revision}`);
   }
 
-  return coerceRuntimeState(
+  return attachRuntimeStateStorageRevision(coerceRuntimeState(
     parseJsonContent(row.data, `failed to parse snapshot at revision ${row.revision}`),
-  );
+  ), row.revision);
 }
 
 function persistRuntimeStateSnapshotWithinTransaction(
   db: InstanceType<typeof DatabaseSync>,
   state: RuntimeState,
-): RuntimeState {
+): PersistedRuntimeStateSnapshot {
   const normalizedState = ensureRuntimeEventIdentities(state);
   const persistedState = {
     ...normalizedState,
@@ -342,17 +370,38 @@ function persistRuntimeStateSnapshotWithinTransaction(
   const createdAt = nowIso();
   const checksum = checksumSha256(content);
 
-  db.prepare(`
+  const insertResult = db.prepare(`
     INSERT INTO snapshots (data, checksum_sha256, created_at)
     VALUES (?, ?, ?)
   `).run(content, checksum, createdAt);
+  const revision = Number(insertResult.lastInsertRowid);
+  if (!Number.isSafeInteger(revision) || revision <= 0) {
+    throw new Error("failed to resolve persisted snapshot revision");
+  }
 
   appendRuntimeAuditEvents(db, persistedState.events);
   rewriteStructuredProjection(db, persistedState);
-  return persistedState;
+  pruneRuntimeStateSnapshots(db);
+  attachRuntimeStateStorageRevision(persistedState, revision);
+  return { state: persistedState, revision };
 }
 
-function persistRuntimeStateSnapshot(db: InstanceType<typeof DatabaseSync>, state: RuntimeState): RuntimeState {
+function pruneRuntimeStateSnapshots(db: InstanceType<typeof DatabaseSync>): void {
+  db.prepare(`
+    DELETE FROM snapshots
+    WHERE revision < COALESCE((
+      SELECT revision
+      FROM snapshots
+      ORDER BY revision DESC
+      LIMIT 1 OFFSET ?
+    ), 0)
+  `).run(snapshotRetentionLimit() - 1);
+}
+
+function persistRuntimeStateSnapshot(
+  db: InstanceType<typeof DatabaseSync>,
+  state: RuntimeState,
+): PersistedRuntimeStateSnapshot {
   db.exec("BEGIN IMMEDIATE;");
   try {
     const persistedState = persistRuntimeStateSnapshotWithinTransaction(db, state);
@@ -515,24 +564,48 @@ function loadFromJsonFallback(stateDir: string, reason: unknown): RuntimeState {
   return importFromJson(stateDir, jsonContent);
 }
 
+function rewriteProjectionTable(
+  db: InstanceType<typeof DatabaseSync>,
+  tableName: string,
+  rows: unknown[],
+  rewrite: () => void,
+): void {
+  const contentSha256 = checksumSha256(JSON.stringify(rows));
+  const current = db.prepare(`
+    SELECT content_sha256, row_count
+    FROM projection_table_hashes
+    WHERE table_name = ?
+  `).get(tableName) as { content_sha256: string; row_count: number } | undefined;
+  const projected = db.prepare(`
+    SELECT COUNT(*) AS row_count
+    FROM ${tableName}
+  `).get() as { row_count: number };
+  if (current?.content_sha256 === contentSha256
+    && Number(current.row_count) === rows.length
+    && Number(projected.row_count) === rows.length) {
+    return;
+  }
+
+  rewrite();
+  db.prepare(`
+    INSERT INTO projection_table_hashes (
+      table_name, content_sha256, row_count, rewrite_count, updated_at
+    )
+    VALUES (?, ?, ?, 1, ?)
+    ON CONFLICT(table_name) DO UPDATE SET
+      content_sha256 = excluded.content_sha256,
+      row_count = excluded.row_count,
+      rewrite_count = projection_table_hashes.rewrite_count + 1,
+      updated_at = excluded.updated_at
+  `).run(tableName, contentSha256, rows.length, nowIso());
+}
+
 function rewriteStructuredProjection(
   db: InstanceType<typeof DatabaseSync>,
   state: RuntimeState,
 ): void {
-  db.exec(`
-      DELETE FROM workers;
-      DELETE FROM tasks;
-      DELETE FROM task_attempts;
-      DELETE FROM artifact_bundles;
-      DELETE FROM assignments;
-      DELETE FROM reviews;
-      DELETE FROM pull_requests;
-      DELETE FROM dispatches;
-      DELETE FROM runtime_events;
-      DELETE FROM leases;
-      DELETE FROM sessions;
-  `);
-
+  rewriteProjectionTable(db, "workers", state.workers, () => {
+    db.exec("DELETE FROM workers;");
     const insertWorker = db.prepare(`
       INSERT INTO workers (
         id, pool, hostname, labels_json, repo_dir, status, last_heartbeat_at, current_task_id, disabled_at, disabled_by
@@ -552,7 +625,10 @@ function rewriteStructuredProjection(
         worker.disabledBy ?? null,
       );
     }
+  });
 
+  rewriteProjectionTable(db, "tasks", state.tasks, () => {
+    db.exec("DELETE FROM tasks;");
     const insertTask = db.prepare(`
       INSERT INTO tasks (
         id, external_task_id, trace_id, repo, default_branch, title, pool, allowed_paths_json, acceptance_json, depends_on_json,
@@ -590,7 +666,10 @@ function rewriteStructuredProjection(
         task.createdAt,
       );
     }
+  });
 
+  rewriteProjectionTable(db, "task_attempts", state.taskAttempts ?? [], () => {
+    db.exec("DELETE FROM task_attempts;");
     const insertTaskAttempt = db.prepare(`
       INSERT INTO task_attempts (
         attempt_id, task_id, attempt_no, worker_id, worker_runtime, protocol_version, lease_token, status, trace_id,
@@ -618,7 +697,10 @@ function rewriteStructuredProjection(
         attempt.idempotencyKey,
       );
     }
+  });
 
+  rewriteProjectionTable(db, "artifact_bundles", state.artifactBundles ?? [], () => {
+    db.exec("DELETE FROM artifact_bundles;");
     const insertArtifactBundle = db.prepare(`
       INSERT INTO artifact_bundles (
         bundle_id, task_id, attempt_id, schema_version, summary, branch, commit_sha, pull_request_url,
@@ -645,7 +727,10 @@ function rewriteStructuredProjection(
         bundle.createdAt ?? null,
       );
     }
+  });
 
+  rewriteProjectionTable(db, "assignments", state.assignments, () => {
+    db.exec("DELETE FROM assignments;");
     const insertAssignment = db.prepare(`
       INSERT INTO assignments (
         task_id, worker_id, pool, status, assignment_json, worker_prompt, context_markdown, worker_prompt_mode,
@@ -667,7 +752,10 @@ function rewriteStructuredProjection(
         assignment.claimedAt ?? null,
       );
     }
+  });
 
+  rewriteProjectionTable(db, "reviews", state.reviews, () => {
+    db.exec("DELETE FROM reviews;");
     const insertReview = db.prepare(`
       INSERT INTO reviews (
         task_id, decision, actor, notes, decided_at, review_material_json, latest_worker_result_json, evidence_json, risk_assessment_json
@@ -686,7 +774,10 @@ function rewriteStructuredProjection(
         asJson(review.riskAssessment ?? null),
       );
     }
+  });
 
+  rewriteProjectionTable(db, "pull_requests", state.pullRequests, () => {
+    db.exec("DELETE FROM pull_requests;");
     const insertPullRequest = db.prepare(`
       INSERT INTO pull_requests (
         task_id, number, url, head_branch, base_branch, title, status, created_at, updated_at
@@ -705,7 +796,10 @@ function rewriteStructuredProjection(
         pullRequest.updatedAt,
       );
     }
+  });
 
+  rewriteProjectionTable(db, "dispatches", state.dispatches, () => {
+    db.exec("DELETE FROM dispatches;");
     const insertDispatch = db.prepare(`
       INSERT INTO dispatches (id, repo, default_branch, requested_by, created_at, task_ids_json)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -720,7 +814,10 @@ function rewriteStructuredProjection(
         asJson(dispatch.taskIds),
       );
     }
+  });
 
+  rewriteProjectionTable(db, "runtime_events", state.events, () => {
+    db.exec("DELETE FROM runtime_events;");
     const insertEvent = db.prepare(`
       INSERT INTO runtime_events (event_id, task_id, type, at, summary, payload_json)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -735,7 +832,10 @@ function rewriteStructuredProjection(
         asJson(event.payload ?? null),
       );
     }
+  });
 
+  rewriteProjectionTable(db, "leases", state.leases ?? [], () => {
+    db.exec("DELETE FROM leases;");
     const insertLease = db.prepare(`
       INSERT INTO leases (
         id, resource_type, resource_id, owner_id, owner_token, acquired_at, renewed_at, expires_at, released_at, reclaim_reason, metadata_json
@@ -756,6 +856,7 @@ function rewriteStructuredProjection(
         asJson(lease.metadata ?? null),
       );
     }
+  });
 
 }
 
@@ -788,8 +889,12 @@ export function saveRuntimeState(stateDir: string, state: RuntimeState): void {
 
   try {
     initDb(db);
-    const persistedState = persistRuntimeStateSnapshot(db, state);
-    void syncRuntimeStateShadowAndPersistStatus(stateDir, persistedState)
+    const persisted = persistRuntimeStateSnapshot(db, state);
+    void syncRuntimeStateShadowAndPersistStatus(
+      stateDir,
+      persisted.state,
+      persisted.revision,
+    )
       .catch(() => observeShadowFailure(stateDir));
   } finally {
     db.close();

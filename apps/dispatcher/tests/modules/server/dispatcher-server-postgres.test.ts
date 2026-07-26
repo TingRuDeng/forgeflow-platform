@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
   };
   const store = {
     state: null as unknown,
+    revision: 0,
   };
   return {
     client,
@@ -23,9 +24,17 @@ const mocks = vi.hoisted(() => {
       hasMore: false,
       nextBeforeSequence: null,
     })),
-    loadPrimaryRuntimeStateSnapshot: vi.fn(async () => store.state),
-    savePrimaryRuntimeStateSnapshot: vi.fn(async (_client: unknown, state: unknown) => {
+    loadPrimaryRuntimeStateSnapshotWithRevision: vi.fn(async () => store.state
+      ? { state: store.state, revision: store.revision }
+      : null),
+    savePrimaryRuntimeStateSnapshot: vi.fn(async (
+      _client: unknown,
+      state: unknown,
+      expectedRevision: number | null,
+    ) => {
       store.state = state;
+      store.revision = expectedRevision === null ? 1 : expectedRevision + 1;
+      return store.revision;
     }),
   };
 });
@@ -33,7 +42,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("@forgeflow/dispatcher-store-postgres", () => ({
   createPgClient: mocks.createPgClient,
   listRuntimeAuditEvents: mocks.listRuntimeAuditEvents,
-  loadPrimaryRuntimeStateSnapshot: mocks.loadPrimaryRuntimeStateSnapshot,
+  loadPrimaryRuntimeStateSnapshotWithRevision: mocks.loadPrimaryRuntimeStateSnapshotWithRevision,
   savePrimaryRuntimeStateSnapshot: mocks.savePrimaryRuntimeStateSnapshot,
 }));
 
@@ -113,6 +122,7 @@ describe("dispatcher server postgres backend", () => {
   afterEach(() => {
     restoreEnv();
     mocks.store.state = null;
+    mocks.store.revision = 0;
     vi.clearAllMocks();
     for (const root of tmpRoots.splice(0)) {
       fs.rmSync(root, { recursive: true, force: true });
@@ -142,7 +152,7 @@ describe("dispatcher server postgres backend", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.createPgClient).toHaveBeenCalledWith("postgres://localhost/forgeflow");
-    expect(mocks.loadPrimaryRuntimeStateSnapshot).toHaveBeenCalledWith(mocks.client);
+    expect(mocks.loadPrimaryRuntimeStateSnapshotWithRevision).toHaveBeenCalledWith(mocks.client);
     expect(mocks.savePrimaryRuntimeStateSnapshot).toHaveBeenCalled();
     const savedState = mocks.savePrimaryRuntimeStateSnapshot.mock.calls[0]?.[1] as
       | { workers?: Array<{ id: string }> }

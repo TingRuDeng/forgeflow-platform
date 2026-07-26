@@ -249,3 +249,5 @@ Do not copy package CLI examples into source-script runbooks without checking th
 Shadow write status is persisted to `runtime-state-shadow-status.json` and exposed through `/api/dr/status.shadowWrite`. Automatic reconciliation status is persisted to `shadow-reconciler-status.json` and exposed through `/api/dr/status.shadowReconciler`.
 
 Do not treat a green SQLite write as proof that Postgres / queue shadow stores are healthy; check `/api/dr/status.shadowWrite` and `/api/dr/status.shadowReconciler` before shadow rollout or DR cutover decisions.
+
+Shadow projection / queue synchronization is ordered by the persisted SQLite snapshot revision. Replaying an older snapshot is a no-op, and reusing one revision with different content is a conflict; do not fabricate `sourceRevision` values in repair scripts. PostgreSQL primary writes also use a separate storage revision CAS. A `409 runtime_state_revision_conflict` means another writer committed first: reload the latest state and reapply the intended mutation instead of retrying the stale full snapshot.

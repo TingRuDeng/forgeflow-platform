@@ -1,8 +1,18 @@
 import { normalizeShadowMode } from "@forgeflow/dispatcher-store-core";
-import { syncAssignmentQueueShadow, readAssignmentQueueCounts } from "@forgeflow/dispatcher-queue-postgres";
-import { applyShadowProjection, createPgClient, readShadowProjectionCounts } from "@forgeflow/dispatcher-store-postgres";
+import {
+  ensureAssignmentQueueTable,
+  syncAssignmentQueueShadow,
+  readAssignmentQueueCounts,
+} from "@forgeflow/dispatcher-queue-postgres";
+import {
+  applyShadowProjection,
+  createPgClient,
+  ensureShadowProjectionTables,
+  readShadowProjectionCounts,
+} from "@forgeflow/dispatcher-store-postgres";
 
 import type { RuntimeState } from "./runtime-state.js";
+import { readRuntimeStateStorageRevision } from "./runtime-state-revision.js";
 import {
   buildAssignmentQueueExpectedCounts,
   buildAssignmentQueueShadowSnapshot,
@@ -95,7 +105,10 @@ export function readRuntimeStateShadowWriteStatus(stateDir?: string): RuntimeSta
   };
 }
 
-export async function syncRuntimeStateShadow(state: RuntimeState): Promise<void> {
+export async function syncRuntimeStateShadow(
+  state: RuntimeState,
+  sourceRevision = readRuntimeStateStorageRevision(state),
+): Promise<void> {
   const mode = getRuntimeStateShadowMode();
   const queueMode = getQueueShadowMode();
   const postgresUrl = getPostgresUrl();
@@ -146,11 +159,46 @@ export async function syncRuntimeStateShadow(state: RuntimeState): Promise<void>
 
   let client: Awaited<ReturnType<typeof createPgClient>> | null = null;
   try {
+    const persistedSourceRevision = Number(sourceRevision);
+    if (!Number.isSafeInteger(persistedSourceRevision) || persistedSourceRevision <= 0) {
+      throw new Error("shadow projection requires a persisted source revision");
+    }
     client = await createPgClient(postgresUrl);
     await ensureRuntimeStateProjectionTables(client);
-    await applyShadowProjection(client, buildRuntimeStateProjectionSnapshot(state));
+    await ensureShadowProjectionTables(client);
     if (queueMode !== "disabled") {
-      await syncAssignmentQueueShadow(client, buildAssignmentQueueShadowSnapshot(state));
+      await ensureAssignmentQueueTable(client);
+    }
+    await client.query("BEGIN");
+    try {
+      const projection = await applyShadowProjection(
+        client,
+        buildRuntimeStateProjectionSnapshot(state, persistedSourceRevision),
+        { manageTransaction: false },
+      );
+      if (queueMode !== "disabled" && !projection.stale) {
+        const queue = await syncAssignmentQueueShadow(
+          client,
+          buildAssignmentQueueShadowSnapshot(state, persistedSourceRevision),
+          { manageTransaction: false },
+        );
+        if (queue.stale) {
+          await client.query("ROLLBACK");
+          updateShadowWriteStatus({
+            status: "ok",
+            mode,
+            queueMode,
+            configured: true,
+            lastSuccessAt: new Date().toISOString(),
+            lastError: null,
+          });
+          return;
+        }
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
     }
     updateShadowWriteStatus({
       status: "ok",
@@ -175,9 +223,13 @@ export async function syncRuntimeStateShadow(state: RuntimeState): Promise<void>
   }
 }
 
-export async function syncRuntimeStateShadowAndPersistStatus(stateDir: string, state: RuntimeState): Promise<void> {
+export async function syncRuntimeStateShadowAndPersistStatus(
+  stateDir: string,
+  state: RuntimeState,
+  sourceRevision?: number,
+): Promise<void> {
   try {
-    await syncRuntimeStateShadow(state);
+    await syncRuntimeStateShadow(state, sourceRevision);
   } finally {
     // shadow 写失败不能影响 SQLite 主链，但最后一次结果必须落到 durable health record。
     persistRuntimeStateShadowWriteStatus(stateDir, readRuntimeStateShadowWriteStatus());

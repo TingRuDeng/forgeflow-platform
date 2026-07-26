@@ -11,4 +11,5 @@ export interface QueueRecord {
 export interface QueueSnapshot {
   queueName: string;
   rows: QueueRecord[];
+  sourceRevision?: number;
 }

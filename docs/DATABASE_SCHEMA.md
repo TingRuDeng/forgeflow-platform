@@ -16,7 +16,7 @@
 - `snapshots` 仍是权威 runtime snapshot，结构化表是 query projection。
 - runtime state 只保留最近 500 条事件窗口；SQLite/PostgreSQL 另有 append-only audit table 保存可分页历史。
 - `leases[]` 当前支持 `assignment`、`repo`、`branch`、`session` resource type；dispatcher 管理的 task 生命周期会获取并释放对应资源。
-- Postgres / queue shadow path 是 best-effort，不是 primary store。
+- Postgres / queue 默认是 best-effort shadow path；只有完成 cutover evidence 并显式选择 `RUNTIME_STATE_BACKEND=postgres` 时才使用 Postgres primary。
 - live SQLite schema ownership is in `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts`; standalone dispatcher schema constants are not kept.
 
 ```yaml
@@ -353,17 +353,28 @@ Verified status values:
 
 ## 5. Dispatcher SQLite Snapshot Schema
 
-The active runtime SQLite backend currently uses an append-only snapshot schema in `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts`:
+The active runtime SQLite backend uses a revisioned snapshot schema in `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts`:
 
 - `metadata`
   - generic key/value table
 - `snapshots`
-  - append-only authoritative runtime snapshots
+  - authoritative runtime snapshots, appended by revision and pruned in the same write transaction
   - columns:
     - `revision` (`INTEGER PRIMARY KEY AUTOINCREMENT`)
     - `data` (`TEXT`)
     - `checksum_sha256` (`TEXT`)
     - `created_at` (`TEXT`)
+- `projection_table_hashes`
+  - per-table source hash, expected row count, rewrite count, and update time
+  - unchanged tables skip full projection rewrites; row-count drift forces a rebuild on the next save
+
+Snapshot retention:
+
+- `DISPATCHER_SQLITE_SNAPSHOT_RETENTION` controls the number of recent snapshots retained
+- default: `128`
+- accepted range: `2` to `10000`; invalid or smaller values fall back to the default
+- revision numbers remain monotonic and may have gaps after pruning
+- `runtime_audit_events` is not pruned by this snapshot limit and remains the complete pageable event history
 
 Stage-3 query-first projection tables now also live in the same SQLite file:
 
@@ -388,13 +399,15 @@ Current role of those tables:
 - `artifact_bundles` 保存 vNext ArtifactBundle 摘要、refs projection、`trajectory_json` 和可选 retained diff / log / test result / trajectory 正文片段
 - `runtime_events` 只保存 runtime snapshot 当前保留的最近 500 条事件投影
 - `runtime_audit_events` 按 `event_id` 幂等追加完整历史，`sequence` 是分页游标；`/api/query/events` 优先读取该表
+- `sessions` 当前是保留表，不由 `RuntimeState` projection 写入；Trae automation session truth 仍在独立 `sessions.json` store
 - they do not replace `snapshots` as the runtime truth source
 
-每次 SQLite 状态写入在同一个 `BEGIN IMMEDIATE` transaction 内完成三件事：
+每次 SQLite 状态写入在同一个 `BEGIN IMMEDIATE` transaction 内完成四件事：
 
 1. 追加带 checksum 的权威 snapshot。
 2. 按 `event_id` 幂等追加 `runtime_audit_events`。
-3. 重写 query-first structured projection。
+3. 只重写 source hash 或实际 row count 发生变化的 query-first structured projection 表。
+4. 按 snapshot retention 上限清理旧 revision。
 
 任一步失败都会 rollback，避免 snapshot 已推进但 projection 或 audit 未落账。
 
@@ -407,7 +420,7 @@ Artifact 文件正文不进入 SQLite 表：
 - retention 删除 bundle 目录时，同一次 dispatcher 状态写入会同步移除对应 `artifactBundles[]` / SQLite projection 索引；bundle metadata 读取本身不要求当前节点持有本地 manifest，避免 Postgres 多节点读取被本机文件系统错误过滤
 - SQLite `artifact_bundles.refs_json` 保存指向这些文件的 `artifact://<bundleId>/<fileName>` 引用
 
-PostgreSQL primary backend 使用 `dispatcher_runtime_audit_events` 保存同类 append-only 审计记录。primary snapshot 与新审计事件在同一个 PostgreSQL transaction 内提交；查询同样使用 `audit_sequence` 做 `beforeSequence` 分页。
+PostgreSQL primary backend 使用 `dispatcher_runtime_audit_events` 保存同类 append-only 审计记录。`dispatcher_runtime_state.revision` 是独立于业务 `state.sequence` 的持久化 revision；primary save 只有在调用方持有的 revision 仍匹配时才更新并递增，否则返回 `runtime_state_revision_conflict`（HTTP 路径为 `409`）。primary snapshot 与新审计事件在同一个 PostgreSQL transaction 内提交；查询同样使用 `audit_sequence` 做 `beforeSequence` 分页。
 
 Current stage-3 optional shadow path:
 
@@ -428,13 +441,17 @@ Current shadow semantics:
 
 - SQLite remains the authority
 - Postgres / queue writes are best-effort shadow projection
+- 每次 shadow snapshot 携带对应的已持久化 SQLite revision；Postgres metadata 保存 `source_revision` 与 `content_sha256`
+- 小于当前 `source_revision` 的过期同步会被忽略，同 revision 不同内容会按 revision conflict 失败
+- projection 和 assignment queue 在同一个 PostgreSQL transaction 内推进；任一侧失败或 queue 已领先都会回滚本次组合写入
+- content hash 未变化的 projection table / queue 不执行 `TRUNCATE + INSERT`，只推进 revision metadata
 - shadow write status is persisted separately in `runtime-state-shadow-status.json`; automatic reconciliation status is persisted in `shadow-reconciler-status.json`; both are operational health records, not runtime truth sources
 - drift should be checked through `scripts/check-shadow-drift.mjs <stateDir>` before shadow rollout or cutover decisions; `/api/dr/status` stays focused on lightweight DR posture, shadow write health, and the latest reconciler status file
 - `scripts/check-shadow-drift.mjs <stateDir> --reconcile` replays SQLite truth into the configured shadow path, and `--record-alert` can append `shadow_drift_detected` to runtime events
 
 This is intentionally not a fully normalized operational schema. The current design optimizes for:
 
-- revision history for rescue plus append-only runtime audit events
+- a bounded recent revision window for rescue plus append-only runtime audit events
 - checksum validation to detect silent corruption
 - WAL mode for safer concurrent read/write behavior
 - transactional snapshot / audit / projection persistence

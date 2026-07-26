@@ -81,23 +81,28 @@ Desired direction:
 - keep the SQLite snapshot backend and JSON fallback explicitly documented
 - do not reintroduce standalone schema constants outside the live runtime persistence module without a tested caller
 
-## 3. Postgres / queue shadow path exists, but external stores are not primary yet
+## 3. Postgres primary is guarded, while SQLite remains the default
 
 Current situation:
 
 - dispatcher now has query-first SQLite projection tables
 - optional Postgres / queue shadow write also exists
-- SQLite snapshots remain the truth source
+- SQLite snapshots remain the default truth source
+- a guarded Postgres primary backend exists behind drill, approval, ready evidence, revocation checks, and explicit backend selection
+- Postgres primary uses a storage revision CAS; stale full-state writers fail instead of overwriting a newer snapshot
+- shadow projection / queue writes carry the persisted SQLite source revision, reject rollback, and advance atomically
+- SQLite snapshots now have bounded retention, and SQLite/Postgres shadow projection rewrites skip unchanged tables
 
 Impact:
 
-- external drift detection and rollout discipline still matter
-- it is easy to overstate stage-3 maturity as “already migrated to Postgres”
+- external drift detection, production cutover evidence, and rollout discipline still matter
+- table-level hashing still rewrites an entire changed table; it is not row-level change data capture
+- SQLite projection self-repair detects source-hash or row-count drift, but same-row-count manual content corruption still requires clearing projection hash metadata and rebuilding from the latest snapshot
 
 Desired direction:
 
 - keep shadow mode / primary mode boundaries explicit
-- add stronger drift reporting and eventual cutover / rollback discipline before any primary-store switch
+- retain production cutover / rollback evidence and move to row-level projection deltas only if measured write volume justifies the added complexity
 
 ## 4. Trae automation gateway handler、HTTP server、debug logger、driver 创建规则和 session-store 已共享，剩余债务集中在发布适配层
 
