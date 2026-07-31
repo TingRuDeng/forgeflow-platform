@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { execFileSync } from 'child_process';
 const args = process.argv.slice(2);
@@ -28,14 +28,15 @@ Options:
   --package <name>       Package name to release (required)
   --bump <type>          Version bump type: major, minor, patch, prerelease (required)
   --tag <name>           npm dist-tag to publish with (optional)
+  --prepare              Update only package.json for a protected-branch version PR
   --publish              Deprecated and rejected; formal publishing only runs through the Release workflow
   --dry-run              Explicit dry-run mode (default behavior)
   --help                 Show this help message
 
 Behavior:
-  - Always previews the version and exact-tarball release steps
-  - Never modifies package.json or publishes
-  - Formal publishing is owned exclusively by .github/workflows/release.yml
+  - Defaults to previewing the version and exact-tarball release steps
+  - --prepare updates only the package version; it never publishes or changes git state
+  - Formal publishing starts after the version PR reaches main and is owned by .github/workflows/release.yml
 
 Examples:
   # Dry-run: see what version would be published
@@ -44,6 +45,9 @@ Examples:
 
   # Explicit dry-run
   node scripts/release-package.js --package trae-beta-runtime --bump prerelease --dry-run
+
+  # Prepare a version-only pull request after reviewing the preview
+  node scripts/release-package.js --package trae-beta-runtime --bump prerelease --prepare
 `);
 }
 if (parsedArgs.help) {
@@ -63,6 +67,8 @@ if (!parsedArgs.bump) {
 const packageName = parsedArgs.package;
 const bumpType = parsedArgs.bump;
 const shouldPublish = parsedArgs.publish === true;
+const shouldPrepare = parsedArgs.prepare === true;
+const explicitDryRun = parsedArgs["dry-run"] === true;
 const distTag = typeof parsedArgs.tag === "string" ? parsedArgs.tag : "";
 const DIST_TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
 function runCommand(command, commandArgs, options = {}) {
@@ -82,9 +88,16 @@ function validateDistTag(tag) {
         process.exit(1);
     }
 }
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 validateDistTag(distTag);
+if (shouldPrepare && explicitDryRun) {
+    console.error("Error: --prepare cannot be combined with --dry-run");
+    process.exit(1);
+}
 if (shouldPublish) {
-    console.error("Error: release-package is preview-only. Dispatch .github/workflows/release.yml for formal publishing.");
+    console.error("Error: release-package never publishes. Use --prepare, merge the version PR, and let .github/workflows/release.yml publish from main.");
     process.exit(1);
 }
 const workspacePath = resolve(process.cwd());
@@ -104,9 +117,10 @@ catch (error) {
 }
 const packageJsonPath = resolve(packagePath, 'package.json');
 let packageJson;
+let packageJsonContent;
 try {
-    const content = readFileSync(packageJsonPath, 'utf-8');
-    packageJson = JSON.parse(content);
+    packageJsonContent = readFileSync(packageJsonPath, 'utf-8');
+    packageJson = JSON.parse(packageJsonContent);
 }
 catch (error) {
     console.error(`Error: Could not read package.json at ${packageJsonPath}`);
@@ -156,16 +170,38 @@ if (distTag && distTag !== expectedDistTag) {
     process.exit(1);
 }
 const publishDistTag = distTag || expectedDistTag;
+if (shouldPrepare) {
+    const currentVersionLiteral = JSON.stringify(currentVersion);
+    const topLevelIndent = packageJsonContent.match(/^[\t \r\n]*\{[\t ]*\r?\n([\t ]*)"/)?.[1];
+    if (topLevelIndent === undefined) {
+        console.error(`Error: Could not identify the top-level manifest indentation in ${packageJsonPath}`);
+        process.exit(1);
+    }
+    const versionLinePattern = new RegExp(`^(${escapeRegExp(topLevelIndent)}"version"[\\t ]*:[\\t ]*)${escapeRegExp(currentVersionLiteral)}`, "m");
+    const updatedPackageJsonContent = packageJsonContent.replace(versionLinePattern, `$1${JSON.stringify(newVersion)}`);
+    if (updatedPackageJsonContent === packageJsonContent) {
+        console.error(`Error: Could not update the top-level version line in ${packageJsonPath} without reformatting it`);
+        process.exit(1);
+    }
+    writeFileSync(packageJsonPath, updatedPackageJsonContent, "utf8");
+    console.log(`\nPackage: @tingrudeng/${packageName}`);
+    console.log(`Version: ${currentVersion} -> ${newVersion}`);
+    console.log("Mode: PREPARE VERSION PR");
+    console.log(`Updated: ${packageJsonPath}`);
+    console.log("Next: review the diff, commit it on a release branch, and merge it through a pull request.");
+    console.log("The main-branch Release workflow will publish and tag the exact merged version.");
+    process.exit(0);
+}
 console.log(`\nPackage: @tingrudeng/${packageName}`);
 console.log(`Current version: ${currentVersion}`);
 console.log(`New version: ${newVersion}`);
 console.log('Mode: PREVIEW (no changes will be made)');
-console.log('\n[PREVIEW] The Release workflow will perform the following actions:');
-console.log(`  1. Update ${packageJsonPath}`);
+console.log('\n[PREVIEW] The protected-branch release flow will perform the following actions:');
+console.log(`  1. Prepare ${packageJsonPath} for a version PR`);
 console.log(`     "version": "${currentVersion}" → "${newVersion}"`);
-console.log(`  2. Build the package:`);
+console.log(`  2. After merge, build the package:`);
 console.log(`     pnpm --filter @tingrudeng/${packageName} build`);
 console.log(`  3. Prepare and publish one exact tarball (with Trusted Publishing):`);
 console.log(`     npm publish <prepared-tarball> --ignore-scripts --access public --provenance --tag ${publishDistTag}`);
 console.log(`  4. Download registry dist.tarball and verify dist-tag, integrity, exact contents, and installability`);
-console.log('\nFormal publishing is available only through .github/workflows/release.yml');
+console.log('\nFormal publishing starts only after the version PR reaches main and runs through .github/workflows/release.yml');

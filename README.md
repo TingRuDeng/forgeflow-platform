@@ -358,7 +358,7 @@ npm ls -g --depth=0 @tingrudeng/trae-beta-runtime
 
 ### 4. 发布 npm 包
 
-正式发布只通过 `.github/workflows/release.yml`；本地 helper 只用于预览版本变化与发布步骤：
+正式 npm 写入只通过 `.github/workflows/release.yml`。先在本地预览并准备版本变更，再把唯一的 `package.json` 版本改动通过 PR 合入受保护的 `main`：
 
 ```bash
 # 预览发布（默认 dry-run，不会修改文件）
@@ -366,41 +366,38 @@ node scripts/release-package.js --package codex-beta-runtime --bump prerelease
 node scripts/release-package.js --package forgeflow-dispatcher --bump prerelease
 node scripts/release-package.js --package trae-beta-runtime --bump prerelease
 
-# 从 main 触发正式发布
-gh workflow run release.yml --ref main -f package=codex-beta-runtime -f bump=prerelease -f tag=beta
-gh workflow run release.yml --ref main -f package=forgeflow-dispatcher -f bump=prerelease -f tag=beta
-gh workflow run release.yml --ref main -f package=trae-beta-runtime -f bump=prerelease -f tag=beta
+# 在发布分支上准备版本 PR（只修改目标 package.json，不发布、不提交）
+node scripts/release-package.js --package codex-beta-runtime --bump prerelease --prepare
 ```
 
-如果这次 runtime 变更同时修改了共享报告解析库，还需要先发布 `@tingrudeng/automation-gateway-core`：
+提交并合并版本 PR 后，`main` 的 package manifest push 会自动触发 Release。不要给版本提交添加 `[skip actions]`。如果 provider 依赖新的共享 core，按依赖顺序分别合并版本 PR，并等待 core 发布成功后再准备 provider：
 
 ```bash
-gh workflow run release.yml --ref main -f package=automation-gateway-core -f bump=prerelease -f tag=beta
-# 等待 core workflow 成功且版本提交进入 main 后，再从更新后的 main 发布 provider
-gh workflow run release.yml --ref main -f package=trae-beta-runtime -f bump=prerelease -f tag=beta
+node scripts/release-package.js --package automation-gateway-core --bump prerelease --prepare
+# 合并并确认 core registry 版本后，再在最新 main 的新分支准备 provider
+node scripts/release-package.js --package trae-beta-runtime --bump prerelease --prepare
 ```
 
-该 helper 始终是 preview-only，不修改 `package.json`，显式传入 `--publish` 也会失败；唯一正式入口是 `.github/workflows/release.yml`，由 GitHub Actions 用 OIDC + provenance 执行发布。发布后的 OpenSSF Scorecard 由独立的 `.github/workflows/release-scorecard.yml` 在 `Release` 成功后跟跑。正式发布不会再让 `npm publish` 临时重打包源码目录：workflow 先以 `--ignore-scripts` 生成唯一 tarball，校验清单、bin 与 `workspace:` 依赖，再以 `npm publish <tarball> --ignore-scripts` 上传同一个文件；发布后从 registry 的 `dist.tarball` 下载精确产物，核对目标 `dist-tag`、`dist.integrity` / `dist.shasum`、包名、版本、完整文件集、bin 和安装结果。发包前还会校验 npm `dist-tag` 与版本语义：预发布版本只能走 `beta`，稳定版本只能走 `latest`。手动发布只允许从 `main` ref 触发，会在版本 bump 后确认精确新版本仍可发布；它先完成 npm 发布及 registry tarball 验证，再提交版本变更并把 release tag 推回 `main`，避免 npm 发布失败时 git 历史提前记录未发布版本。
+helper 默认仍是只读预览；只有显式 `--prepare` 才修改目标 `package.json` 的版本字段，它从不执行 npm、commit、push 或 merge，`--publish` 始终失败。版本 PR 合入后，GitHub Actions 用 OIDC + provenance 发布；OpenSSF Scorecard 由独立的 `.github/workflows/release-scorecard.yml` 在整个 `Release`（含 release tag）成功后跟跑。workflow 先以 `--ignore-scripts` 生成唯一 tarball，校验清单、bin 与 `workspace:` 依赖，再以 `npm publish <tarball> --ignore-scripts` 上传同一个文件；发布后从 registry 的 `dist.tarball` 下载精确产物，核对目标 `dist-tag`、`dist.integrity` / `dist.shasum`、包名、版本、完整文件集、bin 和安装结果。预发布版本自动使用 `beta`，稳定版本自动使用 `latest`。
 
 自动发布还有几条硬门禁：
 
-- 只有 `.github/workflows/release.yml` 这一条正式发布链路；手动与自动发布共用仓库级 concurrency group，所有包串行发布。detect 阶段输出触发 commit SHA，publish job 固定 checkout 该 SHA，并校验 package version；`npm publish` 紧邻远端 `main` 校验执行，发布后还会再次核对 `main`，若竞态窗口内发生推进则让 workflow 失败并留下恢复证据。
-- 所有 GitHub Actions 第三方 action 都固定到完整 commit SHA；CI 与 Stage3 Drill 默认 `contents: read`，只有 npm 发布 job 按需取得 `id-token: write`，手动发布记录版本时才取得 `contents: write`。
+- 只有 `.github/workflows/release.yml` 这一条 npm 发布链路；所有包共用仓库级 concurrency group，并且每次 merge 最多允许一个待发布精确版本。若 detect 同时发现多个版本，workflow 会在任何 npm 写入前失败，必须按依赖顺序拆成版本 PR。publish job 固定 checkout detect 输出的 commit SHA 并校验 package version；`npm publish` 紧邻远端 `main` 校验执行，发布后还会再次核对 `main`，若竞态窗口内发生推进则让 workflow 失败并留下恢复证据。
+- 所有 GitHub Actions 第三方 action 都固定到完整 commit SHA；npm publish job 只有 `contents: read` 与 `id-token: write`，发布成功后的独立 tag job 才取得 `contents: write`，不会向受保护 `main` 直接推送。
 - 只有当 npm 已把当前仓库 `TingRuDeng/forgeflow-platform` 配置成 `@tingrudeng/*` 包的 Trusted Publisher，且仓库或组织变量 `NPM_TRUSTED_PUBLISHING_ENABLED=true` 时，push 自动发包才会真正执行；否则 workflow 会成功结束并明确写出“已跳过自动发布”。
 - push 自动发布只会把 npm 上已经存在的包名纳入发布矩阵；全新包名会在 Actions summary 标记为 `自动发布等待 npm 包名配置`，先完成 npm 包名和 Trusted Publisher 配置后再由后续版本自动发布。
-- 手动发布和自动发布的 release preflight 会在 publish 前校验目标包名存在，并把当前 package.json 内 `workspace:*` 依赖解析为本地 workspace 版本，要求对应依赖版本已经发布；例如 provider runtime 会在 `@tingrudeng/beta-runtime-core@<本地版本>` 未发布时提前失败。
-- 手动发布会在 bump 后再次查询 `@tingrudeng/<package>@<new-version>`；只有明确的 npm E404 表示版本可用，已发布版本或 registry 查询异常都会在 build / publish 前失败。
+- release preflight 会在 publish 前校验目标包名存在、目标精确版本尚未发布，并把当前 package.json 内 `workspace:*` 依赖解析为本地 workspace 版本，要求对应依赖版本已经发布；例如 provider runtime 会在 `@tingrudeng/beta-runtime-core@<本地版本>` 未发布时提前失败。只有精确版本的 npm E404 表示可发布，已发布版本或 registry 查询异常都会失败关闭。
 - push 自动发布在 `npm publish` 前会先运行 `pnpm lint`、`pnpm docs:validate`、`pnpm typecheck`、`pnpm test` 和 `pnpm verify:shadow-drift`，避免 main 分支直接绕过常规验证发包。
 - release job 会先把 npm CLI 升到 `11.12.1`；npm Trusted Publishing 至少要求 `npm 11.5.1+`，不要再用 Node 自带的 npm 10.x 直接判断发布链是否可用。
 - `pnpm report:runtime-packages:setup` 会只读查询 npm registry，输出 runtime 包的 package/version 状态、发布顺序和 Trusted Publisher 配置要求；需要把缺口作为硬失败时可加 `-- --require-ready`。
 - `pnpm verify:runtime-packages:published-smoke` 会从 npm registry 安装当前源码版本的 codex/gemini/trae provider runtime，并验证对应 CLI bin、`--version` 和 `--help`；该命令要求所有 provider 包名和版本都已发布。
 - `node scripts/verify-published-package-tarball.mjs --package <package>` 会只读查询当前源码版本的 registry `dist` 元数据，下载精确 tarball，并验证 integrity、shasum、内容边界、manifest、bin 与安装结果；release workflow 还会验证目标 dist-tag，并把这些值与本次实际上传前生成的 manifest 逐项比对。
-- 如果手动发布已经成功写入 npm，但后续 git commit/tag/push 失败，Actions summary 会提示 `手动发布需要恢复` 并创建恢复 issue；此时按 `docs/runbooks/release-cadence.md` 补交版本记录和同名 release tag。
+- registry 与 provider smoke 全部通过后，独立 `record-release-tags` job 才为已合入的 release SHA 创建 `release/<name>@<version>` tag；该 job 不拥有 OIDC，失败后可单独重跑并会校验已有 tag 的目标 commit。
 
 当前还要注意一个外部前置条件：
 
 - 仓库内阶段一发布链已经切到 CI-only + OIDC + provenance；OpenSSF Scorecard 现在单独挂在 `Release` 成功后的 `release-scorecard.yml` 上，避免后置评分把发包主 workflow 拉红。
-- `@tingrudeng/gemini-beta-runtime` 和 `@tingrudeng/beta-runtime-core` 当前还属于“源码内已有、npm 包名待配置”的包；在 npm 返回 E404 时，处理方式不是反复 rerun，而是先完成包名权限 / Trusted Publisher 绑定，再用后续版本变更重新触发自动发布。排查入口见 `docs/runbooks/release-cadence.md`。
+- `@tingrudeng/gemini-beta-runtime` 和 `@tingrudeng/beta-runtime-core` 的 npm 包名与 Trusted Publisher 已配置；新增其他包名时仍需先完成首次包名创建和 Trusted Publisher 绑定，再合并后续版本 PR。排查入口见 `docs/runbooks/release-cadence.md`。
 
 如需安装发包助手 skill：
 

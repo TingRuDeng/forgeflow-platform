@@ -108,7 +108,9 @@ function printActions(rows) {
     console.log("- publishRequired:");
     for (const row of publishRows) {
       const shortName = row.spec.name.replace("@tingrudeng/", "");
-      console.log(`  - ${row.spec.name}@${row.version}: 运行 Release workflow package=${shortName}`);
+      console.log(
+        `  - ${row.spec.name}@${row.version}: 运行 release-package --package ${shortName} --prepare，合并版本 PR 后由 Release workflow 自动发布`,
+      );
     }
   }
 }

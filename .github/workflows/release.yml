@@ -1,35 +1,6 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      package:
-        description: "workspace package name, for example trae-beta-runtime"
-        required: true
-        type: choice
-        options:
-          - automation-gateway-core
-          - beta-runtime-core
-          - codex-beta-runtime
-          - forgeflow-dispatcher
-          - gemini-beta-runtime
-          - trae-beta-runtime
-          - worker-review-orchestrator-cli
-      bump:
-        description: "version bump type"
-        required: true
-        default: prerelease
-        type: choice
-        options:
-          - major
-          - minor
-          - patch
-          - prerelease
-      tag:
-        description: "npm dist-tag"
-        required: true
-        default: beta
-        type: string
   push:
     branches: [main]
     paths:
@@ -45,7 +16,6 @@ permissions:
 
 jobs:
   detect-changes:
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       packages: ${{ steps.detect.outputs.packages }}
@@ -94,241 +64,20 @@ jobs:
             echo "has-new-packages=false" >> $GITHUB_OUTPUT
           fi
 
-  publish-manual:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    environment: npm
-    env:
-      RELEASE_PACKAGE: ${{ inputs.package }}
-      RELEASE_BUMP: ${{ inputs.bump }}
-      NPM_DIST_TAG: ${{ inputs.tag }}
-      RELEASE_REF: ${{ github.ref }}
-      RELEASE_REPOSITORY: ${{ github.repository }}
-      RELEASE_SHA: ${{ github.sha }}
-    permissions:
-      contents: write
-      id-token: write
-      issues: write
-    steps:
-      - name: Require main release ref
-        run: |
-          if [[ "$RELEASE_REF" != "refs/heads/main" ]]; then
-            echo "Manual releases must run from main; got ${RELEASE_REF}" >&2
-            exit 1
-          fi
-
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-
-      - name: Verify release checkout
-        run: |
-          CURRENT_SHA=$(git rev-parse HEAD)
-          if [[ "$CURRENT_SHA" != "$RELEASE_SHA" ]]; then
-            echo "Release checkout mismatch: expected $RELEASE_SHA, got $CURRENT_SHA" >&2
-            exit 1
-          fi
-
-      - name: Validate release inputs
-        run: node scripts/validate-release-inputs.mjs "$RELEASE_PACKAGE" "$NPM_DIST_TAG"
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: 10.23.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-          package-manager-cache: false
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Upgrade npm for Trusted Publishing
-        run: |
-          npm install -g npm@11.12.1
-          npm --version
-
-      - name: Release preflight
+      - name: Require one package release per merge
         env:
-          NPM_TRUSTED_PUBLISHING_ENABLED: ${{ vars.NPM_TRUSTED_PUBLISHING_ENABLED }}
-        run: >
-          node scripts/release-publish-preflight.mjs
-          --package-dir "packages/${RELEASE_PACKAGE}"
-          --expected-repo "$RELEASE_REPOSITORY"
-          --require-trusted-publishing
-          --require-package-exists
-          --require-published-workspace-deps
-
-      - name: Check deprecated entrypoints
-        run: pnpm verify:deprecated-entrypoints
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Audit production dependencies
-        run: pnpm audit --prod --audit-level high
-
-      - name: Run typecheck
-        run: pnpm typecheck
-
-      - name: Verify runtime package readiness
-        run: pnpm verify:runtime-packages
-
-      - name: Verify runtime package install smoke
-        run: pnpm verify:runtime-packages:install
-
-      - name: Run tests
-        run: pnpm --filter "@tingrudeng/${RELEASE_PACKAGE}..." --if-present test
-
-      - name: Run shadow drift gate
-        run: pnpm verify:shadow-drift
-
-      - name: Bump package version
+          RELEASE_PACKAGES: ${{ steps.detect.outputs.packages }}
         run: |
-          cd "packages/${RELEASE_PACKAGE}"
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          if [[ "$RELEASE_BUMP" == "prerelease" ]]; then
-            if [[ "$CURRENT_VERSION" == *"-beta."* ]]; then
-              BASE="${CURRENT_VERSION%%-beta.*}"
-              PRE="${CURRENT_VERSION##*-beta.}"
-              NEW_VERSION="${BASE}-beta.$((PRE + 1))"
-            else
-              NEW_VERSION="${CURRENT_VERSION}-beta.1"
-            fi
-          else
-            # Strip prerelease suffix first
-            CLEAN="${CURRENT_VERSION%%-beta.*}"
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$CLEAN"
-            case "$RELEASE_BUMP" in
-              major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
-              minor) NEW_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
-              patch) NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
-            esac
-          fi
-          npm version "$NEW_VERSION" --no-git-tag-version --no-commit-hooks
-          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
-          echo "📦 ${RELEASE_PACKAGE}: $CURRENT_VERSION → $NEW_VERSION"
-
-      - name: Verify bumped version is available
-        run: >
-          node scripts/release-publish-preflight.mjs
-          --package-dir "packages/${RELEASE_PACKAGE}"
-          --expected-repo "$RELEASE_REPOSITORY"
-          --expected-dist-tag "$NPM_DIST_TAG"
-          --require-version-available
-
-      - name: Build package
-        run: pnpm --filter "@tingrudeng/${RELEASE_PACKAGE}" build
-
-      - name: Prepare exact release tarball
-        id: release-artifact
-        run: |
-          RELEASE_MANIFEST="$RUNNER_TEMP/release-artifact.json"
-          node scripts/prepare-release-tarball.mjs \
-            --package-dir "packages/${RELEASE_PACKAGE}" \
-            --output-dir "$RUNNER_TEMP/release-tarballs" \
-            --manifest "$RELEASE_MANIFEST"
-          echo "tarball=$(jq -r '.tarball' "$RELEASE_MANIFEST")" >> "$GITHUB_OUTPUT"
-
-      - name: Require unchanged main and publish exact tarball
-        id: publish
-        env:
-          GITHUB_ACTIONS: "true"
-          NPM_CONFIG_PROVENANCE: "true"
-          RELEASE_TARBALL: ${{ steps.release-artifact.outputs.tarball }}
-        run: |
-          git fetch --no-tags origin main
-          REMOTE_MAIN=$(git rev-parse origin/main)
-          if [[ "$REMOTE_MAIN" != "$RELEASE_SHA" ]]; then
-            echo "main advanced before publish: expected $RELEASE_SHA, got $REMOTE_MAIN" >&2
+          RELEASE_COUNT=$(jq 'length' <<< "$RELEASE_PACKAGES")
+          if [[ "$RELEASE_COUNT" -gt 1 ]]; then
+            echo "Refusing to publish multiple package versions from one main merge." >&2
+            echo "$RELEASE_PACKAGES" | jq -r '.[] | "- @tingrudeng/\(.name)@\(.version)"' >&2
+            echo "Prepare and merge one version pull request at a time in dependency order." >&2
             exit 1
           fi
-          npm publish "$RELEASE_TARBALL" --ignore-scripts --access public --provenance --tag "$NPM_DIST_TAG"
-          echo "published=true" >> "$GITHUB_OUTPUT"
-          echo "✅ Published @tingrudeng/${RELEASE_PACKAGE}@${NEW_VERSION}"
-
-      - name: Verify exact registry tarball
-        run: >
-          node scripts/verify-published-package-tarball.mjs
-          --package "$RELEASE_PACKAGE"
-          --version "$NEW_VERSION"
-          --expected-dist-tag "$NPM_DIST_TAG"
-          --expected-manifest "$RUNNER_TEMP/release-artifact.json"
-
-      - name: Verify main remained unchanged during publish
-        run: |
-          git fetch --no-tags origin main
-          REMOTE_MAIN=$(git rev-parse origin/main)
-          if [[ "$REMOTE_MAIN" != "$RELEASE_SHA" ]]; then
-            echo "main advanced during publish: expected $RELEASE_SHA, got $REMOTE_MAIN" >&2
-            exit 1
-          fi
-
-      - name: Verify published provider runtime smoke
-        run: >
-          node scripts/verify-published-runtime-smoke.mjs
-          --package "$RELEASE_PACKAGE"
-          --require-published
-
-      - name: Record published package version in git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "packages/${RELEASE_PACKAGE}/package.json"
-          git diff --cached --quiet && {
-            echo "No package.json version change to record after publish"
-            exit 1
-          }
-          git commit -m "chore(release): 发布 @tingrudeng/${RELEASE_PACKAGE}@${NEW_VERSION} [skip actions]"
-          git tag -a "release/${RELEASE_PACKAGE}@${NEW_VERSION}" -m "release @tingrudeng/${RELEASE_PACKAGE}@${NEW_VERSION}"
-          git push origin "HEAD:main" --follow-tags
-
-      - name: Summarize post-publish git recovery
-        if: ${{ failure() && steps.publish.outcome == 'success' }}
-        run: |
-          {
-            echo "## 手动发布需要恢复"
-            echo ""
-            echo "npm publish 已成功，但 git commit/tag/push 记录失败。"
-            echo ""
-            echo "- package: @tingrudeng/${RELEASE_PACKAGE}"
-            echo "- version: ${NEW_VERSION}"
-            echo "- tag: release/${RELEASE_PACKAGE}@${NEW_VERSION}"
-            echo ""
-            echo "恢复方式：确认 npm 上该版本存在后，在 main 上补交 packages/${RELEASE_PACKAGE}/package.json 的版本变更，并创建同名 release tag。"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: 创建发布后 git 恢复 issue
-        if: ${{ failure() && steps.publish.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          RELEASE_VERSION="$NEW_VERSION"
-          RELEASE_TAG="release/${RELEASE_PACKAGE}@${RELEASE_VERSION}"
-          ISSUE_BODY="$RUNNER_TEMP/release-recovery-issue.md"
-          cat > "$ISSUE_BODY" <<EOF
-          npm publish 已成功，但 git commit / tag / push 记录失败，需要人工补齐版本记录。
-
-          - package: @tingrudeng/${RELEASE_PACKAGE}
-          - version: ${RELEASE_VERSION}
-          - tag: ${RELEASE_TAG}
-          - workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
-
-          恢复方式：
-          1. 确认 npm 上 @tingrudeng/${RELEASE_PACKAGE}@${RELEASE_VERSION} 已存在。
-          2. 在 main 上补交 packages/${RELEASE_PACKAGE}/package.json 的版本变更。
-          3. 创建同名 release tag：${RELEASE_TAG}。
-          4. 推送 commit 和 tag 后关闭本 issue。
-          EOF
-          gh issue create \
-            --title "手动发布需要恢复：@tingrudeng/${RELEASE_PACKAGE}@${RELEASE_VERSION}" \
-            --body-file "$ISSUE_BODY"
-
   publish-disabled-summary:
     needs: detect-changes
-    if: github.event_name == 'push' && needs.detect-changes.outputs.has-packages == 'true' && vars.NPM_TRUSTED_PUBLISHING_ENABLED != 'true'
+    if: needs.detect-changes.outputs.has-packages == 'true' && vars.NPM_TRUSTED_PUBLISHING_ENABLED != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Release disabled summary
@@ -346,7 +95,7 @@ jobs:
 
   publish-setup-required-summary:
     needs: detect-changes
-    if: github.event_name == 'push' && needs.detect-changes.outputs.has-new-packages == 'true'
+    if: needs.detect-changes.outputs.has-new-packages == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: 输出全新包名配置缺口
@@ -366,7 +115,7 @@ jobs:
 
   publish-auto:
     needs: detect-changes
-    if: github.event_name == 'push' && needs.detect-changes.outputs.has-packages == 'true' && vars.NPM_TRUSTED_PUBLISHING_ENABLED == 'true'
+    if: needs.detect-changes.outputs.has-packages == 'true' && vars.NPM_TRUSTED_PUBLISHING_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: npm
     env:
@@ -534,4 +283,72 @@ jobs:
             echo "- workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo ""
             echo "请先确认 npm 上的精确版本、dist-tag 与 tarball，再按本次 workflow 日志处理 main 漂移或 smoke 失败。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  record-release-tags:
+    needs: [detect-changes, publish-auto]
+    if: needs.detect-changes.outputs.has-packages == 'true' && vars.NPM_TRUSTED_PUBLISHING_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_PACKAGE: ${{ matrix.package.name }}
+      RELEASE_VERSION: ${{ matrix.package.version }}
+      RELEASE_SHA: ${{ needs.detect-changes.outputs.release-sha }}
+    permissions:
+      contents: write
+    strategy:
+      max-parallel: 1
+      matrix:
+        package: ${{ fromJson(needs.detect-changes.outputs.packages) }}
+      fail-fast: false
+    steps:
+      - name: Checkout published release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.detect-changes.outputs.release-sha }}
+
+      - name: Verify release tag identity
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          CURRENT_VERSION=$(node -p "require('./packages/${RELEASE_PACKAGE}/package.json').version")
+          if [[ "$CURRENT_SHA" != "$RELEASE_SHA" ]]; then
+            echo "Release tag checkout mismatch: expected $RELEASE_SHA, got $CURRENT_SHA" >&2
+            exit 1
+          fi
+          if [[ "$CURRENT_VERSION" != "$RELEASE_VERSION" ]]; then
+            echo "Release tag version mismatch: expected $RELEASE_VERSION, got $CURRENT_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Record idempotent release tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          RELEASE_TAG="release/${RELEASE_PACKAGE}@${RELEASE_VERSION}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            git fetch --no-tags origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+            EXISTING_SHA=$(git rev-list -n 1 "$RELEASE_TAG")
+            if [[ "$EXISTING_SHA" != "$RELEASE_SHA" ]]; then
+              echo "Release tag ${RELEASE_TAG} points to ${EXISTING_SHA}, expected ${RELEASE_SHA}" >&2
+              exit 1
+            fi
+            echo "Release tag ${RELEASE_TAG} already records ${RELEASE_SHA}"
+            exit 0
+          fi
+          git tag -a "$RELEASE_TAG" -m "release @tingrudeng/${RELEASE_PACKAGE}@${RELEASE_VERSION}"
+          git push origin "refs/tags/${RELEASE_TAG}"
+
+      - name: Summarize release tag recovery
+        if: ${{ failure() }}
+        run: |
+          {
+            echo "## 发布 tag 需要恢复"
+            echo ""
+            echo "npm publish 与发布后验证已经成功，但 release tag 记录失败。"
+            echo ""
+            echo "- package: @tingrudeng/${RELEASE_PACKAGE}"
+            echo "- version: ${RELEASE_VERSION}"
+            echo "- release sha: ${RELEASE_SHA}"
+            echo "- expected tag: release/${RELEASE_PACKAGE}@${RELEASE_VERSION}"
+            echo ""
+            echo "可直接重新运行失败的 record-release-tags job；该步骤会校验已有 tag 并保持幂等。"
           } >> "$GITHUB_STEP_SUMMARY"

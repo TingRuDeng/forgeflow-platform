@@ -59,7 +59,7 @@ afterEach(() => {
   }
 });
 
-describe("release-package preview-only gate", () => {
+describe("release-package protected-branch gate", () => {
   it("refuses publish even when CI flags are present and never touches the package", () => {
     const tempDir = makeTempDir();
     const packageDir = path.join(tempDir, "packages", "release-gate");
@@ -98,7 +98,7 @@ describe("release-package preview-only gate", () => {
     );
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr || result.stdout).toMatch(/preview-only|Release workflow/i);
+    expect(result.stderr || result.stdout).toMatch(/never publishes|Release workflow/i);
     expect(JSON.parse(fs.readFileSync(packageJsonPath, "utf8")).version).toBe("1.2.3");
     expect(fs.existsSync(fakePnpm.logPath)).toBe(false);
   });
@@ -175,6 +175,96 @@ describe("release-package preview-only gate", () => {
     expect(result.stdout).toContain("npm publish <prepared-tarball> --ignore-scripts");
     expect(result.stdout).toContain("registry dist.tarball");
     expect(result.stdout).toContain("--tag latest");
+  });
+
+  it("prepares only the package version change for a protected-branch release PR", () => {
+    const tempDir = makeTempDir();
+    const packageDir = path.join(tempDir, "packages", "release-gate");
+    fs.mkdirSync(packageDir, { recursive: true });
+    const packageJsonPath = path.join(packageDir, "package.json");
+    const originalManifest = [
+      "{",
+      '\t"metadata": {',
+      '\t\t"name": "nested-metadata",',
+      '\t\t"version": "1.2.3-beta.4"',
+      '\t},',
+      '\t"name": "@tingrudeng/release-gate",',
+      '\t"version" : "1.2.3-beta.4" ,',
+      '\t"private": false',
+      "}",
+      "",
+    ].join("\n");
+    fs.writeFileSync(packageJsonPath, originalManifest);
+    const fakePnpm = createFakePnpm(tempDir, packageDir);
+
+    const result = spawnSync(
+      "node",
+      [
+        releaseScriptPath,
+        "--package",
+        "release-gate",
+        "--bump",
+        "prerelease",
+        "--prepare",
+      ],
+      {
+        cwd: tempDir,
+        encoding: "utf8",
+        env: { ...process.env, ...fakePnpm.env },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Mode: PREPARE VERSION PR");
+    expect(result.stdout).toContain("1.2.3-beta.4 -> 1.2.3-beta.5");
+    const updatedManifest = fs.readFileSync(packageJsonPath, "utf8");
+    expect(JSON.parse(updatedManifest)).toEqual({
+      name: "@tingrudeng/release-gate",
+      metadata: { name: "nested-metadata", version: "1.2.3-beta.4" },
+      version: "1.2.3-beta.5",
+      private: false,
+    });
+    expect(updatedManifest).toBe(
+      originalManifest.replace('"version" : "1.2.3-beta.4"', '"version" : "1.2.3-beta.5"'),
+    );
+    expect(fs.readFileSync(fakePnpm.logPath, "utf8")).not.toMatch(/build|publish/);
+  });
+
+  it("rejects combining prepare with dry-run without changing the package", () => {
+    const tempDir = makeTempDir();
+    const packageDir = path.join(tempDir, "packages", "release-gate");
+    fs.mkdirSync(packageDir, { recursive: true });
+    const packageJsonPath = path.join(packageDir, "package.json");
+    fs.writeFileSync(
+      packageJsonPath,
+      `${JSON.stringify({
+        name: "@tingrudeng/release-gate",
+        version: "1.2.3",
+      }, null, 2)}\n`,
+    );
+    const fakePnpm = createFakePnpm(tempDir, packageDir);
+
+    const result = spawnSync(
+      "node",
+      [
+        releaseScriptPath,
+        "--package",
+        "release-gate",
+        "--bump",
+        "patch",
+        "--prepare",
+        "--dry-run",
+      ],
+      {
+        cwd: tempDir,
+        encoding: "utf8",
+        env: { ...process.env, ...fakePnpm.env },
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("--prepare cannot be combined with --dry-run");
+    expect(JSON.parse(fs.readFileSync(packageJsonPath, "utf8")).version).toBe("1.2.3");
   });
 
   it("rejects a safe but semantically wrong dist-tag before changing the version", () => {

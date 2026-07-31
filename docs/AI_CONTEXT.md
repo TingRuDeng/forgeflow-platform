@@ -31,7 +31,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - 当前推荐路径：源码仓运行读 `scripts/start-control-plane.sh`；install-and-run 读 `packages/forgeflow-dispatcher/README.md`。
 - Worker 定位：Trae automation gateway + Trae automation worker 是首选无人值守路径，Trae MCP worker 是 fallback。
 - 持久化定位：SQLite snapshot 是默认 runtime state 真相源，并默认保留最近 128 个 revision；runtime 只保留最近 500 条事件窗口，SQLite/PostgreSQL audit table 另存可分页历史。Postgres / queue 默认是 revision-gated shadow path；只有完成 cutover evidence 且显式选择 `RUNTIME_STATE_BACKEND=postgres` 时才使用 Postgres primary。
-- 发布包定位：`@tingrudeng/codex-beta-runtime` 与 `@tingrudeng/trae-beta-runtime` 当前在 npm registry 可安装；`@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 源码已存在，但仍需 npm 包名和 Trusted Publisher 外部配置。
+- 发布包定位：`@tingrudeng/codex-beta-runtime`、`@tingrudeng/gemini-beta-runtime`、`@tingrudeng/trae-beta-runtime` 与共享 `@tingrudeng/beta-runtime-core` 当前均已存在于 npm registry；正式新版本由版本 PR 合入 `main` 后通过 Trusted Publishing 自动发布。
 
 ## Core Directories
 
@@ -78,7 +78,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - Postgres / queue shadow path 是 best-effort shadow；每次同步绑定已持久化 SQLite revision，projection 与 queue 原子推进并拒绝旧 revision 回退。SQLite snapshot 默认仍是真相源。
 - shadow drift 的 `--record-alert` 写入与 dispatcher 共用本机 `.runtime-state.lock` 并在锁内重读最新状态；它不提供跨主机互斥。
 - Trae `sessions.json` mutation 通过本机 `sessions.json.lock` 串行化并在锁内重读；它解决 lost update，不代表多 gateway 或跨主机 session ownership。
-- 不要把源码中存在的 `@tingrudeng/gemini-beta-runtime` / `@tingrudeng/beta-runtime-core` 误写成当前已公开 npm 安装入口；npm registry 返回 E404 时先处理包名权限和 Trusted Publisher 配置。
+- 发布版本必须先作为 `package.json` 版本 PR 合入受保护 `main`；不要从 workflow 或本地发布脚本直推 `main`，也不要给版本提交添加 `[skip actions]`。
 - `backup-runtime-state.mjs` / `restore-runtime-state.mjs` 使用位置参数；打包 CLI 的 `--backup-dir` 是另一路入口。两者复用同一个 backup core 和 v1 manifest；正式 restore 前仍需停止 dispatcher 与直接文件 / SQLite 写入者。
 - `docs/plans/`、`docs/research/`、`docs/archive/`、`docs/external/` 默认不是当前实现权威。
 
@@ -103,6 +103,7 @@ pnpm verify:stage2
 pnpm verify:stage3
 # 只读 registry 可安装性检查，无发布副作用
 npm view @tingrudeng/codex-beta-runtime version dist-tags --json
+npm view @tingrudeng/gemini-beta-runtime version dist-tags --json
 npm view @tingrudeng/trae-beta-runtime version dist-tags --json
 ```
 
@@ -112,9 +113,8 @@ Device-required:
 
 Release-side-effect:
 
-- 不在快速上下文里提供直接发布命令；实际 create/sign/publish/tag/push 只通过 `.github/workflows/release.yml` 的受控发布流程执行。
+- 不在快速上下文里提供直接 npm 发布命令；本地 helper 只允许预览或显式准备版本 PR，实际 npm publish / provenance / release tag 只通过 `.github/workflows/release.yml` 执行。
 
 ## Stale when
 
-- `scripts/` live entrypoint、dispatcher runtime、Trae runtime、SQLite / shadow path、发布包入口或 npm registry 可安装状态变化。
-- 新增、归档或重命名权威文档，或 `package.json` 的验证脚本 / stage gate 变化。
+- `scripts/` live entrypoint、dispatcher runtime、Trae runtime、SQLite / shadow path、发布包入口、npm registry 可安装状态、权威文档或 `package.json` 的验证脚本 / stage gate 变化。

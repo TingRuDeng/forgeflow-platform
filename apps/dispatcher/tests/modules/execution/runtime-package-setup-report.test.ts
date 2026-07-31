@@ -47,7 +47,7 @@ describe("runtime package setup report", () => {
     const fixturePath = writeRegistryFixture(tempDir, {
       "@tingrudeng/automation-gateway-core": { status: "published", versions: ["0.1.0-beta.3"] },
       "@tingrudeng/beta-runtime-core": { status: "missing" },
-      "@tingrudeng/codex-beta-runtime": { status: "published", versions: ["0.1.0-beta.2"] },
+      "@tingrudeng/codex-beta-runtime": { status: "published", versions: ["0.1.0-beta.1"] },
       "@tingrudeng/gemini-beta-runtime": { status: "missing" },
       "@tingrudeng/trae-beta-runtime": { status: "published", versions: ["0.1.0-beta.62"] },
     });
@@ -60,6 +60,8 @@ describe("runtime package setup report", () => {
     expect(result.stdout).toContain("@tingrudeng/beta-runtime-core");
     expect(result.stdout).toContain("@tingrudeng/gemini-beta-runtime");
     expect(result.stdout).toContain("action=setup_required");
+    expect(result.stdout).toContain("release-package --package codex-beta-runtime --prepare");
+    expect(result.stdout).toContain("合并版本 PR 后由 Release workflow 自动发布");
   });
 
   it("fails with require-ready when setup or current version publish is incomplete", () => {

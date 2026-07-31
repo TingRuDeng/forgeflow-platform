@@ -32,16 +32,14 @@ forgeflow-dispatcher version
 This repository uses GitHub Actions Trusted Publishing for `@tingrudeng/*` public packages.
 
 Normal path:
+- preview with `node scripts/release-package.js --package forgeflow-dispatcher --bump prerelease`
+- prepare the version-only diff with the same command plus `--prepare`
+- commit the diff on a release branch and pass pull-request CI
 - merge the versioned `packages/forgeflow-dispatcher/package.json` change to `main`
 - let `.github/workflows/release.yml` auto-detect and publish the exact version
+- let the separate least-privilege tag job record the verified release
 
-Manual workflow path:
-
-```bash
-gh workflow run release.yml --ref main -f package=forgeflow-dispatcher -f bump=prerelease -f tag=beta
-```
-
-`scripts/release-package.js` is preview-only and rejects `--publish`; it is not an alternate publishing path.
+`scripts/release-package.js` defaults to preview, accepts `--prepare` only for the version field, and rejects `--publish`; it is not an alternate publishing path. The Release workflow has no manual dispatch path and never writes to `main`. Do not add `[skip actions]` to the version commit.
 
 ## Notes
 

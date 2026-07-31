@@ -9,6 +9,11 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error local publish script has no TypeScript declaration
 import { rewriteWorkspaceDependencies } from "../scripts/remove-workspace-deps.mjs";
 
+function readWorkspaceVersion(packageDir: string): string {
+  const packageJsonUrl = new URL(`../../${packageDir}/package.json`, import.meta.url);
+  return JSON.parse(fs.readFileSync(packageJsonUrl, "utf8")).version;
+}
+
 describe("remove-workspace-deps publish preparation", () => {
   it("rewrites workspace dependencies using the default repo workspace root", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "trae-publish-default-root-"));
@@ -34,8 +39,10 @@ describe("remove-workspace-deps publish preparation", () => {
     rewriteWorkspaceDependencies(packageJsonPath);
 
     const updatedPkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
-    expect(updatedPkg.dependencies?.["@tingrudeng/automation-gateway-core"]).toBe("0.1.0-beta.3");
-    expect(updatedPkg.dependencies?.["@tingrudeng/beta-runtime-core"]).toBe("0.1.0-beta.1");
+    expect(updatedPkg.dependencies?.["@tingrudeng/automation-gateway-core"])
+      .toBe(readWorkspaceVersion("automation-gateway-core"));
+    expect(updatedPkg.dependencies?.["@tingrudeng/beta-runtime-core"])
+      .toBe(readWorkspaceVersion("beta-runtime-core"));
   });
 
   it("rewrites workspace dependencies to concrete workspace package versions", () => {

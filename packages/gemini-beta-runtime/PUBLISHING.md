@@ -50,14 +50,15 @@ git diff --check
 
 ## 发布流程
 
-先用本地 preview-only helper 预览 core 与 provider 的版本，再通过 Release workflow 按依赖顺序发布：
+先用本地 helper 预览 core 与 provider 的版本。确认后，对本次确实要发布的包分别运行 `--prepare`，提交版本 PR；PR 通过 CI 并合入受保护 `main` 后，package manifest push 自动触发 Release workflow：
 
 ```bash
 node scripts/release-package.js --package beta-runtime-core --bump prerelease --dry-run
 node scripts/release-package.js --package gemini-beta-runtime --bump prerelease --dry-run
+node scripts/release-package.js --package gemini-beta-runtime --bump prerelease --prepare
 ```
 
-当 Gemini runtime 依赖新的 core 版本时，必须先发布 `@tingrudeng/beta-runtime-core`。Release workflow 会生成唯一 tarball，把 `workspace:*` runtime 依赖改写为具体版本，以 OIDC + provenance 发布该 tarball，并从 registry 下载精确产物复核 integrity、内容与安装结果。
+当 Gemini runtime 依赖新的 core 版本时，必须先单独合并并发布 `@tingrudeng/beta-runtime-core`，确认 registry 版本存在后再准备 provider 版本 PR。Release workflow 会生成唯一 tarball，把 `workspace:*` runtime 依赖改写为具体版本，以 OIDC + provenance 发布该 tarball，并从 registry 下载精确产物复核 integrity、内容与安装结果；独立 job 再记录 release tag。不要手动 dispatch workflow，也不要给版本提交添加 `[skip actions]`。
 
 ## 远端机器安装流程
 
