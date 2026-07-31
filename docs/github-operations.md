@@ -246,6 +246,6 @@
 3. 配好 `OPENAI_API_KEY` 和 `GEMINI_API_KEY`
 4. 准备 self-hosted runner
 5. 放入 `.orchestrator/project.yaml` 和 workflow 模板
-6. 跑第一次 `workflow_dispatch`
+6. 跑第一次业务仓 worker `workflow_dispatch`（不是本仓 npm Release）
 
 这就够开始了。

@@ -84,7 +84,9 @@ Preferred path:
 
 1. Configure npm Trusted Publisher for `@tingrudeng/trae-beta-runtime` and repo `TingRuDeng/forgeflow-platform`
 2. Set repository/org variable `NPM_TRUSTED_PUBLISHING_ENABLED=true`
-3. Trigger `.github/workflows/release.yml`
+3. Preview and prepare the version change on a release branch
+4. Merge the version pull request to protected `main` after CI passes
+5. Let the package manifest push trigger `.github/workflows/release.yml` automatically
 
 Preview the version changes from the repository root:
 
@@ -92,10 +94,11 @@ Preview the version changes from the repository root:
 node scripts/release-package.js --package automation-gateway-core --bump prerelease --dry-run
 node scripts/release-package.js --package beta-runtime-core --bump prerelease --dry-run
 node scripts/release-package.js --package trae-beta-runtime --bump prerelease --dry-run
+node scripts/release-package.js --package trae-beta-runtime --bump prerelease --prepare
 ```
 
 If a shared core did not change for this release and the referenced dependency version already exists on npm, you can skip republishing it. When versions change together, publish `automation-gateway-core` and `beta-runtime-core` before `trae-beta-runtime`.
-The workflow prepares one tarball, publishes that exact file with OIDC provenance, then verifies npm `dist.integrity`, `dist.shasum`, contents, bin links, and installability before the release is complete.
+The workflow prepares one tarball, publishes that exact file with OIDC provenance, then verifies npm `dist.integrity`, `dist.shasum`, contents, bin links, and installability before a separate least-privilege job records the release tag. It has no manual dispatch release path and never writes to `main`; do not add `[skip actions]` to the version commit.
 
 ## Install flow on a remote machine
 

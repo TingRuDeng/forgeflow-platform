@@ -41,16 +41,19 @@ Preferred path:
 
 1. Configure npm Trusted Publisher for `@tingrudeng/automation-gateway-core` and repo `TingRuDeng/forgeflow-platform`
 2. Set repository/org variable `NPM_TRUSTED_PUBLISHING_ENABLED=true`
-3. Trigger `.github/workflows/release.yml`
+3. Preview and prepare the version change on a release branch
+4. Merge the version pull request to protected `main` after CI passes
+5. Let the package manifest push trigger `.github/workflows/release.yml` automatically
 
 Preview the release from the repository root:
 
 ```bash
 node scripts/release-package.js --package automation-gateway-core --bump prerelease --dry-run
+node scripts/release-package.js --package automation-gateway-core --bump prerelease --prepare
 ```
 
 When a new `@tingrudeng/trae-beta-runtime` version depends on a new core version, publish this package first.
-The workflow prepares and publishes one exact tarball, then downloads npm `dist.tarball` and verifies its integrity, contents, and installability.
+The workflow prepares and publishes one exact tarball, then downloads npm `dist.tarball` and verifies its integrity, contents, and installability. A separate least-privilege job records the release tag after verification; the workflow never writes to `main` and has no manual dispatch release path.
 
 ## Notes
 

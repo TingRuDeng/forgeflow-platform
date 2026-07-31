@@ -14,7 +14,7 @@ Only confirmed, still-active debt belongs here.
 
 - 本文件只写仍然存在的债务，不写愿望清单。
 - 当前债务集中在 runtime bridge、持久化 fallback / shadow 边界、Trae gateway 发布适配层和 Stage 3 边界。
-- 近期审查确认 dispatcher 外部资源锁、跨主机生产 DR 和手动发布后的 git 版本落账恢复仍需后续修复。
+- 近期审查确认 dispatcher 外部资源锁和跨主机生产 DR 仍需后续修复；发布版本落账已改为 PR-first，不再由 workflow 直推受保护 `main`。
 - 修复债务时必须同步 `README.md`、`docs/README.md` 和相关稳定文档。
 
 ```yaml
@@ -295,26 +295,26 @@ Desired direction:
 - archive drill output in the production release system when production rollout evidence becomes mandatory
 - add real cross-host failover, quorum restore, and cutover runbooks if production RTO / RPO requirements tighten
 
-## 11. Manual release recovery is tracked, but still manual
+## 11. Release is PR-first; exceptional post-publish recovery remains operator-driven
 
 Current situation:
 
-- `.github/workflows/release.yml` manual path publishes to npm before committing the release version and tag
-- manual releases now reject non-`main` refs before checkout and always record the published version back to `main`
-- after the version bump, the workflow reuses the canonical preflight to require the exact new npm version to be available before build and publish
-- if `npm publish` fails, git history no longer advances ahead of npm
-- if `npm publish` succeeds but the later commit / tag / push step fails, npm can contain a version that still needs a matching git record
-- the workflow writes an Actions summary and opens a recovery issue when that post-publish git record step fails
+- local `release-package.js` defaults to preview and only changes the target manifest version when `--prepare` is explicit
+- every release version enters protected `main` through a normal pull request; the workflow has no manual dispatch path and never pushes to `main`
+- the resulting package manifest push auto-detects an exact version missing from npm, then publishes one prepared tarball through Trusted Publishing
+- npm publishing uses `contents: read` plus `id-token: write`; a separate `contents: write` job records an idempotent tag only after publish and registry verification succeed
+- if npm accepts the immutable version but later registry verification, provider smoke, or tag recording fails, the workflow writes a recovery summary and the operator must reconcile that exact version
 
 Impact:
 
-- operators still need to reconcile a published npm version with a missing release commit/tag
-- retry or manual git record repair must be explicit to avoid confusing maintainers
+- normal releases no longer need a post-publish commit recovery or a protected-branch bypass
+- exceptional failures after `npm publish` still require checking registry metadata before rerunning verification or the tag job
 
 Desired direction:
 
 - keep the release runbook recovery path current
-- consider an automated repair workflow only if post-publish git record failures become common
+- keep publish and tag permissions separated
+- consider a dedicated verification-only repair workflow only if post-publish verification failures become common
 
 ## 12. 确定性候选打分原语已落地，但并行竞争执行仍 deferred
 
@@ -350,10 +350,10 @@ Desired direction:
 - **全 provider worktree 生命周期已统一（P2 完成）**：Codex、Gemini、Trae、dispatcher 与源码 worker adapter 都复用 `@tingrudeng/beta-runtime-core` 的唯一 task worktree 实现。可取消 Git 命令默认 60 秒超时；有损或过长的 task 目录名会附加稳定短哈希，创建/复用前拒绝危险目录、非法 ref、默认分支、未登记目录、分支占用和 path/branch 错配；复用统一执行 `reset --hard` + `clean -fd`。只有 terminal result 已被 dispatcher 确认且 `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 时才清理，默认不 force、保留脏 worktree，并写失败事件；`FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 是显式破坏性 opt-in。
 - **runtime 包发布清单门禁已落地（P2 完成）**：`pnpm verify:runtime-packages` 会校验 `automation-gateway-core`、`beta-runtime-core`、`codex-beta-runtime`、`gemini-beta-runtime`、`trae-beta-runtime` 的 public package 元数据、`dist`/README/PUBLISHING 发布范围、build/typecheck/test 脚本、provider CLI bin 和源码内 `workspace:*` 依赖重写规则；CI 与 release workflow 都会执行该门禁。生产发布窗口可执行 `pnpm verify:runtime-packages:published`，用只读 `npm view` 强制校验 npm registry 包名、当前本地版本和已发布依赖元数据；该检查会把源码内 `workspace:*` 依赖转换为本地 workspace 版本后，与已发布包的 `dependencies` 对比，避免远端安装包仍停留在旧依赖形态。
 - **runtime tarball 安装 smoke 已落地（P2 完成）**：`pnpm verify:runtime-packages:install` 会构建并本地 staging `codex`、`gemini`、`trae` runtime 组，重写 `workspace:*` 依赖为本地 workspace 版本，使用临时 npm cache 执行 `npm pack` / `npm install --ignore-scripts`，并校验 provider CLI bin 安装成功、安装后的 package 不含 `workspace:*` 依赖。CI 与 release workflow 都会执行该门禁，证明发布前 tarball 形态可安装且不依赖外部 registry。
-- **release preflight 会提前阻断未配置包名和未发布 workspace 依赖（P2 完成）**：`release-publish-preflight.mjs --require-package-exists --require-published-workspace-deps` 会在手动发布和自动发布进入 typecheck / test / build / publish 前执行只读 `npm view <package> version`，并把当前 package.json 的 `workspace:*` 依赖解析为本地 workspace 版本后校验对应精确版本已发布。包名不存在、权限不足、registry 查询失败或 provider 依赖的 shared core 版本未发布时，workflow 会停在 preflight，避免在 `npm publish` PUT 阶段或发布后 smoke 才暴露依赖缺口。
+- **release preflight 会提前阻断未配置包名和未发布 workspace 依赖（P2 完成）**：版本 PR 合入 `main` 后，`release-publish-preflight.mjs --require-package-exists --require-version-available --require-published-workspace-deps` 会在 typecheck / test / build / publish 前执行只读 registry 查询，并把当前 package.json 的 `workspace:*` 依赖解析为本地 workspace 版本后校验对应精确版本已发布。包名不存在、目标版本已占用、权限不足、registry 查询失败或 provider 依赖的 shared core 版本未发布时，workflow 会停在 preflight，避免在 `npm publish` PUT 阶段或发布后 smoke 才暴露依赖缺口。
 - **runtime 包设置报告已落地（P2 完成）**：`pnpm report:runtime-packages:setup` 复用同一份 runtime package spec，只读查询 npm registry，输出每个包名、当前源码版本、package/version 发布状态、推荐发布顺序和 Trusted Publisher 配置要求；需要把缺口作为硬失败时可加 `-- --require-ready`。
 - **已发布 provider runtime smoke 已落地（P2 完成）**：`pnpm verify:runtime-packages:published-smoke` 会从 npm registry 安装当前源码版本的 `codex`、`gemini`、`trae` provider runtime，并校验 provider CLI bin、`--version` 和 `--help`；该命令要求所有 provider 包名和版本都已发布，适合作为发布后远端安装证据入口。
-- **GitHub Actions 与精确 npm tarball 发布链已加固（P1 完成）**：CI、Release、Stage3 Drill 和 Release Scorecard 的第三方 action 已固定到完整 commit SHA；CI / drill 使用显式只读权限，正式发布共用仓库级 concurrency group，并把 publish 绑定到 detect / dispatch commit 与 package version。远端 `main` 会在紧邻 publish 前和发布后各校验一次，竞态漂移会失败并留下恢复证据。本地 `release-package` helper 已收敛为 preview-only；`scripts/prepare-release-tarball.mjs` 以 `--ignore-scripts` 生成唯一 tarball 和 manifest，正式链路只发布该文件。`scripts/verify-published-package-tarball.mjs` 随后读取 registry `dist.tarball` / `integrity` / `shasum`，并核对目标 dist-tag、完整文件集、manifest、bin 与安装结果。剩余外部边界是 npm Trusted Publisher / environment protection 的仓库配置，以及 npm 服务端 provenance 签发可用性。
+- **GitHub Actions 与精确 npm tarball 发布链已加固（P1 完成）**：CI、Release、Stage3 Drill 和 Release Scorecard 的第三方 action 已固定到完整 commit SHA；CI / drill 使用显式只读权限，正式发布共用仓库级 concurrency group，并把 publish 绑定到 detect commit 与 package version。版本变化先通过 PR 进入受保护 `main`，本地 `release-package` helper 默认只预览，显式 `--prepare` 只修改目标 manifest 的版本字段；merge push 自动触发发布，workflow 不写 `main`。远端 `main` 会在紧邻 publish 前和发布后各校验一次，竞态漂移会失败并留下恢复证据。`scripts/prepare-release-tarball.mjs` 以 `--ignore-scripts` 生成唯一 tarball 和 manifest，正式链路只发布该文件；`scripts/verify-published-package-tarball.mjs` 随后读取 registry `dist.tarball` / `integrity` / `shasum`，并核对目标 dist-tag、完整文件集、manifest、bin 与安装结果；独立低权限 job 最后记录幂等 release tag。剩余外部边界是各包 npm Trusted Publisher / environment protection 配置，以及 npm 服务端 provenance 签发可用性。
 - **Trae launcher clean relaunch 已下沉到共享 core（P2 完成）**：`@tingrudeng/automation-gateway-core` 现在提供 `prepareCleanRelaunch` / `quitExistingMacApp` / `waitForDebuggerPortToDrain` / `resolveMacAppName`，`scripts/run-trae-automation-launch.ts` 和 `@tingrudeng/trae-beta-runtime` 共用同一实现，避免源码调试脚本与 packaged runtime 的 clean relaunch 语义继续漂移。
 - **Trae `.app` launch target 解析已下沉到共享 core（P2 完成）**：`@tingrudeng/automation-gateway-core` 现在提供 `resolveMacAppBundleExecutable`，`scripts/lib/trae-launcher.ts` 和 `packages/trae-beta-runtime/src/runtime/trae-launcher.ts` 共用同一实现，避免 macOS `.app` executable 探测规则在源码脚本与 packaged runtime 之间漂移。
 - **Trae launch target 构建已下沉到共享 core（P2 完成）**：`@tingrudeng/automation-gateway-core` 现在提供 `parseLaunchArgs`、`hasRemoteDebuggingPortArg` 和 `resolveTraeLaunchTarget`，`scripts/lib/trae-launcher.ts` 与 `packages/trae-beta-runtime/src/runtime/trae-launcher.ts` 共用 launch args、remote debugging port 和 project path 组装规则。
@@ -361,7 +361,7 @@ Desired direction:
 
 仍存在的债务：
 
-- `@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 的本地发布清单、release preflight、tarball install smoke、设置报告和 published smoke 入口已有门禁，但仍需要完成 npm 包名和 Trusted Publisher 配置后，才能进入自动发布矩阵。
+- `@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 的 npm 包名和 Trusted Publisher 已配置；后续发布仍必须按 shared core 在前、provider 在后的版本 PR 顺序进入自动发布矩阵。
 - codex/gemini 已是源码内受支持路径，但生产远端部署仍应以已发布包、固定版本和 CI 验证证据为准，不应直接依赖本仓未发布 dist。
 - worktree 保留、复用和 ack 后清理策略已经跨 provider 统一；自动删除刻意保持显式 opt-in。Trae automation worker 的 executor / session-store / gateway 仍保留必要的 provider runtime 边界，后续若收敛完整 executor core，应单独评估 session、phase event 和 failure evidence 模型，不再重复实现 worktree 生命周期。
 

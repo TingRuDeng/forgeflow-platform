@@ -35,22 +35,44 @@ hotfix 要求：
 - runbook 已更新
 - release notes 已准备
 
-## 4. 手动 npm 发布失败恢复
+## 4. 版本 PR 与自动 npm 发布
 
-手动包发布入口是 `.github/workflows/release.yml`。
+受保护 `main` 不接受 workflow 直推。发布必须先把版本变化作为普通 PR 合入，再由 `.github/workflows/release.yml` 对 `main` 的 package manifest push 执行唯一 npm 写入。
 
-- 手动发布只允许从 `main` ref 触发；非 `main` ref 会在 checkout 和发布动作前显式失败，版本记录固定推回 `main`。
-- `package` 只能从当前受支持的 runtime 包列表选择；workflow 还会复用 `scripts/lib/runtime-package-specs.mjs` 做二次校验。
-- npm `dist-tag` 会在任何构建或发布命令前校验；除了字符安全外，预发布版本必须使用 `beta`，稳定版本必须使用 `latest`。
-- workflow 输入只通过环境变量传给 shell，不应在 `run` 块中直接插入 `${{ inputs.* }}`。
-- workflow 先执行 preflight、依赖安装、`pnpm audit --prod --audit-level high`、类型检查、测试、shadow drift gate 和版本 bump；bump 后会用 canonical preflight 查询精确新版本，只有 npm 对该版本返回 E404 才继续构建和 `npm publish`，已发布版本、权限错误、超时或其他 registry 错误都会阻断。
-- 所有正式发布共用仓库级 concurrency group。workflow 固定 checkout 触发时的 commit SHA；自动发布会同时核对 detect 输出的 package version。远端 `main` 检查与 `npm publish` 位于同一步并紧邻执行，发布后还会再次检查；若不可消除的外部竞态窗口内 `main` 推进，workflow 会失败并写出发布后恢复证据。
-- 构建后由 `scripts/prepare-release-tarball.mjs` 以 `npm pack --ignore-scripts` 生成唯一 tarball 和 manifest；该步骤会临时把 `workspace:` 依赖改写为精确 workspace 版本、校验发布文件与 bin，然后恢复源码 package.json。
-- 发布命令只接受已准备好的 tarball，并使用 `--ignore-scripts` 防止上传前再次执行 lifecycle、重新打包或改变 payload。
-- 发布后由 `scripts/verify-published-package-tarball.mjs` 读取 npm registry 的目标 dist-tag、`dist.tarball`、`dist.integrity` 和 `dist.shasum`，下载并核对与上传前 manifest 相同的精确产物，再验证包名、版本、完整文件集、文件边界、bin 和临时安装。registry 元数据或 dist-tag 短暂未可见时会有限重试，tag 指向错误、缺字段或摘要不一致都会失败关闭。
-- registry tarball 验证成功后，workflow 才提交对应 `packages/<name>/package.json` 版本变更、创建 `release/<name>@<version>` tag 并推送。
-- 如果 `npm publish` 失败，git commit / tag 不会提前推进；修复 npm 或 Trusted Publishing 配置后重新触发发布即可。
-- 如果 `npm publish` 已成功但 git 记录失败，GitHub Actions summary 会标记 `手动发布需要恢复`，并自动创建一个恢复 issue。此时先确认 npm 上该版本存在，再在 `main` 上补交同一个 `package.json` 版本变更，并创建同名 release tag；完成后关闭该 issue。
+1. 从最新 `origin/main` 创建发布分支。
+2. 只读预览版本：
+
+   ```bash
+   node scripts/release-package.js --package <name> --bump <major|minor|patch|prerelease>
+   ```
+
+3. 显式准备版本 PR：
+
+   ```bash
+   node scripts/release-package.js --package <name> --bump <major|minor|patch|prerelease> --prepare
+   ```
+
+   `--prepare` 只修改目标 `packages/<name>/package.json` 的版本字段，不执行 npm、Git、PR 或 merge。不要给版本提交添加 `[skip actions]`。
+4. 检查 diff、运行包级和仓库级门禁，提交、推送并通过 PR 合入 `main`。
+5. 等待 `Release` workflow 完成 publish、registry tarball 验证、provider smoke 和 `record-release-tags`。
+
+发布链硬约束：
+
+- detect 只把 npm 上已存在包名、但当前源码精确版本尚未发布的包放入矩阵；已发布版本不会重复上传。
+- 每次 `main` merge 最多允许一个待发布精确版本。detect 同时发现多个版本时会在 npm 写入前失败；按 shared core 在前、provider 在后的顺序拆成独立版本 PR。
+- preflight 会确认 Trusted Publisher 门禁、目标包名、精确版本可用性和已发布 workspace 依赖。只有精确版本 E404 表示可发布，权限、超时或其他 registry 错误都会失败关闭。
+- 所有发布共用仓库级 concurrency group。publish 固定绑定 detect 输出的 commit SHA 和 package version，并在 npm 写入前后核对远端 `main` 未漂移。
+- 构建后由 `scripts/prepare-release-tarball.mjs` 以 `npm pack --ignore-scripts` 生成唯一 tarball 和 manifest；它临时把 `workspace:` 依赖改写为精确 workspace 版本、校验发布文件与 bin，然后恢复源码 manifest。
+- npm 只接收该已准备 tarball，并使用 Trusted Publishing、OIDC、provenance 和 `--ignore-scripts`；预发布版本自动使用 `beta`，稳定版本自动使用 `latest`。
+- `scripts/verify-published-package-tarball.mjs` 从 registry 下载精确 `dist.tarball`，核对 dist-tag、integrity、shasum、manifest、完整文件集、bin 与安装结果。
+- npm publish job 只有 `contents: read` 与 `id-token: write`。全部发布验证成功后，独立 `record-release-tags` job 才以 `contents: write` 在已合入 SHA 上创建 `release/<name>@<version>`，不会向 `main` 直接推送。
+
+失败恢复：
+
+- npm 写入前失败：修复根因后重新运行失败 job；精确版本仍未发布时可以安全重试。
+- npm 已写入但 registry / smoke 后验失败：先用本节第 6 节的只读命令确认真实 registry 状态，不要再次递增或重复发布同一版本。
+- `record-release-tags` 失败：直接重新运行失败 job。tag 记录逻辑会验证已有 tag 指向的 commit，并保持幂等。
+- `main` 在 publish 窗口推进：workflow 失败关闭。确认 npm 是否已经写入后，再决定重跑验证或只恢复 tag，不要猜测发布结果。
 
 ## 5. 自动发布遇到全新 npm 包名
 
@@ -68,12 +90,7 @@ push 自动发布入口会先区分两类包：
 3. 保持仓库或组织变量 `NPM_TRUSTED_PUBLISHING_ENABLED=true`。
 4. 配置完成后，用后续版本变更重新触发 push 自动发布。
 
-当前已知属于这类外部前置缺口的包：
-
-- `@tingrudeng/beta-runtime-core`
-- `@tingrudeng/gemini-beta-runtime`
-
-如果 `npm view <pkg> version dist-tags --json` 返回 E404，先按上述配置路径处理，不要把它当作代码测试失败。
+`@tingrudeng/beta-runtime-core` 与 `@tingrudeng/gemini-beta-runtime` 的包名和 Trusted Publisher 已完成配置。后续新增包若 `npm view <pkg> version dist-tags --json` 对包名返回 E404，先按上述配置路径处理，不要把它当作代码测试失败。
 
 如果检测 npm registry 时返回的不是 E404，workflow 会直接失败并暴露 registry 错误，不会把网络或权限异常误判成可跳过的首次配置问题。
 
