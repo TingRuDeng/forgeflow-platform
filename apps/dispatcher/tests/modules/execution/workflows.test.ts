@@ -158,8 +158,18 @@ describe("workflow quality gates", () => {
     const recordTagsIndex = workflow.indexOf("  record-release-tags:");
     const autoJob = workflow.slice(publishAutoIndex, recordTagsIndex);
     const autoRunSteps = workflowRunScripts(autoJob);
+    const dispatcherBuildIndex = autoJob.indexOf("Build dispatcher test dependency");
+    const testIndex = autoJob.indexOf("Run tests");
     expect(autoJob).toContain("RELEASE_PACKAGE: ${{ matrix.package.name }}");
     expect(autoJob).toContain("RELEASE_VERSION: ${{ matrix.package.version }}");
+    expect(dispatcherBuildIndex).toBeGreaterThanOrEqual(0);
+    expect(dispatcherBuildIndex).toBeLessThan(testIndex);
+    expect(autoJob).toContain(
+      `      - name: Run tests
+        run: pnpm --filter "@tingrudeng/\${RELEASE_PACKAGE}..." --if-present test
+        env:
+          FORGEFLOW_DISPATCHER_DIST_PREBUILT: '1'`,
+    );
     expect(autoRunSteps).not.toMatch(/\$\{\{\s*matrix\.package\.(?:name|version)\s*\}\}/);
     expect(autoRunSteps).not.toContain("${{ steps.preflight.outputs.dist_tag }}");
     expect(autoRunSteps).toContain(
