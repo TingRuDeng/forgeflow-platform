@@ -5,7 +5,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { RUNTIME_PACKAGES, readWorkspaceVersions } from "./lib/runtime-package-specs.mjs";
+import {
+  RUNTIME_PACKAGES,
+  readWorkspaceVersions,
+  releaseDistTagForVersion,
+} from "./lib/runtime-package-specs.mjs";
 
 function parseArgs(argv) {
   const parsed = {};
@@ -160,8 +164,16 @@ function validatePublishedDependencies(spec, packageJson, workspaceVersions, opt
 }
 
 function validateRegistry(spec, packageJson, options, issues, warnings) {
+  const releaseDistTag = releaseDistTagForVersion(packageJson.version);
   if (!options.checkRegistry) {
-    return { status: "not_checked", version: "", versionStatus: "not_checked" };
+    return {
+      status: "not_checked",
+      version: "",
+      versionStatus: "not_checked",
+      releaseDistTag,
+      releaseDistTagStatus: "not_checked",
+      releaseDistTagVersion: "",
+    };
   }
   const packageStatus = queryNpmVersion(spec.name, options.registryTimeoutMs, options.npmEnv);
   if (packageStatus.status !== "published") {
@@ -173,7 +185,13 @@ function validateRegistry(spec, packageJson, options, issues, warnings) {
     } else {
       warnings.push(message);
     }
-    return { ...packageStatus, versionStatus: packageStatus.status };
+    return {
+      ...packageStatus,
+      versionStatus: packageStatus.status,
+      releaseDistTag,
+      releaseDistTagStatus: "not_checked",
+      releaseDistTagVersion: "",
+    };
   }
   const versionStatus = queryNpmVersion(`${spec.name}@${packageJson.version}`, options.registryTimeoutMs, options.npmEnv);
   if (versionStatus.status !== "published") {
@@ -186,7 +204,38 @@ function validateRegistry(spec, packageJson, options, issues, warnings) {
       warnings.push(message);
     }
   }
-  return { ...packageStatus, versionStatus: versionStatus.status };
+  let releaseDistTagStatus = "not_checked";
+  let releaseDistTagVersion = "";
+  if (versionStatus.status === "published") {
+    const distTagResult = queryNpmVersion(
+      `${spec.name}@${releaseDistTag}`,
+      options.registryTimeoutMs,
+      options.npmEnv,
+    );
+    releaseDistTagVersion = distTagResult.version;
+    releaseDistTagStatus = distTagResult.status === "published" && distTagResult.version === packageJson.version
+      ? "current"
+      : distTagResult.status === "published"
+        ? "stale"
+        : distTagResult.status;
+    if (releaseDistTagStatus !== "current") {
+      const message = distTagResult.status === "published"
+        ? `${spec.name} 的 ${releaseDistTag} dist-tag 应指向 ${packageJson.version}，实际为 ${distTagResult.version || "<missing>"}`
+        : `${spec.name} 的 ${releaseDistTag} dist-tag 查询失败：${distTagResult.error || distTagResult.status}`;
+      if (options.requirePublished) {
+        issues.push(message);
+      } else {
+        warnings.push(message);
+      }
+    }
+  }
+  return {
+    ...packageStatus,
+    versionStatus: versionStatus.status,
+    releaseDistTag,
+    releaseDistTagStatus,
+    releaseDistTagVersion,
+  };
 }
 
 function main() {
@@ -235,7 +284,10 @@ function main() {
     const registryText = row.registry.version
       ? `${row.registry.status}:${row.registry.version}`
       : row.registry.status;
-    console.log(`- ${row.name}@${row.version} role=${row.role} registry=${registryText}`);
+    const releaseTagText = row.registry.releaseDistTagVersion
+      ? `${row.registry.releaseDistTag}:${row.registry.releaseDistTagStatus}:${row.registry.releaseDistTagVersion}`
+      : `${row.registry.releaseDistTag}:${row.registry.releaseDistTagStatus}`;
+    console.log(`- ${row.name}@${row.version} role=${row.role} registryDefault=${registryText} releaseTag=${releaseTagText}`);
   }
 
   for (const warning of warnings) {

@@ -28,7 +28,7 @@ describe("update command", () => {
     expect(execFile).toHaveBeenNthCalledWith(1, "npm", [
       "install",
       "-g",
-      "@tingrudeng/worker-review-orchestrator-cli@latest",
+      "@tingrudeng/worker-review-orchestrator-cli@beta",
     ]);
     expect(execFile).toHaveBeenNthCalledWith(2, "npm", [
       "list",
@@ -41,9 +41,53 @@ describe("update command", () => {
       packageName: "@tingrudeng/worker-review-orchestrator-cli",
       previousVersion: "0.1.0-beta.4",
       installedVersion: "0.1.0-beta.5",
-      performedCommand: "npm install -g @tingrudeng/worker-review-orchestrator-cli@latest",
+      performedCommand: "npm install -g @tingrudeng/worker-review-orchestrator-cli@beta",
     });
     expect(result.message).toContain("Updated the globally installed ForgeFlow review orchestrator CLI");
+  });
+
+  it("uses latest after the installed CLI reaches a stable version", async () => {
+    const execFile = vi.fn()
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          dependencies: {
+            "@tingrudeng/worker-review-orchestrator-cli": { version: "1.0.1" },
+          },
+        }),
+        stderr: "",
+      });
+
+    const result = await runUpdate({ installedVersion: "1.0.0", execFile });
+
+    expect(execFile).toHaveBeenNthCalledWith(1, "npm", [
+      "install",
+      "-g",
+      "@tingrudeng/worker-review-orchestrator-cli@latest",
+    ]);
+    expect(result.performedCommand).toContain("@latest");
+  });
+
+  it("falls back to latest when the installed version cannot be resolved", async () => {
+    const execFile = vi.fn()
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          dependencies: {
+            "@tingrudeng/worker-review-orchestrator-cli": { version: "1.0.1" },
+          },
+        }),
+        stderr: "",
+      });
+
+    const result = await runUpdate({ installedVersion: null, execFile });
+
+    expect(execFile).toHaveBeenNthCalledWith(1, "npm", [
+      "install",
+      "-g",
+      "@tingrudeng/worker-review-orchestrator-cli@latest",
+    ]);
+    expect(result.performedCommand).toContain("@latest");
   });
 
   it("uses a custom dist-tag when defaultBranch is provided", async () => {

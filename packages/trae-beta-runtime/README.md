@@ -14,7 +14,7 @@ This package is self-contained for the remote Trae runtime path:
 - it does **not** require a local ForgeFlow repository checkout
 - it **does** require a local checkout of the target project repository that Trae will open and the worker will execute tasks against
 
-This package is now structured for **public beta npm publishing**, but it is still beta-oriented and is not published automatically from this repository.
+This package is published automatically from the protected `main` branch through the repository's Trusted Publishing workflow. It remains beta-oriented, so installs and self-updates follow the `beta` dist-tag.
 It depends on `@tingrudeng/automation-gateway-core` for shared automation/session helpers and on `@tingrudeng/beta-runtime-core` for the same task-worktree implementation used by Codex and Gemini workers.
 
 Current unattended runtime guards:

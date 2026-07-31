@@ -151,7 +151,13 @@ jobs:
           fi
 
       - name: Validate release package
-        run: node scripts/validate-release-inputs.mjs "$RELEASE_PACKAGE" beta
+        run: |
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            EXPECTED_DIST_TAG=beta
+          else
+            EXPECTED_DIST_TAG=latest
+          fi
+          node scripts/validate-release-inputs.mjs "$RELEASE_PACKAGE" "$EXPECTED_DIST_TAG"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9

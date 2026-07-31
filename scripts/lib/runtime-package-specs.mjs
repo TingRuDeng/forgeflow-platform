@@ -15,6 +15,13 @@ export const RUNTIME_PACKAGES = [
     dependencies: [],
   },
   {
+    bin: "forgeflow-dispatcher",
+    dir: "packages/forgeflow-dispatcher",
+    name: "@tingrudeng/forgeflow-dispatcher",
+    role: "single-node-control-plane-runtime",
+    dependencies: [],
+  },
+  {
     bin: "forgeflow-codex-beta",
     dir: "packages/codex-beta-runtime",
     name: "@tingrudeng/codex-beta-runtime",
@@ -48,6 +55,10 @@ export const RUNTIME_PACKAGE_GROUPS = {
     findRuntimePackage("@tingrudeng/trae-beta-runtime"),
   ],
 };
+
+export function releaseDistTagForVersion(version) {
+  return typeof version === "string" && version.includes("-") ? "beta" : "latest";
+}
 
 export function findRuntimePackage(packageName) {
   const spec = RUNTIME_PACKAGES.find((candidate) => candidate.name === packageName);

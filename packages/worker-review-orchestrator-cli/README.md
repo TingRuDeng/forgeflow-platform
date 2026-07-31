@@ -7,9 +7,13 @@ ForgeFlow control-layer CLI for dispatching tasks to workers, watching their sta
 Preferred global install after publish:
 
 ```bash
-npm install -g @tingrudeng/worker-review-orchestrator-cli
+npm install -g @tingrudeng/worker-review-orchestrator-cli@beta
 forgeflow-review-orchestrator --help
 ```
+
+While the package version is prerelease, `forgeflow-review-orchestrator update` follows the npm
+`beta` dist-tag by default. A stable installed version follows `latest`; pass
+`--default-branch <tag>` only to opt into another channel explicitly.
 
 Repository-local fallback:
 

@@ -29,6 +29,9 @@ After CI passes, merge the version PR to protected `main`. The package manifest 
 After publish, users should be able to install the CLI globally with:
 
 ```bash
-npm install -g @tingrudeng/worker-review-orchestrator-cli
+npm install -g @tingrudeng/worker-review-orchestrator-cli@beta
 forgeflow-review-orchestrator --help
 ```
+
+Prerelease publishes advance `beta`; `latest` is reserved for a future stable version and is not
+manually mirrored after publish.

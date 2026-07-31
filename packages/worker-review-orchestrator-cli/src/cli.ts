@@ -161,11 +161,11 @@ Usage: forgeflow-review-orchestrator update [options]
 
 Description:
   Updates the globally installed @tingrudeng/worker-review-orchestrator-cli package
-  to the latest version (or a specific dist-tag) via npm.
+  from its release channel (prerelease: beta; stable: latest) or a specific dist-tag.
 
 Options:
   -h, --help              Show this help message
-  --default-branch <tag>  npm dist-tag to install (default: latest)
+  --default-branch <tag>  npm dist-tag to install (default: current package release channel)
 
 Examples:
   forgeflow-review-orchestrator update
@@ -432,9 +432,10 @@ Examples:
   }
 
   if (parsed.command === "update") {
-    const result = await deps.runUpdate({
-      defaultBranch: typeof options.defaultBranch === "string" ? options.defaultBranch : "latest",
-    });
+    const updateOptions = typeof options.defaultBranch === "string"
+      ? { defaultBranch: options.defaultBranch }
+      : {};
+    const result = await deps.runUpdate(updateOptions);
     const lines: string[] = [];
     lines.push(`Package: ${result.packageName}`);
     lines.push(`Previous version: ${result.previousVersion}`);

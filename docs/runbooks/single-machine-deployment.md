@@ -45,7 +45,7 @@ export FORGEFLOW_STATE_DIR="/abs/path/to/.forgeflow-dispatcher"
 ### 路径 A：安装 runtime 包（推荐给外部用户）
 
 ```bash
-npm install -g @tingrudeng/forgeflow-dispatcher
+npm install -g @tingrudeng/forgeflow-dispatcher@beta
 forgeflow-dispatcher init
 forgeflow-dispatcher doctor
 forgeflow-dispatcher start
