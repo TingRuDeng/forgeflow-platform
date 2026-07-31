@@ -416,7 +416,22 @@ function classifyReviewDecisionError(error: unknown): number {
   if (message.startsWith("task not in review:")) {
     return 409;
   }
+  if (message.startsWith("review freshness mismatch for task:")) {
+    return 409;
+  }
+  if (message.startsWith("review freshness required for task:")) {
+    return 409;
+  }
+  if (message.startsWith("review freshness unavailable for task:")) {
+    return 409;
+  }
   if (message.startsWith("merge blocked by risk gate:")) {
+    return 409;
+  }
+  if (message === "review decision at must be a valid timestamp") {
+    return 400;
+  }
+  if (message.startsWith("review decision at must not be before review started for task:")) {
     return 409;
   }
   return 500;
@@ -430,10 +445,28 @@ function classifyTaskCancellationError(error: unknown): number {
   ) {
     return 404;
   }
-  if (message.startsWith("task not cancellable from state:")) {
+  if (
+    message.startsWith("task not cancellable from state:")
+    || message.startsWith("task not interruptible from state:")
+    || message.startsWith("task not waiting for input:")
+    || message.startsWith("input requestId required for task:")
+    || message.startsWith("input request attemptId required for task:")
+    || message.startsWith("input request mismatch for task:")
+    || message.startsWith("input request attempt mismatch for task:")
+    || message.startsWith("input request expired for task:")
+    || message.startsWith("input request metadata invalid for task:")
+    || message.startsWith("input request replay payload mismatch for task:")
+  ) {
     return 409;
   }
-  if (message.startsWith("resumePayload.")) {
+  if (
+    message.startsWith("resumePayload.")
+    || message.startsWith("input request at must ")
+    || message.startsWith("input request expiresAt must ")
+    || message.startsWith("input requestId must ")
+    || message.startsWith("input attemptId must ")
+    || message.startsWith("input sourceSessionId must ")
+  ) {
     return 400;
   }
   return 500;
@@ -502,6 +535,7 @@ function classifyWorkerResultError(error: unknown): number {
     || message === "worker result changedFiles must be an array of strings when provided"
     || message === "worker result waitingForInput must be an object when provided"
     || message.startsWith("worker result waitingForInput.")
+    || message.startsWith("input request expiresAt must ")
     || message === "worker result pullRequest must be null or an object"
     || message === "worker result pullRequest.number must be a positive integer"
     || message === "worker result pullRequest.url must be a string"
@@ -531,6 +565,33 @@ function classifyWorkerEventError(error: unknown): number {
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readOptionalInputIdentityField(
+  body: Record<string, any>,
+  key: "requestId" | "attemptId" | "sourceSessionId",
+): string | undefined {
+  if (body[key] === undefined) {
+    return undefined;
+  }
+  if (typeof body[key] !== "string" || !body[key].trim()) {
+    throw new Error(`input ${key} must be a non-empty string when provided`);
+  }
+  return body[key].trim();
+}
+
+function readOptionalInputExpiresAt(body: Record<string, any>): string | undefined {
+  if (body.expiresAt === undefined) {
+    return undefined;
+  }
+  if (
+    typeof body.expiresAt !== "string"
+    || !body.expiresAt.trim()
+    || !Number.isFinite(Date.parse(body.expiresAt))
+  ) {
+    throw new Error("input request expiresAt must be a valid timestamp");
+  }
+  return body.expiresAt.trim();
 }
 
 function readWorkerLeaseFields(body: Record<string, any>): {
@@ -625,6 +686,35 @@ function normalizeReviewDecisionEvidence(body: Record<string, any>): Record<stri
   return evidence;
 }
 
+function readExpectedReviewFreshness(value: unknown): {
+  attemptId: string;
+  artifactBundleId: string;
+  commitSha?: string;
+} {
+  if (value === undefined) {
+    throw Object.assign(new Error("review decision expectedFreshness is required"), { status: 400 });
+  }
+  if (!isPlainObject(value)) {
+    throw Object.assign(new Error("review decision expectedFreshness must be an object"), { status: 400 });
+  }
+  const attemptId = typeof value.attemptId === "string" ? value.attemptId.trim() : "";
+  const artifactBundleId = typeof value.artifactBundleId === "string" ? value.artifactBundleId.trim() : "";
+  if (!attemptId) {
+    throw Object.assign(new Error("review decision expectedFreshness.attemptId is required"), { status: 400 });
+  }
+  if (!artifactBundleId) {
+    throw Object.assign(new Error("review decision expectedFreshness.artifactBundleId is required"), { status: 400 });
+  }
+  if (value.commitSha !== undefined && (typeof value.commitSha !== "string" || !value.commitSha.trim())) {
+    throw Object.assign(new Error("review decision expectedFreshness.commitSha must be a non-empty string when provided"), { status: 400 });
+  }
+  return {
+    attemptId,
+    artifactBundleId,
+    ...(typeof value.commitSha === "string" ? { commitSha: value.commitSha.trim() } : {}),
+  };
+}
+
 function validateReviewDecisionBody(body: unknown): Record<string, any> {
   if (!isPlainObject(body)) {
     throw Object.assign(new Error("review decision body must be a JSON object"), { status: 400 });
@@ -643,6 +733,14 @@ function validateReviewDecisionBody(body: unknown): Record<string, any> {
   if (body.notes !== undefined && typeof body.notes !== "string") {
     throw Object.assign(new Error("review decision notes must be a string when provided"), { status: 400 });
   }
+  const at = body.at === undefined
+    ? undefined
+    : typeof body.at === "string"
+      ? body.at.trim()
+      : "";
+  if (body.at !== undefined && (!at || !Number.isFinite(Date.parse(at)))) {
+    throw Object.assign(new Error("review decision at must be a valid timestamp when provided"), { status: 400 });
+  }
 
   if (body.evidence !== undefined) {
     if (!isPlainObject(body.evidence)) {
@@ -650,13 +748,16 @@ function validateReviewDecisionBody(body: unknown): Record<string, any> {
     }
   }
   const evidence = normalizeReviewDecisionEvidence(body);
+  const expectedFreshness = readExpectedReviewFreshness(body.expectedFreshness);
   const acknowledgeRisk = body.acknowledgeRisk === true || body.acknowledge_risk === true;
 
   return {
     ...body,
     actor,
     decision,
+    at,
     evidence,
+    expectedFreshness,
     acknowledgeRisk,
   };
 }
@@ -735,10 +836,17 @@ function validateWorkerResultBody(body: unknown): Record<string, any> {
     if (!isPlainObject(body.result.waitingForInput)) {
       throw new Error("worker result waitingForInput must be an object when provided");
     }
-    for (const key of ["requestedBy", "reason", "prompt"]) {
+    for (const key of ["requestId", "sourceSessionId", "requestedBy", "reason", "prompt", "expiresAt"]) {
       if (body.result.waitingForInput[key] !== undefined && typeof body.result.waitingForInput[key] !== "string") {
         throw new Error(`worker result waitingForInput.${key} must be a string when provided`);
       }
+    }
+    const expiresAt = body.result.waitingForInput.expiresAt;
+    if (
+      expiresAt !== undefined
+      && (!expiresAt.trim() || !Number.isFinite(Date.parse(expiresAt)))
+    ) {
+      throw new Error("worker result waitingForInput.expiresAt must be a valid timestamp");
     }
     if (
       body.result.waitingForInput.resumePayloadSchema !== undefined
@@ -1668,11 +1776,17 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
     if (interruptTaskMatch) {
       try {
         const taskId = decodeURIComponent(interruptTaskMatch[1]);
+        const requestId = readOptionalInputIdentityField(body, "requestId");
+        const sourceSessionId = readOptionalInputIdentityField(body, "sourceSessionId");
+        const expiresAt = readOptionalInputExpiresAt(body);
         const result = await withStateAsync(stateDir, (state) => ({
           state: interruptTaskForInput(state, {
             taskId,
             actor: String(body.actor || "").trim() || "codex-control",
+            requestId,
+            sourceSessionId,
             reason: typeof body.reason === "string" ? body.reason : undefined,
+            expiresAt,
             resumePayloadSchema: isPlainObject(body.resumePayloadSchema) ? body.resumePayloadSchema as any : undefined,
             at: body.at,
           }),
@@ -1697,10 +1811,14 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
       try {
         const taskId = decodeURIComponent(resumeTaskMatch[1]);
         const resumePayload = isPlainObject(body.resumePayload) ? body.resumePayload : null;
+        const requestId = readOptionalInputIdentityField(body, "requestId");
+        const attemptId = readOptionalInputIdentityField(body, "attemptId");
         const result = await withStateAsync(stateDir, (state) => ({
           state: resumeTaskFromInput(state, {
             taskId,
             actor: String(body.actor || "").trim() || "codex-control",
+            requestId,
+            attemptId,
             resumePayload,
             at: body.at,
           }),
@@ -1786,6 +1904,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
             notes: validatedBody.notes,
             at: validatedBody.at,
             evidence: validatedBody.evidence,
+            expectedFreshness: validatedBody.expectedFreshness,
             acknowledgeRisk: validatedBody.acknowledgeRisk,
           }),
         }));

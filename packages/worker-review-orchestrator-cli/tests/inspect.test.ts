@@ -47,6 +47,11 @@ const mockSnapshot = {
         changedFiles: ["src/index.ts"],
         selfTestPassed: true,
         checks: [{ command: "pnpm test" }, { command: "pnpm typecheck" }],
+        freshness: {
+          attemptId: "attempt-1",
+          artifactBundleId: "attempt-1:artifact-bundle",
+          commitSha: "abc123",
+        },
         pullRequest: {
           number: 1,
           url: "https://github.com/owner/repo/pull/1",

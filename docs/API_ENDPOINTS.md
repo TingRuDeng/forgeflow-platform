@@ -307,7 +307,7 @@ Current endpoint families:
     - `waitingForInput`
   - Failed results use one canonical terminal-failure selection rule: the first non-empty `evidence.blockers[]` entry wins; otherwise dispatcher falls back to `evidence.failureType` / `evidence.failureSummary`, then to `verification_failed` and the result output. Provider-specific blocker codes remain compatible and are not narrowed to a fixed enum.
   - Dispatcher writes the selected `failureType`, `failureCode`, and `failureSummary` to the terminal `status_changed` event, and writes the same code/message to the active `TaskAttempt`. This applies equally to generic and Trae result paths.
-  - `result.waitingForInput` may include `requestedBy`, `reason`, `prompt`, and `resumePayloadSchema`; dispatcher treats it as a worker-initiated HITL interrupt, checkpoints the active attempt, releases worker / leases, and moves the task to `waiting_for_input` instead of `review` or `failed`.
+  - `result.waitingForInput` may include `requestId`, `sourceSessionId`, `requestedBy`, `reason`, `prompt`, `expiresAt`, and `resumePayloadSchema`; dispatcher treats it as a worker-initiated HITL interrupt, binds the active attempt identity, checkpoints that attempt, releases worker / leases, and moves the task to `waiting_for_input` instead of `review` or `failed`. Invalid or non-future `expiresAt` values are worker input errors and return `400`.
   - `resumePayloadSchema` supports object `properties` with `string` / `number` / `integer` / `boolean` / `array` fields, optional string `enum`, `title`, `description`, `default`, `format: "textarea"`, `placeholder`, numeric `minimum` / `maximum`, array `minItems` / `maxItems`, string `items.enum`, and a top-level `required[]` list for Console form rendering and validation.
   - `artifactBundle` may be provided as a top-level field; dispatcher validates ownership against the active attempt and stores the bundle summary, refs, and optional retained content.
 - `POST /api/workers/:workerId/events`
@@ -350,7 +350,9 @@ Current endpoint families:
     - `actor` 必填，非空字符串
     - `decision` 必填 enum
     - `notes` 可选字符串
+    - `at` 可选有效时间戳；格式非法返回 `400`，早于当前任务进入 `review` 的时间返回 `409`
     - `evidence` 可选 object
+    - `expectedFreshness` 必填 object；字段包含 `attemptId`、`artifactBundleId`，可选 `commitSha`。字段缺失或结构非法返回 `400`
     - `acknowledgeRisk` / `acknowledge_risk` 可选布尔（用于服务端 merge 风险门禁）
   - 结构化决策证据可放在 `evidence` 内，也可直接作为顶层便捷字段提交；顶层字段会归一化写入 `review.evidence`：
     - `reasonCode`
@@ -360,6 +362,8 @@ Current endpoint families:
   - 标准 `reasonCode` 包括 `looks_good`、`tests_passed`、`minor_fix_needed`、`incomplete_implementation`、`test_failure`、`policy_violation`、`security_risk`、`unclear_diff`、`requires_pairing`、`needs_redrive`、`other`；旧版自定义字符串仍兼容。
   - 最新 review decision 为 `rework` 或 `changes_requested` 的 blocked 任务可由 orchestrator CLI redrive。
   - 服务端 merge 风险门禁（`DISPATCHER_REVIEW_MERGE_GATE`，默认 `off`）：`enforce` 模式下，对风险非 `low` 的任务提交 `merge` 且未带 `acknowledgeRisk` 时返回 `409`（`merge blocked by risk gate`）；`warn` 模式放行但记 `review_merge_risk_acknowledged` 事件。该门禁覆盖 Console / CLI / 直连 HTTP。
+  - dispatcher 会把 `expectedFreshness` 与当前 `reviewMaterial.freshness` 精确比较；attempt、bundle、commit 任一不一致都返回 `409`，不落审查决策。Console、orchestrator CLI 和兼容 review CLI 会先读取 snapshot 再提交；没有无 freshness 或省略字段的兼容路径。
+  - 成功决策会把 dispatcher 当前的 canonical freshness 写入 `evidence.reviewedFreshness` 与 `review_decided` 事件，保留“审查了哪份证据”的审计记录。
   - 任务或 assignment 不存在时返回 `404`。
   - 任务存在但不在 `review` 状态时返回 `409`。
 - `POST /api/tasks/:taskId/redrive`
@@ -374,7 +378,6 @@ Current endpoint families:
   - Current request body may include:
     - `actor`
     - `reason`
-    - `resumePayloadSchema`
     - `at`
   - Current dispatcher behavior:
     - rejects `merged` / `failed` / invalid-task transitions with `409`
@@ -385,10 +388,15 @@ Current endpoint families:
   - Moves an interruptible task to `waiting_for_input`.
   - Current request body may include:
     - `actor`
+    - `requestId`
+    - `sourceSessionId`
     - `reason`
+    - `expiresAt`
+    - `resumePayloadSchema`
     - `at`
   - Current dispatcher behavior:
     - supports `ready` / `assigned` / `in_progress` / `blocked`
+    - generates `requestId` when omitted, binds the active `attemptId` when present, and rejects an invalid `at` or invalid/non-future `expiresAt` with `400`
     - releases worker / assignment / repo / branch / session leases when present
     - marks the active attempt as `checkpointed`
     - appends `status_changed` and `task_interrupted` events
@@ -396,11 +404,16 @@ Current endpoint families:
   - Moves a `waiting_for_input` task back to `ready`.
   - Current request body may include:
     - `actor`
+    - `requestId`
+    - `attemptId`
     - `resumePayload`
     - `at`
   - Current dispatcher behavior:
+    - requires the stored `requestId` and bound `attemptId` for newly created identity-aware requests; legacy persisted requests without identity remain readable and resumable
+    - returns `400` for an invalid `at` or an `at` earlier than stored `requestedAt`; returns `409` for missing, stale, mismatched, expired identity, or invalid persisted request-time metadata (including empty or non-string values)
     - validates `resumePayload` against the task's stored `waitingForInput.resumePayloadSchema` when present, returning `400` for mismatched required fields, types, enums, numeric bounds, or array constraints
     - stores `resumePayload` on the task and assignment payload
+    - stores `lastResolvedInput`; an identical retry with the same request/attempt identity and payload returns success without applying the transition twice, while a conflicting replay returns `409`
     - appends `status_changed` and `task_resumed` events
     - leaves checkpointed attempts available for the next worker claim
     - beta runtime materializes `resumePayload` into `.orchestrator/assignments/<task>/assignment.json` for the resumed worker process

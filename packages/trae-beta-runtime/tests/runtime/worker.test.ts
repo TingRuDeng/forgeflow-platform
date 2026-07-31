@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const prepareTaskWorktreeMock = vi.fn((_repoDir: string, task: { taskId?: string }) => (
   `/tmp/project/.worktrees/${task?.taskId || "task-1"}`
 ));
+const removeTaskWorktreeLifecycleMock = vi.fn(async (_repoDir: string, taskId: string) => ({
+  action: "removed" as const,
+  taskId,
+  worktreeDir: `/tmp/project/.worktrees/${taskId}`,
+}));
 const safeTaskDirNameMock = vi.fn((value: string) => value.replace(/[^a-z0-9._-]+/gi, "-"));
 const checkArtifactReviewabilityMock = vi.fn();
 
@@ -50,6 +55,7 @@ function unreviewableArtifact(reason = "remote artifact verification failed") {
 
 vi.mock("../../src/runtime/task-worktree.js", () => ({
   prepareTaskWorktree: prepareTaskWorktreeMock,
+  removeTaskWorktreeLifecycle: removeTaskWorktreeLifecycleMock,
   safeTaskDirName: safeTaskDirNameMock,
 }));
 
@@ -66,8 +72,11 @@ vi.mock("node:fs", () => ({
 
 describe("runtime/worker", () => {
   afterEach(() => {
+    delete process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT;
+    delete process.env.FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP;
     vi.restoreAllMocks();
     prepareTaskWorktreeMock.mockClear();
+    removeTaskWorktreeLifecycleMock.mockClear();
     safeTaskDirNameMock.mockClear();
     checkArtifactReviewabilityMock.mockReset();
     checkArtifactReviewabilityMock.mockReturnValue(reviewableArtifact());
@@ -76,6 +85,7 @@ describe("runtime/worker", () => {
   checkArtifactReviewabilityMock.mockReturnValue(reviewableArtifact());
 
   it("registers, materializes a worktree, and submits a parsed result", async () => {
+    process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT = "1";
     checkArtifactReviewabilityMock.mockReturnValue({
       reviewable: true,
       reason: "Artifact is reviewable",
@@ -146,6 +156,7 @@ describe("runtime/worker", () => {
       releaseSession: vi.fn(async () => ({ data: { sessionId: "session-001", released: true } })),
     };
     const launchTrae = vi.fn(async () => ({ reusedExisting: false }));
+    const logger = { warn: vi.fn(), log: vi.fn() };
 
     const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
     const runtime = createTraeAutomationWorkerRuntime({
@@ -155,7 +166,7 @@ describe("runtime/worker", () => {
       repoDir: "/tmp/project",
       traeBin: "/Applications/Trae CN.app",
       remoteDebuggingPort: 9222,
-      logger: { warn: vi.fn(), log: vi.fn() },
+      logger,
       launchTrae,
       sleep: vi.fn(async () => undefined),
       setIntervalImpl: vi.fn(() => ({}) as never),
@@ -182,6 +193,7 @@ describe("runtime/worker", () => {
       defaultBranch: "main",
     }, {
       allowReuse: true,
+      resetOnReuse: true,
     });
     expect(dispatcherClient.startTask).toHaveBeenCalledWith("trae-remote", "task-1", {
       attemptId: "attempt-1",
@@ -208,6 +220,14 @@ describe("runtime/worker", () => {
       responseRequiredPrefix: "任务完成",
     }));
     expect(automationClient.releaseSession).toHaveBeenCalledWith("session-001");
+    expect(removeTaskWorktreeLifecycleMock).toHaveBeenCalledWith("/tmp/project", "task-1", {
+      force: false,
+      worktreeDir: "/tmp/project/.worktrees/task-1",
+      branchName: "feature/runtime",
+    });
+    expect(automationClient.releaseSession.mock.invocationCallOrder[0]).toBeLessThan(
+      removeTaskWorktreeLifecycleMock.mock.invocationCallOrder[0]!,
+    );
     const sendChatCalls = automationClient.sendChat.mock.calls as Array<Array<{ content?: string }>>;
     const promptContent = sendChatCalls[0]?.[0]?.content || "";
     expect(promptContent).toContain("执行上下文预检要求：");
@@ -301,6 +321,18 @@ describe("runtime/worker", () => {
       taskId: "task-1",
       responseText: expect.stringContaining("## 任务完成"),
     });
+
+    process.env.FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP = "1";
+    removeTaskWorktreeLifecycleMock.mockRejectedValueOnce(new Error("dirty worktree preserved"));
+    const resultWithCleanupFailure = await runtime.runOnce();
+
+    expect(removeTaskWorktreeLifecycleMock).toHaveBeenLastCalledWith("/tmp/project", "task-1", {
+      force: true,
+      worktreeDir: "/tmp/project/.worktrees/task-1",
+      branchName: "feature/runtime",
+    });
+    expect(resultWithCleanupFailure.status).toBe("review_ready");
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("dirty worktree preserved"));
 
     runtime.stop();
   });

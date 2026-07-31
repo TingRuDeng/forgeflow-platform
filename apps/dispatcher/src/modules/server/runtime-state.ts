@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
 import { jsonStore } from "./runtime-state-json.js";
@@ -20,6 +21,7 @@ import {
   ArtifactBundleSchema,
   resolveWorkerFailure,
   type ArtifactBundle,
+  type ReviewFreshness,
   type ResolvedWorkerFailure,
 } from "@forgeflow/result-contracts";
 import type {
@@ -220,12 +222,23 @@ export interface Task {
   followUpOfTaskId?: string | null;
   workerChangeReason?: string | null;
   waitingForInput?: {
+    requestId?: string;
+    attemptId?: string;
+    sourceSessionId?: string;
     requestedBy: string;
     reason?: string;
     requestedAt: string;
+    expiresAt?: string;
     resumePayloadSchema?: ResumePayloadSchema;
   } | null;
   resumePayload?: Record<string, unknown> | null;
+  lastResolvedInput?: {
+    requestId: string;
+    attemptId?: string;
+    resolvedBy: string;
+    resolvedAt: string;
+    resumePayload: Record<string, unknown> | null;
+  };
   status: TaskStatus;
   assignedWorkerId?: string | null;
   lastAssignedWorkerId?: string | null;
@@ -326,6 +339,7 @@ export interface ReviewMaterial {
   changedFiles: string[];
   selfTestPassed: boolean;
   checks: string[];
+  freshness: ReviewFreshness;
   pullRequest?: {
     number: number;
     url: string;
@@ -544,9 +558,12 @@ export interface WorkerResult {
   evidence?: WorkerEvidence;
   artifactBundle?: ArtifactBundle;
   waitingForInput?: {
+    requestId?: string;
+    sourceSessionId?: string;
     requestedBy?: string;
     reason?: string;
     prompt?: string;
+    expiresAt?: string;
     resumePayloadSchema?: ResumePayloadSchema;
   };
 }
@@ -577,13 +594,17 @@ export interface RecordReviewDecisionInput {
   notes?: string;
   at?: string;
   evidence?: ReviewDecisionEvidence;
+  expectedFreshness: ReviewFreshness;
   acknowledgeRisk?: boolean;
 }
 
 export interface InterruptTaskForInputInput {
   taskId: string;
   actor: string;
+  requestId?: string;
+  sourceSessionId?: string;
   reason?: string;
+  expiresAt?: string;
   resumePayloadSchema?: ResumePayloadSchema;
   at?: string;
 }
@@ -591,6 +612,8 @@ export interface InterruptTaskForInputInput {
 export interface ResumeTaskFromInputInput {
   taskId: string;
   actor: string;
+  requestId?: string;
+  attemptId?: string;
   resumePayload?: Record<string, unknown> | null;
   at?: string;
 }
@@ -970,11 +993,17 @@ function normalizeWaitingForInput(value: unknown, workerId: string, fallbackReas
   }
   const reason = normalizeString(value.reason, fallbackReason).trim();
   const prompt = normalizeString(value.prompt).trim();
+  const requestId = normalizeString(value.requestId).trim();
+  const sourceSessionId = normalizeString(value.sourceSessionId).trim();
+  const expiresAt = normalizeString(value.expiresAt).trim();
   const resumePayloadSchema = normalizeResumePayloadSchema(value.resumePayloadSchema);
   return {
+    ...(requestId ? { requestId } : {}),
+    ...(sourceSessionId ? { sourceSessionId } : {}),
     requestedBy: normalizeString(value.requestedBy, workerId).trim() || workerId,
     reason: reason || fallbackReason || "worker requested input",
     ...(prompt ? { prompt } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
     ...(resumePayloadSchema ? { resumePayloadSchema } : {}),
   };
 }
@@ -1370,6 +1399,22 @@ function normalizeArtifactChangedFiles(changedFiles: string[] | undefined): Arti
   }));
 }
 
+function mergeArtifactChangedFiles(
+  changedFiles: string[] | undefined,
+  bundleChangedFiles: ArtifactBundle["changedFiles"] | undefined,
+): ArtifactBundle["changedFiles"] {
+  const merged = new Map<string, ArtifactBundle["changedFiles"][number]>();
+  for (const entry of bundleChangedFiles ?? []) {
+    merged.set(entry.path, entry);
+  }
+  for (const entry of normalizeArtifactChangedFiles(changedFiles)) {
+    if (!merged.has(entry.path)) {
+      merged.set(entry.path, entry);
+    }
+  }
+  return [...merged.values()];
+}
+
 function buildWorkerResultTrajectory(result: WorkerResult): ArtifactBundle["trajectory"] | undefined {
   const steps = result.verification.commands.map((command, index) => ({
     sequence: index + 1,
@@ -1403,9 +1448,9 @@ function buildArtifactBundle(input: {
     taskId: input.task.id,
     attemptId: input.attempt.attemptId,
     schemaVersion: "artifact-bundle/v1",
-    changedFiles: normalizeArtifactChangedFiles(input.changedFiles),
     refs: {},
     ...rawBundle,
+    changedFiles: mergeArtifactChangedFiles(input.changedFiles, rawBundle?.changedFiles),
     trajectory: rawBundle?.trajectory ?? buildWorkerResultTrajectory(input.result),
     bundleId: rawBundle?.bundleId ?? `${input.attempt.attemptId}:artifact-bundle`,
     summary: rawBundle?.summary ?? input.result.output,
@@ -1580,7 +1625,7 @@ function isIdempotentWorkerResultReplay(
       && !input.result.artifactBundle;
   const changedFilesMatch = !canonicalResult.verification.allPassed
     || isDeepStrictEqual(
-      input.changedFiles ?? [],
+      replayBundle.changedFiles.map((entry) => entry.path),
       recordedReview?.reviewMaterial?.changedFiles ?? [],
     );
   if (
@@ -3360,35 +3405,35 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   const currentReview = state.reviews.find((candidate) => candidate.taskId === task.id);
   const canonicalResult = buildCanonicalWorkerResult(task, input.workerId, input.result);
   const canonicalPullRequest = canonicalizePullRequest(task, input.pullRequest);
-  const hasExplicitArtifactBundle = Boolean(input.artifactBundle ?? input.result.artifactBundle);
-  if (!activeAttempt && hasExplicitArtifactBundle) {
+  if (!activeAttempt) {
     throw new Error(`active attempt not found for task: ${task.id}`);
   }
   if (canonicalResult.waitingForInput) {
     return interruptTaskForInput(state, {
       taskId: task.id,
       actor: canonicalResult.waitingForInput.requestedBy ?? input.workerId,
+      requestId: canonicalResult.waitingForInput.requestId,
+      sourceSessionId: canonicalResult.waitingForInput.sourceSessionId,
       reason: canonicalResult.waitingForInput.reason ?? canonicalResult.output,
+      expiresAt: canonicalResult.waitingForInput.expiresAt,
       resumePayloadSchema: canonicalResult.waitingForInput.resumePayloadSchema,
       at: receivedAt,
     });
   }
-  const artifactBundle = activeAttempt
-    ? buildArtifactBundle({
-        task,
-        attempt: activeAttempt,
-        result: canonicalResult,
-        artifactBundle: input.artifactBundle ?? input.result.artifactBundle,
-        changedFiles: input.changedFiles,
-        pullRequest: canonicalPullRequest,
-      })
-    : null;
+  const artifactBundle = buildArtifactBundle({
+    task,
+    attempt: activeAttempt,
+    result: canonicalResult,
+    artifactBundle: input.artifactBundle ?? input.result.artifactBundle,
+    changedFiles: input.changedFiles,
+    pullRequest: canonicalPullRequest,
+  });
 
   const nextStatus = canonicalResult.verification.allPassed ? "review" : "failed";
   const terminalFailure = canonicalResult.verification.allPassed
     ? null
     : resolveWorkerFailure(canonicalResult.evidence, canonicalResult.output);
-  const reviewChangedFiles = input.changedFiles ?? [];
+  const reviewChangedFiles = artifactBundle.changedFiles.map((entry) => entry.path);
   const reviewMaterial = canonicalResult.verification.allPassed
     ? {
         repo: task.repo,
@@ -3396,6 +3441,11 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
         changedFiles: reviewChangedFiles,
         selfTestPassed: true,
         checks: canonicalResult.verification.commands.map((item) => item.command),
+        freshness: {
+          attemptId: activeAttempt.attemptId,
+          artifactBundleId: artifactBundle.bundleId!,
+          ...(artifactBundle.commit ? { commitSha: artifactBundle.commit } : {}),
+        },
         pullRequest: canonicalPullRequest,
       }
     : null;
@@ -3540,6 +3590,35 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
   if (task.status !== "review") {
     throw new Error(`task not in review: ${input.taskId}`);
   }
+  const decisionAt = input.at ?? nowIso();
+  if (!Number.isFinite(Date.parse(decisionAt))) {
+    throw new Error("review decision at must be a valid timestamp");
+  }
+  const reviewStartedEvent = [...state.events].reverse().find((event) => (
+    event.taskId === task.id
+    && event.type === "status_changed"
+    && (event.payload as { to?: unknown } | undefined)?.to === "review"
+  ));
+  const reviewStartedAtMs = Date.parse(reviewStartedEvent?.at ?? "");
+  if (Number.isFinite(reviewStartedAtMs) && Date.parse(decisionAt) < reviewStartedAtMs) {
+    throw new Error(`review decision at must not be before review started for task: ${input.taskId}`);
+  }
+  const canonicalFreshness = review?.reviewMaterial?.freshness;
+  if (!canonicalFreshness) {
+    throw new Error(`review freshness unavailable for task: ${input.taskId}`);
+  }
+  if (!input.expectedFreshness) {
+    throw new Error(`review freshness required for task: ${input.taskId}`);
+  }
+  if (
+    !isDeepStrictEqual(input.expectedFreshness, canonicalFreshness)
+  ) {
+    throw new Error(`review freshness mismatch for task: ${input.taskId}`);
+  }
+  const decisionEvidence = {
+    ...(input.evidence ?? review?.evidence ?? { mustFix: [] }),
+    ...(canonicalFreshness ? { reviewedFreshness: canonicalFreshness } : {}),
+  };
 
   // Server-side merge risk gate (authoritative across Console, CLI, and direct
   // HTTP). Disabled by default; opt in via DISPATCHER_REVIEW_MERGE_GATE.
@@ -3560,7 +3639,7 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
   let nextState = appendEvent(state, {
     taskId: task.id,
     type: "status_changed",
-    at: input.at ?? nowIso(),
+    at: decisionAt,
     payload: {
       from: "review",
       to: nextStatus,
@@ -3569,12 +3648,13 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
   nextState = appendEvent(nextState, {
     taskId: task.id,
     type: "review_decided",
-    at: input.at ?? nowIso(),
+    at: decisionAt,
     payload: {
       decision: input.decision,
       actor: input.actor,
       notes: input.notes ?? "",
-      evidence: input.evidence ?? review?.evidence ?? null,
+      evidence: decisionEvidence,
+      freshness: canonicalFreshness ?? null,
     },
   });
 
@@ -3582,7 +3662,7 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
     nextState = appendEvent(nextState, {
       taskId: task.id,
       type: "review_merge_risk_acknowledged",
-      at: input.at ?? nowIso(),
+      at: decisionAt,
       payload: {
         mode: mergeGateMode,
         level: riskLevel,
@@ -3594,7 +3674,7 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
 
   nextState = {
     ...nextState,
-    updatedAt: input.at ?? nowIso(),
+    updatedAt: decisionAt,
     tasks: upsertTask(nextState.tasks, {
       ...task,
       status: nextStatus,
@@ -3612,10 +3692,10 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
       decision: input.decision,
       actor: input.actor,
       notes: input.notes ?? "",
-      decidedAt: input.at ?? nowIso(),
+      decidedAt: decisionAt,
       reviewMaterial: review?.reviewMaterial ?? null,
       latestWorkerResult: review?.latestWorkerResult ?? null,
-      evidence: input.evidence ?? review?.evidence ?? null,
+      evidence: decisionEvidence,
       riskAssessment: review?.riskAssessment ?? null,
     }),
   };
@@ -3627,7 +3707,7 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
       pullRequests: upsertPullRequest(nextState.pullRequests, {
         ...pullRequest,
         status: input.decision === "merge" ? "merged" : "changes_requested",
-        updatedAt: input.at ?? nowIso(),
+        updatedAt: decisionAt,
       }),
     };
   }
@@ -3688,7 +3768,11 @@ function applyInterruptedTaskState(state: RuntimeState, input: {
   task: Task;
   assignment: Assignment;
   actor: string;
+  requestId: string;
+  attemptId?: string;
+  sourceSessionId?: string;
   reason?: string;
+  expiresAt?: string;
   resumePayloadSchema?: ResumePayloadSchema;
   at: string;
 }): RuntimeState {
@@ -3700,9 +3784,13 @@ function applyInterruptedTaskState(state: RuntimeState, input: {
       status: "waiting_for_input",
       assignedWorkerId: null,
       waitingForInput: {
+        requestId: input.requestId,
+        ...(input.attemptId ? { attemptId: input.attemptId } : {}),
+        ...(input.sourceSessionId ? { sourceSessionId: input.sourceSessionId } : {}),
         requestedBy: input.actor,
         reason: input.reason ?? "",
         requestedAt: input.at,
+        ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
         ...(input.resumePayloadSchema ? { resumePayloadSchema: input.resumePayloadSchema } : {}),
       },
     }),
@@ -3723,6 +3811,9 @@ function applyInterruptedTaskState(state: RuntimeState, input: {
 export function interruptTaskForInput(state: RuntimeState, input: InterruptTaskForInputInput): RuntimeState {
   const { task, assignment } = requireTaskAndAssignment(state, input.taskId);
   if (task.status === "waiting_for_input") {
+    if (input.requestId && input.requestId !== task.waitingForInput?.requestId) {
+      throw new Error(`input request mismatch for task: ${input.taskId}`);
+    }
     return state;
   }
   if (!["ready", "assigned", "in_progress", "blocked"].includes(task.status)) {
@@ -3730,6 +3821,19 @@ export function interruptTaskForInput(state: RuntimeState, input: InterruptTaskF
   }
 
   const at = input.at ?? nowIso();
+  if (typeof at !== "string" || !Number.isFinite(Date.parse(at))) {
+    throw new Error("input request at must be a valid timestamp");
+  }
+  const requestId = input.requestId?.trim() || randomUUID();
+  const sourceSessionId = input.sourceSessionId?.trim() || undefined;
+  const expiresAt = input.expiresAt?.trim() || undefined;
+  if (expiresAt && !Number.isFinite(Date.parse(expiresAt))) {
+    throw new Error("input request expiresAt must be a valid timestamp");
+  }
+  if (expiresAt && Date.parse(expiresAt) <= Date.parse(at)) {
+    throw new Error("input request expiresAt must be after requestedAt");
+  }
+  const activeAttempt = findActiveTaskAttempt(state, task.id);
   const resumePayloadSchema = normalizeResumePayloadSchema(input.resumePayloadSchema);
   let nextState = appendTaskStatusChange(state, {
     taskId: input.taskId,
@@ -3743,7 +3847,11 @@ export function interruptTaskForInput(state: RuntimeState, input: InterruptTaskF
     at,
     payload: {
       actor: input.actor,
+      requestId,
+      attemptId: activeAttempt?.attemptId ?? null,
+      sourceSessionId: sourceSessionId ?? null,
       reason: input.reason ?? "",
+      expiresAt: expiresAt ?? null,
       ...(resumePayloadSchema ? { resumePayloadSchema } : {}),
     },
   });
@@ -3752,7 +3860,11 @@ export function interruptTaskForInput(state: RuntimeState, input: InterruptTaskF
     task,
     assignment,
     actor: input.actor,
+    requestId,
+    attemptId: activeAttempt?.attemptId,
+    sourceSessionId,
     reason: input.reason,
+    expiresAt,
     resumePayloadSchema,
     at,
   });
@@ -3766,12 +3878,68 @@ export function interruptTaskForInput(state: RuntimeState, input: InterruptTaskF
 
 export function resumeTaskFromInput(state: RuntimeState, input: ResumeTaskFromInputInput): RuntimeState {
   const { task, assignment } = requireTaskAndAssignment(state, input.taskId);
+  const resumePayload = input.resumePayload ?? null;
   if (task.status !== "waiting_for_input") {
+    const resolved = task.lastResolvedInput;
+    if (resolved && input.requestId === resolved.requestId) {
+      if (resolved.attemptId && !input.attemptId) {
+        throw new Error(`input request attemptId required for task: ${input.taskId}`);
+      }
+      if (input.attemptId && input.attemptId !== resolved.attemptId) {
+        throw new Error(`input request attempt mismatch for task: ${input.taskId}`);
+      }
+      if (!isDeepStrictEqual(resumePayload, resolved.resumePayload)) {
+        throw new Error(`input request replay payload mismatch for task: ${input.taskId}`);
+      }
+      return state;
+    }
     throw new Error(`task not waiting for input: ${input.taskId}`);
   }
-  validateResumePayloadAgainstSchema(task.waitingForInput?.resumePayloadSchema, input.resumePayload);
 
   const at = input.at ?? nowIso();
+  if (typeof at !== "string" || !Number.isFinite(Date.parse(at))) {
+    throw new Error("input request at must be a valid timestamp");
+  }
+  const resumeAtMs = Date.parse(at);
+  const waiting = task.waitingForInput;
+  if (waiting?.requestId && !input.requestId) {
+    throw new Error(`input requestId required for task: ${input.taskId}`);
+  }
+  if (waiting?.requestId && input.requestId !== waiting.requestId) {
+    throw new Error(`input request mismatch for task: ${input.taskId}`);
+  }
+  if (waiting?.attemptId && !input.attemptId) {
+    throw new Error(`input request attemptId required for task: ${input.taskId}`);
+  }
+  if (waiting?.attemptId && input.attemptId !== waiting.attemptId) {
+    throw new Error(`input request attempt mismatch for task: ${input.taskId}`);
+  }
+  const requestedAt = (waiting as { requestedAt?: unknown } | undefined)?.requestedAt;
+  if (typeof requestedAt !== "string" || !requestedAt.trim()) {
+    throw new Error(`input request metadata invalid for task: ${input.taskId}: requestedAt`);
+  }
+  const requestedAtMs = Date.parse(requestedAt);
+  if (!Number.isFinite(requestedAtMs)) {
+    throw new Error(`input request metadata invalid for task: ${input.taskId}: requestedAt`);
+  }
+  if (resumeAtMs < requestedAtMs) {
+    throw new Error(`input request at must not be before requestedAt for task: ${input.taskId}`);
+  }
+  if (waiting && Object.prototype.hasOwnProperty.call(waiting, "expiresAt")) {
+    const expiresAt = (waiting as { expiresAt?: unknown }).expiresAt;
+    if (typeof expiresAt !== "string" || !expiresAt.trim()) {
+      throw new Error(`input request metadata invalid for task: ${input.taskId}: expiresAt`);
+    }
+    const expiresAtMs = Date.parse(expiresAt);
+    if (!Number.isFinite(expiresAtMs)) {
+      throw new Error(`input request metadata invalid for task: ${input.taskId}: expiresAt`);
+    }
+    if (resumeAtMs >= expiresAtMs) {
+      throw new Error(`input request expired for task: ${input.taskId}`);
+    }
+  }
+  validateResumePayloadAgainstSchema(waiting?.resumePayloadSchema, resumePayload);
+
   let nextState = appendTaskStatusChange(state, {
     taskId: input.taskId,
     from: "waiting_for_input",
@@ -3784,7 +3952,9 @@ export function resumeTaskFromInput(state: RuntimeState, input: ResumeTaskFromIn
     at,
     payload: {
       actor: input.actor,
-      resumePayload: input.resumePayload ?? null,
+      requestId: waiting?.requestId ?? null,
+      attemptId: waiting?.attemptId ?? null,
+      resumePayload,
     },
   });
 
@@ -3796,7 +3966,16 @@ export function resumeTaskFromInput(state: RuntimeState, input: ResumeTaskFromIn
       status: "ready",
       assignedWorkerId: null,
       waitingForInput: null,
-      resumePayload: input.resumePayload ?? null,
+      resumePayload,
+      ...(waiting?.requestId ? {
+        lastResolvedInput: {
+          requestId: waiting.requestId,
+          ...(waiting.attemptId ? { attemptId: waiting.attemptId } : {}),
+          resolvedBy: input.actor,
+          resolvedAt: at,
+          resumePayload,
+        },
+      } : {}),
     }),
     assignments: upsertAssignment(nextState.assignments, {
       ...assignment,
@@ -3806,7 +3985,7 @@ export function resumeTaskFromInput(state: RuntimeState, input: ResumeTaskFromIn
         ...assignment.assignment,
         workerId: null,
         status: "pending",
-        resumePayload: input.resumePayload ?? null,
+        resumePayload,
       },
       assignedAt: null,
       claimedAt: null,

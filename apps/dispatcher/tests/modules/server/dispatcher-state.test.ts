@@ -56,6 +56,25 @@ function activeWorkerEnvelope(state: {
   return workerEnvelope(attempt);
 }
 
+function reviewFreshnessFor(
+  state: {
+    reviews: Array<{
+      taskId: string;
+      reviewMaterial?: {
+        freshness?: unknown;
+      };
+    }>;
+  },
+  taskId: string,
+) {
+  const freshness = state.reviews.find((review) => review.taskId === taskId)
+    ?.reviewMaterial?.freshness;
+  if (!freshness) {
+    throw new Error(`missing review freshness for ${taskId}`);
+  }
+  return freshness;
+}
+
 function claimAndStartTaskForTest(
   mod: {
     claimAssignedTaskForWorker: Function;
@@ -224,6 +243,7 @@ describe("dispatcher runtime state", () => {
       actor: "codex-control",
       decision: "merge",
       notes: "self test and PR review passed",
+      expectedFreshness: reviewFreshnessFor(state, dispatch.taskIds[0]),
       at: "2026-03-16T10:03:00.000Z",
     });
 
@@ -1362,6 +1382,7 @@ describe("dispatcher runtime state", () => {
       decision: "block",
       actor: "reviewer",
       notes: "needs changes",
+      expectedFreshness: reviewFreshnessFor(state, taskId),
       at: "2026-03-17T10:06:00.000Z",
     });
 

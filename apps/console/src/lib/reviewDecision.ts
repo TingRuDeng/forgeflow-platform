@@ -2,12 +2,19 @@ import { extractResponseError, parseJsonResponse } from './http';
 
 export type ReviewDecisionKind = 'merge' | 'rework' | 'block';
 
+export interface ReviewFreshness {
+  attemptId: string;
+  artifactBundleId: string;
+  commitSha?: string;
+}
+
 export interface ReviewDecisionInput {
   reasonCode?: string;
   mustFix?: string[];
   canRedrive?: boolean;
   redriveStrategy?: string;
   acknowledgeRisk?: boolean;
+  expectedFreshness?: ReviewFreshness;
 }
 
 export async function postReviewDecision(input: {
@@ -16,6 +23,9 @@ export async function postReviewDecision(input: {
   reviewInput: ReviewDecisionInput;
   notes: string;
 }) {
+  if (!input.reviewInput.expectedFreshness) {
+    throw new Error(`Review freshness is unavailable for task ${input.taskId}`);
+  }
   const res = await fetch(`/api/reviews/${encodeURIComponent(input.taskId)}/decision`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -24,6 +34,7 @@ export async function postReviewDecision(input: {
       actor: 'console-ui',
       notes: input.notes,
       acknowledgeRisk: input.reviewInput.acknowledgeRisk,
+      expectedFreshness: input.reviewInput.expectedFreshness,
       evidence: {
         reasonCode: input.reviewInput.reasonCode,
         mustFix: input.reviewInput.mustFix,

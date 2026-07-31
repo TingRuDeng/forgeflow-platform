@@ -121,9 +121,13 @@ describe("Runtime convergence schemas", () => {
       followUpOfTaskId: "task-parent",
       workerChangeReason: "目标 worker 忙碌，改派 Trae",
       waitingForInput: {
+        requestId: "input-request-1",
+        attemptId: "attempt-1",
+        sourceSessionId: "session-1",
         requestedBy: "codex-control",
         reason: "选择发布范围",
         requestedAt: "2026-07-05T10:00:00.000Z",
+        expiresAt: "2026-07-05T10:30:00.000Z",
         resumePayloadSchema: {
           properties: {
             decision: { type: "string", title: "Decision" },
@@ -134,6 +138,13 @@ describe("Runtime convergence schemas", () => {
           },
           required: ["decision", "reviewers"],
         },
+      },
+      lastResolvedInput: {
+        requestId: "input-request-0",
+        attemptId: "attempt-0",
+        resolvedBy: "codex-control",
+        resolvedAt: "2026-07-05T09:30:00.000Z",
+        resumePayload: { decision: "continue" },
       },
       status: "cancelled",
       assignedWorkerId: "trae-worker-1",

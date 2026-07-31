@@ -42,6 +42,7 @@ import { checkArtifactReviewability } from "./trae-automation-artifact-checks.js
 import { launchTraeForAutomation } from "./trae-launcher.js";
 import {
   prepareTaskWorktree,
+  removeTaskWorktreeLifecycle,
   safeTaskDirName,
 } from "./task-worktree.js";
 import {
@@ -811,6 +812,7 @@ export function materializeTaskWorkspace(task: WorkerRuntimeTask, repoDir: strin
     defaultBranch: task.default_branch || task.defaultBranch,
   }, {
     allowReuse: true,
+    resetOnReuse: true,
   });
   const assignmentDir = path.join(
     worktreeDir,
@@ -957,6 +959,41 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
 
   function phaseEventsForTask(taskId: string): TraeWorkerPhaseEvent[] {
     return phaseEvents.filter((event) => event.taskId === taskId);
+  }
+
+  async function cleanupTaskWorktree(task: WorkerRuntimeTask): Promise<void> {
+    if (process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT !== "1" || !task.worktree_dir) {
+      return;
+    }
+    try {
+      const cleanup = await removeTaskWorktreeLifecycle(repoDir, task.task_id, {
+        force: process.env.FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP === "1",
+        worktreeDir: task.worktree_dir,
+        branchName: task.branch,
+      });
+      await emitPhaseEvent("progress_reported", {
+        stage: "worktree_cleanup_completed",
+        action: cleanup.action,
+        message: `worktree cleanup ${cleanup.action}`,
+      }, task.task_id);
+      debugLog("worker.worktree.cleanup.done", {
+        taskId: task.task_id,
+        action: cleanup.action,
+        worktreeDir: cleanup.worktreeDir,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await emitPhaseEvent("worktree_cleanup_failed", {
+        error: message,
+        failureCode: "cleanup_failed",
+      }, task.task_id);
+      debugLog("worker.worktree.cleanup.error", {
+        taskId: task.task_id,
+        worktreeDir: task.worktree_dir,
+        message,
+      });
+      logger.warn?.(`[trae-automation-worker] failed to clean worktree for ${task.task_id}: ${message}`);
+    }
   }
 
   async function releaseTaskSession(sessionId: string | null) {
@@ -1109,6 +1146,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       },
       donePayload: { status, sessionId },
     });
+    await cleanupTaskWorktree(task);
     return status;
   }
 
@@ -1198,6 +1236,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         phase,
       },
     });
+    await cleanupTaskWorktree(task);
   }
 
   function classifyPreStartFailure(error: Error): string {

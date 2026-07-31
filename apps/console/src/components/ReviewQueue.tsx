@@ -11,9 +11,13 @@ export interface TaskSummary {
   repo?: string;
   branchName?: string;
   waitingForInput?: {
+    requestId?: string;
+    attemptId?: string;
+    sourceSessionId?: string;
     requestedBy?: string;
     reason?: string;
     requestedAt?: string;
+    expiresAt?: string;
     resumePayloadSchema?: {
       properties?: Record<string, {
         type?: 'string' | 'number' | 'boolean';

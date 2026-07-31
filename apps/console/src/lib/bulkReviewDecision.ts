@@ -1,4 +1,8 @@
-import { postReviewDecision, type ReviewDecisionInput } from './reviewDecision';
+import {
+  postReviewDecision,
+  type ReviewDecisionInput,
+  type ReviewFreshness,
+} from './reviewDecision';
 
 export interface BulkReviewResult {
   total: number;
@@ -10,12 +14,16 @@ export async function submitBulkReviewDecision(
   decision: 'merge' | 'rework' | 'block',
   taskIds: string[],
   input: ReviewDecisionInput,
+  freshnessByTaskId: Record<string, ReviewFreshness | undefined> = {},
 ): Promise<BulkReviewResult> {
   const results = await Promise.allSettled(
     taskIds.map((taskId) => postReviewDecision({
       taskId,
       decision,
-      reviewInput: input,
+      reviewInput: {
+        ...input,
+        expectedFreshness: freshnessByTaskId[taskId],
+      },
       notes: `${decision} from console bulk review`,
     })),
   );

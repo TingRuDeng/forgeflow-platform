@@ -72,8 +72,11 @@ describe("worker SDK payload helpers", () => {
           commands: [],
         },
         waitingForInput: {
+          requestId: "input-request-1",
+          sourceSessionId: "session-1",
           reason: "choose rollout scope",
           prompt: "Ship narrow scope or full rollout?",
+          expiresAt: "2026-06-12T00:30:00.000Z",
           resumePayloadSchema: {
             properties: {
               decision: { type: "string", title: "Decision" },
@@ -98,7 +101,10 @@ describe("worker SDK payload helpers", () => {
         workerId: "worker-1",
         repo: "owner/repo",
         waitingForInput: {
+          requestId: "input-request-1",
+          sourceSessionId: "session-1",
           reason: "choose rollout scope",
+          expiresAt: "2026-06-12T00:30:00.000Z",
           resumePayloadSchema: {
             properties: {
               rollout: { type: "string", enum: ["narrow", "full"] },

@@ -49,13 +49,14 @@
     "beta"
   ],
   "scripts": {
-    "build": "pnpm --filter @tingrudeng/automation-gateway-core build && tsc -p tsconfig.build.json && node ./scripts/verify-build.mjs",
+    "build": "pnpm --filter @tingrudeng/automation-gateway-core build && pnpm --filter @tingrudeng/beta-runtime-core build && tsc -p tsconfig.build.json && node ./scripts/verify-build.mjs",
     "prepack": "pnpm run build",
     "prepublishOnly": "node scripts/remove-workspace-deps.mjs",
-    "typecheck": "pnpm --filter @tingrudeng/automation-gateway-core build && tsc -p tsconfig.json --noEmit",
-    "test": "pnpm --filter @tingrudeng/automation-gateway-core build && vitest run"
+    "typecheck": "pnpm --filter @tingrudeng/automation-gateway-core build && pnpm --filter @tingrudeng/beta-runtime-core build && tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @tingrudeng/automation-gateway-core build && pnpm --filter @tingrudeng/beta-runtime-core build && vitest run"
   },
   "dependencies": {
-    "@tingrudeng/automation-gateway-core": "workspace:*"
+    "@tingrudeng/automation-gateway-core": "workspace:*",
+    "@tingrudeng/beta-runtime-core": "workspace:*"
   }
 }

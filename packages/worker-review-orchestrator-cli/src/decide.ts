@@ -1,4 +1,4 @@
-import type { DecideOptions, DecideResult } from "./types.js";
+import type { DecideOptions, DecideResult, ReviewFreshness } from "./types.js";
 
 import { createJsonHttpClient } from "./http.js";
 import { loadLocalSnapshot, runLocalDispatcherRequest } from "./local-dispatcher.js";
@@ -28,68 +28,72 @@ function readNowIso() {
   return formatLocalTimestamp();
 }
 
-type ResolvedReviewRisk = {
-  level: string | null;
-  reasons: string[];
-};
-
-// Resolves the deterministic review risk grade for a task, fail-open: returns
-// null when it cannot be determined (older dispatcher, fetch error, no grade),
-// so the merge gate never blocks merely because risk could not be read.
-async function resolveTaskReviewRisk(
+async function resolveTaskReview(
   options: DecideOptions & { fetchImpl?: typeof globalThis.fetch },
-): Promise<ResolvedReviewRisk | null> {
-  const pickRisk = (review: Record<string, unknown> | undefined | null): ResolvedReviewRisk | null => {
-    const risk = review?.riskAssessment as Record<string, unknown> | undefined | null;
-    if (!risk) {
-      return null;
+): Promise<Record<string, unknown> | null> {
+  if (options.dispatcherUrl) {
+    const client = createJsonHttpClient(options.dispatcherUrl, { fetchImpl: options.fetchImpl });
+    const snapshot = (await client.request("/api/dashboard/snapshot")) as {
+      reviews?: Array<Record<string, unknown>>;
+    };
+    const review = (snapshot.reviews ?? []).find((item) => item.taskId === options.taskId);
+    if (!review) {
+      throw new Error(`review not found for task: ${options.taskId}`);
     }
-    const level = typeof risk.level === "string" ? risk.level : null;
-    const reasons = Array.isArray(risk.reasons)
-      ? risk.reasons.filter((reason): reason is string => typeof reason === "string")
+    return review;
+  }
+  if (options.stateDir) {
+    const snapshot = await loadLocalSnapshot(options.stateDir);
+    const reviews = Array.isArray(snapshot.reviews)
+      ? snapshot.reviews as Array<Record<string, unknown>>
       : [];
-    return { level, reasons };
-  };
-
-  try {
-    if (options.dispatcherUrl) {
-      const client = createJsonHttpClient(options.dispatcherUrl, { fetchImpl: options.fetchImpl });
-      const snapshot = (await client.request("/api/dashboard/snapshot")) as {
-        reviews?: Array<Record<string, unknown>>;
-      };
-      const review = (snapshot.reviews ?? []).find((item) => item.taskId === options.taskId);
-      return pickRisk(review);
+    const review = reviews.find(
+      (item) => item.taskId === options.taskId,
+    );
+    if (!review) {
+      throw new Error(`review not found for task: ${options.taskId}`);
     }
-    if (options.stateDir) {
-      const snapshot = await loadLocalSnapshot(options.stateDir);
-      const reviews = Array.isArray(snapshot.reviews)
-        ? snapshot.reviews as Array<Record<string, unknown>>
-        : [];
-      const review = reviews.find(
-        (item) => item.taskId === options.taskId,
-      );
-      return pickRisk(review);
-    }
-  } catch {
-    return null;
+    return review;
   }
   return null;
 }
 
-async function assertMergeRiskAcknowledged(
-  options: DecideOptions & { fetchImpl?: typeof globalThis.fetch },
-): Promise<void> {
+function assertMergeRiskAcknowledged(
+  options: DecideOptions,
+  review: Record<string, unknown> | null,
+): void {
   if (options.acknowledgeRisk === true) {
     return;
   }
-  const risk = await resolveTaskReviewRisk(options);
-  if (risk?.level && risk.level !== "low") {
-    const reasonText = risk.reasons.length > 0 ? ` (${risk.reasons.join("; ")})` : "";
+  const risk = review?.riskAssessment as Record<string, unknown> | undefined | null;
+  const level = typeof risk?.level === "string" ? risk.level : null;
+  const reasons = Array.isArray(risk?.reasons)
+    ? risk.reasons.filter((reason): reason is string => typeof reason === "string")
+    : [];
+  if (level && level !== "low") {
+    const reasonText = reasons.length > 0 ? ` (${reasons.join("; ")})` : "";
     throw new Error(
-      `merge blocked: review risk is "${risk.level}"${reasonText}. ` +
+      `merge blocked: review risk is "${level}"${reasonText}. ` +
         "Re-run with --acknowledge-risk to override after a human review.",
     );
   }
+}
+
+function readReviewFreshness(review: Record<string, unknown> | null): ReviewFreshness | undefined {
+  const material = review?.reviewMaterial as Record<string, unknown> | undefined | null;
+  const freshness = material?.freshness as Record<string, unknown> | undefined | null;
+  const attemptId = typeof freshness?.attemptId === "string" ? freshness.attemptId : "";
+  const artifactBundleId = typeof freshness?.artifactBundleId === "string" ? freshness.artifactBundleId : "";
+  if (!attemptId || !artifactBundleId) {
+    return undefined;
+  }
+  return {
+    attemptId,
+    artifactBundleId,
+    ...(typeof freshness?.commitSha === "string" && freshness.commitSha
+      ? { commitSha: freshness.commitSha }
+      : {}),
+  };
 }
 
 function normalizeText(value: unknown): string | undefined {
@@ -141,10 +145,15 @@ export async function runDecide(options: DecideOptions & {
   fetchImpl?: typeof globalThis.fetch;
 }): Promise<DecideResult> {
   const decision = normalizeDecision(options.decision);
+  const review = await resolveTaskReview(options);
   if (decision === "merge") {
-    await assertMergeRiskAcknowledged(options);
+    assertMergeRiskAcknowledged(options, review);
   }
   const evidence = buildDecisionEvidence(options);
+  const expectedFreshness = options.expectedFreshness ?? readReviewFreshness(review);
+  if (!expectedFreshness) {
+    throw new Error(`review freshness unavailable for task: ${options.taskId}`);
+  }
   const payload = {
     actor: options.actor ?? "codex-control",
     decision,
@@ -152,6 +161,7 @@ export async function runDecide(options: DecideOptions & {
     at: options.at ?? readNowIso(),
     ...(options.acknowledgeRisk === true ? { acknowledgeRisk: true } : {}),
     ...(evidence ? { evidence } : {}),
+    expectedFreshness,
   };
 
   if (options.dispatcherUrl) {

@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { prepareTaskWorktree, safeTaskDirName } from "./task-worktree.js";
+import {
+  prepareTaskWorktree,
+  removeTaskWorktreeLifecycle,
+  safeTaskDirName,
+} from "./task-worktree.js";
 import { checkArtifactReviewability } from "./trae-automation-artifact-checks.js";
 
 interface WorkerFailure {
@@ -453,6 +457,7 @@ export function materializeTaskWorkspace(task: Task, repoDir: string): { worktre
     defaultBranch: task.default_branch || task.defaultBranch,
   }, {
     allowReuse: true,
+    resetOnReuse: true,
   });
   const assignmentDir = path.join(
     worktreeDir,
@@ -823,6 +828,40 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
     throw new Error("dispatcherClient, automationClient, workerId, and repoDir are required");
   }
 
+  async function cleanupTaskWorktree(task: Task): Promise<void> {
+    if (process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT !== "1" || !task.worktree_dir) {
+      return;
+    }
+    try {
+      const cleanup = await removeTaskWorktreeLifecycle(repoDir, task.task_id, {
+        force: process.env.FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP === "1",
+        worktreeDir: task.worktree_dir,
+        branchName: task.branch,
+      });
+      try {
+        await dispatcherClient.reportProgress(
+          task.task_id,
+          `Worktree cleanup ${cleanup.action}`,
+          workerId,
+        );
+      } catch {
+        // Cleanup reporting must not replace the acknowledged task result.
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn?.(`[trae-automation-worker] failed to clean worktree for ${task.task_id}: ${message}`);
+      try {
+        await dispatcherClient.reportProgress(
+          task.task_id,
+          `Worktree cleanup failed: ${message}`,
+          workerId,
+        );
+      } catch {
+        // Cleanup reporting is best-effort after terminal result acknowledgement.
+      }
+    }
+  }
+
   async function submitParsedResult(task: Task, parsed: ParsedFinalReport): Promise<string> {
     const successRequested = parsed.result === "成功";
     const successAllowed = hasCodeChangeEvidence(parsed);
@@ -894,6 +933,7 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
       ...(evidence ? { evidence } : {}),
     });
     heartbeat.promoteToIdle();
+    await cleanupTaskWorktree(task);
     return status;
   }
 
@@ -915,6 +955,7 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
       },
     });
     heartbeat.promoteToIdle();
+    await cleanupTaskWorktree(task);
   }
 
   async function pollSessionStatus(sessionId: string, timeoutMs: number, pollIntervalMs: number): Promise<{ status: string; error?: string }> {

@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm --filter @tingrudeng/beta-runtime-core build && tsc -p tsconfig.json --noEmit",
     "test": "node scripts/run-tests.mjs",
-    "build": "tsc -p tsconfig.build.json"
+    "build": "pnpm --filter @tingrudeng/beta-runtime-core build && tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@forgeflow/dispatcher-queue-postgres": "workspace:*",

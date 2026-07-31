@@ -34,7 +34,9 @@ interface BetaRuntimeCoreBridge {
     heartbeatManagedExternally?: boolean;
     createPullRequest?: boolean;
     removeWorktreeOnExit?: boolean;
+    forceWorktreeCleanup?: boolean;
     resetWorktreeOnReuse?: boolean;
+    worktreeCommandTimeoutMs?: number;
     runtimeScriptPath?: string;
     runtimeScriptCwd?: string;
     executionTimeoutMs?: number;
@@ -113,6 +115,7 @@ export async function executeClaimedTask(input: ProcessTaskAssignmentInput): Pro
     heartbeatManagedExternally: true,
     createPullRequest: process.env.FORGEFLOW_WORKER_CREATE_PR === "1",
     removeWorktreeOnExit: process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT === "1",
+    forceWorktreeCleanup: process.env.FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP === "1",
     resetWorktreeOnReuse: true,
     runtimeScriptPath: path.join(input.repoRoot, "scripts/run-worker-assignment.js"),
     runtimeScriptCwd: input.repoRoot,

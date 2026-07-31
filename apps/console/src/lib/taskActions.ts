@@ -19,6 +19,8 @@ export async function postTaskCancel(input: { taskId: string; reason: string }) 
 
 export async function postTaskResume(input: {
   taskId: string;
+  requestId?: string;
+  attemptId?: string;
   resumePayload: Record<string, unknown>;
 }) {
   const res = await fetch(`/api/tasks/${encodeURIComponent(input.taskId)}/resume`, {
@@ -27,6 +29,8 @@ export async function postTaskResume(input: {
     body: JSON.stringify({
       at: new Date().toISOString(),
       actor: 'console-ui',
+      requestId: input.requestId,
+      attemptId: input.attemptId,
       resumePayload: input.resumePayload,
     }),
   });

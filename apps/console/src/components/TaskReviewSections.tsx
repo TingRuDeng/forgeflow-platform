@@ -45,6 +45,13 @@ interface Review {
       failureSummary?: string;
     } | null;
   } | null;
+  reviewMaterial?: {
+    freshness?: {
+      attemptId: string;
+      artifactBundleId: string;
+      commitSha?: string;
+    };
+  } | null;
 }
 
 export interface ReviewDecisionInput {
@@ -53,6 +60,11 @@ export interface ReviewDecisionInput {
   canRedrive?: boolean;
   redriveStrategy?: string;
   acknowledgeRisk?: boolean;
+  expectedFreshness?: {
+    attemptId: string;
+    artifactBundleId: string;
+    commitSha?: string;
+  };
 }
 
 function formatTime(isoString?: string): string {
@@ -214,7 +226,8 @@ const ReviewActionsForm: React.FC<{
     return null;
   }
 
-  const disabled = reviewingTaskId === task.id;
+  const freshness = review?.reviewMaterial?.freshness;
+  const disabled = reviewingTaskId === task.id || !freshness;
   const riskLevel = review?.riskAssessment?.level;
   const riskAboveLow = Boolean(riskLevel && riskLevel !== 'low');
   const buildInput = (): ReviewDecisionInput => ({
@@ -226,6 +239,7 @@ const ReviewActionsForm: React.FC<{
     canRedrive,
     redriveStrategy,
     acknowledgeRisk,
+    expectedFreshness: freshness,
   });
 
   return (

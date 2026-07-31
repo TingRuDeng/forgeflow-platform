@@ -184,6 +184,13 @@ describe('Task drill-down', () => {
               failureSummary: 'pnpm test failed',
             },
           },
+          reviewMaterial: {
+            freshness: {
+              attemptId: 'att-001',
+              artifactBundleId: 'att-001:artifact-bundle',
+              commitSha: 'abc123',
+            },
+          },
         }}
         pullRequest={{
           taskId: 'dispatch-1:task-1',
@@ -322,6 +329,11 @@ describe('Task drill-down', () => {
       mustFix: ['补齐失败测试'],
       reasonCode: 'test_gap',
       redriveStrategy: 'same_worker_continue',
+      expectedFreshness: {
+        attemptId: 'att-001',
+        artifactBundleId: 'att-001:artifact-bundle',
+        commitSha: 'abc123',
+      },
     }));
   });
 

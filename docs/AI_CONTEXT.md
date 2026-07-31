@@ -71,6 +71,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 
 - 不要只改 `apps/dispatcher/src` 就假定 live entrypoint 已同步；`scripts/*.js` 和 `scripts/lib/*` 仍是源码仓运行入口。
 - `leases[]` 当前在 task claim 生命周期内强约束 assignment / repo / branch；continuation 或 follow-up 任务还会强约束 session。
+- Codex、Gemini、Trae 的 worktree 操作都复用 `@tingrudeng/beta-runtime-core`，默认 60 秒超时并响应取消，复用时强制 reset/clean，退出清理只在 terminal result 获 dispatcher 确认后显式启用且默认非 force。每个 review 都必须携带 attempt/bundle/commit freshness，Console/CLI 的 `expectedFreshness` 缺失返回 `400`、漂移返回 `409`；新 HITL 请求以 request/attempt identity fence resume，相同 payload 重试幂等，证据漂移、错配、过期或冲突重放被拒绝。
 - `DISPATCHER_READ_ONLY_MODE=1` 默认冻结 `/api/` 写方法；它覆盖 dispatcher HTTP API 写入，但不覆盖直接文件、外部数据库或绕过 HTTP 的写入。
 - 控制层使用 `DISPATCHER_API_TOKEN`；远程 worker 应使用按 workerId 绑定的 `DISPATCHER_WORKER_TOKEN`。Codex / Gemini 默认是 `trusted-host`；`isolated-container` 必须由 operator 显式启用并 fail closed，Docker `bridge` 不是域名级网络 allowlist。
 - `/api/metrics` 的事件型计数只覆盖 `metrics.eventWindow` 标出的最近 500 条运行窗口；完整审计应分页读取 `/api/query/events`。
@@ -116,5 +117,4 @@ Release-side-effect:
 ## Stale when
 
 - `scripts/` live entrypoint、dispatcher runtime、Trae runtime、SQLite / shadow path、发布包入口或 npm registry 可安装状态变化。
-- 新增、归档或重命名权威文档。
-- `package.json` 的验证脚本或 stage gate 变化。
+- 新增、归档或重命名权威文档，或 `package.json` 的验证脚本 / stage gate 变化。

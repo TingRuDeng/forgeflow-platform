@@ -27,13 +27,17 @@ pnpm --filter @tingrudeng/trae-beta-runtime build
 pnpm --filter @tingrudeng/trae-beta-runtime pack
 ```
 
-Because `@tingrudeng/trae-beta-runtime` now depends on `@tingrudeng/automation-gateway-core`, also verify the shared package when it changed in the same release train:
+Because `@tingrudeng/trae-beta-runtime` depends on two shared packages, verify both when either changes in the same release train:
 
 ```bash
 pnpm --filter @tingrudeng/automation-gateway-core test
 pnpm --filter @tingrudeng/automation-gateway-core typecheck
 pnpm --filter @tingrudeng/automation-gateway-core build
 pnpm --filter @tingrudeng/automation-gateway-core pack
+pnpm --filter @tingrudeng/beta-runtime-core test
+pnpm --filter @tingrudeng/beta-runtime-core typecheck
+pnpm --filter @tingrudeng/beta-runtime-core build
+pnpm --filter @tingrudeng/beta-runtime-core pack
 ```
 
 Before the first public beta publish, also run one real remote-machine smoke check:
@@ -86,10 +90,11 @@ Preview the version changes from the repository root:
 
 ```bash
 node scripts/release-package.js --package automation-gateway-core --bump prerelease --dry-run
+node scripts/release-package.js --package beta-runtime-core --bump prerelease --dry-run
 node scripts/release-package.js --package trae-beta-runtime --bump prerelease --dry-run
 ```
 
-If `automation-gateway-core` did not change for this release and the published dependency version already exists on npm, you can skip republishing it.
+If a shared core did not change for this release and the referenced dependency version already exists on npm, you can skip republishing it. When versions change together, publish `automation-gateway-core` and `beta-runtime-core` before `trae-beta-runtime`.
 The workflow prepares one tarball, publishes that exact file with OIDC provenance, then verifies npm `dist.integrity`, `dist.shasum`, contents, bin links, and installability before the release is complete.
 
 ## Install flow on a remote machine
@@ -131,7 +136,7 @@ The remote machine still needs a local checkout of the target project repository
 Do not cut the first public beta release until all of the following are true:
 
 1. The package builds and passes package-local verification
-2. `pnpm pack` succeeds for both `@tingrudeng/trae-beta-runtime` and its shared helper package when that dependency changed
+2. `pnpm pack` succeeds for `@tingrudeng/trae-beta-runtime` and both shared core packages when either dependency changed
 3. The full repository still passes `pnpm test` and `pnpm typecheck`
 4. A real remote-machine smoke run passes with:
    - local target project checkout present
@@ -146,5 +151,5 @@ Do not cut the first public beta release until all of the following are true:
 - The ForgeFlow dispatcher remains a separate control-plane deployment.
 - The package assumes the remote machine has a local checkout of the target project repository to execute tasks against.
 - The package does not require a local ForgeFlow checkout.
-- The package depends on `@tingrudeng/automation-gateway-core`; publish that dependency first when the referenced version changes.
+- The package depends on `@tingrudeng/automation-gateway-core` and `@tingrudeng/beta-runtime-core`; publish changed dependency versions before the Trae runtime.
 - The repository and package are intended to be distributed under Apache-2.0.

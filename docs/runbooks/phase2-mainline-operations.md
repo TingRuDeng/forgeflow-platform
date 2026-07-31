@@ -236,8 +236,8 @@ curl -s -D - \
 阶段二收尾时，建议至少确认这几组能力都能跑通：
 
 - dispatcher ownership：
-  - `review-memory` / `task-worktree` 权威实现位于 `apps/dispatcher/src/modules/server/*`
-  - `scripts/lib/*` 仅保留 bootstrap wrapper
+  - `review-memory` 权威实现位于 `apps/dispatcher/src/modules/server/*`
+  - `task-worktree` 权威实现位于 `packages/beta-runtime-core/src/runtime/task-worktree.ts`，`apps/dispatcher` 与 `scripts/lib/*` 仅保留 re-export / bootstrap wrapper
 - 最小观测面：
   - snapshot / `/api/metrics` / CLI summary / console 都能看到 `traceId`
   - `/api/metrics` 暴露 `retryRatePct`、`failureCodes`、`reviewReasonCodes`

@@ -55,7 +55,7 @@ Current active building blocks:
 - `dispatcher`
   - Current truth source for task state, worker state, assignments, reviews, PR metadata, and audit events.
   - Active runtime entry still lives in `scripts/lib/dispatcher-server.js`.
-  - Trae-specific dispatcher route handling, review-memory loading, and task-worktree ownership now live in the TypeScript runtime foundation under `apps/dispatcher/dist/modules/server/*.js`; `scripts/lib/*` only bootstraps or re-exports those modules.
+  - Trae-specific dispatcher route handling and review-memory loading live in the TypeScript runtime foundation under `apps/dispatcher/dist/modules/server/*.js`; provider-neutral task-worktree ownership lives in `@tingrudeng/beta-runtime-core`. `apps/dispatcher` and `scripts/lib/*` only bootstrap or re-export the shared worktree module.
   - HTTP surface separates the all-access control-plane `DISPATCHER_API_TOKEN` from per-worker credentials configured by `DISPATCHER_WORKER_TOKENS`; `/health` remains public.
 - `worker daemon`
   - Preferred unattended path for `codex` and `gemini`.
@@ -86,7 +86,7 @@ Verified bridge points:
 - HTTP dispatcher server Trae route handling: `scripts/lib/dispatcher-server.js` -> `apps/dispatcher/dist/modules/server/runtime-dispatcher-server.js`
 - Dispatcher state machine: `scripts/lib/dispatcher-state.js` -> `apps/dispatcher/dist/modules/server/runtime-state.js`
 - Review-memory loading and lesson extraction: `scripts/lib/review-memory.js` -> `apps/dispatcher/dist/modules/server/review-memory.js`
-- Task worktree planning and reuse rules: `scripts/lib/task-worktree.js` -> `apps/dispatcher/dist/modules/server/task-worktree.js`
+- Task worktree planning, reuse, and cleanup rules: `scripts/lib/task-worktree.js` and `apps/dispatcher/dist/modules/server/task-worktree.js` -> `@tingrudeng/beta-runtime-core/runtime/task-worktree.js`
 - Generic worker loop bridge: `scripts/lib/worker-daemon.js` / `scripts/run-worker-daemon.js` -> `apps/dispatcher/dist/modules/server/runtime-glue-dispatcher-client.js`
 - Review decision bridge: `scripts/lib/review-decision.js` / `scripts/submit-review-decision.js` -> `apps/dispatcher/dist/modules/server/runtime-glue-review-decision.js`
 
@@ -144,10 +144,10 @@ Dispatcher runtime persistence is owned by the runtime-state SQLite backend. Sta
    - Assignment ownership is guarded by dispatcher lease acquisition.
 3. Worker daemon registers and heartbeats against dispatcher.
 4. Worker daemon claims an assigned task or a ready task in its pool.
-5. Worker daemon creates a per-task worktree from the latest fetched default branch.
+5. Worker daemon creates a per-task worktree through `@tingrudeng/beta-runtime-core` from the latest fetched default branch; a reused worktree is reset and cleaned before execution.
 6. Worker executes assignment scripts inside the worktree. The operator-owned execution profile defaults to `trusted-host`; `isolated-container` wraps both provider and verification in one fixed-image, resource-bounded, fail-closed container boundary. The shared daemon cycle owns one single-flight heartbeat through execution and result delivery; timeout or process termination kills the full child process tree.
 7. Worker reports verification results, changed files, and optional PR metadata back to dispatcher. An exact retry after a lost response is idempotent; a changed replay with the same attempt key is rejected.
-8. Worker may additionally report best-effort runtime events such as delivery failure, cleanup failure, session interruption, and structured failure codes back to dispatcher metrics.
+8. After dispatcher acknowledges the terminal result, the worker may apply the shared opt-in worktree cleanup policy. Cleanup failure is reported best-effort and never replaces the acknowledged task result.
 9. Dispatcher moves the task to `review` or `failed`.
 10. Control layer submits `merge` or `block`.
 
@@ -155,12 +155,12 @@ Dispatcher runtime persistence is owned by the runtime-state SQLite backend. Sta
 
 1. Dispatcher exposes Trae-specific worker endpoints under `/api/trae/*`.
 2. Trae automation worker registers and fetches tasks from dispatcher.
-3. Dispatcher computes task-specific worktree and assignment directories for the Trae worker.
+3. Trae worker uses the same `@tingrudeng/beta-runtime-core` worktree implementation as Codex/Gemini to compute task-specific worktree and assignment directories.
    - The task payload also carries the stable dispatcher `trace_id`.
 4. Trae automation worker calls the local automation gateway.
 5. Automation gateway drives Trae, tracks session state, and returns the final response.
 6. Trae automation worker reports structured phase events plus `traceId` / `sessionId` / `failureCode` hints back to dispatcher.
-7. Trae automation worker submits `review_ready` or `failed` back to dispatcher.
+7. Trae automation worker submits `review_ready` or `failed` back to dispatcher; only after acknowledgement may the shared opt-in worktree cleanup policy run.
 8. Dispatcher maps those statuses to `review` or `failed`.
 
 ### 4.3 Rework continuation flow

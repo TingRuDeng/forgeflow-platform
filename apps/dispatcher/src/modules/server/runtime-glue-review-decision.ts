@@ -3,12 +3,16 @@ import type {
   ReviewDecisionPayload,
 } from "./runtime-glue-types.js";
 
+type ReviewFreshness = ReviewDecisionPayload["expectedFreshness"];
+
 export interface DispatcherReviewClient {
   submitDecision(taskId: string, payload: ReviewDecisionPayload): Promise<unknown>;
+  readReviewFreshness?(taskId: string): Promise<ReviewFreshness | undefined>;
 }
 
 export interface StateDirReviewClient {
   submitDecision(taskId: string, payload: ReviewDecisionPayload): Promise<unknown>;
+  readReviewFreshness?(taskId: string): Promise<ReviewFreshness | undefined>;
 }
 
 export interface SubmitReviewDecisionInput {
@@ -21,6 +25,7 @@ export interface SubmitReviewDecisionInput {
   notes?: string;
   at?: string;
   evidence?: ReviewDecisionPayload["evidence"];
+  expectedFreshness?: ReviewDecisionPayload["expectedFreshness"];
   mergePullRequest?: boolean;
   repo?: string;
   pullRequestNumber?: number;
@@ -36,6 +41,41 @@ export interface ReviewDecisionResult {
 export interface CreateHttpReviewClientOptions {
   dispatcherUrl: string;
   fetchImpl?: typeof globalThis.fetch;
+}
+
+function extractReviewFreshness(
+  snapshot: unknown,
+  taskId: string,
+): ReviewFreshness | undefined {
+  if (!snapshot || typeof snapshot !== "object") {
+    return undefined;
+  }
+  const reviews = (snapshot as { reviews?: unknown }).reviews;
+  if (!Array.isArray(reviews)) {
+    return undefined;
+  }
+  const review = reviews.find(
+    (candidate) => candidate
+      && typeof candidate === "object"
+      && (candidate as { taskId?: unknown }).taskId === taskId,
+  ) as { reviewMaterial?: { freshness?: unknown } } | undefined;
+  const freshness = review?.reviewMaterial?.freshness;
+  if (!freshness || typeof freshness !== "object") {
+    return undefined;
+  }
+  const value = freshness as {
+    attemptId?: unknown;
+    artifactBundleId?: unknown;
+    commitSha?: unknown;
+  };
+  if (typeof value.attemptId !== "string" || typeof value.artifactBundleId !== "string") {
+    return undefined;
+  }
+  return {
+    attemptId: value.attemptId,
+    artifactBundleId: value.artifactBundleId,
+    ...(typeof value.commitSha === "string" ? { commitSha: value.commitSha } : {}),
+  };
 }
 
 function createDispatcherReviewClient(
@@ -69,6 +109,15 @@ function createDispatcherReviewClient(
         payload,
       );
     },
+    async readReviewFreshness(taskId: string) {
+      const response = await fetchImpl(`${baseUrl}/api/dashboard/snapshot`);
+      const text = await response.text();
+      const json = text ? JSON.parse(text) : {};
+      if (!response.ok) {
+        throw new Error(json.error || text || `review snapshot failed: ${response.status}`);
+      }
+      return extractReviewFreshness(json, taskId);
+    },
   };
 }
 
@@ -94,6 +143,17 @@ function createStateDirReviewClient(
         internalCall: true,
       });
       return result.json;
+    },
+    async readReviewFreshness(taskId: string) {
+      const result = await handleRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/dashboard/snapshot",
+        body: undefined,
+        clientAddress: "127.0.0.1",
+        internalCall: true,
+      });
+      return extractReviewFreshness(result.json, taskId);
     },
   };
 }
@@ -161,12 +221,18 @@ export async function submitReviewDecision(
 ): Promise<ReviewDecisionResult> {
   const client =
     input.client ?? createDispatcherReviewClient(input.dispatcherUrl!);
+  const expectedFreshness = input.expectedFreshness
+    ?? await client.readReviewFreshness?.(input.taskId);
+  if (!expectedFreshness) {
+    throw new Error(`review freshness unavailable for task: ${input.taskId}`);
+  }
   const result = (await client.submitDecision(input.taskId, {
     actor: input.actor,
     decision: input.decision,
     notes: input.notes,
     at: input.at,
     evidence: input.evidence,
+    expectedFreshness,
   })) as ReviewDecisionResult;
 
   if (

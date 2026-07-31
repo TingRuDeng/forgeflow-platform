@@ -50,7 +50,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 
 当前仓库已落到主线能力，而不是早期的 Trae MCP-only 阶段：
 
-- Phase 1 运行时合并到 TypeScript 已完成：`worker-daemon`、`review-decision`、`dispatcher-state`、`dispatcher-server` 主链现在都通过 `scripts/*.js` 入口桥接到 `apps/dispatcher/dist` 下的 TypeScript foundation；`review-memory` 和 `task-worktree` 也已下沉到 `apps/dispatcher`，`scripts/lib/*` 仅保留薄 bootstrap wrapper。
+- Phase 1 运行时合并到 TypeScript 已完成：`worker-daemon`、`review-decision`、`dispatcher-state`、`dispatcher-server` 主链现在都通过 `scripts/*.js` 入口桥接到 `apps/dispatcher/dist` 下的 TypeScript foundation；`review-memory` 已下沉到 `apps/dispatcher`，task worktree 则统一由 `@tingrudeng/beta-runtime-core` 提供，`apps/dispatcher` 与 `scripts/lib/*` 都只保留薄 re-export / bootstrap wrapper。
 - Phase 2 持久化切换主线已完成：dispatcher 默认真相源现在是 `.forgeflow-dispatcher/runtime-state.db`，基于 `node:sqlite` 落盘；只有显式传 `--persistence-backend json`（或设置 `RUNTIME_STATE_BACKEND=json`）时才回退到 JSON。
 - `scripts/*.js` 仍然是当前 live 入口与本地启动方式；它们现在主要承担 CLI、bootstrap、薄适配层与剩余脚本 glue，而不再单独承载整条 dispatcher 主链实现。
 - `dispatcher server` + `worker daemon` 的 `codex` / `gemini` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。源码层 worker-daemon 主循环、worker CLI、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到 `@tingrudeng/beta-runtime-core`；dispatcher runtime-glue 复用同一个 shared daemon cycle，脚本侧 dist bootstrap 已收敛到 `scripts/lib/runtime-bootstrap.ts`，本地日志 / metrics hook 组装已拆到 `scripts/lib/worker-daemon-hooks.ts`，`worker-daemon` 只保留兼容入口和薄 adapter；CI 和 release workflow 会运行 `pnpm verify:runtime-packages` 保护 runtime 包发布清单。
@@ -78,7 +78,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - `worker-daemon` 不再把 `submitResult` 重试耗尽、`git push` 失败或自动 PR 创建失败记成“completed”；这些路径现在都会保留在显式 failed 语义里。每个 task 只由 shared daemon cycle 维持一条 single-flight heartbeat，覆盖执行和结果回写重试；执行超时或 daemon 收到终止信号时会终止完整子进程树，避免遗留 provider / verification 进程。
 - `worker-daemon` 子进程现在使用 env allowlist，而不是继承完整 `process.env`；自动 PR 创建也改成显式 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - `forgeflow-review-orchestrator` 现在补齐了阶段二控制层闭环：`dispatch/dispatch-task/watch/inspect/decide` 都支持 `--state-dir` 本地 dispatcher bridge，mutation 仍经过 dispatcher 权威状态机并写入默认 SQLite 真相源；`watch --summary` 与 `inspect --summary` 统一输出 review/failure/redrive/progress/trace 摘要，并会附带结构化 `failureCode`。
-- `inspect --summary` / `watch --summary` 现在还会带上 review 风险分级；`decide --decision merge` 受该分级软门禁：风险非 `low` 时拒绝合并，需 `--acknowledge-risk` 显式覆盖（fail-open，无法读取风险时放行，仅约束 merge）。Console 任务详情也会展示该风险分级 badge 与合并前人工确认提示。
+- `inspect --summary` / `watch --summary` 现在还会带上 review 风险分级；`decide --decision merge` 受该分级软门禁：读取到非 `low` 风险时 fail closed，需 `--acknowledge-risk` 显式覆盖；只有风险字段缺失时才放行，且仅约束 merge。Console 任务详情也会展示该风险分级 badge 与合并前人工确认提示。
 - dispatcher 现在还提供服务端 merge 风险门禁（`DISPATCHER_REVIEW_MERGE_GATE`，默认 `off`）：`enforce` 时对风险非 `low` 的 `merge` 在 `/api/reviews/:taskId/decision` 直接返回 `409`，需 `acknowledgeRisk`/`acknowledge_risk` 覆盖；`warn` 放行但落 `review_merge_risk_acknowledged` 事件。该门禁是权威层，覆盖 Console / CLI / 直连 HTTP，CLI `--acknowledge-risk` 会透传给服务端。
 - dispatcher 现在会为每个任务生成稳定 `traceId`；dashboard snapshot、CLI 摘要、console drill-down 和 Trae worker evidence 都会携带该关联键，便于跨 dispatcher / worker / session 做最小闭环排障。
 - dashboard snapshot 现在附带阶段二控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`、`retryRatePct`、`branchProtectionHitCount`、`repoConcurrencySaturation`、`failureCodes`、`reviewReasonCodes`。
@@ -151,7 +151,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - `scripts/` 根目录现在只保留当前主线入口和少量 legacy 演练脚本。
 - 未被主线文档或运行时引用的 `start-staging-*.sh` 包装脚本、`trigger-ai-dispatch.*`，以及未消费的 checked-in `.d.ts` 产物已清理。
 - 旧的本地 codex drill 脚本 `run-codex-control-flow.*`、`create-two-codex-drill-planner.*`、`run-dispatch-assignments.*`、`process-worker-result.*` 已退役；`codex/gemini` 多机执行保留 `run-worker-daemon.js` 和其执行依赖。
-- `scripts/lib/*.js` 仍是 live adapter / bootstrap 层；dispatcher 的 server/state/review-memory/task-worktree 权威实现已下沉到 `apps/dispatcher`，Trae gateway 的 route/session/chat handler、HTTP server、debug logger、driver 创建规则、持久化 session-store、Trae CDP / DOM driver、clean relaunch 原语、launch target 构建和 debugger wait / spawn 编排已委托 `@tingrudeng/automation-gateway-core`，脚本层只保留兼容默认值、time adapter 和 worker / daemon glue。
+- `scripts/lib/*.js` 仍是 live adapter / bootstrap 层；dispatcher 的 server/state/review-memory 权威实现位于 `apps/dispatcher`，task worktree 权威实现位于 `@tingrudeng/beta-runtime-core`，Trae gateway 的 route/session/chat handler、HTTP server、debug logger、driver 创建规则、持久化 session-store、Trae CDP / DOM driver、clean relaunch 原语、launch target 构建和 debugger wait / spawn 编排已委托 `@tingrudeng/automation-gateway-core`，脚本层只保留兼容默认值、time adapter 和 worker / daemon glue。
 
 ## 当前使用方式
 
@@ -472,6 +472,8 @@ node scripts/run-worker-daemon.js \
 
 每个 assignment 子进程默认最多运行 30 分钟，可用 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 覆盖为正整数毫秒值。`SIGINT` / `SIGTERM` 会同时取消 dispatcher HTTP 请求、结果重试等待和完整子进程树，避免 worker 停止时继续等待网络超时。
 
+generic worker 的 worktree Git 命令默认最多运行 60 秒，并响应 assignment 的取消信号。runtime 会拒绝把默认分支当作任务分支，复用前核对 Git 登记路径与分支；`FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 才启用退出清理，且默认保留脏 worktree。只有再显式设置 `FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 才会强制丢弃未提交内容。
+
 Codex / Gemini 默认仍在 `trusted-host` profile 中执行。需要把 provider 与 verification 约束在同一个 fail-closed 容器边界时，由 worker 操作者在启动前配置：
 
 ```bash
@@ -563,7 +565,9 @@ node scripts/run-trae-mcp-worker-server.js \
 
 - Trae automation worker 目前仍是单任务串行 runtime，不支持多任务并发。
 - automation gateway 本体只定义 Trae 自动化控制接口；dispatcher 任务循环与结果回写由 automation worker 负责完成。
-- 任务 worktree 只保证从最新抓取的默认分支派生；允许复用时会先 `reset --hard` + `clean -fd`，但自动删除旧 worktree 仍不是默认行为。
+- 所有 provider 的任务 worktree 都复用 `@tingrudeng/beta-runtime-core`：从最新抓取的默认分支派生，目录名在清洗有损或过长时附加原始 task ID 的稳定短哈希，允许复用时先 `reset --hard` + `clean -fd`，且只能复用当前 task 预期路径上的同分支登记。升级前已登记在旧版无哈希精确路径的同分支 worktree 仍可复用；旧路径清理必须同时核对分支身份，符号链接路径会被拒绝。只有结果已被 dispatcher 确认且显式设置 `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 时才尝试删除，默认非 force；`FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 才允许丢弃脏 worktree。
+- 每个进入 review 的 material 都必须包含 canonical `attemptId`、`artifactBundleId` 和可选 `commitSha`。Console、orchestrator CLI 与兼容 review CLI 提交 decision 时必须携带完整 `expectedFreshness`；字段缺失是 `400`，与当前 material 不一致是 `409`，不存在无 freshness 的兼容决策路径。
+- 新建 HITL 请求会持久化 `requestId`，运行中的请求还会绑定 active `attemptId`，并可选绑定 `sourceSessionId` / `expiresAt`。Console 恢复会回传 identity；相同 identity 与 payload 的网络重放幂等成功，过期、早于 `requestedAt`、身份错配、损坏的时间元数据或改变 payload 的恢复请求都会被拒绝。
 - review memory 当前是文件存储 + dispatch 注入主线；lesson 的自动提取与落盘仍需外部调用方编排。
 - `docs/plans/*`、`docs/runbooks/*`、`docs/research/*` 可作为背景资料，但不能替代当前主线文档和代码。
 

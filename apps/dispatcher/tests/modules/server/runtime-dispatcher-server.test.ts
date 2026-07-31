@@ -114,8 +114,11 @@ describe("runtime-dispatcher-server foundation", () => {
     });
 
     it("replaces invalid characters", () => {
-      expect(safeTaskDirName("dispatch-1:task-1")).toBe("dispatch-1-task-1");
-      expect(safeTaskDirName("task/with/slashes")).toBe("task-with-slashes");
+      expect(safeTaskDirName("dispatch-1:task-1"))
+        .toMatch(/^dispatch-1-task-1-[0-9a-f]{12}$/);
+      expect(safeTaskDirName("task/with/slashes"))
+        .toMatch(/^task-with-slashes-[0-9a-f]{12}$/);
+      expect(safeTaskDirName("a/b")).not.toBe(safeTaskDirName("a b"));
     });
   });
 

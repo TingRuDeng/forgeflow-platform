@@ -3,10 +3,11 @@ export type ReviewDecisionKind = "merge" | "block" | "rework" | "changes_request
 import type {
   ArtifactBundle,
   ReviewDecisionEvidence,
+  ReviewFreshness,
   WorkerEvidence,
 } from "@forgeflow/result-contracts";
 
-export { ArtifactBundle, ReviewDecisionEvidence, WorkerEvidence };
+export { ArtifactBundle, ReviewDecisionEvidence, ReviewFreshness, WorkerEvidence };
 
 export interface ReviewDecisionPayload {
   actor?: string;
@@ -14,6 +15,7 @@ export interface ReviewDecisionPayload {
   notes?: string;
   at?: string;
   evidence?: ReviewDecisionEvidence;
+  expectedFreshness: ReviewFreshness;
 }
 
 export interface ReviewSubmitResult {

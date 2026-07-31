@@ -8,14 +8,57 @@ import { runDecide } from "../src/decide.js";
 import { createEmptyRuntimeState, saveRuntimeState } from "../src/http.js";
 import { loadLocalSnapshot } from "../src/local-dispatcher.js";
 
+const CURRENT_FRESHNESS = {
+  attemptId: "attempt-1",
+  artifactBundleId: "attempt-1:artifact-bundle",
+  commitSha: "abc123",
+};
+
+function reviewWithFreshness(riskAssessment?: { level: string; reasons: string[] }) {
+  return {
+    taskId: "dispatch-1:task-1",
+    reviewMaterial: { freshness: CURRENT_FRESHNESS },
+    ...(riskAssessment ? { riskAssessment } : {}),
+  };
+}
+
 describe("decide", () => {
+  it("fails closed when the current review has no freshness tuple", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        reviews: [{ taskId: "dispatch-1:task-1", reviewMaterial: {} }],
+      }),
+    });
+
+    await expect(runDecide({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-1",
+      decision: "block",
+      fetchImpl: fetchImpl as typeof globalThis.fetch,
+    })).rejects.toThrow(/review freshness unavailable/i);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("posts review decisions to the dispatcher", async () => {
     const fetchImpl = vi.fn().mockImplementation((url: string) => {
       if (typeof url === "string" && url.includes("/api/dashboard/snapshot")) {
         return Promise.resolve({
           ok: true,
           status: 200,
-          text: async () => JSON.stringify({ reviews: [] }),
+          text: async () => JSON.stringify({
+            reviews: [{
+              taskId: "dispatch-1:task-1",
+              reviewMaterial: {
+                freshness: {
+                  attemptId: "attempt-1",
+                  artifactBundleId: "attempt-1:artifact-bundle",
+                  commitSha: "abc123",
+                },
+              },
+            }],
+          }),
         });
       }
       return Promise.resolve({
@@ -58,6 +101,11 @@ describe("decide", () => {
         reasonCode: "looks_good",
         mustFix: [],
         canRedrive: false,
+      },
+      expectedFreshness: {
+        attemptId: "attempt-1",
+        artifactBundleId: "attempt-1:artifact-bundle",
+        commitSha: "abc123",
       },
     });
   });
@@ -109,6 +157,14 @@ describe("decide", () => {
       actor: null,
       notes: "",
       decidedAt: null,
+      reviewMaterial: {
+        repo: "test/repo",
+        title: "Review task",
+        changedFiles: [],
+        selfTestPassed: true,
+        checks: [],
+        freshness: CURRENT_FRESHNESS,
+      },
       riskAssessment: {
         level: "low",
         reasons: [],
@@ -222,7 +278,7 @@ describe("decide", () => {
           ok: true,
           status: 200,
           text: async () => JSON.stringify({
-            reviews: [{ taskId: "dispatch-1:task-1", riskAssessment: { level: "too_large_for_auto_review", reasons: [] } }],
+            reviews: [reviewWithFreshness({ level: "too_large_for_auto_review", reasons: [] })],
           }),
         });
       }
@@ -242,10 +298,10 @@ describe("decide", () => {
     });
 
     expect(result.status).toBe("merged");
-    // With acknowledgement the risk snapshot is not even fetched.
+    // Review context is still fetched so the CLI can attach a freshness fence.
     expect(
       (fetchImpl.mock.calls as Array<[string]>).some((call) => call[0].includes("/api/dashboard/snapshot")),
-    ).toBe(false);
+    ).toBe(true);
     // The acknowledgement flag is forwarded to the dispatcher so the server gate honors it.
     const decisionCall = (fetchImpl.mock.calls as Array<[string, { body?: string }]>).find(
       (call) => call[0].includes("/decision"),
@@ -260,7 +316,7 @@ describe("decide", () => {
           ok: true,
           status: 200,
           text: async () => JSON.stringify({
-            reviews: [{ taskId: "dispatch-1:task-1", riskAssessment: { level: "low", reasons: [] } }],
+            reviews: [reviewWithFreshness({ level: "low", reasons: [] })],
           }),
         });
       }
@@ -282,10 +338,21 @@ describe("decide", () => {
   });
 
   it("does not gate non-merge decisions on risk", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify({ taskId: "dispatch-1:task-1", status: "blocked" }),
+    const fetchImpl = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/api/dashboard/snapshot")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            reviews: [reviewWithFreshness({ level: "needs_human_attention", reasons: ["manual review"] })],
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ taskId: "dispatch-1:task-1", status: "blocked" }),
+      });
     });
 
     const result = await runDecide({
@@ -296,9 +363,27 @@ describe("decide", () => {
     });
 
     expect(result.status).toBe("blocked");
-    // No risk snapshot fetch for non-merge decisions.
+    // Non-merge decisions do not apply the risk gate, but still fetch freshness.
     expect(
       (fetchImpl.mock.calls as Array<[string]>).some((call) => call[0].includes("/api/dashboard/snapshot")),
+    ).toBe(true);
+  });
+
+  it("fails closed when the review snapshot cannot be read", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: async () => JSON.stringify({ error: "snapshot unavailable" }),
+    });
+
+    await expect(runDecide({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      taskId: "dispatch-1:task-1",
+      decision: "block",
+      fetchImpl: fetchImpl as typeof globalThis.fetch,
+    })).rejects.toThrow(/snapshot unavailable/i);
+    expect(
+      (fetchImpl.mock.calls as Array<[string]>).some((call) => call[0].includes("/decision")),
     ).toBe(false);
   });
 });

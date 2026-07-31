@@ -49,9 +49,12 @@ export interface WorkerResult {
     }>;
   };
   waitingForInput?: {
+    requestId?: string;
+    sourceSessionId?: string;
     requestedBy?: string;
     reason?: string;
     prompt?: string;
+    expiresAt?: string;
     resumePayloadSchema?: Record<string, unknown>;
   };
   evidence?: {

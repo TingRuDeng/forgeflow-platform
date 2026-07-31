@@ -11,6 +11,9 @@ importers:
       '@tingrudeng/automation-gateway-core':
         specifier: workspace:*
         version: link:packages/automation-gateway-core
+      '@tingrudeng/beta-runtime-core':
+        specifier: workspace:*
+        version: link:packages/beta-runtime-core
       pino:
         specifier: ^9.6.0
         version: 9.14.0
@@ -288,6 +291,9 @@ importers:
       '@tingrudeng/automation-gateway-core':
         specifier: workspace:*
         version: link:../automation-gateway-core
+      '@tingrudeng/beta-runtime-core':
+        specifier: workspace:*
+        version: link:../beta-runtime-core
 
   packages/worker-protocol:
     dependencies:

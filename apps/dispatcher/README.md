@@ -50,7 +50,7 @@ Current verified contents:
 
 - dispatcher domain services under `src/modules/*`
 - dispatcher runtime foundations under `src/modules/server/*`
-- dispatcher-owned review-memory and task-worktree implementations under `src/modules/server/*`
+- dispatcher-owned review-memory implementation and a thin re-export of the shared beta-runtime-core task-worktree module under `src/modules/server/*`
 - dispatcher-focused tests under `tests/modules/*`
 
 ## Does Not Own Alone
@@ -66,7 +66,7 @@ Current live entry adapters are still under:
 - `../../scripts/lib/review-memory.js`
 - `../../scripts/lib/task-worktree.js`
 
-Current live bridges import built output from `apps/dispatcher/dist`, so behavior changes may require checking:
+Current live bridges import built output from `apps/dispatcher/dist`; task-worktree is the exception and re-exports `@tingrudeng/beta-runtime-core`. Behavior changes may require checking:
 
 - source in `apps/dispatcher/src/modules/server/*`
 - tests in `apps/dispatcher/tests/modules/server/*`

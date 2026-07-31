@@ -15,12 +15,15 @@ This package is self-contained for the remote Trae runtime path:
 - it **does** require a local checkout of the target project repository that Trae will open and the worker will execute tasks against
 
 This package is now structured for **public beta npm publishing**, but it is still beta-oriented and is not published automatically from this repository.
-It depends on `@tingrudeng/automation-gateway-core` for shared final-report parsing and task-id validation logic.
+It depends on `@tingrudeng/automation-gateway-core` for shared automation/session helpers and on `@tingrudeng/beta-runtime-core` for the same task-worktree implementation used by Codex and Gemini workers.
 
 Current unattended runtime guards:
 - `new_chat` sampling is narrowed to the last visible chat root instead of scanning the whole page by default
 - when baseline sampling still exposes a different completed task id, the runtime fails early with a stale-session error instead of continuing to read the old chat
 - the runtime now reports structured phase events plus `traceId` / `sessionId` / `failureCode` hints back to dispatcher when the control plane is reachable
+- lossy task ids use collision-resistant worktree directories, while an already-registered same-branch worktree at the exact legacy path remains reusable during upgrades
+- reused worktrees are reset with `git reset --hard HEAD` and `git clean -fd` before each task attempt
+- worktree removal runs only after dispatcher acknowledges the terminal result and only when `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1`; cleanup is non-force by default, while `FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` explicitly permits discarding a dirty worktree
 
 ## Commands
 
@@ -181,6 +184,7 @@ Set this before running `forgeflow-trae-beta start worker` or any other runtime 
 
 - This only changes how SSH connects; if the remote baseline cannot be fetched (network unreachable, auth failed), the worker will still hard-fail.
 - The override applies to git operations during task execution (e.g., fetching baseline, creating worktrees).
+- Worktree reuse is limited to the current task's expected `.worktrees/<task>` path; lossy task ID sanitization adds a stable identity hash, and a branch registered at another path is rejected to preserve task isolation.
 
 ## Dispatcher Authentication
 
