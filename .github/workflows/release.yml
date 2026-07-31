@@ -213,8 +213,13 @@ jobs:
       - name: Verify runtime package install smoke
         run: pnpm verify:runtime-packages:install
 
+      - name: Build dispatcher test dependency
+        run: pnpm --filter @forgeflow/dispatcher build
+
       - name: Run tests
         run: pnpm --filter "@tingrudeng/${RELEASE_PACKAGE}..." --if-present test
+        env:
+          FORGEFLOW_DISPATCHER_DIST_PREBUILT: '1'
 
       - name: Run shadow drift gate
         run: pnpm verify:shadow-drift
