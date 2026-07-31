@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-import { createAutomationGatewayClient, createDispatcherClient, createTraeAutomationWorkerRuntime, waitForAutomationGatewayReady, parseArgs, } from "./lib/trae-automation-worker.js";
+import { ensureTaskWorktreeRuntimeDist } from "./lib/runtime-bootstrap.js";
+ensureTaskWorktreeRuntimeDist();
+const { createAutomationGatewayClient, createDispatcherClient, createTraeAutomationWorkerRuntime, waitForAutomationGatewayReady, parseArgs, } = await import("./lib/trae-automation-worker.js");
 function printHelp() {
     console.log(`
 Usage:

@@ -13,6 +13,7 @@ const workerDaemonClientSourcePath = path.join(repoRoot, "scripts/lib/worker-dae
 const workerDaemonTaskExecutorSourcePath = path.join(repoRoot, "scripts/lib/worker-daemon-task-executor.ts");
 const runWorkerDaemonSourcePath = path.join(repoRoot, "scripts/run-worker-daemon.ts");
 const runWorkerAssignmentSourcePath = path.join(repoRoot, "scripts/run-worker-assignment.ts");
+const runTraeAutomationWorkerSourcePath = path.join(repoRoot, "scripts/run-trae-automation-worker.ts");
 const runtimeBootstrapSourcePath = path.join(repoRoot, "scripts/lib/runtime-bootstrap.ts");
 
 describe("worker daemon thin adapter", () => {
@@ -70,6 +71,16 @@ describe("worker daemon thin adapter", () => {
     expect(runtimeBootstrapSource).toContain("importWorkerAssignmentRuntime");
     expect(runtimeBootstrapSource).toContain("importDispatcherWorkerRuntimeFactories");
     expect(runtimeBootstrapSource).toContain("ensureDispatcherRuntimeBridgeDist");
+  });
+
+  it("bootstraps beta-runtime-core before loading the Trae worker adapter", () => {
+    const runTraeAutomationWorkerSource = fs.readFileSync(runTraeAutomationWorkerSourcePath, "utf8");
+    const runtimeBootstrapSource = fs.readFileSync(runtimeBootstrapSourcePath, "utf8");
+
+    expect(runtimeBootstrapSource).toContain("ensureTaskWorktreeRuntimeDist");
+    expect(runTraeAutomationWorkerSource).toContain("ensureTaskWorktreeRuntimeDist");
+    expect(runTraeAutomationWorkerSource).toContain('await import("./lib/trae-automation-worker.js")');
+    expect(runTraeAutomationWorkerSource).not.toContain('from "./lib/trae-automation-worker.js"');
   });
 
   it("keeps worker-daemon as a thin cycle adapter under the file size budget", () => {
