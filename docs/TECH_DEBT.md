@@ -45,13 +45,14 @@ ai_summary:
 - 对 shadow / DR 债务核对 `runtime-state-shadow.ts`、`runtime-state-sqlite.ts` 和 `scripts/verify-stage3-dr.mjs`。
 - 运行 `pnpm docs:validate` 检查本文结构和链接。
 
-## 1. Dispatcher compatibility wrappers still depend on `apps/dispatcher/dist` freshness
+## 1. Compatibility wrappers still depend on their authority package `dist` freshness
 
 Current situation:
 
 - dispatcher control-plane ownership now lives in `apps/dispatcher/`
-- `scripts/lib/dispatcher-server|dispatcher-state|review-memory|task-worktree|review-decision` 只保留 bootstrap / compatibility wrapper
-- live entrypoints still depend on checked-in adapters importing `apps/dispatcher/dist`
+- `scripts/lib/dispatcher-server|dispatcher-state|review-memory|review-decision` 只保留指向 `apps/dispatcher/dist` 的 bootstrap / compatibility wrapper
+- `apps/dispatcher/src/modules/server/task-worktree.ts`、`scripts/lib/task-worktree.ts` 和 Trae adapter 只 re-export `@tingrudeng/beta-runtime-core` 的唯一 worktree 实现
+- live entrypoints still depend on checked-in adapters importing the built `dist` of their authority package
 
 Impact:
 
@@ -203,7 +204,7 @@ Desired direction:
 - dispatcher runtime state 已有 `artifactBundles[]`，SQLite `artifact_bundles` projection 会保存 ArtifactBundle 摘要、refs、结构化 trajectory 和可选 retainedContent 正文片段
 - reconcile 支持 `maxTaskAttempts` retry policy，默认仍是 2 次 attempt
 - task-level `terminationPolicy.maxAttempts`、`attemptLeaseTimeoutMs`、`heartbeatTimeoutMs`、`assignmentTimeoutMs` 已接入 retry / lease / offline / assignment 回收主链
-- review material 已绑定 canonical attempt / ArtifactBundle / 可选 commit freshness tuple；Console、orchestrator CLI 与兼容 review CLI 会携带 `expectedFreshness`，dispatcher 对当前 review 拒绝 unfenced / stale decision，并把实际审查 tuple 写入 evidence/event
+- review material 已强制绑定 canonical attempt / ArtifactBundle / 可选 commit freshness tuple；Console、orchestrator CLI 与兼容 review CLI 必须携带 `expectedFreshness`，dispatcher 拒绝所有 unfenced / stale decision，并把实际审查 tuple 写入 evidence/event；旧状态必须重新执行或 redrive，不保留兼容决策路径
 - HITL 已有 dispatcher 级 `waiting_for_input` / `resumePayload` 协议；HTTP interrupt/resume 和 worker result `waitingForInput` 都会释放 worker / lease、checkpoint active attempt，并以 request/attempt identity、可选 session/expiry fence resume
 
 影响：
@@ -346,7 +347,7 @@ Desired direction:
 - **Codex / Gemini provider-neutral execution profile 已落地**：`@tingrudeng/beta-runtime-core` 统一拥有 `trusted-host` / `isolated-container` profile，provider 与 verification 共用固定镜像、只读 root、受限 tmpfs、最小 provider secret、CPU / memory / PID 上限和 fail-closed runtime / image preflight；managed worker 使用非敏感 policy id 阻止旧进程跨策略复用。已删除无运行时调用的 `scripts/lib/worker-daemon-helpers.*` 与对应旧测试，避免脚本侧重新形成第二套 env / command helper。剩余安全边界是标准 Docker `bridge` 不提供域名级 egress allowlist，也不是 microVM；更强隔离需要独立 sandbox runtime 或网络代理。
 - **`scripts/lib` 构建可重建已修复（P0 完成）**：`scripts/lib/review-memory.ts` 的 type-only re-export 改从 `apps/dispatcher/dist` 的 `.d.ts` 取（消除 rootDir 违规），`worker-daemon.ts` 的 `startTime` 已提到 try 外（修复 latent ReferenceError），`scripts/lib/tsconfig.json` 改为非严格并排除 `*.test.ts`。现在 `tsc -p scripts/lib/tsconfig.json` 可干净、幂等地 emit；committed `.js` 已与 `.ts` 对齐（含此前缺失从未提交的 `logger.js` / `metrics.js` / `dispatcher-auth.js` 运行时依赖）。CI 新增 `Verify scripts/lib build is in sync` 步骤（`tsc` + `git diff --exit-code`）防止再次漂移。`.ts` 现在是真相源。
 - **daemon 主循环、worker CLI、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到共享 runtime core（P2 主体完成）**：`packages/beta-runtime-core/src/runtime/worker-daemon-cycle.ts` 是唯一 generic daemon cycle 实现，`scripts/lib/worker-daemon.ts`、dispatcher `runtime-glue-worker-daemon-cycle.ts` 与 packaged Codex/Gemini runtime 都只做 adapter；completed submitResult retry / delivery_failed 事件由 shared cycle 负责。Trae 的独立 automation worker lifecycle 现在也对齐同一默认重试配置和事件语义：默认 3 次 / 2 秒，支持 AbortSignal，耗尽时抛出明确 delivery error，在 dispatcher 确认终态前不降为 idle、不释放 session，并停止任务轮询、以非零状态退出，避免同一进程重复执行未确认任务。每个 generic task 由 shared cycle 维护一条 single-flight heartbeat，覆盖执行与结果提交重试，脚本 executor 不再重复启动第二条 heartbeat；assignment 子进程默认总超时为 30 分钟，可通过 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 调整；SIGINT / SIGTERM / execution timeout 会通过 AbortSignal 取消 dispatcher HTTP 请求和重试等待，并通过 process-group / taskkill 终止完整子进程树。dispatcher HTTP / state-dir client lazy adapter 已拆到 `worker-daemon-dispatcher-client.ts`，claimed task execution / failed result fallback adapter 已拆到 `worker-daemon-task-executor.ts`；`run-worker-assignment` 的 prompt 拼接、verification shell / nvm 包装、执行 timeout、workspace dependency symlink、Codex/Gemini launch builder、worker-result 文件写入已下沉到 `packages/beta-runtime-core/src/runtime/run-worker-assignment.ts` 与 `run-worker-assignment-cli.ts`；provider worker CLI 参数解析、help、pool 校验和 provider binary env wiring 已下沉到 `packages/beta-runtime-core/src/runtime/provider-worker-cli.ts`；worktree / commit / push / PR / cleanup live executor 已下沉到 `executeLiveWorkerTask`；失败 result 构建、落盘、submitResult retry 和 evidence 分类已下沉到 `submitFailedWorkerResult`，重试耗尽会抛出 `WorkerResultDeliveryError`。root `scripts/run-worker-assignment.ts` 只保留 env / CLI wiring，beta-runtime-core dist、dispatcher runtime factory dist 和 src/dist freshness 检查都由 `scripts/lib/runtime-bootstrap.ts` 负责；`@tingrudeng/codex-beta-runtime` / `@tingrudeng/gemini-beta-runtime` 只保留 provider 配置型薄入口。
-- **generic worktree 生命周期安全已加固（P2 完成）**：`@tingrudeng/beta-runtime-core` live executor 使用可取消异步 Git 命令，默认单命令 60 秒超时；有损或过长的 task 目录名会附加原始 ID 的稳定短哈希，创建/复用前拒绝危险 task 目录、非法 ref、默认分支、未登记目录、分支被其他 worktree 占用和 path/branch 错配，并以 `created` / `reused` progress event 暴露结果。退出清理只在 `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 时发生，使用独立有界 Git 操作，默认不 force、会保留脏 worktree 并写 `worktree_cleanup_failed`；`FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 是显式破坏性 opt-in。dispatcher/Trae 同步 worktree helper 也增加碰撞规避、危险目录、非法 ref、登记错配拒绝与 60 秒 Git 超时。
+- **全 provider worktree 生命周期已统一（P2 完成）**：Codex、Gemini、Trae、dispatcher 与源码 worker adapter 都复用 `@tingrudeng/beta-runtime-core` 的唯一 task worktree 实现。可取消 Git 命令默认 60 秒超时；有损或过长的 task 目录名会附加稳定短哈希，创建/复用前拒绝危险目录、非法 ref、默认分支、未登记目录、分支占用和 path/branch 错配；复用统一执行 `reset --hard` + `clean -fd`。只有 terminal result 已被 dispatcher 确认且 `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 时才清理，默认不 force、保留脏 worktree，并写失败事件；`FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 是显式破坏性 opt-in。
 - **runtime 包发布清单门禁已落地（P2 完成）**：`pnpm verify:runtime-packages` 会校验 `automation-gateway-core`、`beta-runtime-core`、`codex-beta-runtime`、`gemini-beta-runtime`、`trae-beta-runtime` 的 public package 元数据、`dist`/README/PUBLISHING 发布范围、build/typecheck/test 脚本、provider CLI bin 和源码内 `workspace:*` 依赖重写规则；CI 与 release workflow 都会执行该门禁。生产发布窗口可执行 `pnpm verify:runtime-packages:published`，用只读 `npm view` 强制校验 npm registry 包名、当前本地版本和已发布依赖元数据；该检查会把源码内 `workspace:*` 依赖转换为本地 workspace 版本后，与已发布包的 `dependencies` 对比，避免远端安装包仍停留在旧依赖形态。
 - **runtime tarball 安装 smoke 已落地（P2 完成）**：`pnpm verify:runtime-packages:install` 会构建并本地 staging `codex`、`gemini`、`trae` runtime 组，重写 `workspace:*` 依赖为本地 workspace 版本，使用临时 npm cache 执行 `npm pack` / `npm install --ignore-scripts`，并校验 provider CLI bin 安装成功、安装后的 package 不含 `workspace:*` 依赖。CI 与 release workflow 都会执行该门禁，证明发布前 tarball 形态可安装且不依赖外部 registry。
 - **release preflight 会提前阻断未配置包名和未发布 workspace 依赖（P2 完成）**：`release-publish-preflight.mjs --require-package-exists --require-published-workspace-deps` 会在手动发布和自动发布进入 typecheck / test / build / publish 前执行只读 `npm view <package> version`，并把当前 package.json 的 `workspace:*` 依赖解析为本地 workspace 版本后校验对应精确版本已发布。包名不存在、权限不足、registry 查询失败或 provider 依赖的 shared core 版本未发布时，workflow 会停在 preflight，避免在 `npm publish` PUT 阶段或发布后 smoke 才暴露依赖缺口。
@@ -362,7 +363,7 @@ Desired direction:
 
 - `@tingrudeng/gemini-beta-runtime` 与 `@tingrudeng/beta-runtime-core` 的本地发布清单、release preflight、tarball install smoke、设置报告和 published smoke 入口已有门禁，但仍需要完成 npm 包名和 Trusted Publisher 配置后，才能进入自动发布矩阵。
 - codex/gemini 已是源码内受支持路径，但生产远端部署仍应以已发布包、固定版本和 CI 验证证据为准，不应直接依赖本仓未发布 dist。
-- 自动删除 worktree 尚未跨 provider 默认启用；Trae automation worker 的 executor / session-store / gateway 仍保留独立 runtime 边界。Trae launcher 的 target 构建、clean relaunch 和 debugger wait / spawn 编排已共享；若要做到所有 provider 完全同一 executor core，需要单独评估 worktree cleanup、session、phase event 和 failure evidence 模型。
+- worktree 保留、复用和 ack 后清理策略已经跨 provider 统一；自动删除刻意保持显式 opt-in。Trae automation worker 的 executor / session-store / gateway 仍保留必要的 provider runtime 边界，后续若收敛完整 executor core，应单独评估 session、phase event 和 failure evidence 模型，不再重复实现 worktree 生命周期。
 
 影响：
 

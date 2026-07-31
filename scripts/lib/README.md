@@ -52,7 +52,7 @@ This directory contains the code that actually wires together:
 - dispatcher HTTP handling
 - dispatcher runtime state loading/saving and live bridges
 - worker-daemon loops
-- thin bootstrap wrappers for dispatcher-owned review-memory and task-worktree modules
+- thin bootstrap wrappers for dispatcher-owned review-memory and shared runtime-core task-worktree modules
 - Trae automation gateway and worker behavior
 
 Top-level `scripts/*.js` files are mostly thin CLI wrappers around this directory.
@@ -64,7 +64,7 @@ Several mainline dispatcher paths are now bridged into `apps/dispatcher/dist` ra
 - `worker-daemon.js` bridges the generic worker daemon cycle to `runtime-glue-dispatcher-client.js`; live executor and failed-result fallback now live in `packages/beta-runtime-core`, while this directory keeps bootstrap, logging, and metrics callbacks
 - `review-decision.js` bridges review submission logic to `runtime-glue-review-decision.js`
 - `review-memory.js` bridges lesson loading/extraction to `apps/dispatcher/dist/modules/server/review-memory.js`
-- `task-worktree.js` bridges worktree planning/reuse logic to `apps/dispatcher/dist/modules/server/task-worktree.js`
+- `task-worktree.js` re-exports provider-neutral worktree planning/reuse/cleanup logic from `@tingrudeng/beta-runtime-core`
 
 ## High-Value Entry Files
 
@@ -75,7 +75,7 @@ Several mainline dispatcher paths are now bridged into `apps/dispatcher/dist` ra
 - `worker-daemon.js`
   - unattended worker loop for `codex` and `gemini`
 - `task-worktree.js`
-  - thin wrapper for dispatcher-owned worktree planning helpers
+  - thin wrapper for the shared beta runtime worktree lifecycle
 - `review-memory.js`
   - thin wrapper for dispatcher-owned lesson extraction and selective context injection
 - `trae-automation-gateway.js`

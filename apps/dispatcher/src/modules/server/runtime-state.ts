@@ -339,7 +339,7 @@ export interface ReviewMaterial {
   changedFiles: string[];
   selfTestPassed: boolean;
   checks: string[];
-  freshness?: ReviewFreshness;
+  freshness: ReviewFreshness;
   pullRequest?: {
     number: number;
     url: string;
@@ -594,7 +594,7 @@ export interface RecordReviewDecisionInput {
   notes?: string;
   at?: string;
   evidence?: ReviewDecisionEvidence;
-  expectedFreshness?: ReviewFreshness;
+  expectedFreshness: ReviewFreshness;
   acknowledgeRisk?: boolean;
 }
 
@@ -3405,8 +3405,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   const currentReview = state.reviews.find((candidate) => candidate.taskId === task.id);
   const canonicalResult = buildCanonicalWorkerResult(task, input.workerId, input.result);
   const canonicalPullRequest = canonicalizePullRequest(task, input.pullRequest);
-  const hasExplicitArtifactBundle = Boolean(input.artifactBundle ?? input.result.artifactBundle);
-  if (!activeAttempt && hasExplicitArtifactBundle) {
+  if (!activeAttempt) {
     throw new Error(`active attempt not found for task: ${task.id}`);
   }
   if (canonicalResult.waitingForInput) {
@@ -3421,24 +3420,20 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
       at: receivedAt,
     });
   }
-  const artifactBundle = activeAttempt
-    ? buildArtifactBundle({
-        task,
-        attempt: activeAttempt,
-        result: canonicalResult,
-        artifactBundle: input.artifactBundle ?? input.result.artifactBundle,
-        changedFiles: input.changedFiles,
-        pullRequest: canonicalPullRequest,
-      })
-    : null;
+  const artifactBundle = buildArtifactBundle({
+    task,
+    attempt: activeAttempt,
+    result: canonicalResult,
+    artifactBundle: input.artifactBundle ?? input.result.artifactBundle,
+    changedFiles: input.changedFiles,
+    pullRequest: canonicalPullRequest,
+  });
 
   const nextStatus = canonicalResult.verification.allPassed ? "review" : "failed";
   const terminalFailure = canonicalResult.verification.allPassed
     ? null
     : resolveWorkerFailure(canonicalResult.evidence, canonicalResult.output);
-  const reviewChangedFiles = artifactBundle
-    ? artifactBundle.changedFiles.map((entry) => entry.path)
-    : input.changedFiles ?? [];
+  const reviewChangedFiles = artifactBundle.changedFiles.map((entry) => entry.path);
   const reviewMaterial = canonicalResult.verification.allPassed
     ? {
         repo: task.repo,
@@ -3446,13 +3441,11 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
         changedFiles: reviewChangedFiles,
         selfTestPassed: true,
         checks: canonicalResult.verification.commands.map((item) => item.command),
-        ...(activeAttempt && artifactBundle ? {
-          freshness: {
-            attemptId: activeAttempt.attemptId,
-            artifactBundleId: artifactBundle.bundleId!,
-            ...(artifactBundle.commit ? { commitSha: artifactBundle.commit } : {}),
-          },
-        } : {}),
+        freshness: {
+          attemptId: activeAttempt.attemptId,
+          artifactBundleId: artifactBundle.bundleId!,
+          ...(artifactBundle.commit ? { commitSha: artifactBundle.commit } : {}),
+        },
         pullRequest: canonicalPullRequest,
       }
     : null;
@@ -3611,12 +3604,14 @@ export function recordReviewDecision(state: RuntimeState, input: RecordReviewDec
     throw new Error(`review decision at must not be before review started for task: ${input.taskId}`);
   }
   const canonicalFreshness = review?.reviewMaterial?.freshness;
-  if (canonicalFreshness && !input.expectedFreshness) {
+  if (!canonicalFreshness) {
+    throw new Error(`review freshness unavailable for task: ${input.taskId}`);
+  }
+  if (!input.expectedFreshness) {
     throw new Error(`review freshness required for task: ${input.taskId}`);
   }
   if (
-    input.expectedFreshness
-    && (!canonicalFreshness || !isDeepStrictEqual(input.expectedFreshness, canonicalFreshness))
+    !isDeepStrictEqual(input.expectedFreshness, canonicalFreshness)
   ) {
     throw new Error(`review freshness mismatch for task: ${input.taskId}`);
   }

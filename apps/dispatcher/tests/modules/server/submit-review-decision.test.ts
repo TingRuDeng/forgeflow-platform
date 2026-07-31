@@ -235,8 +235,8 @@ describe("submit review decision", () => {
         decision: "merge",
       },
     });
-    expect(unfenced.status).toBe(409);
-    expect(unfenced.json.error).toMatch(/review freshness required/i);
+    expect(unfenced.status).toBe(400);
+    expect(unfenced.json.error).toMatch(/expectedFreshness is required/i);
 
     const stale = await serverMod.handleDispatcherHttpRequest({
       stateDir,

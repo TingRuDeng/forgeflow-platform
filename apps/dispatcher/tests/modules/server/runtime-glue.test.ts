@@ -12,6 +12,12 @@ import {
   runWorkerDaemonCycle,
 } from "../../../src/modules/server/runtime-glue-dispatcher-client.js";
 
+const CURRENT_REVIEW_FRESHNESS = {
+  attemptId: "attempt-1",
+  artifactBundleId: "attempt-1:artifact-bundle",
+  commitSha: "abc123",
+};
+
 describe("runtime-glue review-decision", () => {
   describe("createHttpReviewClient", () => {
     it("creates a client with submitDecision method", () => {
@@ -34,6 +40,7 @@ describe("runtime-glue review-decision", () => {
         taskId: "task-1",
         decision: "merge",
         actor: "tester",
+        expectedFreshness: CURRENT_REVIEW_FRESHNESS,
       });
 
       expect(mockClient.submitDecision).toHaveBeenCalledWith("task-1", {
@@ -41,6 +48,7 @@ describe("runtime-glue review-decision", () => {
         decision: "merge",
         notes: undefined,
         at: undefined,
+        expectedFreshness: CURRENT_REVIEW_FRESHNESS,
       });
       expect(result.status).toBe("decision_recorded");
     });
@@ -414,6 +422,11 @@ describe("runtime-glue state-dir review client", () => {
     await client.submitDecision("task-1", {
       actor: "tester",
       decision: "rework",
+      expectedFreshness: {
+        attemptId: "attempt-1",
+        artifactBundleId: "attempt-1:artifact-bundle",
+        commitSha: "abc123",
+      },
     });
 
     expect(mockHandleRequest).toHaveBeenCalledWith({
@@ -425,6 +438,11 @@ describe("runtime-glue state-dir review client", () => {
       body: {
         actor: "tester",
         decision: "rework",
+        expectedFreshness: {
+          attemptId: "attempt-1",
+          artifactBundleId: "attempt-1:artifact-bundle",
+          commitSha: "abc123",
+        },
       },
     });
   });
@@ -520,6 +538,7 @@ describe("runtime-glue submitReviewDecision with mergePullRequest side effect", 
         taskId: "task-1",
         decision: "merge",
         actor: "tester",
+        expectedFreshness: CURRENT_REVIEW_FRESHNESS,
         mergePullRequest: true,
         repo: "org/repo",
         pullRequestNumber: 42,
@@ -559,6 +578,7 @@ describe("runtime-glue submitReviewDecision with mergePullRequest side effect", 
         taskId: "task-1",
         decision: "merge",
         actor: "tester",
+        expectedFreshness: CURRENT_REVIEW_FRESHNESS,
         mergePullRequest: false,
         repo: "org/repo",
         pullRequestNumber: 42,
@@ -595,6 +615,7 @@ describe("runtime-glue submitReviewDecision with mergePullRequest side effect", 
         taskId: "task-1",
         decision: "rework",
         actor: "tester",
+        expectedFreshness: CURRENT_REVIEW_FRESHNESS,
         mergePullRequest: true,
         repo: "org/repo",
         pullRequestNumber: 42,

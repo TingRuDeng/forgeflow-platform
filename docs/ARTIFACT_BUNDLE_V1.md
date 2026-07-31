@@ -111,7 +111,7 @@ runtime-state 只应保存 bundle 摘要、引用和受限正文片段。大型 
 - Trae runtime 在拿到 `attempt_id` 后会随 submitResult 提交 minimal bundle。
 - Console 任务详情提供摘要、引用、正文和轨迹 tabs；轨迹 tab 支持按步骤前后回放 `trajectory.steps`，并可从当前 step 的 `artifactRef` 直接展开或下载 manifest 登记的观察文件。
 - Console 任务详情在任务处于 `review` 状态时可直接提交 `merge` / `rework` / `block` 审查决策，并携带 `reasonCode`、`mustFix[]`、`canRedrive`、`redriveStrategy` 和高风险合并的 `acknowledgeRisk`，和 attempt timeline / artifact summary 共处同一审查上下文。
-- dispatcher 会把当前 `TaskAttempt.attemptId`、`ArtifactBundle.bundleId` 和可选 bundle commit 组成 `reviewMaterial.freshness`。Console / orchestrator CLI 以 `expectedFreshness` 回传；当前 review 有 freshness 时，缺失或变化的 tuple 都返回 `409`，成功决策把 canonical tuple 记录为 `evidence.reviewedFreshness`。
+- dispatcher 会把当前 `TaskAttempt.attemptId`、`ArtifactBundle.bundleId` 和可选 bundle commit 组成必需的 `reviewMaterial.freshness`。Console / orchestrator CLI 以 `expectedFreshness` 回传；字段缺失返回 `400`，tuple 变化返回 `409`，成功决策把 canonical tuple 记录为 `evidence.reviewedFreshness`。旧状态没有 freshness 时必须重新执行或 redrive，不能绕过 fence 决策。
 
 ## Review 展示
 

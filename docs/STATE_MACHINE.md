@@ -151,9 +151,9 @@ The CLI `decide --acknowledge-risk` forwards the flag to the dispatcher so the s
 Worker result 进入 `review` 时，dispatcher 会把 canonical `attemptId`、`artifactBundleId` 和可选 `commitSha` 写入 `reviewMaterial.freshness`。Console 和 orchestrator CLI 提交决策时把这组值作为 `expectedFreshness` 回传：
 
 - 与当前 review material 精确一致时才继续决策。
-- 当前 review 有 freshness 时，缺失 tuple 或 attempt、bundle、commit 任一变化都会返回 `409`，要求 reviewer 重新读取证据。
+- 决策请求缺失 `expectedFreshness` 返回 `400`；attempt、bundle、commit 任一变化返回 `409`，要求 reviewer 重新读取证据。
 - 决策落账时把 canonical tuple 写入 `evidence.reviewedFreshness` 和 `review_decided` 事件。
-- 历史上没有 `reviewMaterial.freshness` 的 review 仍可无 tuple 决策；新的 review 入口必须先读取 snapshot 并发送。
+- 不存在无 freshness 的兼容决策路径；旧状态必须重新执行或 redrive，生成 canonical review material 后才能决策。
 - review decision 的显式 `at` 必须是有效时间戳，且不得早于当前任务进入 `review` 的状态事件，避免审计时间线倒序。
 
 Current mapping:

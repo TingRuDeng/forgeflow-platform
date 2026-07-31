@@ -385,9 +385,9 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - rework / follow-up 只有在源任务已经交付过可验证的远端分支产物、且 worker 不变时才允许复用原分支；否则应新开 `-rN` 分支继续
 - worker 子进程默认只继承 allowlist 环境变量，不会把 `GITHUB_TOKEN`、`DISPATCHER_API_TOKEN` 之类的上层 secrets 原样透传进 assignment 执行进程
 - execution policy 由 worker 环境拥有，task payload 不能覆盖；isolated profile 只给对应 provider 容器注入 API key，verification 不接收 provider key
-- generic worker 的 worktree Git 命令默认 60 秒超时并响应取消；危险 task 目录、非法 ref、默认分支、未登记路径、分支占用和路径错配都会 fail closed
-- 只有 `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 才启用退出清理；默认保留脏 worktree，`FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 是显式的破坏性 opt-in
-- Console / orchestrator CLI 会把当前 review material 的 `attemptId`、`artifactBundleId` 和可选 `commitSha` 作为 freshness 条件提交；证据已变化时 dispatcher 返回 `409`，要求重新读取后再决策
+- 所有 provider 的 worktree Git 操作都复用 `@tingrudeng/beta-runtime-core`，默认 60 秒超时并响应取消；危险 task 目录、非法 ref、默认分支、未登记路径、分支占用和路径错配都会 fail closed，复用时执行 `git reset --hard HEAD` + `git clean -fd`
+- 只有 terminal result 已被 dispatcher 确认且 `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 时才启用退出清理；默认保留脏 worktree，`FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 是显式的破坏性 opt-in
+- Console / orchestrator CLI 会把当前 review material 的 `attemptId`、`artifactBundleId` 和可选 `commitSha` 作为必需 freshness 条件提交；字段缺失返回 `400`，证据已变化返回 `409`，要求重新读取后再决策
 - HITL 恢复会回传 `requestId` 与绑定的 `attemptId`；过期或错配请求被拒绝，相同 identity 与 payload 的重复提交按幂等成功处理
 
 当前边界：
@@ -395,12 +395,12 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - 单任务串行
 - 非流式最终回复
 - 只有最小 backoff / 错误恢复
-- 允许复用的 task worktree 会先 `git reset --hard HEAD` + `git clean -fd`
-- 还没有跨所有 provider 默认开启“任务完成后自动删除旧 worktree”的完整生命周期治理
+- 所有 provider 允许复用的 task worktree 都会先 `git reset --hard HEAD` + `git clean -fd`
+- 自动删除仍由操作者显式开启，不作为默认策略；各 provider 的 ack 后清理、默认非 force 和显式 force 语义已经统一
 - 没有多实例协调
 - `blocked + rework -> continuation` 已进入主线协议，并完成远程 Trae smoke 验证；当前 continuation 链路依赖更新后的 packaged runtime。
 - 一个最小的远程机器运行时包已进入 beta 安装路径，位于 `packages/trae-beta-runtime/`，用于包装启动与直接包自更新命令。
-- 该 runtime 现在依赖共享 helper 包 `@tingrudeng/automation-gateway-core`；对远程机器的安装方式没有变化，但发布 runtime 新版本时需要先确保对应 helper 版本已可用。
+- 该 runtime 现在依赖 `@tingrudeng/automation-gateway-core` 和 `@tingrudeng/beta-runtime-core`；对远程机器的安装方式没有变化，但发布 runtime 新版本时必须先确保两个共享包的对应版本都已可用。
 
 补充：
 

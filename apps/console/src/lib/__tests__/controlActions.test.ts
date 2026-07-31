@@ -66,4 +66,17 @@ describe('control action identity fences', () => {
       },
     });
   });
+
+  it('fails closed before posting a decision without review freshness', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(postReviewDecision({
+      taskId: 'dispatch-1:task-1',
+      decision: 'merge',
+      notes: 'reviewed',
+      reviewInput: {},
+    })).rejects.toThrow(/freshness is unavailable/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

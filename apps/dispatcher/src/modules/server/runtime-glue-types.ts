@@ -15,7 +15,7 @@ export interface ReviewDecisionPayload {
   notes?: string;
   at?: string;
   evidence?: ReviewDecisionEvidence;
-  expectedFreshness?: ReviewFreshness;
+  expectedFreshness: ReviewFreshness;
 }
 
 export interface ReviewSubmitResult {

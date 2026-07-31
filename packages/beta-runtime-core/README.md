@@ -2,7 +2,7 @@
 
 ForgeFlow beta runtime 的共享 worker daemon 与 task worktree 控制逻辑。
 
-该包面向 `@tingrudeng/codex-beta-runtime`、`@tingrudeng/gemini-beta-runtime` 和源码仓 `scripts/run-worker-assignment.js` 复用，不提供独立 CLI。worker daemon 主循环、assignment runner、Codex/Gemini launch builder、managed executor、live executor、失败 result 回写和 task worktree 控制逻辑都应优先在这里扩展；provider 专属 CLI wrapper 仍保留在各自 runtime 包内。
+该包面向 `@tingrudeng/codex-beta-runtime`、`@tingrudeng/gemini-beta-runtime`、`@tingrudeng/trae-beta-runtime` 和源码仓 worker adapter 复用，不提供独立 CLI。worker daemon 主循环、assignment runner、Codex/Gemini launch builder、managed executor、live executor、失败 result 回写和所有 provider 的 task worktree 控制逻辑都应优先在这里扩展；provider 专属 CLI、Trae session 与 automation adapter 仍保留在各自 runtime 包内。
 
 当前发布状态：
 
@@ -17,7 +17,8 @@ Codex / Gemini assignment 默认使用 `trusted-host`。设置 `FORGEFLOW_EXECUT
 
 - live executor 使用可取消的异步 Git 操作，单条命令默认最多运行 60 秒。
 - task ID 必须生成安全的单级目录名；清洗有损或目录名过长时会附加原始 ID 的稳定短哈希以避免碰撞。升级前已登记在旧版无哈希精确路径的同分支 worktree 仍可复用，清理旧路径时必须提供并核对分支身份；符号链接路径会被拒绝。任务分支必须是合法 ref 且不能等于默认分支；复用前会核对 Git 登记的 worktree 路径与分支，拒绝未登记目录、分支占用和路径错配。
-- `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 才会在任务结束后尝试清理。默认不带 `--force`，脏 worktree 会保留并上报 `worktree_cleanup_failed`。
+- provider 复用已有 worktree 时统一执行 `git reset --hard HEAD` + `git clean -fd`，避免上一次执行的已跟踪和未跟踪内容污染新 attempt。
+- `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 只会在 terminal result 已被 dispatcher 确认后尝试清理。默认不带 `--force`，脏 worktree 会保留并上报 `worktree_cleanup_failed`。
 - 只有同时设置 `FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 才会强制清理；这会丢弃任务 worktree 中尚未提交的内容，应只用于操作者明确接受该风险的环境。
 
 ## 验证

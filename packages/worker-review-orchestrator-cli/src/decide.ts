@@ -151,6 +151,9 @@ export async function runDecide(options: DecideOptions & {
   }
   const evidence = buildDecisionEvidence(options);
   const expectedFreshness = options.expectedFreshness ?? readReviewFreshness(review);
+  if (!expectedFreshness) {
+    throw new Error(`review freshness unavailable for task: ${options.taskId}`);
+  }
   const payload = {
     actor: options.actor ?? "codex-control",
     decision,
@@ -158,7 +161,7 @@ export async function runDecide(options: DecideOptions & {
     at: options.at ?? readNowIso(),
     ...(options.acknowledgeRisk === true ? { acknowledgeRisk: true } : {}),
     ...(evidence ? { evidence } : {}),
-    ...(expectedFreshness ? { expectedFreshness } : {}),
+    expectedFreshness,
   };
 
   if (options.dispatcherUrl) {

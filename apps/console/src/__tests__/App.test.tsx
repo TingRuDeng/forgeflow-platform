@@ -142,6 +142,13 @@ describe('App dashboard loading', () => {
           taskId: 'dispatch-1:task-review',
           decision: 'pending',
           notes: '',
+          reviewMaterial: {
+            freshness: {
+              attemptId: 'attempt-1',
+              artifactBundleId: 'attempt-1:artifact-bundle',
+              commitSha: 'abc123',
+            },
+          },
           riskAssessment: {
             level: 'needs_human_attention',
             reasons: ['protected paths touched'],
@@ -197,6 +204,11 @@ describe('App dashboard loading', () => {
     expect(submittedBody).toMatchObject({
       decision: 'merge',
       acknowledgeRisk: true,
+      expectedFreshness: {
+        attemptId: 'attempt-1',
+        artifactBundleId: 'attempt-1:artifact-bundle',
+        commitSha: 'abc123',
+      },
       evidence: {
         reasonCode: 'needs_manual_review',
         mustFix: ['补齐协议测试', '更新发布说明'],
@@ -220,6 +232,12 @@ describe('App dashboard loading', () => {
         {
           taskId: 'dispatch-1:task-review',
           decision: 'pending',
+          reviewMaterial: {
+            freshness: {
+              attemptId: 'attempt-1',
+              artifactBundleId: 'attempt-1:artifact-bundle',
+            },
+          },
         },
       ],
     };
@@ -372,8 +390,26 @@ describe('App dashboard loading', () => {
         { id: 'task-risky', title: 'Risky task', status: 'review', repo: 'owner/auth' },
       ],
       reviews: [
-        { taskId: 'task-safe', decision: 'pending' },
-        { taskId: 'task-risky', decision: 'pending' },
+        {
+          taskId: 'task-safe',
+          decision: 'pending',
+          reviewMaterial: {
+            freshness: {
+              attemptId: 'attempt-safe',
+              artifactBundleId: 'attempt-safe:artifact-bundle',
+            },
+          },
+        },
+        {
+          taskId: 'task-risky',
+          decision: 'pending',
+          reviewMaterial: {
+            freshness: {
+              attemptId: 'attempt-risky',
+              artifactBundleId: 'attempt-risky:artifact-bundle',
+            },
+          },
+        },
       ],
     };
     const alertMock = vi.fn();

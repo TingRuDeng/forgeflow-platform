@@ -524,11 +524,22 @@ describe("dispatcher runtime state (TypeScript)", () => {
       attemptId: expect.any(String),
       artifactBundleId: expect.any(String),
     });
+    if (!reviewFreshness) {
+      throw new Error("expected review freshness");
+    }
     expect(() => recordReviewDecision(state, {
       taskId: dispatch.taskIds[0],
       actor: "unfenced-reviewer",
       decision: "merge",
-    })).toThrow(/review freshness required/i);
+    } as never)).toThrow(/review freshness required/i);
+    const reviewWithoutFreshness = structuredClone(state);
+    delete (reviewWithoutFreshness.reviews[0]?.reviewMaterial as { freshness?: unknown }).freshness;
+    expect(() => recordReviewDecision(reviewWithoutFreshness, {
+      taskId: dispatch.taskIds[0],
+      actor: "legacy-reviewer",
+      decision: "merge",
+      expectedFreshness: reviewFreshness,
+    })).toThrow(/review freshness unavailable/i);
     expect(() => recordReviewDecision(state, {
       taskId: dispatch.taskIds[0],
       actor: "stale-reviewer",

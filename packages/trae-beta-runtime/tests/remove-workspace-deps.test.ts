@@ -22,6 +22,7 @@ describe("remove-workspace-deps publish preparation", () => {
       version: "0.1.0-beta.59",
       dependencies: {
         "@tingrudeng/automation-gateway-core": "workspace:*",
+        "@tingrudeng/beta-runtime-core": "workspace:*",
       },
     }, null, 2));
     fs.writeFileSync(path.join(depDir, "package.json"), JSON.stringify({
@@ -34,14 +35,17 @@ describe("remove-workspace-deps publish preparation", () => {
 
     const updatedPkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
     expect(updatedPkg.dependencies?.["@tingrudeng/automation-gateway-core"]).toBe("0.1.0-beta.3");
+    expect(updatedPkg.dependencies?.["@tingrudeng/beta-runtime-core"]).toBe("0.1.0-beta.1");
   });
 
   it("rewrites workspace dependencies to concrete workspace package versions", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "trae-publish-"));
     const packageDir = path.join(tempRoot, "packages", "trae-beta-runtime");
     const depDir = path.join(tempRoot, "packages", "automation-gateway-core");
+    const betaCoreDir = path.join(tempRoot, "packages", "beta-runtime-core");
     fs.mkdirSync(packageDir, { recursive: true });
     fs.mkdirSync(depDir, { recursive: true });
+    fs.mkdirSync(betaCoreDir, { recursive: true });
 
     const packageJsonPath = path.join(packageDir, "package.json");
     fs.writeFileSync(packageJsonPath, JSON.stringify({
@@ -49,6 +53,7 @@ describe("remove-workspace-deps publish preparation", () => {
       version: "0.1.0-beta.57",
       dependencies: {
         "@tingrudeng/automation-gateway-core": "workspace:*",
+        "@tingrudeng/beta-runtime-core": "workspace:*",
         minimist: "^1.2.8",
       },
     }, null, 2));
@@ -57,12 +62,17 @@ describe("remove-workspace-deps publish preparation", () => {
       name: "@tingrudeng/automation-gateway-core",
       version: "0.1.0-beta.3",
     }, null, 2));
+    fs.writeFileSync(path.join(betaCoreDir, "package.json"), JSON.stringify({
+      name: "@tingrudeng/beta-runtime-core",
+      version: "0.1.0-beta.1",
+    }, null, 2));
 
     rewriteWorkspaceDependencies(packageJsonPath, { workspaceRoot: tempRoot });
 
     const updatedPkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
     expect(updatedPkg.dependencies).toEqual({
       "@tingrudeng/automation-gateway-core": "0.1.0-beta.3",
+      "@tingrudeng/beta-runtime-core": "0.1.0-beta.1",
       minimist: "^1.2.8",
     });
   });

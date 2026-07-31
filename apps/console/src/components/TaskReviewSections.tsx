@@ -226,7 +226,8 @@ const ReviewActionsForm: React.FC<{
     return null;
   }
 
-  const disabled = reviewingTaskId === task.id;
+  const freshness = review?.reviewMaterial?.freshness;
+  const disabled = reviewingTaskId === task.id || !freshness;
   const riskLevel = review?.riskAssessment?.level;
   const riskAboveLow = Boolean(riskLevel && riskLevel !== 'low');
   const buildInput = (): ReviewDecisionInput => ({
@@ -238,7 +239,7 @@ const ReviewActionsForm: React.FC<{
     canRedrive,
     redriveStrategy,
     acknowledgeRisk,
-    expectedFreshness: review?.reviewMaterial?.freshness,
+    expectedFreshness: freshness,
   });
 
   return (

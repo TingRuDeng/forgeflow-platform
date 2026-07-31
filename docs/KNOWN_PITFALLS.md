@@ -74,7 +74,7 @@ When you touch one gateway implementation, check the other one in the same task.
 
 ## 4. Worktree creation hard-fails on missing remote baseline
 
-The active task-worktree implementation in `apps/dispatcher/src/modules/server/task-worktree.ts` (re-exported by `scripts/lib/task-worktree.js`) always does:
+When creating a new worktree, the active implementation in `packages/beta-runtime-core/src/runtime/task-worktree.ts` (re-exported by `apps/dispatcher` and `scripts/lib/task-worktree.js`) always does:
 
 - `git fetch origin <defaultBranch>`
 - resolve `origin/<defaultBranch>`
@@ -121,8 +121,8 @@ When diagnosing worker/reporting issues, verify there is only one live process p
 
 ## 9. Newly published Trae runtime dependencies may lag on mirrored npm registries
 
-`@tingrudeng/trae-beta-runtime` now depends on the separately published package
-`@tingrudeng/automation-gateway-core`.
+`@tingrudeng/trae-beta-runtime` depends on the separately published packages
+`@tingrudeng/automation-gateway-core` and `@tingrudeng/beta-runtime-core`.
 
 When a fresh runtime version is published, mirrored registries such as
 `https://registry.npmmirror.com` may expose the runtime package before they expose the
@@ -130,7 +130,7 @@ new shared dependency. In that state:
 
 - `npm view @tingrudeng/trae-beta-runtime@<version>` can already succeed
 - `npm install -g @tingrudeng/trae-beta-runtime@<version>` can still fail with dependency `404`
-- the missing package is usually `@tingrudeng/automation-gateway-core@<version>`
+- the missing package may be `@tingrudeng/automation-gateway-core@<version>` or `@tingrudeng/beta-runtime-core@<version>`
 
 If installation or `forgeflow-trae-beta update` fails right after a release on a mirrored
 registry, do not assume the publish itself is broken first. Retry against the official npm

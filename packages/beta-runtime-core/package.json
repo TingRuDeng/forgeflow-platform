@@ -47,7 +47,8 @@
     "worker",
     "runtime",
     "codex",
-    "gemini"
+    "gemini",
+    "trae"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

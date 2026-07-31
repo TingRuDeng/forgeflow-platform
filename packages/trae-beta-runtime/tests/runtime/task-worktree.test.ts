@@ -9,8 +9,10 @@ const spawnSyncMock = vi.fn(() => ({
   stdout: "",
   stderr: "",
 }));
+const execFileMock = vi.fn();
 
 vi.mock("node:child_process", () => ({
+  execFile: execFileMock,
   spawnSync: spawnSyncMock,
 }));
 

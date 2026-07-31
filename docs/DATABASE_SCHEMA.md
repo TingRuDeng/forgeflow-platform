@@ -237,7 +237,7 @@ Current additive review-side structured fields:
   - `reasons[]`
   - 由 dispatcher 在任务进入 `review` 时确定性计算，并持久化到 `reviews.risk_assessment_json`（SQLite 结构化投影列）。
 
-`reviewMaterial` is retained after a final review decision so the control layer keeps the original review snapshot alongside the structured evidence. 成功 worker result 进入 review 时，`reviewMaterial.freshness` 保存 canonical `attemptId`、`artifactBundleId` 和可选 `commitSha`；最终决策会把同一 tuple 复制到 `evidence.reviewedFreshness`。
+`reviewMaterial` is retained after a final review decision so the control layer keeps the original review snapshot alongside the structured evidence. 成功 worker result 进入 review 时，`reviewMaterial.freshness` 必须保存 canonical `attemptId`、`artifactBundleId` 和可选 `commitSha`；最终决策会把同一 tuple 复制到 `evidence.reviewedFreshness`。没有 freshness 的旧状态不能继续决策，必须重新执行或 redrive。
 
 Pull request records track review-side Git metadata:
 

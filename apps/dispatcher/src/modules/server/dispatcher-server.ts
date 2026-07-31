@@ -422,6 +422,9 @@ function classifyReviewDecisionError(error: unknown): number {
   if (message.startsWith("review freshness required for task:")) {
     return 409;
   }
+  if (message.startsWith("review freshness unavailable for task:")) {
+    return 409;
+  }
   if (message.startsWith("merge blocked by risk gate:")) {
     return 409;
   }
@@ -687,12 +690,12 @@ function readExpectedReviewFreshness(value: unknown): {
   attemptId: string;
   artifactBundleId: string;
   commitSha?: string;
-} | undefined {
+} {
   if (value === undefined) {
-    return undefined;
+    throw Object.assign(new Error("review decision expectedFreshness is required"), { status: 400 });
   }
   if (!isPlainObject(value)) {
-    throw Object.assign(new Error("review decision expectedFreshness must be an object when provided"), { status: 400 });
+    throw Object.assign(new Error("review decision expectedFreshness must be an object"), { status: 400 });
   }
   const attemptId = typeof value.attemptId === "string" ? value.attemptId.trim() : "";
   const artifactBundleId = typeof value.artifactBundleId === "string" ? value.artifactBundleId.trim() : "";

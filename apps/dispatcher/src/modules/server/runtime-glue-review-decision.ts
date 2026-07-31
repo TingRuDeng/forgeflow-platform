@@ -3,14 +3,16 @@ import type {
   ReviewDecisionPayload,
 } from "./runtime-glue-types.js";
 
+type ReviewFreshness = ReviewDecisionPayload["expectedFreshness"];
+
 export interface DispatcherReviewClient {
   submitDecision(taskId: string, payload: ReviewDecisionPayload): Promise<unknown>;
-  readReviewFreshness?(taskId: string): Promise<ReviewDecisionPayload["expectedFreshness"]>;
+  readReviewFreshness?(taskId: string): Promise<ReviewFreshness | undefined>;
 }
 
 export interface StateDirReviewClient {
   submitDecision(taskId: string, payload: ReviewDecisionPayload): Promise<unknown>;
-  readReviewFreshness?(taskId: string): Promise<ReviewDecisionPayload["expectedFreshness"]>;
+  readReviewFreshness?(taskId: string): Promise<ReviewFreshness | undefined>;
 }
 
 export interface SubmitReviewDecisionInput {
@@ -44,7 +46,7 @@ export interface CreateHttpReviewClientOptions {
 function extractReviewFreshness(
   snapshot: unknown,
   taskId: string,
-): ReviewDecisionPayload["expectedFreshness"] {
+): ReviewFreshness | undefined {
   if (!snapshot || typeof snapshot !== "object") {
     return undefined;
   }
@@ -221,6 +223,9 @@ export async function submitReviewDecision(
     input.client ?? createDispatcherReviewClient(input.dispatcherUrl!);
   const expectedFreshness = input.expectedFreshness
     ?? await client.readReviewFreshness?.(input.taskId);
+  if (!expectedFreshness) {
+    throw new Error(`review freshness unavailable for task: ${input.taskId}`);
+  }
   const result = (await client.submitDecision(input.taskId, {
     actor: input.actor,
     decision: input.decision,

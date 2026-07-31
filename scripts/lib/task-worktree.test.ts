@@ -1,24 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createHash } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import { describe, expect, it } from "vitest";
 
-const safeTaskDirName = (taskId: unknown) => {
-  const rawTaskId = String(taskId || "").trim();
-  const readableName = rawTaskId
-    .replace(/[^\p{L}\p{N}._-]+/gu, "-")
-    .replace(/^-+|-+$/g, "");
-  if (!readableName || readableName === "." || readableName === "..") {
-    return readableName;
-  }
-  if (rawTaskId === readableName && [...readableName].length <= 48) {
-    return readableName;
-  }
-  const readablePrefix = [...readableName].slice(0, 48).join("");
-  const identityHash = createHash("sha256").update(rawTaskId).digest("hex").slice(0, 12);
-  return `${readablePrefix}-${identityHash}`;
-};
+import { safeTaskDirName } from "./task-worktree.js";
 
 describe("task-worktree.ts", () => {
   describe("safeTaskDirName", () => {

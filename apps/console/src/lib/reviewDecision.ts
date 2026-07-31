@@ -23,6 +23,9 @@ export async function postReviewDecision(input: {
   reviewInput: ReviewDecisionInput;
   notes: string;
 }) {
+  if (!input.reviewInput.expectedFreshness) {
+    throw new Error(`Review freshness is unavailable for task ${input.taskId}`);
+  }
   const res = await fetch(`/api/reviews/${encodeURIComponent(input.taskId)}/decision`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

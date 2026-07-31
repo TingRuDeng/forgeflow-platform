@@ -11,7 +11,7 @@ export const RUNTIME_PACKAGES = [
   {
     dir: "packages/beta-runtime-core",
     name: "@tingrudeng/beta-runtime-core",
-    role: "codex-gemini-support-core",
+    role: "worker-support-core",
     dependencies: [],
   },
   {
@@ -35,14 +35,18 @@ export const RUNTIME_PACKAGES = [
     dir: "packages/trae-beta-runtime",
     name: "@tingrudeng/trae-beta-runtime",
     role: "trae-remote-runtime",
-    dependencies: ["@tingrudeng/automation-gateway-core"],
+    dependencies: ["@tingrudeng/automation-gateway-core", "@tingrudeng/beta-runtime-core"],
   },
 ];
 
 export const RUNTIME_PACKAGE_GROUPS = {
   codex: [findRuntimePackage("@tingrudeng/beta-runtime-core"), findRuntimePackage("@tingrudeng/codex-beta-runtime")],
   gemini: [findRuntimePackage("@tingrudeng/beta-runtime-core"), findRuntimePackage("@tingrudeng/gemini-beta-runtime")],
-  trae: [findRuntimePackage("@tingrudeng/automation-gateway-core"), findRuntimePackage("@tingrudeng/trae-beta-runtime")],
+  trae: [
+    findRuntimePackage("@tingrudeng/automation-gateway-core"),
+    findRuntimePackage("@tingrudeng/beta-runtime-core"),
+    findRuntimePackage("@tingrudeng/trae-beta-runtime"),
+  ],
 };
 
 export function findRuntimePackage(packageName) {

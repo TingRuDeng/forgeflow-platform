@@ -1113,6 +1113,10 @@ describe("dispatcher server", () => {
         actor: "codex-control",
         decision: "merge",
         notes: "probe",
+        expectedFreshness: {
+          attemptId: "attempt-probe",
+          artifactBundleId: "attempt-probe:artifact-bundle",
+        },
       },
     });
 
@@ -1385,6 +1389,10 @@ describe("dispatcher server", () => {
         actor: "codex-control",
         decision: "merge",
         notes: "probe",
+        expectedFreshness: {
+          attemptId: "attempt-probe",
+          artifactBundleId: "attempt-probe:artifact-bundle",
+        },
       },
     });
 

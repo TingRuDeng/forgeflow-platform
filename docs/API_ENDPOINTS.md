@@ -352,7 +352,7 @@ Current endpoint families:
     - `notes` 可选字符串
     - `at` 可选有效时间戳；格式非法返回 `400`，早于当前任务进入 `review` 的时间返回 `409`
     - `evidence` 可选 object
-    - `expectedFreshness` 条件必填 object：当前 `reviewMaterial.freshness` 存在时必须提交；字段包含 `attemptId`、`artifactBundleId`，可选 `commitSha`
+    - `expectedFreshness` 必填 object；字段包含 `attemptId`、`artifactBundleId`，可选 `commitSha`。字段缺失或结构非法返回 `400`
     - `acknowledgeRisk` / `acknowledge_risk` 可选布尔（用于服务端 merge 风险门禁）
   - 结构化决策证据可放在 `evidence` 内，也可直接作为顶层便捷字段提交；顶层字段会归一化写入 `review.evidence`：
     - `reasonCode`
@@ -362,7 +362,7 @@ Current endpoint families:
   - 标准 `reasonCode` 包括 `looks_good`、`tests_passed`、`minor_fix_needed`、`incomplete_implementation`、`test_failure`、`policy_violation`、`security_risk`、`unclear_diff`、`requires_pairing`、`needs_redrive`、`other`；旧版自定义字符串仍兼容。
   - 最新 review decision 为 `rework` 或 `changes_requested` 的 blocked 任务可由 orchestrator CLI redrive。
   - 服务端 merge 风险门禁（`DISPATCHER_REVIEW_MERGE_GATE`，默认 `off`）：`enforce` 模式下，对风险非 `low` 的任务提交 `merge` 且未带 `acknowledgeRisk` 时返回 `409`（`merge blocked by risk gate`）；`warn` 模式放行但记 `review_merge_risk_acknowledged` 事件。该门禁覆盖 Console / CLI / 直连 HTTP。
-  - dispatcher 会把 `expectedFreshness` 与当前 `reviewMaterial.freshness` 精确比较；当前 review 有 freshness 时，缺失该字段或 attempt、bundle、commit 任一不一致都返回 `409`，不落审查决策。Console、orchestrator CLI 和兼容 review CLI 会先读取 snapshot 再提交；只有历史上没有 freshness 的 review 允许省略。
+  - dispatcher 会把 `expectedFreshness` 与当前 `reviewMaterial.freshness` 精确比较；attempt、bundle、commit 任一不一致都返回 `409`，不落审查决策。Console、orchestrator CLI 和兼容 review CLI 会先读取 snapshot 再提交；没有无 freshness 或省略字段的兼容路径。
   - 成功决策会把 dispatcher 当前的 canonical freshness 写入 `evidence.reviewedFreshness` 与 `review_decided` 事件，保留“审查了哪份证据”的审计记录。
   - 任务或 assignment 不存在时返回 `404`。
   - 任务存在但不在 `review` 状态时返回 `409`。
