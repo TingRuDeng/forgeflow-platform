@@ -50,7 +50,10 @@ describe("runtime package setup report", () => {
   it("reports missing npm package setup without failing by default", () => {
     const tempDir = makeTempDir();
     const fixturePath = writeRegistryFixture(tempDir, {
-      "@tingrudeng/automation-gateway-core": { status: "published", versions: ["0.1.0-beta.3"] },
+      "@tingrudeng/automation-gateway-core": {
+        status: "published",
+        versions: [readWorkspacePackageVersion("automation-gateway-core")],
+      },
       "@tingrudeng/beta-runtime-core": { status: "missing" },
       "@tingrudeng/codex-beta-runtime": { status: "published", versions: ["0.1.0-beta.1"] },
       "@tingrudeng/gemini-beta-runtime": { status: "missing" },
@@ -72,7 +75,10 @@ describe("runtime package setup report", () => {
   it("fails with require-ready when setup or current version publish is incomplete", () => {
     const tempDir = makeTempDir();
     const fixturePath = writeRegistryFixture(tempDir, {
-      "@tingrudeng/automation-gateway-core": { status: "published", versions: ["0.1.0-beta.3"] },
+      "@tingrudeng/automation-gateway-core": {
+        status: "published",
+        versions: [readWorkspacePackageVersion("automation-gateway-core")],
+      },
       "@tingrudeng/beta-runtime-core": { status: "missing" },
       "@tingrudeng/codex-beta-runtime": { status: "published", versions: ["0.1.0-beta.1"] },
       "@tingrudeng/gemini-beta-runtime": { status: "published", versions: ["0.1.0-beta.2"] },
@@ -91,7 +97,10 @@ describe("runtime package setup report", () => {
   it("can emit structured json for automation", () => {
     const tempDir = makeTempDir();
     const fixturePath = writeRegistryFixture(tempDir, {
-      "@tingrudeng/automation-gateway-core": { status: "published", versions: ["0.1.0-beta.3"] },
+      "@tingrudeng/automation-gateway-core": {
+        status: "published",
+        versions: [readWorkspacePackageVersion("automation-gateway-core")],
+      },
       "@tingrudeng/beta-runtime-core": { status: "published", versions: ["0.1.0-beta.1"] },
       "@tingrudeng/codex-beta-runtime": { status: "published", versions: ["0.1.0-beta.2"] },
       "@tingrudeng/gemini-beta-runtime": { status: "published", versions: ["0.1.0-beta.2"] },
