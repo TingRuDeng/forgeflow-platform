@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 
@@ -44,6 +45,21 @@ const expectedDistTag = typeof args["expected-dist-tag"] === "string" ? args["ex
 const registryUrl = typeof args["registry-url"] === "string"
   ? args["registry-url"]
   : "https://registry.npmjs.org";
+const needsRegistryQuery = requirePackageExists
+  || requirePublishedWorkspaceDeps
+  || requireVersionAvailable;
+const npmCacheDir = needsRegistryQuery
+  ? mkdtempSync(resolve(tmpdir(), "forgeflow-npm-view-"))
+  : "";
+const npmEnv = npmCacheDir
+  ? { ...process.env, NPM_CONFIG_CACHE: npmCacheDir }
+  : process.env;
+
+if (npmCacheDir) {
+  process.on("exit", () => {
+    rmSync(npmCacheDir, { recursive: true, force: true });
+  });
+}
 
 if (!packageDir) {
   console.error("Error: --package-dir is required");
@@ -120,6 +136,7 @@ function readPublishedPackageTargetVersion(packageName, version) {
   try {
     const output = execFileSync("npm", ["view", target, "version", "--registry", registryUrl], {
       encoding: "utf8",
+      env: npmEnv,
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 15000,
     });

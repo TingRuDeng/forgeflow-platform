@@ -53,7 +53,10 @@ const packageSpecs = [
     bin: { "forgeflow-trae-beta": "dist/cli.js" },
     dir: "packages/trae-beta-runtime",
     name: "@tingrudeng/trae-beta-runtime",
-    dependencies: { "@tingrudeng/automation-gateway-core": "workspace:*" },
+    dependencies: {
+      "@tingrudeng/automation-gateway-core": "workspace:*",
+      "@tingrudeng/beta-runtime-core": "workspace:*",
+    },
     scripts: { build: "tsc", typecheck: "tsc --noEmit", test: "vitest" },
   },
 ];
@@ -88,7 +91,11 @@ function writeRuntimePackages(rootDir: string, overrides: Record<string, Record<
   }
 }
 
-function createFakeNpm(rootDir: string, options: { missingPackages?: string[]; dependencyMetadata?: Record<string, Record<string, string>> } = {}) {
+function createFakeNpm(rootDir: string, options: {
+  dependencyMetadata?: Record<string, Record<string, string>>;
+  missingPackages?: string[];
+  requireIsolatedCache?: boolean;
+} = {}) {
   const binDir = path.join(rootDir, "fake-bin");
   fs.mkdirSync(binDir, { recursive: true });
   const npmPath = path.join(binDir, "npm");
@@ -98,6 +105,13 @@ function createFakeNpm(rootDir: string, options: { missingPackages?: string[]; d
       "#!/usr/bin/env node",
       `const missingPackages = ${JSON.stringify(options.missingPackages ?? ["beta-runtime-core", "gemini-beta-runtime"])};`,
       `const dependencyMetadata = ${JSON.stringify(options.dependencyMetadata ?? {})};`,
+      `const requireIsolatedCache = ${JSON.stringify(options.requireIsolatedCache ?? false)};`,
+      'const cacheDir = process.env.NPM_CONFIG_CACHE || "";',
+      'const userCacheDir = process.env.FORGEFLOW_TEST_USER_NPM_CACHE || "";',
+      'if (requireIsolatedCache && (!cacheDir || cacheDir === userCacheDir)) {',
+      '  process.stderr.write("npm ERR! code EACCES\\n");',
+      "  process.exit(1);",
+      "}",
       'const target = process.argv[3] || "";',
       'const field = process.argv[4] || "version";',
       'if (missingPackages.some((name) => target.includes(name))) {',
@@ -168,6 +182,34 @@ describe("runtime package readiness", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("@tingrudeng/beta-runtime-core 尚未在 npm registry 创建");
     expect(result.stderr).toContain("@tingrudeng/gemini-beta-runtime 尚未在 npm registry 创建");
+  });
+
+  it("isolates registry queries from the user npm cache", () => {
+    const tempDir = makeTempRoot();
+    writeRuntimePackages(tempDir);
+    const fakeNpmBin = createFakeNpm(tempDir, {
+      missingPackages: [],
+      requireIsolatedCache: true,
+    });
+    const userCacheDir = path.join(tempDir, "poisoned-npm-cache");
+
+    const result = spawnSync(
+      "node",
+      [readinessScriptPath, "--root", tempDir, "--check-registry", "--require-published"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          FORGEFLOW_TEST_USER_NPM_CACHE: userCacheDir,
+          NPM_CONFIG_CACHE: userCacheDir,
+          PATH: `${fakeNpmBin}:${process.env.PATH || ""}`,
+        },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Runtime package readiness passed.");
   });
 
   it("rejects published runtime packages whose npm dependency metadata is stale", () => {

@@ -2,6 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { RUNTIME_PACKAGES, readWorkspaceVersions } from "./lib/runtime-package-specs.mjs";
@@ -87,7 +88,7 @@ function validatePackageDependencies(spec, packageJson, issues) {
   }
 }
 
-function queryNpmView(packageName, field, timeoutMs) {
+function queryNpmView(packageName, field, timeoutMs, npmEnv) {
   try {
     const args = ["view", packageName, field];
     if (field !== "version") {
@@ -95,6 +96,7 @@ function queryNpmView(packageName, field, timeoutMs) {
     }
     const output = execFileSync("npm", args, {
       encoding: "utf8",
+      env: npmEnv,
       stdio: ["ignore", "pipe", "pipe"],
       timeout: timeoutMs,
     });
@@ -111,13 +113,13 @@ function queryNpmView(packageName, field, timeoutMs) {
   }
 }
 
-function queryNpmVersion(packageName, timeoutMs) {
-  const result = queryNpmView(packageName, "version", timeoutMs);
+function queryNpmVersion(packageName, timeoutMs, npmEnv) {
+  const result = queryNpmView(packageName, "version", timeoutMs, npmEnv);
   return { ...result, version: result.value };
 }
 
-function queryNpmDependencies(packageName, timeoutMs) {
-  const result = queryNpmView(packageName, "dependencies", timeoutMs);
+function queryNpmDependencies(packageName, timeoutMs, npmEnv) {
+  const result = queryNpmView(packageName, "dependencies", timeoutMs, npmEnv);
   if (result.status !== "published") {
     return { ...result, dependencies: {} };
   }
@@ -144,7 +146,7 @@ function validatePublishedDependencies(spec, packageJson, workspaceVersions, opt
     return;
   }
   const packageName = `${spec.name}@${packageJson.version}`;
-  const result = queryNpmDependencies(packageName, options.registryTimeoutMs);
+  const result = queryNpmDependencies(packageName, options.registryTimeoutMs, options.npmEnv);
   if (result.status !== "published") {
     issues.push(`${packageName} published dependencies 查询失败：${result.error || result.status}`);
     return;
@@ -161,7 +163,7 @@ function validateRegistry(spec, packageJson, options, issues, warnings) {
   if (!options.checkRegistry) {
     return { status: "not_checked", version: "", versionStatus: "not_checked" };
   }
-  const packageStatus = queryNpmVersion(spec.name, options.registryTimeoutMs);
+  const packageStatus = queryNpmVersion(spec.name, options.registryTimeoutMs, options.npmEnv);
   if (packageStatus.status !== "published") {
     const message = packageStatus.status === "missing"
       ? `${spec.name} 尚未在 npm registry 创建`
@@ -173,7 +175,7 @@ function validateRegistry(spec, packageJson, options, issues, warnings) {
     }
     return { ...packageStatus, versionStatus: packageStatus.status };
   }
-  const versionStatus = queryNpmVersion(`${spec.name}@${packageJson.version}`, options.registryTimeoutMs);
+  const versionStatus = queryNpmVersion(`${spec.name}@${packageJson.version}`, options.registryTimeoutMs, options.npmEnv);
   if (versionStatus.status !== "published") {
     const message = versionStatus.status === "missing"
       ? `${spec.name}@${packageJson.version} 尚未发布`
@@ -200,20 +202,32 @@ function main() {
   const warnings = [];
   const rows = [];
   const workspaceVersions = readWorkspaceVersions(rootDir);
+  const npmCacheDir = options.checkRegistry
+    ? fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-npm-view-"))
+    : "";
+  options.npmEnv = npmCacheDir
+    ? { ...process.env, NPM_CONFIG_CACHE: npmCacheDir }
+    : process.env;
 
-  for (const spec of RUNTIME_PACKAGES) {
-    const packageJson = readPackageJson(rootDir, spec.dir, issues);
-    if (!packageJson) {
-      continue;
+  try {
+    for (const spec of RUNTIME_PACKAGES) {
+      const packageJson = readPackageJson(rootDir, spec.dir, issues);
+      if (!packageJson) {
+        continue;
+      }
+      validatePackageMetadata(rootDir, spec, packageJson, issues);
+      validatePackageScripts(spec, packageJson, issues);
+      validatePackageDependencies(spec, packageJson, issues);
+      const registry = validateRegistry(spec, packageJson, options, issues, warnings);
+      if (registry.versionStatus === "published") {
+        validatePublishedDependencies(spec, packageJson, workspaceVersions, options, issues);
+      }
+      rows.push({ name: spec.name, role: spec.role, version: packageJson.version, registry });
     }
-    validatePackageMetadata(rootDir, spec, packageJson, issues);
-    validatePackageScripts(spec, packageJson, issues);
-    validatePackageDependencies(spec, packageJson, issues);
-    const registry = validateRegistry(spec, packageJson, options, issues, warnings);
-    if (registry.versionStatus === "published") {
-      validatePublishedDependencies(spec, packageJson, workspaceVersions, options, issues);
+  } finally {
+    if (npmCacheDir) {
+      fs.rmSync(npmCacheDir, { recursive: true, force: true });
     }
-    rows.push({ name: spec.name, role: spec.role, version: packageJson.version, registry });
   }
 
   console.log("Runtime package readiness:");
