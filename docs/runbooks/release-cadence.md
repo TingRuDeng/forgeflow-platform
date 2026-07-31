@@ -63,7 +63,7 @@ hotfix 要求：
 - preflight 会确认 Trusted Publisher 门禁、目标包名、精确版本可用性和已发布 workspace 依赖。只有精确版本 E404 表示可发布，权限、超时或其他 registry 错误都会失败关闭。
 - 所有发布共用仓库级 concurrency group。publish 固定绑定 detect 输出的 commit SHA 和 package version，并在 npm 写入前后核对远端 `main` 未漂移。
 - 构建后由 `scripts/prepare-release-tarball.mjs` 以 `npm pack --ignore-scripts` 生成唯一 tarball 和 manifest；它临时把 `workspace:` 依赖改写为精确 workspace 版本、校验发布文件与 bin，然后恢复源码 manifest。
-- npm 只接收该已准备 tarball，并使用 Trusted Publishing、OIDC、provenance 和 `--ignore-scripts`；预发布版本自动使用 `beta`，稳定版本自动使用 `latest`。
+- npm 只接收该已准备 tarball，并使用 Trusted Publishing、OIDC、provenance 和 `--ignore-scripts`；预发布版本只推进权威 `beta`，稳定版本才推进 `latest`，不执行发布后的人工 tag 镜像。
 - `scripts/verify-published-package-tarball.mjs` 从 registry 下载精确 `dist.tarball`，核对 dist-tag、integrity、shasum、manifest、完整文件集、bin 与安装结果。
 - npm publish job 只有 `contents: read` 与 `id-token: write`。全部发布验证成功后，独立 `record-release-tags` job 才以 `contents: write` 在已合入 SHA 上创建 `release/<name>@<version>`，不会向 `main` 直接推送。
 

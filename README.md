@@ -212,13 +212,13 @@ node scripts/run-dispatcher-server.js \
 
 当前仓库对外提供的 control-plane/operator 公开安装路径现在有两类：
 
-- dispatcher/control-plane runtime：`@tingrudeng/forgeflow-dispatcher`
-- control-layer review/dispatch CLI：`@tingrudeng/worker-review-orchestrator-cli`
+- dispatcher/control-plane runtime：`@tingrudeng/forgeflow-dispatcher@beta`
+- control-layer review/dispatch CLI：`@tingrudeng/worker-review-orchestrator-cli@beta`
 
 如果你只是想获得单机 dispatcher 能力，而不想 clone 源码仓库，优先安装 runtime 包：
 
 ```bash
-npm install -g @tingrudeng/forgeflow-dispatcher
+npm install -g @tingrudeng/forgeflow-dispatcher@beta
 forgeflow-dispatcher init
 forgeflow-dispatcher doctor
 forgeflow-dispatcher start
@@ -228,7 +228,7 @@ forgeflow-dispatcher start
 
 ```bash
 npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator -g -y
-npm install -g @tingrudeng/worker-review-orchestrator-cli
+npm install -g @tingrudeng/worker-review-orchestrator-cli@beta
 ```
 
 其中：
@@ -267,18 +267,18 @@ git diff --check
 
 当前 npm registry 可公开安装的包包括：
 
-- 单机 dispatcher/control-plane runtime：`@tingrudeng/forgeflow-dispatcher`
+- 单机 dispatcher/control-plane runtime：`@tingrudeng/forgeflow-dispatcher@beta`
 - 远程 Codex 运行时：`@tingrudeng/codex-beta-runtime`
 - 远程 Gemini 运行时：`@tingrudeng/gemini-beta-runtime`
 - 远程 Trae 运行时：`@tingrudeng/trae-beta-runtime`
-- control-layer CLI：`@tingrudeng/worker-review-orchestrator-cli`
+- control-layer CLI：`@tingrudeng/worker-review-orchestrator-cli@beta`
 
-`@tingrudeng/beta-runtime-core` 与 `@tingrudeng/automation-gateway-core` 是已发布的传递依赖，不是远程机器的直接入口。三套 provider runtime 仍处于 beta 阶段，安装时必须显式使用 `@beta`，避免 npm 默认 `latest` 指向旧版本。可运行 `pnpm report:runtime-packages:setup` 核对包名、当前版本、发布顺序和 Trusted Publisher 状态。
+`@tingrudeng/beta-runtime-core` 与 `@tingrudeng/automation-gateway-core` 是已发布的传递依赖，不是远程机器的直接入口。dispatcher、control-layer CLI 与三套 provider runtime 仍处于 prerelease 阶段，安装时必须显式使用 `@beta`，避免 npm 默认 `latest` 指向旧版本。可运行 `pnpm report:runtime-packages:setup` 核对 runtime 包名、当前版本、权威 dist-tag、发布顺序和 Trusted Publisher 状态。
 
 单机 dispatcher/control-plane runtime：
 
 ```bash
-npm install -g @tingrudeng/forgeflow-dispatcher
+npm install -g @tingrudeng/forgeflow-dispatcher@beta
 forgeflow-dispatcher init
 forgeflow-dispatcher doctor
 forgeflow-dispatcher start
@@ -375,7 +375,7 @@ node scripts/release-package.js --package automation-gateway-core --bump prerele
 node scripts/release-package.js --package trae-beta-runtime --bump prerelease --prepare
 ```
 
-helper 默认仍是只读预览；只有显式 `--prepare` 才修改目标 `package.json` 的版本字段，它从不执行 npm、commit、push 或 merge，`--publish` 始终失败。版本 PR 合入后，GitHub Actions 用 OIDC + provenance 发布；OpenSSF Scorecard 由独立的 `.github/workflows/release-scorecard.yml` 在整个 `Release`（含 release tag）成功后跟跑。workflow 先以 `--ignore-scripts` 生成唯一 tarball，校验清单、bin 与 `workspace:` 依赖，再以 `npm publish <tarball> --ignore-scripts` 上传同一个文件；发布后从 registry 的 `dist.tarball` 下载精确产物，核对目标 `dist-tag`、`dist.integrity` / `dist.shasum`、包名、版本、完整文件集、bin 和安装结果。预发布版本自动使用 `beta`，稳定版本自动使用 `latest`。
+helper 默认仍是只读预览；只有显式 `--prepare` 才修改目标 `package.json` 的版本字段，它从不执行 npm、commit、push 或 merge，`--publish` 始终失败。版本 PR 合入后，GitHub Actions 用 OIDC + provenance 发布；OpenSSF Scorecard 由独立的 `.github/workflows/release-scorecard.yml` 在整个 `Release`（含 release tag）成功后跟跑。workflow 先以 `--ignore-scripts` 生成唯一 tarball，校验清单、bin 与 `workspace:` 依赖，再以 `npm publish <tarball> --ignore-scripts` 上传同一个文件；发布后从 registry 的 `dist.tarball` 下载精确产物，核对目标 `dist-tag`、`dist.integrity` / `dist.shasum`、包名、版本、完整文件集、bin 和安装结果。预发布版本只推进权威 `beta`，稳定版本才推进 `latest`；不要把 `latest` 人工镜像到 prerelease。
 
 自动发布还有几条硬门禁：
 
@@ -386,7 +386,7 @@ helper 默认仍是只读预览；只有显式 `--prepare` 才修改目标 `pack
 - release preflight 会在 publish 前校验目标包名存在、目标精确版本尚未发布，并把当前 package.json 内 `workspace:*` 依赖解析为本地 workspace 版本，要求对应依赖版本已经发布；例如 provider runtime 会在 `@tingrudeng/beta-runtime-core@<本地版本>` 未发布时提前失败。只有精确版本的 npm E404 表示可发布，已发布版本或 registry 查询异常都会失败关闭。
 - push 自动发布在 `npm publish` 前会先运行 `pnpm lint`、`pnpm docs:validate`、`pnpm typecheck`、`pnpm test` 和 `pnpm verify:shadow-drift`，避免 main 分支直接绕过常规验证发包。
 - release job 会先把 npm CLI 升到 `11.12.1`；npm Trusted Publishing 至少要求 `npm 11.5.1+`，不要再用 Node 自带的 npm 10.x 直接判断发布链是否可用。
-- `pnpm report:runtime-packages:setup` 会只读查询 npm registry，输出 runtime 包的 package/version 状态、发布顺序和 Trusted Publisher 配置要求；需要把缺口作为硬失败时可加 `-- --require-ready`。
+- `pnpm report:runtime-packages:setup` 会只读查询 npm registry，输出 runtime 包的 package/version 状态、当前版本对应的权威 dist-tag、发布顺序和 Trusted Publisher 配置要求；需要把缺口作为硬失败时可加 `-- --require-ready`。
 - `pnpm verify:runtime-packages:published-smoke` 会从 npm registry 安装当前源码版本的 codex/gemini/trae provider runtime，并验证对应 CLI bin、`--version` 和 `--help`；该命令要求所有 provider 包名和版本都已发布。
 - `node scripts/verify-published-package-tarball.mjs --package <package>` 会只读查询当前源码版本的 registry `dist` 元数据，下载精确 tarball，并验证 integrity、shasum、内容边界、manifest、bin 与安装结果；release workflow 还会验证目标 dist-tag，并把这些值与本次实际上传前生成的 manifest 逐项比对。
 - registry 与 provider smoke 全部通过后，独立 `record-release-tags` job 才为已合入的 release SHA 创建 `release/<name>@<version>` tag；该 job 不拥有 OIDC，失败后可单独重跑并会校验已有 tag 的目标 commit。

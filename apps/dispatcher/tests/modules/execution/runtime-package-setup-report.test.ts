@@ -53,8 +53,14 @@ describe("runtime package setup report", () => {
       "@tingrudeng/automation-gateway-core": {
         status: "published",
         versions: [readWorkspacePackageVersion("automation-gateway-core")],
+        distTags: { beta: readWorkspacePackageVersion("automation-gateway-core") },
       },
       "@tingrudeng/beta-runtime-core": { status: "missing" },
+      "@tingrudeng/forgeflow-dispatcher": {
+        status: "published",
+        versions: [readWorkspacePackageVersion("forgeflow-dispatcher")],
+        distTags: { beta: readWorkspacePackageVersion("forgeflow-dispatcher") },
+      },
       "@tingrudeng/codex-beta-runtime": { status: "published", versions: ["0.1.0-beta.1"] },
       "@tingrudeng/gemini-beta-runtime": { status: "missing" },
       "@tingrudeng/trae-beta-runtime": { status: "published", versions: ["0.1.0-beta.62"] },
@@ -78,8 +84,14 @@ describe("runtime package setup report", () => {
       "@tingrudeng/automation-gateway-core": {
         status: "published",
         versions: [readWorkspacePackageVersion("automation-gateway-core")],
+        distTags: { beta: readWorkspacePackageVersion("automation-gateway-core") },
       },
       "@tingrudeng/beta-runtime-core": { status: "missing" },
+      "@tingrudeng/forgeflow-dispatcher": {
+        status: "published",
+        versions: [readWorkspacePackageVersion("forgeflow-dispatcher")],
+        distTags: { beta: readWorkspacePackageVersion("forgeflow-dispatcher") },
+      },
       "@tingrudeng/codex-beta-runtime": { status: "published", versions: ["0.1.0-beta.1"] },
       "@tingrudeng/gemini-beta-runtime": { status: "published", versions: ["0.1.0-beta.2"] },
       "@tingrudeng/trae-beta-runtime": { status: "published", versions: ["0.1.0-beta.62"] },
@@ -100,8 +112,18 @@ describe("runtime package setup report", () => {
       "@tingrudeng/automation-gateway-core": {
         status: "published",
         versions: [readWorkspacePackageVersion("automation-gateway-core")],
+        distTags: { beta: readWorkspacePackageVersion("automation-gateway-core") },
       },
-      "@tingrudeng/beta-runtime-core": { status: "published", versions: ["0.1.0-beta.1"] },
+      "@tingrudeng/beta-runtime-core": {
+        status: "published",
+        versions: [readWorkspacePackageVersion("beta-runtime-core")],
+        distTags: { beta: readWorkspacePackageVersion("beta-runtime-core") },
+      },
+      "@tingrudeng/forgeflow-dispatcher": {
+        status: "published",
+        versions: [readWorkspacePackageVersion("forgeflow-dispatcher")],
+        distTags: { beta: readWorkspacePackageVersion("forgeflow-dispatcher") },
+      },
       "@tingrudeng/codex-beta-runtime": { status: "published", versions: ["0.1.0-beta.2"] },
       "@tingrudeng/gemini-beta-runtime": { status: "published", versions: ["0.1.0-beta.2"] },
       "@tingrudeng/trae-beta-runtime": { status: "published", versions: ["0.1.0-beta.62"] },
@@ -114,5 +136,35 @@ describe("runtime package setup report", () => {
     expect(report.trustedPublisher.environment).toBe("npm");
     expect(report.releaseOrder).toContain("@tingrudeng/beta-runtime-core");
     expect(report.rows.some((row: { action: string }) => row.action === "up_to_date")).toBe(true);
+    expect(report.rows.some((row: { releaseDistTagStatus: string }) => row.releaseDistTagStatus === "current")).toBe(true);
+  });
+
+  it("fails require-ready when the prerelease tag does not point to the current version", () => {
+    const tempDir = makeTempDir();
+    const packages = Object.fromEntries([
+      "automation-gateway-core",
+      "beta-runtime-core",
+      "forgeflow-dispatcher",
+      "codex-beta-runtime",
+      "gemini-beta-runtime",
+      "trae-beta-runtime",
+    ].map((packageDir) => {
+      const packageName = `@tingrudeng/${packageDir}`;
+      const version = readWorkspacePackageVersion(packageDir);
+      return [packageName, {
+        status: "published",
+        versions: [version],
+        distTags: { beta: version },
+      }];
+    }));
+    packages["@tingrudeng/codex-beta-runtime"].distTags = { beta: "0.1.0-beta.1" };
+    const fixturePath = writeRegistryFixture(tempDir, packages);
+
+    const result = runReport(["--registry-fixture", fixturePath, "--require-ready"]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      `@tingrudeng/codex-beta-runtime 的 beta dist-tag 应指向 ${readWorkspacePackageVersion("codex-beta-runtime")}，实际为 0.1.0-beta.1`,
+    );
   });
 });

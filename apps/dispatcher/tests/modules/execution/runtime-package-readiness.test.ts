@@ -26,6 +26,13 @@ const packageSpecs = [
     scripts: { build: "tsc", typecheck: "tsc --noEmit", test: "vitest" },
   },
   {
+    bin: { "forgeflow-dispatcher": "dist/cli.js" },
+    dir: "packages/forgeflow-dispatcher",
+    name: "@tingrudeng/forgeflow-dispatcher",
+    dependencies: {},
+    scripts: { build: "node ./scripts/build.mjs", typecheck: "tsc --noEmit", test: "vitest" },
+  },
+  {
     bin: { "forgeflow-codex-beta": "dist/cli.js" },
     dir: "packages/codex-beta-runtime",
     name: "@tingrudeng/codex-beta-runtime",
@@ -93,6 +100,7 @@ function writeRuntimePackages(rootDir: string, overrides: Record<string, Record<
 
 function createFakeNpm(rootDir: string, options: {
   dependencyMetadata?: Record<string, Record<string, string>>;
+  distTagVersions?: Record<string, string>;
   missingPackages?: string[];
   requireIsolatedCache?: boolean;
 } = {}) {
@@ -105,6 +113,7 @@ function createFakeNpm(rootDir: string, options: {
       "#!/usr/bin/env node",
       `const missingPackages = ${JSON.stringify(options.missingPackages ?? ["beta-runtime-core", "gemini-beta-runtime"])};`,
       `const dependencyMetadata = ${JSON.stringify(options.dependencyMetadata ?? {})};`,
+      `const distTagVersions = ${JSON.stringify(options.distTagVersions ?? {})};`,
       `const requireIsolatedCache = ${JSON.stringify(options.requireIsolatedCache ?? false)};`,
       'const cacheDir = process.env.NPM_CONFIG_CACHE || "";',
       'const userCacheDir = process.env.FORGEFLOW_TEST_USER_NPM_CACHE || "";',
@@ -120,6 +129,10 @@ function createFakeNpm(rootDir: string, options: {
       "}",
       'if (field === "dependencies") {',
       '  process.stdout.write(JSON.stringify(dependencyMetadata[target] || {}));',
+      "  process.exit(0);",
+      "}",
+      "if (Object.prototype.hasOwnProperty.call(distTagVersions, target)) {",
+      '  process.stdout.write(`${distTagVersions[target]}\\n`);',
       "  process.exit(0);",
       "}",
       'process.stdout.write("0.1.0-beta.1\\n");',
@@ -210,6 +223,33 @@ describe("runtime package readiness", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("Runtime package readiness passed.");
+    expect(result.stdout).toContain("releaseTag=beta:current:0.1.0-beta.1");
+  });
+
+  it("rejects a stale prerelease dist-tag even when the exact version exists", () => {
+    const tempDir = makeTempRoot();
+    writeRuntimePackages(tempDir);
+    const fakeNpmBin = createFakeNpm(tempDir, {
+      missingPackages: [],
+      distTagVersions: {
+        "@tingrudeng/codex-beta-runtime@beta": "0.1.0-beta.0",
+      },
+    });
+
+    const result = spawnSync(
+      "node",
+      [readinessScriptPath, "--root", tempDir, "--check-registry", "--require-published"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${fakeNpmBin}:${process.env.PATH || ""}` },
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "@tingrudeng/codex-beta-runtime 的 beta dist-tag 应指向 0.1.0-beta.1，实际为 0.1.0-beta.0",
+    );
   });
 
   it("rejects published runtime packages whose npm dependency metadata is stale", () => {

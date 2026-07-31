@@ -217,6 +217,10 @@ describe("workflow quality gates", () => {
     expect(autoJob).toContain("Verify detected release identity");
     expect(autoJob).toContain('[[ "$CURRENT_SHA" != "$RELEASE_SHA" ]]');
     expect(autoJob).toContain('[[ "$CURRENT_VERSION" != "$RELEASE_VERSION" ]]');
+    expect(autoJob).toContain('[[ "$RELEASE_VERSION" == *-* ]]');
+    expect(autoJob).toContain("EXPECTED_DIST_TAG=beta");
+    expect(autoJob).toContain("EXPECTED_DIST_TAG=latest");
+    expect(autoJob).toContain('validate-release-inputs.mjs "$RELEASE_PACKAGE" "$EXPECTED_DIST_TAG"');
   });
 
   it("publishes and verifies one prepared tarball before recording its release tag", () => {

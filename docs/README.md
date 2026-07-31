@@ -367,10 +367,10 @@ vNext runtime reliability 推进：
   - 适合通过 `npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill package-release -g -y` 安装，并用于发布 forgeflow-platform npm 包。
 - `../packages/worker-review-orchestrator-cli/README.md`
   - 当前对外发布的 control-layer CLI 包入口。
-  - 适合全局安装 `@tingrudeng/worker-review-orchestrator-cli` 后提供 `forgeflow-review-orchestrator` 命令。
+  - 当前 prerelease 阶段适合全局安装 `@tingrudeng/worker-review-orchestrator-cli@beta` 后提供 `forgeflow-review-orchestrator` 命令。
 - `../packages/forgeflow-dispatcher/README.md`
   - 当前对外发布的 dispatcher/control-plane runtime 包入口。
-  - 适合全局安装 `@tingrudeng/forgeflow-dispatcher` 后直接运行单机 SQLite dispatcher。
+  - 当前 prerelease 阶段适合全局安装 `@tingrudeng/forgeflow-dispatcher@beta` 后直接运行单机 SQLite dispatcher。
 - `../packages/trae-beta-runtime/README.md`
   - 当前对外发布的远程 Trae npm 包入口。
   - 适合远程机器用 `npm install -g @tingrudeng/trae-beta-runtime@beta` 安装。

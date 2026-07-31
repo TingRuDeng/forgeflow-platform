@@ -7,7 +7,7 @@ ForgeFlow beta runtime 的共享 worker daemon 与 task worktree 控制逻辑。
 当前发布状态：
 
 - 这是源码内共享包，不是远程机器直接安装入口。
-- npm 包名当前仍需外部包名和 Trusted Publisher 配置；配置完成并发布前，由 workspace 依赖消费。
+- npm 包名和 Trusted Publisher 已配置，版本 PR 合入受保护 `main` 后由 Release workflow 自动发布；源码仓内仍由 workspace 依赖消费。
 
 ## 执行隔离
 

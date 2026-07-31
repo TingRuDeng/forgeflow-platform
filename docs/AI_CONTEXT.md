@@ -31,7 +31,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - 当前推荐路径：源码仓运行读 `scripts/start-control-plane.sh`；install-and-run 读 `packages/forgeflow-dispatcher/README.md`。
 - Worker 定位：Trae automation gateway + Trae automation worker 是首选无人值守路径，Trae MCP worker 是 fallback。
 - 持久化定位：SQLite snapshot 是默认 runtime state 真相源，并默认保留最近 128 个 revision；runtime 只保留最近 500 条事件窗口，SQLite/PostgreSQL audit table 另存可分页历史。Postgres / queue 默认是 revision-gated shadow path；只有完成 cutover evidence 且显式选择 `RUNTIME_STATE_BACKEND=postgres` 时才使用 Postgres primary。
-- 发布包定位：`@tingrudeng/codex-beta-runtime`、`@tingrudeng/gemini-beta-runtime`、`@tingrudeng/trae-beta-runtime` 与共享 `@tingrudeng/beta-runtime-core` 当前均已存在于 npm registry；正式新版本由版本 PR 合入 `main` 后通过 Trusted Publishing 自动发布。三套 provider runtime 仍处于 beta 阶段，安装和默认自更新必须显式跟踪 `beta` dist-tag，不能依赖可能滞后的 `latest`。
+- 发布包定位：dispatcher、control-layer CLI、三套 provider runtime 与共享 core 当前均已存在于 npm registry；正式新版本由版本 PR 合入 `main` 后通过 Trusted Publishing 自动发布。当前 prerelease 安装和默认自更新必须显式跟踪 `beta` dist-tag，不能依赖可能滞后的 `latest`；稳定版本才使用 `latest`，两者不要求镜像。
 
 ## Core Directories
 

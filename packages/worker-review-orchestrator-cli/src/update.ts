@@ -52,10 +52,15 @@ function parseInstalledVersionFromNpmList(packageName: string, output: string): 
   }
 }
 
+function resolveDefaultDistTag(version: string | null): "beta" | "latest" {
+  return version?.includes("-") ? "beta" : "latest";
+}
+
 export async function runUpdate(options: UpdateOptions = {}): Promise<UpdateResult> {
   const packageName = "@tingrudeng/worker-review-orchestrator-cli";
   const previousVersion = resolveInstalledVersion(options.installedVersion);
-  const distTag = String(options.defaultBranch || "latest").trim() || "latest";
+  const defaultDistTag = resolveDefaultDistTag(previousVersion);
+  const distTag = String(options.defaultBranch ?? defaultDistTag).trim() || defaultDistTag;
   const packageSpecifier = `${packageName}@${distTag}`;
   const args = ["install", "-g", packageSpecifier];
   const performedCommand = `npm ${args.join(" ")}`;

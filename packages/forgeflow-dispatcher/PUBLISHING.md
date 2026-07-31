@@ -21,11 +21,14 @@ git diff --check
 After a release, verify:
 
 ```bash
-npm install -g @tingrudeng/forgeflow-dispatcher
+npm install -g @tingrudeng/forgeflow-dispatcher@beta
 forgeflow-dispatcher init
 forgeflow-dispatcher doctor
 forgeflow-dispatcher version
 ```
+
+Prerelease publishes advance `beta`; `latest` is reserved for a future stable version and is not
+manually mirrored after publish.
 
 ## Publishing Model
 

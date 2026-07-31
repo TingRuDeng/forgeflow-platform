@@ -16,8 +16,11 @@ This package is intentionally a runtime product, not a reusable dispatcher libra
 ## Install
 
 ```bash
-npm install -g @tingrudeng/forgeflow-dispatcher
+npm install -g @tingrudeng/forgeflow-dispatcher@beta
 ```
+
+The package is currently prerelease, so `beta` is the supported install channel. `latest` is
+reserved for a future stable release and may point to an older prerelease.
 
 ## Quick Start
 

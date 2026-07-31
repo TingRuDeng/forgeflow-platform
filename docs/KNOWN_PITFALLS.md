@@ -204,10 +204,12 @@ maintainer's interactive npm authentication and OTP when `auth-and-writes` 2FA i
 
 While the provider runtimes remain prerelease packages:
 
-- install Codex, Gemini, and Trae with an explicit `@beta` suffix
-- keep packaged runtime self-update defaults on the `beta` dist-tag
-- verify both `beta` and `latest` with `npm view <package> dist-tags --json`; do not assume a
-  successful beta publish moved `latest`
+- install dispatcher, the control-layer CLI, Codex, Gemini, and Trae with an explicit `@beta` suffix
+- keep prerelease self-update defaults on the `beta` dist-tag; stable versions switch to `latest`
+- treat `beta` as the only prerelease release pointer and do not use interactive `npm dist-tag add`
+  to mirror it into `latest`
+- use `pnpm verify:runtime-packages:published` for runtime package/version/dependency/tag checks;
+  a stale `latest` value is expected until a stable release replaces it
 
 ## 13. Control-plane failure metrics are event-backed and some worker-side signals are best-effort
 

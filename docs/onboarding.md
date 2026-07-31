@@ -142,7 +142,7 @@ ai_summary:
 
 - 控制平面机器：从 `scripts/start-control-plane.sh` 启动常驻 dispatcher 控制面
 - 控制层会话：按需安装 `worker-review-orchestrator` skill
-- 控制层机器：按需安装 `@tingrudeng/worker-review-orchestrator-cli`
+- 控制层机器：按需安装 `@tingrudeng/worker-review-orchestrator-cli@beta`
 - 远程 Codex 机器：按需安装 `@tingrudeng/codex-beta-runtime@beta`
 - 远程 Gemini 机器：按需安装 `@tingrudeng/gemini-beta-runtime@beta`
 - 远程 Trae 机器：按需安装 `@tingrudeng/trae-beta-runtime@beta`
@@ -296,7 +296,7 @@ node /abs/path/to/forgeflow-platform/scripts/run-dispatcher-server.js \
 
 ```bash
 npx skills add https://github.com/TingRuDeng/forgeflow-platform/skills --skill worker-review-orchestrator -g -y
-npm install -g @tingrudeng/worker-review-orchestrator-cli
+npm install -g @tingrudeng/worker-review-orchestrator-cli@beta
 ```
 
 控制层 CLI 当前推荐能力：

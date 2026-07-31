@@ -2,7 +2,11 @@
 
 import path from "node:path";
 
-import { RUNTIME_PACKAGES, readJson } from "./lib/runtime-package-specs.mjs";
+import {
+  RUNTIME_PACKAGES,
+  readJson,
+  releaseDistTagForVersion,
+} from "./lib/runtime-package-specs.mjs";
 import {
   decideRegistryAction,
   parsePositiveInteger,
@@ -41,13 +45,33 @@ async function readRuntimeRows(rootDir, options) {
   for (const spec of RUNTIME_PACKAGES) {
     const packageJson = readJson(path.join(rootDir, spec.dir, "package.json"));
     const registry = await queryPackageRegistry({ name: spec.name, version: packageJson.version }, options);
-    rows.push({ spec, version: packageJson.version, ...registry });
+    const releaseDistTag = releaseDistTagForVersion(packageJson.version);
+    const releaseDistTagVersion = registry.packageStatus.distTags?.[releaseDistTag] ?? "";
+    const releaseDistTagStatus = registry.packageStatus.status !== "published"
+      ? "not_checked"
+      : releaseDistTagVersion === packageJson.version
+        ? "current"
+        : releaseDistTagVersion
+          ? "stale"
+          : "missing";
+    rows.push({
+      spec,
+      version: packageJson.version,
+      releaseDistTag,
+      releaseDistTagVersion,
+      releaseDistTagStatus,
+      ...registry,
+    });
   }
   return rows;
 }
 
 function decideAction(row) {
-  return decideRegistryAction(row.packageStatus, row.versionStatus);
+  const registryAction = decideRegistryAction(row.packageStatus, row.versionStatus);
+  if (registryAction === "up_to_date" && row.releaseDistTagStatus !== "current") {
+    return "dist_tag_mismatch";
+  }
+  return registryAction;
 }
 
 async function buildReport(rootDir, options) {
@@ -85,7 +109,10 @@ function printTextReport(report) {
   for (const row of report.rows) {
     const packageText = formatStatus(row.packageStatus);
     const versionText = formatStatus(row.versionStatus);
-    console.log(`  - ${row.spec.name}@${row.version} role=${row.spec.role} package=${packageText} version=${versionText} action=${row.action}`);
+    const releaseTagText = row.releaseDistTagVersion
+      ? `${row.releaseDistTag}:${row.releaseDistTagStatus}:${row.releaseDistTagVersion}`
+      : `${row.releaseDistTag}:${row.releaseDistTagStatus}`;
+    console.log(`  - ${row.spec.name}@${row.version} role=${row.spec.role} packageDefault=${packageText} version=${versionText} releaseTag=${releaseTagText} action=${row.action}`);
   }
   printActions(report.rows);
 }
@@ -113,6 +140,15 @@ function printActions(rows) {
       );
     }
   }
+  const distTagRows = rows.filter((row) => row.action === "dist_tag_mismatch");
+  if (distTagRows.length > 0) {
+    console.log("- distTagMismatch:");
+    for (const row of distTagRows) {
+      console.log(
+        `  - ${row.spec.name}: ${row.releaseDistTag} 应指向 ${row.version}，实际为 ${row.releaseDistTagVersion || "<missing>"}；通过新的版本 PR 重新发布，不要把 latest 人工镜像到 prerelease`,
+      );
+    }
+  }
 }
 
 function assertReady(report) {
@@ -126,6 +162,11 @@ function assertReady(report) {
     }
     if (row.action === "registry_unknown") {
       issues.push(`${row.spec.name} registry 状态未知：${row.packageStatus.error || row.versionStatus.error}`);
+    }
+    if (row.action === "dist_tag_mismatch") {
+      issues.push(
+        `${row.spec.name} 的 ${row.releaseDistTag} dist-tag 应指向 ${row.version}，实际为 ${row.releaseDistTagVersion || "<missing>"}`,
+      );
     }
   }
   return issues;

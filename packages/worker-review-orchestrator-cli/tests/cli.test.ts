@@ -745,7 +745,7 @@ describe("worker-review-orchestrator-cli", () => {
       packageName: "@tingrudeng/worker-review-orchestrator-cli",
       previousVersion: "0.1.0-beta.4",
       installedVersion: "0.1.0-beta.5",
-      performedCommand: "npm install -g @tingrudeng/worker-review-orchestrator-cli@latest",
+      performedCommand: "npm install -g @tingrudeng/worker-review-orchestrator-cli@beta",
       stdout: "added 1 package",
       stderr: "",
       message: "Updated the globally installed ForgeFlow review orchestrator CLI.",
@@ -756,7 +756,7 @@ describe("worker-review-orchestrator-cli", () => {
       { runUpdate, log },
     );
 
-    expect(runUpdate).toHaveBeenCalledWith({ defaultBranch: "latest" });
+    expect(runUpdate).toHaveBeenCalledWith({});
     expect(result).toMatchObject({
       packageName: "@tingrudeng/worker-review-orchestrator-cli",
     });
