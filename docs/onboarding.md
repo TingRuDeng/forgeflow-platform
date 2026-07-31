@@ -143,9 +143,9 @@ ai_summary:
 - 控制平面机器：从 `scripts/start-control-plane.sh` 启动常驻 dispatcher 控制面
 - 控制层会话：按需安装 `worker-review-orchestrator` skill
 - 控制层机器：按需安装 `@tingrudeng/worker-review-orchestrator-cli`
-- 远程 Codex 机器：按需安装 `@tingrudeng/codex-beta-runtime`
-- 远程 Gemini 机器：当前先使用源码仓 `packages/gemini-beta-runtime/` 入口；`@tingrudeng/gemini-beta-runtime` 的 npm 包名配置完成后再按 npm 包安装
-- 远程 Trae 机器：按需安装 `@tingrudeng/trae-beta-runtime`
+- 远程 Codex 机器：按需安装 `@tingrudeng/codex-beta-runtime@beta`
+- 远程 Gemini 机器：按需安装 `@tingrudeng/gemini-beta-runtime@beta`
+- 远程 Trae 机器：按需安装 `@tingrudeng/trae-beta-runtime@beta`
 
 ### 4.1 本地最小闭环
 
@@ -158,7 +158,7 @@ ai_summary:
 
 - `scripts/start-control-plane.sh`
 - `forgeflow-review-orchestrator dispatch-task/watch/inspect/decide`
-- `@tingrudeng/trae-beta-runtime`、`@tingrudeng/codex-beta-runtime`、源码仓内 `packages/gemini-beta-runtime/` 或 `scripts/run-worker-daemon.js`
+- `@tingrudeng/trae-beta-runtime@beta`、`@tingrudeng/codex-beta-runtime@beta`、`@tingrudeng/gemini-beta-runtime@beta`，或源码仓内用于本地调试的 `scripts/run-worker-daemon.js`
 
 ### 4.2 `codex` / `gemini` 多机链路
 
@@ -166,27 +166,28 @@ ai_summary:
 
 1. 启动 `dispatcher server`
 2. 把 `.orchestrator` 发布到 dispatcher
-3. 在各机器上启动 worker runtime（`scripts/run-worker-daemon.js` 本地/调试，或已公开的 `@tingrudeng/codex-beta-runtime` 远程包；Gemini npm 包发布前用 `packages/gemini-beta-runtime/` 源码入口）
+3. 在各机器上启动 worker runtime（`scripts/run-worker-daemon.js` 用于本地/调试；远程机器分别使用已公开的 Codex、Gemini provider runtime `@beta` 包）
 
 worker daemon 会上报 `progress_reported` 运行阶段事件，可用 `watch --summary` / `inspect --summary` 与 Console 观察进度。daemon 主循环、dispatcher client、assignment runner 和 provider 入口已经收敛到共享 runtime core；源码脚本与 packaged runtime 只保留适配层。
 
 远程 Codex 机器推荐 npm 入口：
 
 ```bash
-npm install -g @tingrudeng/codex-beta-runtime
+npm install -g @tingrudeng/codex-beta-runtime@beta
 forgeflow-codex-beta init
 forgeflow-codex-beta doctor
 export DISPATCHER_WORKER_TOKEN="worker-specific-token"
 forgeflow-codex-beta start worker
 ```
 
-远程 Gemini runtime 在 npm 包发布前先用源码入口：
+远程 Gemini 机器推荐 npm 入口：
 
 ```bash
-pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta init
-pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta doctor
+npm install -g @tingrudeng/gemini-beta-runtime@beta
+forgeflow-gemini-beta init
+forgeflow-gemini-beta doctor
 export DISPATCHER_WORKER_TOKEN="worker-specific-token"
-pnpm --filter @tingrudeng/gemini-beta-runtime exec forgeflow-gemini-beta start worker
+forgeflow-gemini-beta start worker
 ```
 
 远程 `codex` / `gemini` runtime 通过 `POST /api/workers/:workerId/claim-task` 领取任务，并在 start/result 回写时携带 dispatcher 返回的 v1 envelope。远程机器应配置自己的 `DISPATCHER_WORKER_TOKEN`；旧的 `DISPATCHER_API_TOKEN` 仅作为迁移回退，不应继续分发到 worker 主机。只有显式切到 `open` 或满足 `legacy` loopback 条件时才可匿名访问。
@@ -320,7 +321,7 @@ npm install -g @tingrudeng/worker-review-orchestrator-cli
 如果目标是让 Trae 在 dispatcher 驱动下长期无人值守执行，当前推荐路径是 npm 运行时：
 
 ```bash
-npm install -g @tingrudeng/trae-beta-runtime
+npm install -g @tingrudeng/trae-beta-runtime@beta
 forgeflow-trae-beta init \
   --project-path /abs/path/to/your-business-repo \
   --dispatcher-url http://<control-plane-host>:8787 \
@@ -334,7 +335,7 @@ forgeflow-trae-beta start all
 如果远程机器默认使用镜像源（例如 `https://registry.npmmirror.com`），而 runtime 依赖的新共享包还没有同步到镜像，安装可能出现依赖 404。遇到这种情况，直接显式使用官方 npm registry：
 
 ```bash
-npm install -g @tingrudeng/trae-beta-runtime --registry=https://registry.npmjs.org/
+npm install -g @tingrudeng/trae-beta-runtime@beta --registry=https://registry.npmjs.org/
 ```
 
 `forgeflow-trae-beta update` 默认也会跟踪 npm `beta` dist-tag，而不是 `latest`。
@@ -433,7 +434,7 @@ node scripts/run-trae-automation-worker.js \
 如果远程机器不方便直接使用全局 npm，才回退到本仓库脚本链路；正常情况下优先 npm 命令：
 
 ```bash
-npm install -g @tingrudeng/trae-beta-runtime
+npm install -g @tingrudeng/trae-beta-runtime@beta
 forgeflow-trae-beta init \
   --project-path /abs/path/to/your-business-repo \
   --dispatcher-url http://<control-plane-host>:8787 \
@@ -445,7 +446,7 @@ forgeflow-trae-beta start all
 如果 Trae 安装路径不是默认值，再补 `--trae-bin "/Applications/Trae.app"`。
 
 `forgeflow-trae-beta update` 会直接对已安装包执行自更新，不是推荐式卸载重装流程。
-如果默认 registry 是镜像源且镜像同步滞后，优先改用 `npm install -g @tingrudeng/trae-beta-runtime --registry=https://registry.npmjs.org/`。
+如果默认 registry 是镜像源且镜像同步滞后，优先改用 `npm install -g @tingrudeng/trae-beta-runtime@beta --registry=https://registry.npmjs.org/`。
 
 补充：
 

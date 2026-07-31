@@ -65,7 +65,7 @@ node scripts/release-package.js --package gemini-beta-runtime --bump prerelease 
 发布后，预期安装形态如下：
 
 ```bash
-pnpm add -g @tingrudeng/gemini-beta-runtime
+pnpm add -g @tingrudeng/gemini-beta-runtime@beta
 forgeflow-gemini-beta init
 forgeflow-gemini-beta doctor
 forgeflow-gemini-beta start worker

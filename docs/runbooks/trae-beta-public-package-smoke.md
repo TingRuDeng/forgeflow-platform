@@ -10,7 +10,7 @@ CLI 入口：`forgeflow-trae-beta`
 确保 Node.js >= 22 已安装。
 
 ```bash
-npm install -g @tingrudeng/trae-beta-runtime
+npm install -g @tingrudeng/trae-beta-runtime@beta
 ```
 
 验证安装：

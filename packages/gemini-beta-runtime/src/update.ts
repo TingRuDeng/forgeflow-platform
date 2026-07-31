@@ -58,7 +58,7 @@ async function getGlobalInstalledVersion(
 export async function updateLocalCheckout(options: UpdateOptions = {}): Promise<UpdateResult> {
   const packageName = "@tingrudeng/gemini-beta-runtime";
   const installedVersion = resolveInstalledVersion(options.installedVersion);
-  const distTag = String(options.defaultBranch || "latest").trim() || "latest";
+  const distTag = String(options.defaultBranch || "beta").trim() || "beta";
   const packageSpecifier = `${packageName}@${distTag}`;
   const args = ["install", "-g", packageSpecifier];
   const performedCommand = `npm ${args.join(" ")}`;

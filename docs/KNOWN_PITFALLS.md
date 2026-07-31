@@ -191,6 +191,24 @@ typecheck / tests / shadow drift gate before publish.
 Do not treat a green OIDC/provenance setup in GitHub Actions as proof that npm-side trusted
 publisher configuration is complete.
 
+## 12.1 Trusted Publishing does not maintain npm dist-tags outside publish
+
+The release workflow publishes prerelease versions with the npm `beta` dist-tag. An older
+`latest` tag can still remain on the package, and an unqualified install such as
+`npm install -g @tingrudeng/codex-beta-runtime` resolves that stale `latest` instead of the newly
+published beta.
+
+npm Trusted Publishing authorizes `npm publish` and `npm stage publish`; it does not authorize
+separate `npm dist-tag add` or `npm dist-tag rm` commands. Those mutations still require the
+maintainer's interactive npm authentication and OTP when `auth-and-writes` 2FA is enabled.
+
+While the provider runtimes remain prerelease packages:
+
+- install Codex, Gemini, and Trae with an explicit `@beta` suffix
+- keep packaged runtime self-update defaults on the `beta` dist-tag
+- verify both `beta` and `latest` with `npm view <package> dist-tags --json`; do not assume a
+  successful beta publish moved `latest`
+
 ## 13. Control-plane failure metrics are event-backed and some worker-side signals are best-effort
 
 `/api/metrics` now exposes counts such as:
