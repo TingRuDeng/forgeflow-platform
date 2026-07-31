@@ -31,6 +31,22 @@ function ensureDistFile(input: { distPath: string; buildCommand: string; repoRoo
   });
 }
 
+function ensureBetaRuntimeCoreDist(relativeDistPath: string): string {
+  const repoRoot = resolveRepoRoot();
+  const distPath = path.join(repoRoot, "packages/beta-runtime-core/dist", relativeDistPath);
+  ensureDistFile({
+    repoRoot,
+    distPath,
+    buildCommand: "pnpm --filter @tingrudeng/beta-runtime-core build",
+    sourceDir: path.join(repoRoot, "packages/beta-runtime-core/src"),
+  });
+  return distPath;
+}
+
+export function ensureTaskWorktreeRuntimeDist(): void {
+  ensureBetaRuntimeCoreDist("runtime/task-worktree.js");
+}
+
 export function ensureDispatcherRuntimeBridgeDist(): void {
   const repoRoot = resolveRepoRoot();
   ensureDistFile({
@@ -49,26 +65,12 @@ export async function importDispatcherRuntimeBridge<T>(): Promise<T> {
 }
 
 export async function importWorkerDaemonRuntime<T>(): Promise<T> {
-  const repoRoot = resolveRepoRoot();
-  const distPath = path.join(repoRoot, "packages/beta-runtime-core/dist/runtime/worker-daemon.js");
-  ensureDistFile({
-    repoRoot,
-    distPath,
-    buildCommand: "pnpm --filter @tingrudeng/beta-runtime-core build",
-    sourceDir: path.join(repoRoot, "packages/beta-runtime-core/src"),
-  });
+  const distPath = ensureBetaRuntimeCoreDist("runtime/worker-daemon.js");
   return import(pathToFileURL(distPath).href) as Promise<T>;
 }
 
 export async function importWorkerAssignmentRuntime<T>(): Promise<T> {
-  const repoRoot = resolveRepoRoot();
-  const distPath = path.join(repoRoot, "packages/beta-runtime-core/dist/index.js");
-  ensureDistFile({
-    repoRoot,
-    distPath,
-    buildCommand: "pnpm --filter @tingrudeng/beta-runtime-core build",
-    sourceDir: path.join(repoRoot, "packages/beta-runtime-core/src"),
-  });
+  const distPath = ensureBetaRuntimeCoreDist("index.js");
   return import(pathToFileURL(distPath).href) as Promise<T>;
 }
 

@@ -233,6 +233,9 @@ importers:
 
   packages/forgeflow-dispatcher:
     devDependencies:
+      '@tingrudeng/beta-runtime-core':
+        specifier: workspace:*
+        version: link:../beta-runtime-core
       esbuild:
         specifier: ^0.25.10
         version: 0.25.12

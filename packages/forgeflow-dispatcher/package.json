@@ -36,12 +36,13 @@
     "sqlite"
   ],
   "scripts": {
-    "build": "node ./scripts/build.mjs",
+    "build": "pnpm --filter @tingrudeng/beta-runtime-core build && node ./scripts/build.mjs",
     "prepack": "pnpm run build",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "typecheck": "pnpm --filter @tingrudeng/beta-runtime-core build && tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @tingrudeng/beta-runtime-core build && vitest run"
   },
   "devDependencies": {
+    "@tingrudeng/beta-runtime-core": "workspace:*",
     "esbuild": "^0.25.10"
   }
 }
