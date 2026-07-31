@@ -12,6 +12,11 @@ const repoRoot = path.resolve(
 const reportScriptPath = path.join(repoRoot, "scripts/report-runtime-package-setup.mjs");
 const tempRoots: string[] = [];
 
+function readWorkspacePackageVersion(packageDir: string): string {
+  const packageJsonPath = path.join(repoRoot, "packages", packageDir, "package.json");
+  return JSON.parse(fs.readFileSync(packageJsonPath, "utf8")).version;
+}
+
 function makeTempDir() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-runtime-setup-report-"));
   tempRoots.push(tempDir);
@@ -78,7 +83,9 @@ describe("runtime package setup report", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("@tingrudeng/beta-runtime-core 需要先创建 npm 包名");
-    expect(result.stderr).toContain("@tingrudeng/codex-beta-runtime@0.1.0-beta.2 尚未发布");
+    expect(result.stderr).toContain(
+      `@tingrudeng/codex-beta-runtime@${readWorkspacePackageVersion("codex-beta-runtime")} 尚未发布`,
+    );
   });
 
   it("can emit structured json for automation", () => {
