@@ -1938,6 +1938,39 @@ describe("dispatcher server", () => {
 
     const runningState = stateMod.loadRuntimeState(stateDir);
     const staleAttempt = runningState.taskAttempts[0];
+    const lateResultBody = {
+      attemptId: staleAttempt.attemptId,
+      leaseToken: staleAttempt.leaseToken,
+      protocolVersion: staleAttempt.protocolVersion,
+      traceId: staleAttempt.traceId,
+      idempotencyKey: staleAttempt.idempotencyKey,
+      result: {
+        taskId,
+        workerId: "codex-stale-result-http",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-stale-result-http",
+        repo: "test/repo",
+        defaultBranch: "main",
+        mode: "run",
+        output: "late stale result",
+        generatedAt: "2026-05-12T13:05:19.999Z",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+      },
+    };
+    const preReconcileResult = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-stale-result-http/result",
+      receivedAt: staleAttempt.leaseExpiresAt,
+      body: lateResultBody,
+    });
+    expect(preReconcileResult.status).toBe(409);
+    expect(preReconcileResult.json.error).toMatch(/stale attempt result rejected: .* lease expired/i);
+
     stateMod.saveRuntimeState(stateDir, stateMod.reconcileRuntimeState(runningState, {
       now: "2026-05-12T13:11:00.000Z",
       heartbeatTimeoutMs: 60_000,
@@ -1948,26 +1981,10 @@ describe("dispatcher server", () => {
       method: "POST",
       pathname: "/api/workers/codex-stale-result-http/result",
       body: {
-        attemptId: staleAttempt.attemptId,
-        leaseToken: staleAttempt.leaseToken,
-        protocolVersion: staleAttempt.protocolVersion,
-        traceId: staleAttempt.traceId,
-        idempotencyKey: staleAttempt.idempotencyKey,
+        ...lateResultBody,
         result: {
-          taskId,
-          workerId: "codex-stale-result-http",
-          provider: "codex",
-          pool: "codex",
-          branchName: "ai/codex/task-stale-result-http",
-          repo: "test/repo",
-          defaultBranch: "main",
-          mode: "run",
-          output: "late stale result",
+          ...lateResultBody.result,
           generatedAt: "2026-05-12T13:11:30.000Z",
-          verification: {
-            allPassed: true,
-            commands: [],
-          },
         },
       },
     });

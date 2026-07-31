@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type {
   Assignment,
+  RecordWorkerResultInput,
   RuntimeState,
   Task,
   TaskAttempt,
@@ -29,7 +30,7 @@ import {
   redriveTask,
   reconcileRuntimeState,
   recordReviewDecision,
-  recordWorkerResult,
+  recordWorkerResult as recordWorkerResultImpl,
   registerWorker,
   resumeTaskFromInput,
   saveRuntimeState,
@@ -61,6 +62,16 @@ function activeWorkerEnvelope(state: RuntimeState, taskId: string) {
     throw new Error(`missing active attempt for ${taskId}`);
   }
   return workerEnvelope(attempt);
+}
+
+function recordWorkerResult(
+  state: RuntimeState,
+  input: Omit<RecordWorkerResultInput, "receivedAt"> & { receivedAt?: string },
+) {
+  return recordWorkerResultImpl(state, {
+    ...input,
+    receivedAt: input.receivedAt ?? input.result.generatedAt,
+  });
 }
 
 function claimAndStartTaskForTest(
@@ -598,7 +609,9 @@ describe("dispatcher runtime state (TypeScript)", () => {
       attemptId,
       status: "running",
       startedAt: "2026-05-12T10:00:30.000Z",
+      leaseExpiresAt: "2026-05-12T10:05:30.000Z",
     });
+    expect(state.leases.every((lease) => lease.expiresAt === "2026-05-12T10:05:30.000Z")).toBe(true);
 
     const resultInput = {
       workerId: "codex-attempt-worker",
@@ -1235,6 +1248,8 @@ describe("dispatcher runtime state (TypeScript)", () => {
       failureCode: "attempt_lease_expired",
       endedAt: "2026-05-12T13:11:00.000Z",
     });
+    expect(state.leases).toHaveLength(3);
+    expect(state.leases.every((lease) => lease.releasedAt === "2026-05-12T13:11:00.000Z")).toBe(true);
     expect(state.workers[0]).toMatchObject({
       status: "offline",
       currentTaskId: undefined,
@@ -1360,6 +1375,152 @@ describe("dispatcher runtime state (TypeScript)", () => {
       taskId: "dispatch-1:task-attempt-lease-policy",
       leaseExpiresAt: "2026-05-12T13:00:50.000Z",
     });
+    expect(claimed.state.leases).toHaveLength(3);
+    expect(claimed.state.leases.every((lease) => (
+      lease.expiresAt === "2026-05-12T13:00:50.000Z"
+    ))).toBe(true);
+  });
+
+  it("renews the active attempt and all task resource leases on worker heartbeat", () => {
+    let state = createRunningAttemptState("task-heartbeat-renewal", "codex-heartbeat-renewal");
+
+    state = heartbeatWorker(state, {
+      workerId: "codex-heartbeat-renewal",
+      at: "2026-05-12T13:04:00.000Z",
+    });
+
+    expect(state.taskAttempts[0]).toMatchObject({
+      status: "running",
+      heartbeatAt: "2026-05-12T13:04:00.000Z",
+      leaseExpiresAt: "2026-05-12T13:09:00.000Z",
+    });
+    expect(state.leases).toHaveLength(3);
+    expect(state.leases).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        resourceType: "assignment",
+        renewedAt: "2026-05-12T13:04:00.000Z",
+        expiresAt: "2026-05-12T13:09:00.000Z",
+      }),
+      expect.objectContaining({
+        resourceType: "repo",
+        renewedAt: "2026-05-12T13:04:00.000Z",
+        expiresAt: "2026-05-12T13:09:00.000Z",
+      }),
+      expect.objectContaining({
+        resourceType: "branch",
+        renewedAt: "2026-05-12T13:04:00.000Z",
+        expiresAt: "2026-05-12T13:09:00.000Z",
+      }),
+    ]));
+
+    state = reconcileRuntimeState(state, {
+      now: "2026-05-12T13:05:30.000Z",
+      heartbeatTimeoutMs: 60_000,
+    });
+    expect(state.taskAttempts[0]?.status).toBe("running");
+    expect(state.tasks[0]?.status).toBe("in_progress");
+  });
+
+  it("does not revive an attempt when heartbeat arrives at the lease expiry boundary", () => {
+    let state = createRunningAttemptState("task-heartbeat-expired", "codex-heartbeat-expired");
+    const originalExpiry = state.taskAttempts[0]?.leaseExpiresAt;
+
+    state = heartbeatWorker(state, {
+      workerId: "codex-heartbeat-expired",
+      at: originalExpiry,
+    });
+    expect(state.taskAttempts[0]).toMatchObject({
+      status: "running",
+      leaseExpiresAt: originalExpiry,
+    });
+
+    state = reconcileRuntimeState(state, {
+      now: originalExpiry,
+      heartbeatTimeoutMs: 60_000,
+    });
+    expect(state.taskAttempts[0]).toMatchObject({
+      status: "expired",
+      failureCode: "attempt_lease_expired",
+    });
+    expect(state.tasks[0]?.status).toBe("ready");
+  });
+
+  it("rejects an expired result before reconciliation can redrive the attempt", () => {
+    const state = createRunningAttemptState("task-expired-result-fence", "codex-expired-result");
+    const attempt = state.taskAttempts[0]!;
+
+    expect(() => recordWorkerResult(state, {
+      workerId: "codex-expired-result",
+      receivedAt: attempt.leaseExpiresAt!,
+      ...workerEnvelope(attempt),
+      result: {
+        taskId: state.tasks[0]!.id,
+        workerId: "codex-expired-result",
+        provider: "codex",
+        pool: "codex",
+        branchName: "ai/codex/task-expired-result-fence",
+        repo: "TingRuDeng/openclaw-multi-agent-mvp",
+        defaultBranch: "main",
+        mode: "run",
+        output: "late result",
+        generatedAt: "2026-05-12T13:04:59.999Z",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+      },
+    })).toThrow(/stale attempt result rejected: .* lease expired/i);
+  });
+
+  it("uses dispatcher receipt time for result state changes while retaining worker generatedAt as metadata", () => {
+    const state = createRunningAttemptState("task-result-receipt-time", "codex-result-receipt-time");
+    const task = state.tasks[0]!;
+    const receivedAt = "2026-05-12T13:01:00.000Z";
+    const generatedAt = "2000-01-01T00:00:00.000Z";
+
+    const recorded = recordWorkerResult(state, {
+      workerId: "codex-result-receipt-time",
+      receivedAt,
+      ...activeWorkerEnvelope(state, task.id),
+      result: {
+        taskId: task.id,
+        workerId: "codex-result-receipt-time",
+        provider: "codex",
+        pool: "codex",
+        branchName: task.branchName,
+        repo: task.repo,
+        defaultBranch: task.defaultBranch,
+        mode: "run",
+        output: "done",
+        generatedAt,
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+      },
+      changedFiles: ["src/result.ts"],
+      pullRequest: {
+        number: 42,
+        url: "https://github.com/TingRuDeng/openclaw-multi-agent-mvp/pull/42",
+        headBranch: task.branchName,
+        baseBranch: task.defaultBranch,
+      },
+    });
+
+    expect(recorded.updatedAt).toBe(receivedAt);
+    expect(recorded.workers[0]?.lastHeartbeatAt).toBe(receivedAt);
+    expect(recorded.taskAttempts[0]).toMatchObject({
+      status: "succeeded",
+      heartbeatAt: receivedAt,
+      endedAt: receivedAt,
+    });
+    expect(recorded.leases.every((lease) => lease.releasedAt === receivedAt)).toBe(true);
+    expect(recorded.pullRequests[0]).toMatchObject({
+      createdAt: receivedAt,
+      updatedAt: receivedAt,
+    });
+    expect(recorded.events.slice(state.events.length).every((event) => event.at === receivedAt)).toBe(true);
+    expect(recorded.reviews[0]?.latestWorkerResult?.generatedAt).toBe(generatedAt);
   });
 
   it("uses task-level heartbeat timeout when expiring a running attempt", () => {

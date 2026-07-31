@@ -249,10 +249,14 @@ Current endpoint families:
 
 ### Generic worker endpoints
 
+- Lease acquisition, renewal, expiry admission, and stale-result fencing use the dispatcher-owned request receipt timestamp. Client-provided `at` or result `generatedAt` values cannot extend an expired lease.
 - `POST /api/workers/register`
   - Register or refresh a generic worker.
 - `POST /api/workers/:workerId/heartbeat`
   - Update worker heartbeat.
+  - Worker start and heartbeat renew the active attempt plus its assignment / repo / branch / optional session leases in the same serialized state mutation while ownership is still valid.
+  - Attempt and task resource lease expiry use the task-level `terminationPolicy.attemptLeaseTimeoutMs` when configured.
+  - A heartbeat at or after `leaseExpiresAt` does not revive the attempt or reacquire expired resource leases.
 - `POST /api/workers/:workerId/offline`
   - Best-effort operator/runtime path to mark a worker `offline` immediately instead of waiting for heartbeat lease expiry.
   - Current request body may include:
@@ -276,6 +280,7 @@ Current endpoint families:
   - Move task from `assigned` to `in_progress`.
   - Required v1 envelope fields are `attemptId`, `leaseToken`, `protocolVersion`, `traceId`, and `idempotencyKey`.
   - Dispatcher validates the complete v1 envelope against the active attempt and rejects missing fields or stale attempt data.
+  - Dispatcher rejects an attempt at or after `leaseExpiresAt`, even when reconciliation has not run yet.
 - `POST /api/workers/:workerId/result`
   - Submit execution result, changed files, and optional PR metadata.
   - Required v1 envelope fields follow the same validation rule as `start-task`.
@@ -290,6 +295,7 @@ Current endpoint families:
     - `branchName`
     - `mode`
   - Dispatcher will reject mismatched worker metadata with `409`.
+  - Dispatcher also requires a live assignment lease owned by the same worker and rejects an expired attempt before any task, review, artifact, or worker state can change.
   - Dispatcher accepts an exact replay after a `succeeded` or `failed` attempt as an idempotent success when the complete envelope, canonical result, PR metadata, and ArtifactBundle match the recorded result. A changed replay returns `409 idempotency replay mismatch`; other terminal historical attempts remain stale and are rejected with `409`.
   - Request-body validation now rejects malformed result payloads with `400`.
   - `result` may now include additive structured worker evidence for dispatcher persistence:

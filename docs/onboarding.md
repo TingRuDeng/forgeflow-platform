@@ -300,7 +300,7 @@ npm install -g @tingrudeng/worker-review-orchestrator-cli
 
 控制层 CLI 当前推荐能力：
 
-- `dispatch` / `dispatch-task` 支持 `--state-dir`，在本机无法直接发 HTTP 时可走本地 dispatcher bridge
+- `dispatch` / `dispatch-task` / `decide` 支持 `--state-dir`，在本机无法直接发 HTTP 时可走本地 dispatcher bridge；review decision 仍执行 dispatcher 权威 route，并写入默认 SQLite 真相源
 - `watch --summary` / `inspect --summary` 会统一输出 review decision、failure summary、can-redrive、latest progress、lineage
 - 直接 dispatch 到 `pool=trae` 且显式 `targetWorkerId` 时，默认会检查 worker 在线；`redrive` 属于显式 continuation/rework 入口，当前默认允许排队生成后续任务
 

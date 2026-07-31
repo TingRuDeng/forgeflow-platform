@@ -97,6 +97,7 @@ type DispatcherRequestInput = {
   stateDir: string;
   method: string;
   pathname: string;
+  receivedAt?: string;
   query?: Record<string, string>;
   body?: Record<string, any>;
   authHeader?: string;
@@ -1116,6 +1117,12 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
     clientAddress,
     internalCall,
   } = input;
+  // Network and state-dir adapters always provide a dispatcher-owned timestamp.
+  // The fallbacks keep direct legacy test harnesses deterministic.
+  const receivedAt = input.receivedAt
+    || (typeof body.at === "string" ? body.at : "")
+    || (typeof body.result?.generatedAt === "string" ? body.result.generatedAt : "")
+    || nowIso();
 
   const authResult = createAuthMiddleware({ method, pathname, authHeader, clientAddress, internalCall });
   if ("status" in authResult) {
@@ -1386,8 +1393,11 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
           return createJsonResponse(403, { error: "forbidden" });
         }
         const result = await withStateAsync(stateDir, (state) => {
-          const nextState = reconcileRuntimeState(registerWorker(state, validatedBody), {
-            now: validatedBody.at,
+          const nextState = reconcileRuntimeState(registerWorker(state, {
+            ...validatedBody,
+            at: receivedAt,
+          }), {
+            now: receivedAt,
           });
           return {
             state: nextState,
@@ -1412,9 +1422,9 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
       const result = await withStateAsync(stateDir, (state) => {
         const nextState = reconcileRuntimeState(heartbeatWorker(state, {
           workerId: decodeURIComponent(heartbeatMatch[1]),
-          at: body.at,
+          at: receivedAt,
         }), {
-          now: body.at,
+          now: receivedAt,
         });
         return {
           state: nextState,
@@ -1433,7 +1443,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
       const result = await withStateAsync(stateDir, (state) => ({
         state: markWorkerOffline(state, {
           workerId: decodeURIComponent(offlineMatch[1]),
-          at: body.at,
+          at: receivedAt,
           reason: typeof body.reason === "string" ? body.reason : null,
         }),
       }));
@@ -1463,7 +1473,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
     if (claimMatch) {
       const payload = await withStateAsync(stateDir, (state) => claimAssignedTaskForWorker(state, {
         workerId: decodeURIComponent(claimMatch[1]),
-        at: body.at,
+        at: receivedAt,
       }));
       return createJsonResponse(200, payload.assignment ?? { assignment: null });
     }
@@ -1483,7 +1493,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
             protocolVersion: validatedBody.protocolVersion,
             traceId: validatedBody.traceId,
             idempotencyKey: validatedBody.idempotencyKey,
-            at: validatedBody.at,
+            at: receivedAt,
           }),
         }));
         return createJsonResponse(200, {
@@ -1507,6 +1517,7 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
         const result = await withStateAsync(stateDir, (state) => {
           const recordedState = recordWorkerResult(state, {
             workerId: decodeURIComponent(resultMatch[1]),
+            receivedAt,
             attemptId: validatedBody.attemptId,
             leaseToken: validatedBody.leaseToken,
             protocolVersion: validatedBody.protocolVersion,
@@ -1860,6 +1871,7 @@ export async function startDispatcherServer(input: { host?: string; port?: numbe
         stateDir,
         method,
         pathname,
+        receivedAt: nowIso(),
         query: Object.fromEntries(requestUrl.searchParams.entries()),
         body,
         authHeader,

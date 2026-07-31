@@ -18,9 +18,16 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
-type CurlImpl = (url: string, init: { method?: string; body?: string; timeoutMs?: number }) => Promise<unknown>;
+type CurlRequestInit = {
+  method?: string;
+  body?: string;
+  timeoutMs?: number;
+  headers?: Record<string, string>;
+};
 
-async function defaultCurlRequest(url: string, init: { method?: string; body?: string; timeoutMs?: number }): Promise<unknown> {
+type CurlImpl = (url: string, init: CurlRequestInit) => Promise<Record<string, unknown>>;
+
+async function defaultCurlRequest(url: string, init: CurlRequestInit): Promise<Record<string, unknown>> {
   const method = init.method || "GET";
   const args = ["-sS", "-X", method];
 
@@ -30,7 +37,10 @@ async function defaultCurlRequest(url: string, init: { method?: string; body?: s
 
   if (init.body) {
     args.push("-d", init.body);
-    args.push("-H", "Content-Type: application/json");
+  }
+
+  for (const [name, value] of Object.entries(init.headers ?? {})) {
+    args.push("-H", `${name}: ${value}`);
   }
 
   args.push("-w", "\n%{http_code}");
@@ -44,11 +54,24 @@ async function defaultCurlRequest(url: string, init: { method?: string; body?: s
     const statusCode = lastNewline >= 0 ? parseInt(output.slice(lastNewline + 1), 10) : 0;
 
     if (statusCode < 200 || statusCode >= 300) {
-      const json = body ? JSON.parse(body) : {};
-      throw new Error(json.message || json.error || `HTTP ${statusCode}`);
+      let json: Record<string, unknown> = {};
+      try {
+        json = body ? JSON.parse(body) as Record<string, unknown> : {};
+      } catch {
+        // Preserve a stable HTTP error when an upstream proxy returns HTML or text.
+      }
+      throw new Error(
+        (typeof json.message === "string" && json.message)
+        || (typeof json.error === "string" && json.error)
+        || `HTTP ${statusCode}`,
+      );
     }
 
-    return body ? JSON.parse(body) : {};
+    try {
+      return body ? JSON.parse(body) as Record<string, unknown> : {};
+    } catch {
+      throw new Error("invalid JSON response");
+    }
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`curl fallback failed: ${error.message}`);
@@ -68,10 +91,9 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
   const curlImpl: CurlImpl = options.curlImpl || defaultCurlRequest;
 
   async function request(pathname: string, init: JsonHttpRequestOptions = {}) {
-    const controller = new AbortController();
     const timeoutMs = Number(init.timeoutMs || defaultTimeoutMs);
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const url = `${base}${pathname}`;
+    const method = (init.method || "GET").toUpperCase();
 
     const authToken = typeof process !== "undefined" ? process.env.DISPATCHER_API_TOKEN : undefined;
     const configToken = typeof process !== "undefined" && !authToken ? (await import("./config.js")).getDispatcherToken() : undefined;
@@ -79,33 +101,41 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
     if (init.body) headers["content-type"] = "application/json";
     if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
     else if (configToken) headers["Authorization"] = `Bearer ${configToken}`;
+    const controller = new AbortController();
+    let timeoutId!: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        const error = new Error(`request timeout: ${pathname}`);
+        error.name = "AbortError";
+        reject(error);
+      }, timeoutMs);
+    });
+    let response: Response;
     try {
-      const response = await fetchImpl(url, {
-        method: init.method || "GET",
-        headers,
-        body: init.body ? JSON.stringify(init.body) : undefined,
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
-      const text = await response.text();
-      const json = text ? JSON.parse(text) : {};
-      if (!response.ok) {
-        throw new Error(json.message || json.error || `HTTP ${response.status}`);
-      }
-      return json;
+      response = await Promise.race([
+        fetchImpl(url, {
+          method,
+          headers,
+          body: init.body ? JSON.stringify(init.body) : undefined,
+          signal: controller.signal,
+        }),
+        timeoutPromise,
+      ]);
     } catch (error) {
       clearTimeout(timeoutId);
       if (error instanceof Error && error.name === "AbortError") {
         throw new Error(`request timeout: ${pathname}`);
       }
 
-      if (useLocalFallback) {
+      const canRetryWithCurl = useLocalFallback && ["GET", "HEAD", "OPTIONS"].includes(method);
+      if (canRetryWithCurl) {
         try {
           return await curlImpl(url, {
-            method: init.method,
+            method,
             body: init.body ? JSON.stringify(init.body) : undefined,
             timeoutMs,
+            headers,
           });
         } catch (curlError) {
           throw curlError instanceof Error ? curlError : new Error(String(curlError));
@@ -114,6 +144,37 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
 
       throw error instanceof Error ? error : new Error(String(error));
     }
+
+    let text: string;
+    try {
+      text = await Promise.race([response.text(), timeoutPromise]);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(`request timeout: ${pathname}`);
+      }
+      throw error instanceof Error ? error : new Error(String(error));
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    let json: Record<string, unknown> = {};
+    if (text) {
+      try {
+        json = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        throw new Error(`invalid JSON response: ${pathname}`);
+      }
+    }
+    if (!response.ok) {
+      throw new Error(
+        (typeof json.message === "string" && json.message)
+        || (typeof json.error === "string" && json.error)
+        || `HTTP ${response.status}`,
+      );
+    }
+    return json;
   }
 
   return { request };

@@ -170,6 +170,7 @@ describe("dispatcher runtime state", () => {
 
     state = mod.recordWorkerResult(state, {
       workerId: "codex-mac-mini",
+      receivedAt: "2026-03-16T10:02:00.000Z",
       ...activeWorkerEnvelope(state, dispatch.taskIds[0]),
       result: {
         taskId: dispatch.taskIds[0],
@@ -1100,6 +1101,7 @@ describe("dispatcher runtime state", () => {
 
     state = mod.recordWorkerResult(state, {
       workerId: "codex-submit-review",
+      receivedAt: "2026-03-17T10:05:00.000Z",
       ...activeWorkerEnvelope(state, dispatch.taskIds[0]),
       result: {
         taskId: dispatch.taskIds[0],
@@ -1219,6 +1221,7 @@ describe("dispatcher runtime state", () => {
 
     state = mod.recordWorkerResult(state, {
       workerId: "codex-submit-fail",
+      receivedAt: "2026-03-17T10:05:00.000Z",
       ...activeWorkerEnvelope(state, dispatch.taskIds[0]),
       result: {
         taskId: dispatch.taskIds[0],
@@ -1332,6 +1335,7 @@ describe("dispatcher runtime state", () => {
 
     state = mod.recordWorkerResult(state, {
       workerId: "codex-review-sync",
+      receivedAt: "2026-03-17T10:05:00.000Z",
       ...activeWorkerEnvelope(state, taskId),
       result: {
         taskId,

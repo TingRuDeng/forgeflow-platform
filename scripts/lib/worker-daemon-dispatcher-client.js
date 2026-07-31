@@ -20,6 +20,7 @@ export function createStateDirDispatcherClient(stateDir) {
                     stateDir: input.stateDir,
                     method: input.method,
                     pathname: input.pathname,
+                    receivedAt: new Date().toISOString(),
                     body: input.body,
                     clientAddress: "127.0.0.1",
                     internalCall: input.internalCall ?? true,

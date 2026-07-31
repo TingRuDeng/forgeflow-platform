@@ -8,6 +8,7 @@ import {
 import {
   DEFAULT_LEASE_TTL_MS,
   acquireLease,
+  getActiveLease,
   listActiveLeases,
   reclaimExpiredLeases,
   releaseLease,
@@ -552,6 +553,7 @@ export interface WorkerResult {
 
 export interface RecordWorkerResultInput {
   workerId: string;
+  receivedAt: string;
   attemptId?: string;
   leaseToken?: string;
   protocolVersion?: string;
@@ -1432,6 +1434,7 @@ function assertActiveAttemptLease(input: {
   traceId?: string;
   idempotencyKey?: string;
   operation?: string;
+  at?: string;
 }): void {
   const declaresV1Envelope = Boolean(input.protocolVersion || input.traceId || input.idempotencyKey);
   const operation = input.operation ?? "write";
@@ -1474,6 +1477,9 @@ function assertActiveAttemptLease(input: {
   }
   if (input.idempotencyKey && input.idempotencyKey !== activeAttempt.idempotencyKey) {
     throw new Error(`idempotency key mismatch: ${input.taskId}`);
+  }
+  if (input.at && isAttemptLeaseExpired(activeAttempt, input.at)) {
+    throw new Error(`stale attempt ${operation} rejected: ${activeAttempt.attemptId} lease expired`);
   }
 }
 
@@ -1698,7 +1704,7 @@ function acquireTaskResourceLeases(
       ownerId: workerId,
       ownerToken: input.ownerToken,
       at,
-      ttlMs: DEFAULT_LEASE_TTL_MS,
+      ttlMs: resolveAttemptLeaseTimeoutMs(task),
       metadata: input.metadata,
     });
 
@@ -1729,6 +1735,45 @@ function acquireTaskResourceLeases(
   return {
     state: nextState,
     acquired: true,
+  };
+}
+
+function renewTaskResourceLeases(
+  state: RuntimeState,
+  task: Task,
+  workerId: string,
+  at: string,
+): RuntimeState | null {
+  const leaseInputs = buildTaskResourceLeaseInputs(task, workerId);
+  const currentLeases = state.leases ?? [];
+  const ownsEveryLease = leaseInputs.every((input) => {
+    const lease = getActiveLease(currentLeases, input.resourceType, input.resourceId, at);
+    return lease?.ownerId === workerId && lease.ownerToken === input.ownerToken;
+  });
+  if (!ownsEveryLease) {
+    return null;
+  }
+
+  let renewedLeases = currentLeases;
+  for (const input of leaseInputs) {
+    const result = acquireLease(renewedLeases, {
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      ownerId: workerId,
+      ownerToken: input.ownerToken,
+      at,
+      ttlMs: resolveAttemptLeaseTimeoutMs(task),
+      metadata: input.metadata,
+    });
+    if (!result.acquired) {
+      return null;
+    }
+    renewedLeases = result.leases;
+  }
+
+  return {
+    ...state,
+    leases: renewedLeases,
   };
 }
 
@@ -1923,7 +1968,7 @@ function isAttemptLeaseExpired(attempt: TaskAttempt | null, at: string): boolean
   // attempt lease 是 worker 执行尝试的真实占用边界，过期后必须进入可审计恢复路径。
   const leaseExpiresAt = Date.parse(attempt?.leaseExpiresAt ?? "");
   const now = Date.parse(at);
-  return Number.isFinite(leaseExpiresAt) && Number.isFinite(now) && now > leaseExpiresAt;
+  return Number.isFinite(leaseExpiresAt) && Number.isFinite(now) && now >= leaseExpiresAt;
 }
 
 function expireTaskAttempt(state: RuntimeState, attempt: TaskAttempt, at: string): RuntimeState {
@@ -2060,9 +2105,6 @@ function reconcileExpiredRunningAttempts(state: RuntimeState, options: Reconcile
     if (!worker || !assignment || !attempt || !isAttemptLeaseExpired(attempt, at)) {
       continue;
     }
-    if (resolveWorkerStatus(worker, options, task) !== "offline") {
-      continue;
-    }
     nextState = appendEvent(expireTaskAttempt(nextState, attempt, at), {
       taskId: task.id,
       type: "attempt_expired",
@@ -2072,6 +2114,13 @@ function reconcileExpiredRunningAttempts(state: RuntimeState, options: Reconcile
         failureCode: ATTEMPT_LEASE_EXPIRED_CODE,
       },
     });
+    nextState = releaseTaskResourceLeases(
+      nextState,
+      task.id,
+      worker.id,
+      at,
+      ATTEMPT_LEASE_EXPIRED_CODE,
+    );
     const attemptsForTask = (nextState.taskAttempts ?? []).filter((candidate) => candidate.taskId === task.id).length;
     nextState = attemptsForTask < resolveMaxTaskAttempts(options, task)
       ? markTaskReadyForRetry(nextState, { task, assignment, worker, attempt, at })
@@ -2275,7 +2324,7 @@ export function heartbeatWorker(state: RuntimeState, input: HeartbeatWorkerInput
     ? state.updatedAt
     : heartbeatAt;
 
-  return {
+  let nextState: RuntimeState = {
     ...state,
     updatedAt,
     workers: upsertWorker(state.workers, {
@@ -2284,6 +2333,34 @@ export function heartbeatWorker(state: RuntimeState, input: HeartbeatWorkerInput
       status: hasActiveTask ? "busy" : (previousStatus === "offline" ? "idle" : previousStatus),
     }),
   };
+
+  if (!worker.currentTaskId) {
+    return nextState;
+  }
+  const task = nextState.tasks.find((candidate) => candidate.id === worker.currentTaskId);
+  const activeAttempt = task ? findActiveTaskAttempt(nextState, task.id) : null;
+  if (
+    !task
+    || !activeAttempt
+    || activeAttempt.workerId !== worker.id
+    || isAttemptLeaseExpired(activeAttempt, heartbeatAt)
+  ) {
+    return nextState;
+  }
+
+  const renewedState = renewTaskResourceLeases(nextState, task, worker.id, heartbeatAt);
+  if (!renewedState) {
+    return nextState;
+  }
+  const leaseExpiresAt = new Date(
+    Date.parse(heartbeatAt) + resolveAttemptLeaseTimeoutMs(task),
+  ).toISOString();
+  nextState = updateActiveTaskAttempt(renewedState, task.id, (attempt) => ({
+    ...attempt,
+    heartbeatAt,
+    leaseExpiresAt,
+  }));
+  return nextState;
 }
 
 export function createDispatch(state: RuntimeState, input: CreateDispatchInput): CreateDispatchResult {
@@ -3167,6 +3244,8 @@ export function beginTaskForWorker(state: RuntimeState, input: BeginTaskInput): 
     protocolVersion: input.protocolVersion,
     traceId: input.traceId,
     idempotencyKey: input.idempotencyKey,
+    operation: "start",
+    at,
   });
 
   if (task.status === "in_progress") {
@@ -3180,11 +3259,15 @@ export function beginTaskForWorker(state: RuntimeState, input: BeginTaskInput): 
   if (!leaseResult.acquired) {
     throw new Error(`assignment lease not available: ${input.taskId}`);
   }
+  const leaseExpiresAt = new Date(
+    Date.parse(at) + resolveAttemptLeaseTimeoutMs(task),
+  ).toISOString();
   let nextState = updateActiveTaskAttempt(leaseResult.state, input.taskId, (attempt) => ({
     ...attempt,
     status: "running",
     startedAt: attempt.startedAt ?? at,
     heartbeatAt: at,
+    leaseExpiresAt,
   }));
   nextState = appendEvent(nextState, {
     taskId: input.taskId,
@@ -3241,6 +3324,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   if (isIdempotentWorkerResultReplay(state, task, input)) {
     return state;
   }
+  const receivedAt = normalizeTimestamp(input.receivedAt, nowIso());
   assertActiveAttemptLease({
     state,
     taskId: task.id,
@@ -3251,14 +3335,24 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     traceId: input.traceId,
     idempotencyKey: input.idempotencyKey,
     operation: "result",
+    at: receivedAt,
   });
   if (task.assignedWorkerId !== input.workerId) {
     throw new Error(`task not assigned to worker: ${input.workerId}`);
   }
-  const activeAssignmentLease = listActiveLeases(state.leases ?? [], input.result.generatedAt ?? nowIso())
+  const activeAttempt = findActiveTaskAttempt(state, task.id);
+  const activeAssignmentLease = listActiveLeases(state.leases ?? [], receivedAt)
     .find((lease) => lease.resourceType === "assignment" && lease.resourceId === task.id);
-  if (activeAssignmentLease && activeAssignmentLease.ownerId !== input.workerId) {
+  if (
+    !activeAssignmentLease
+  ) {
+    throw new Error(`stale attempt result rejected: ${input.attemptId ?? task.id} assignment lease expired`);
+  }
+  if (activeAssignmentLease.ownerId !== input.workerId) {
     throw new Error(`assignment lease owned by another worker: ${activeAssignmentLease.ownerId}`);
+  }
+  if (activeAssignmentLease.ownerToken !== activeAttempt?.leaseToken) {
+    throw new Error(`lease token mismatch: ${task.id}`);
   }
   if (!["assigned", "in_progress"].includes(task.status)) {
     throw new Error(`task not executable: ${task.id}`);
@@ -3266,7 +3360,6 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   const currentReview = state.reviews.find((candidate) => candidate.taskId === task.id);
   const canonicalResult = buildCanonicalWorkerResult(task, input.workerId, input.result);
   const canonicalPullRequest = canonicalizePullRequest(task, input.pullRequest);
-  const activeAttempt = findActiveTaskAttempt(state, task.id);
   const hasExplicitArtifactBundle = Boolean(input.artifactBundle ?? input.result.artifactBundle);
   if (!activeAttempt && hasExplicitArtifactBundle) {
     throw new Error(`active attempt not found for task: ${task.id}`);
@@ -3277,7 +3370,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
       actor: canonicalResult.waitingForInput.requestedBy ?? input.workerId,
       reason: canonicalResult.waitingForInput.reason ?? canonicalResult.output,
       resumePayloadSchema: canonicalResult.waitingForInput.resumePayloadSchema,
-      at: canonicalResult.generatedAt,
+      at: receivedAt,
     });
   }
   const artifactBundle = activeAttempt
@@ -3318,7 +3411,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     nextState = appendEvent(nextState, {
       taskId: task.id,
       type: "status_changed",
-      at: canonicalResult.generatedAt,
+      at: receivedAt,
       payload: {
         from: "assigned",
         to: "in_progress",
@@ -3328,7 +3421,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   nextState = appendEvent(nextState, {
     taskId: task.id,
     type: "status_changed",
-    at: canonicalResult.generatedAt,
+    at: receivedAt,
     payload: {
       from: "in_progress",
       to: nextStatus,
@@ -3342,7 +3435,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
 
   nextState = {
     ...nextState,
-    updatedAt: canonicalResult.generatedAt,
+    updatedAt: receivedAt,
     tasks: upsertTask(nextState.tasks, {
       ...task,
       status: nextStatus,
@@ -3359,7 +3452,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
       ...worker,
       status: "idle",
       currentTaskId: undefined,
-      lastHeartbeatAt: canonicalResult.generatedAt,
+      lastHeartbeatAt: receivedAt,
     }),
     reviews: upsertReview(nextState.reviews, {
       taskId: task.id,
@@ -3378,7 +3471,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     nextState = appendEvent(nextState, {
       taskId: task.id,
       type: "review_risk_flagged",
-      at: canonicalResult.generatedAt,
+      at: receivedAt,
       payload: {
         level: riskAssessment.level,
         changedFileCount: riskAssessment.changedFileCount,
@@ -3400,8 +3493,8 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
         baseBranch: canonicalPullRequest.baseBranch,
         title: task.title,
         status: "opened",
-        createdAt: canonicalResult.generatedAt,
-        updatedAt: canonicalResult.generatedAt,
+        createdAt: receivedAt,
+        updatedAt: receivedAt,
       }),
     };
   }
@@ -3413,7 +3506,7 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
     }, {
       taskId: task.id,
       type: "artifact_bundle_created",
-      at: artifactBundle.createdAt ?? canonicalResult.generatedAt,
+      at: receivedAt,
       payload: {
         attemptId: artifactBundle.attemptId,
         bundleId: artifactBundle.bundleId,
@@ -3424,14 +3517,14 @@ export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResul
   nextState = updateActiveTaskAttempt(nextState, task.id, (attempt) => ({
     ...attempt,
     status: canonicalResult.verification.allPassed ? "succeeded" : "failed",
-    heartbeatAt: canonicalResult.generatedAt,
-    endedAt: canonicalResult.generatedAt,
+    heartbeatAt: receivedAt,
+    endedAt: receivedAt,
     failureCode: terminalFailure?.code,
     failureMessage: terminalFailure?.message,
     artifactBundleId: artifactBundle?.bundleId ?? attempt.artifactBundleId,
   }));
 
-  return releaseTaskResourceLeases(nextState, task.id, input.workerId, canonicalResult.generatedAt);
+  return releaseTaskResourceLeases(nextState, task.id, input.workerId, receivedAt);
 }
 
 export function recordReviewDecision(state: RuntimeState, input: RecordReviewDecisionInput): RuntimeState {

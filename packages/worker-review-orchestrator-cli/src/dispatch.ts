@@ -645,6 +645,15 @@ export async function runDispatch(options: DispatchOptions): Promise<DispatchRes
       pathname: "/api/dispatches",
       body: payload,
     });
+    if (response.status < 200 || response.status >= 300) {
+      const responseBody = response.json as { error?: unknown; message?: unknown } | undefined;
+      const message = typeof responseBody?.message === "string"
+        ? responseBody.message
+        : typeof responseBody?.error === "string"
+          ? responseBody.error
+          : `HTTP ${response.status}`;
+      throw new Error(message);
+    }
     dispatchResult = response.json as DispatchResult;
   } else {
     const client = createJsonHttpClient(options.dispatcherUrl!, {
@@ -654,7 +663,7 @@ export async function runDispatch(options: DispatchOptions): Promise<DispatchRes
     dispatchResult = await client.request("/api/dispatches", {
       method: "POST",
       body: payload,
-    }) as DispatchResult;
+    }) as unknown as DispatchResult;
   }
 
   verifyDispatchAssignment(dispatchResult, options.targetWorkerId);

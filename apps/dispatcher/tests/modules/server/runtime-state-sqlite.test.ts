@@ -787,6 +787,57 @@ describe("runtime-state-sqlite", () => {
     );
   });
 
+  it("reads the latest committed snapshot, projection, and audit event from an active WAL", () => {
+    const stateDir = makeTempDir();
+    const initialState = createTestState();
+    saveRuntimeState(stateDir, initialState);
+
+    const dbPath = path.join(stateDir, "runtime-state.db");
+    const keeper = new DatabaseSync(dbPath);
+    try {
+      keeper.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;");
+      const updatedState: RuntimeState = {
+        ...initialState,
+        sequence: 2,
+        workers: [
+          ...initialState.workers,
+          {
+            id: "active-wal-worker",
+            pool: "codex",
+            hostname: "active-wal-host",
+            labels: ["wal"],
+            repoDir: "/repos/active-wal",
+            status: "idle",
+            lastHeartbeatAt: "2026-04-01T10:05:00.000Z",
+          },
+        ],
+        events: [
+          ...initialState.events,
+          {
+            taskId: "dispatch-1:task-1",
+            type: "active_wal_committed",
+            at: "2026-04-01T10:05:00.000Z",
+            payload: { revision: 2 },
+          },
+        ],
+      };
+      saveRuntimeState(stateDir, updatedState);
+
+      expect(fs.existsSync(`${dbPath}-wal`)).toBe(true);
+      expect(loadRuntimeState(stateDir).workers).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "active-wal-worker" }),
+      ]));
+      expect(sqliteStore.readStructuredRuntimeState(stateDir).workers).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "active-wal-worker" }),
+      ]));
+      expect(readRuntimeAuditEvents(stateDir, { limit: 10 }).events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: "active_wal_committed" }),
+      ]));
+    } finally {
+      keeper.close();
+    }
+  });
+
   it("retains only the configured number of recent snapshots", () => {
     const stateDir = makeTempDir();
     process.env.DISPATCHER_SQLITE_SNAPSHOT_RETENTION = "2";
