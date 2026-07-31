@@ -225,6 +225,10 @@ Current additive review-side structured fields:
   - `mustFix[]`
   - `canRedrive`
   - `redriveStrategy`
+  - `reviewedFreshness`
+    - `attemptId`
+    - `artifactBundleId`
+    - `commitSha`（可选）
 - `riskAssessment`
   - `level`（`low` / `needs_human_attention` / `too_large_for_auto_review`）
   - `changedFileCount`
@@ -233,7 +237,7 @@ Current additive review-side structured fields:
   - `reasons[]`
   - 由 dispatcher 在任务进入 `review` 时确定性计算，并持久化到 `reviews.risk_assessment_json`（SQLite 结构化投影列）。
 
-`reviewMaterial` is retained after a final review decision so the control layer keeps the original review snapshot alongside the structured evidence.
+`reviewMaterial` is retained after a final review decision so the control layer keeps the original review snapshot alongside the structured evidence. 成功 worker result 进入 review 时，`reviewMaterial.freshness` 保存 canonical `attemptId`、`artifactBundleId` 和可选 `commitSha`；最终决策会把同一 tuple 复制到 `evidence.reviewedFreshness`。
 
 Pull request records track review-side Git metadata:
 
@@ -283,8 +287,9 @@ Current enforced ownership path verified in code:
 
 HITL interrupt/resume 字段：
 
-- `tasks.waiting_for_input_json` 保存 `waitingForInput`，包括 requestedBy、reason、requestedAt
+- `tasks.waiting_for_input_json` 保存 `waitingForInput`，包括 `requestId`、可选 `attemptId` / `sourceSessionId` / `expiresAt`、requestedBy、reason、requestedAt 和可选 resume schema
 - `tasks.resume_payload_json` 保存 resume 时写入的 `resumePayload`
+- `tasks.last_resolved_input_json` 保存最近已处理输入的 request/attempt identity、resolvedBy、resolvedAt 和 payload，用于网络重试幂等判断
 - `waiting_for_input` 是非终态任务状态；resume 后任务回到 `ready`
 
 ## 3. Review Memory Store

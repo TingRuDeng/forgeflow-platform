@@ -30,7 +30,7 @@ describe("codex runtime core wrappers", () => {
     expect(typeof runWorkerDaemon).toBe("function");
     expect(typeof runWorkerDaemonCycle).toBe("function");
     expect(typeof prepareTaskWorktree).toBe("function");
-    expect(safeTaskDirName("task/one")).toBe("task-one");
+    expect(safeTaskDirName("task/one")).toMatch(/^task-one-[0-9a-f]{12}$/);
   });
 
   it("builds codex launch command through the thin wrapper", () => {

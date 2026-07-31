@@ -13,9 +13,13 @@ import type {
 } from './taskHitlSchema';
 
 interface WaitingForInput {
+  requestId?: string;
+  attemptId?: string;
+  sourceSessionId?: string;
   requestedBy?: string;
   reason?: string;
   requestedAt?: string;
+  expiresAt?: string;
   resumePayloadSchema?: ResumePayloadSchema;
 }
 

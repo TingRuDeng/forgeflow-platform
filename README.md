@@ -78,7 +78,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - `worker-daemon` 不再把 `submitResult` 重试耗尽、`git push` 失败或自动 PR 创建失败记成“completed”；这些路径现在都会保留在显式 failed 语义里。每个 task 只由 shared daemon cycle 维持一条 single-flight heartbeat，覆盖执行和结果回写重试；执行超时或 daemon 收到终止信号时会终止完整子进程树，避免遗留 provider / verification 进程。
 - `worker-daemon` 子进程现在使用 env allowlist，而不是继承完整 `process.env`；自动 PR 创建也改成显式 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - `forgeflow-review-orchestrator` 现在补齐了阶段二控制层闭环：`dispatch/dispatch-task/watch/inspect/decide` 都支持 `--state-dir` 本地 dispatcher bridge，mutation 仍经过 dispatcher 权威状态机并写入默认 SQLite 真相源；`watch --summary` 与 `inspect --summary` 统一输出 review/failure/redrive/progress/trace 摘要，并会附带结构化 `failureCode`。
-- `inspect --summary` / `watch --summary` 现在还会带上 review 风险分级；`decide --decision merge` 受该分级软门禁：风险非 `low` 时拒绝合并，需 `--acknowledge-risk` 显式覆盖（fail-open，无法读取风险时放行，仅约束 merge）。Console 任务详情也会展示该风险分级 badge 与合并前人工确认提示。
+- `inspect --summary` / `watch --summary` 现在还会带上 review 风险分级；`decide --decision merge` 受该分级软门禁：读取到非 `low` 风险时 fail closed，需 `--acknowledge-risk` 显式覆盖；只有风险字段缺失时才放行，且仅约束 merge。Console 任务详情也会展示该风险分级 badge 与合并前人工确认提示。
 - dispatcher 现在还提供服务端 merge 风险门禁（`DISPATCHER_REVIEW_MERGE_GATE`，默认 `off`）：`enforce` 时对风险非 `low` 的 `merge` 在 `/api/reviews/:taskId/decision` 直接返回 `409`，需 `acknowledgeRisk`/`acknowledge_risk` 覆盖；`warn` 放行但落 `review_merge_risk_acknowledged` 事件。该门禁是权威层，覆盖 Console / CLI / 直连 HTTP，CLI `--acknowledge-risk` 会透传给服务端。
 - dispatcher 现在会为每个任务生成稳定 `traceId`；dashboard snapshot、CLI 摘要、console drill-down 和 Trae worker evidence 都会携带该关联键，便于跨 dispatcher / worker / session 做最小闭环排障。
 - dashboard snapshot 现在附带阶段二控制面指标：`queueDepth`、`plannedTasks`、`reviewBacklog`、`avgAssignmentLagMs`、`maxAssignmentLagMs`、`retryRatePct`、`branchProtectionHitCount`、`repoConcurrencySaturation`、`failureCodes`、`reviewReasonCodes`。
@@ -472,6 +472,8 @@ node scripts/run-worker-daemon.js \
 
 每个 assignment 子进程默认最多运行 30 分钟，可用 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 覆盖为正整数毫秒值。`SIGINT` / `SIGTERM` 会同时取消 dispatcher HTTP 请求、结果重试等待和完整子进程树，避免 worker 停止时继续等待网络超时。
 
+generic worker 的 worktree Git 命令默认最多运行 60 秒，并响应 assignment 的取消信号。runtime 会拒绝把默认分支当作任务分支，复用前核对 Git 登记路径与分支；`FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 才启用退出清理，且默认保留脏 worktree。只有再显式设置 `FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 才会强制丢弃未提交内容。
+
 Codex / Gemini 默认仍在 `trusted-host` profile 中执行。需要把 provider 与 verification 约束在同一个 fail-closed 容器边界时，由 worker 操作者在启动前配置：
 
 ```bash
@@ -563,7 +565,9 @@ node scripts/run-trae-mcp-worker-server.js \
 
 - Trae automation worker 目前仍是单任务串行 runtime，不支持多任务并发。
 - automation gateway 本体只定义 Trae 自动化控制接口；dispatcher 任务循环与结果回写由 automation worker 负责完成。
-- 任务 worktree 只保证从最新抓取的默认分支派生；允许复用时会先 `reset --hard` + `clean -fd`，但自动删除旧 worktree 仍不是默认行为。
+- 任务 worktree 从最新抓取的默认分支派生；目录名在清洗有损或过长时会附加原始 task ID 的稳定短哈希，避免不同任务落到同一路径；允许复用时会先 `reset --hard` + `clean -fd`，且只能复用当前 task 预期路径上的同分支登记。升级前已登记在旧版无哈希精确路径的同分支 worktree 仍可复用，新的任务始终使用防碰撞目录；旧路径清理必须同时核对分支身份，符号链接路径会被拒绝。generic runtime 已为 Git 命令增加超时、取消、安全目录、合法 ref、默认分支拒绝和登记一致性检查，但自动删除仍是显式 opt-in；dispatcher / Trae 同步 helper 也会拒绝危险目录、非法 ref 和登记错配，完整异步清理生命周期尚未跨 provider 统一。
+- Console、orchestrator CLI 与兼容 review CLI 提交 decision 时会携带当前 `attemptId`、`artifactBundleId` 和可选 `commitSha`。当前 review material 存在 freshness 时，dispatcher 对缺失或不一致的 `expectedFreshness` 都返回 `409`；只有历史上没有 freshness 的 review 继续兼容无条件决策。
+- 新建 HITL 请求会持久化 `requestId`，运行中的请求还会绑定 active `attemptId`，并可选绑定 `sourceSessionId` / `expiresAt`。Console 恢复会回传 identity；相同 identity 与 payload 的网络重放幂等成功，过期、早于 `requestedAt`、身份错配、损坏的时间元数据或改变 payload 的恢复请求都会被拒绝。
 - review memory 当前是文件存储 + dispatch 注入主线；lesson 的自动提取与落盘仍需外部调用方编排。
 - `docs/plans/*`、`docs/runbooks/*`、`docs/research/*` 可作为背景资料，但不能替代当前主线文档和代码。
 

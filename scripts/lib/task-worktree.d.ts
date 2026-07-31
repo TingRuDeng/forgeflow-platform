@@ -9,8 +9,15 @@ interface TaskInfo {
 interface PrepareOptions {
     allowReuse?: boolean;
     resetOnReuse?: boolean;
+    commandTimeoutMs?: number;
+}
+interface RemoveOptions {
+    force?: boolean;
+    commandTimeoutMs?: number;
+    worktreeDir?: string;
+    branchName?: string;
 }
 export declare function safeTaskDirName(taskId: unknown): string;
 export declare function prepareTaskWorktree(repoDir: string, task: TaskInfo, options?: PrepareOptions): string;
-export declare function removeTaskWorktree(repoDir: string, taskId: string): void;
+export declare function removeTaskWorktree(repoDir: string, taskId: string, options?: RemoveOptions): void;
 export {};

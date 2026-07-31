@@ -14,6 +14,7 @@ import {
   reconcileRuntimeState as reconcileRuntimeStateFn,
 } from "./runtime-state.js";
 import { appendRuntimeEvent } from "./runtime-events.js";
+import { safeTaskDirName } from "./task-worktree.js";
 
 import type {
   JsonResponse,
@@ -149,9 +150,7 @@ export function buildTraeWorktreeAndAssignmentDirs(
   return { worktree_dir: worktreeDir, assignment_dir: assignmentDir };
 }
 
-export function safeTaskDirName(taskId: string): string {
-  return taskId.replace(/[^a-zA-Z0-9_-]/g, "-");
-}
+export { safeTaskDirName };
 
 export function buildTraeConstraints(task: Task): string[] {
   return [

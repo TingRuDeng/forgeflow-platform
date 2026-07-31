@@ -45,6 +45,13 @@ interface Review {
       failureSummary?: string;
     } | null;
   } | null;
+  reviewMaterial?: {
+    freshness?: {
+      attemptId: string;
+      artifactBundleId: string;
+      commitSha?: string;
+    };
+  } | null;
 }
 
 export interface ReviewDecisionInput {
@@ -53,6 +60,11 @@ export interface ReviewDecisionInput {
   canRedrive?: boolean;
   redriveStrategy?: string;
   acknowledgeRisk?: boolean;
+  expectedFreshness?: {
+    attemptId: string;
+    artifactBundleId: string;
+    commitSha?: string;
+  };
 }
 
 function formatTime(isoString?: string): string {
@@ -226,6 +238,7 @@ const ReviewActionsForm: React.FC<{
     canRedrive,
     redriveStrategy,
     acknowledgeRisk,
+    expectedFreshness: review?.reviewMaterial?.freshness,
   });
 
   return (

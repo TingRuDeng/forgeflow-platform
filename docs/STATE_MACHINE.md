@@ -77,8 +77,8 @@ Current rules:
   - if attempts are exhausted, dispatcher records `attempt_expired` and moves task / assignment to `failed`
 - Start/result admission checks the lease boundary directly, so a late worker write is rejected even before reconcile runs; historical terminal `attemptId` values remain stale.
 - 已落账 `succeeded` / `failed` result 允许在响应丢失后按同一 v1 envelope 精确重放；canonical result、成功结果的 `changedFiles`、PR metadata 或 ArtifactBundle 任一发生变化都会按 idempotency conflict 拒绝。
-- `POST /api/tasks/:taskId/interrupt` 会把可中断任务置为 `waiting_for_input`，释放 worker / lease，并把 active attempt 标记为 `checkpointed`。
-- `POST /api/tasks/:taskId/resume` 会写入 `resumePayload`，把任务恢复为 `ready`，供下一次 worker claim 时继续使用。
+- `POST /api/tasks/:taskId/interrupt` 会把可中断任务置为 `waiting_for_input`，生成或接纳 `requestId`，绑定当时的 active `attemptId`，可选记录 `sourceSessionId` / `expiresAt`，释放 worker / lease，并把 active attempt 标记为 `checkpointed`。
+- `POST /api/tasks/:taskId/resume` 必须回传 identity-aware 请求的 `requestId` 与绑定 `attemptId`；错配、缺失或过期请求会被拒绝。成功后写入 `resumePayload` 与 `lastResolvedInput`，把任务恢复为 `ready`；同 identity、同 payload 的重复提交幂等返回，改变 payload 的重放会冲突。
 
 ## Assignment States
 
@@ -123,7 +123,7 @@ Supported decisions:
 
 ### Deterministic risk grading on review entry
 
-When a worker result passes verification and the task moves `in_progress -> review`, dispatcher attaches a deterministic, explainable risk grade to the review (`review.riskAssessment`). There is no LLM judge; grading is a pure function of the result's `changedFiles` plus configurable thresholds:
+When a worker result passes verification and the task moves `in_progress -> review`, dispatcher attaches a deterministic, explainable risk grade to the review (`review.riskAssessment`). There is no LLM judge; grading is a pure function of the canonical changed-file set (the deduplicated union of result-level `changedFiles` and `ArtifactBundle.changedFiles`) plus configurable thresholds:
 
 - `low` — no protected path touched and within the changed-file budget; the only auto-merge-eligible grade.
 - `needs_human_attention` — at least one changed file matches a protected-path glob (default set covers `auth`, `payments`, `migrations`, `infra`, `.github/workflows`, and secret/credential/permission-like files).
@@ -145,6 +145,16 @@ When the grade is not `low`, dispatcher appends a `review_risk_flagged` event ca
 - `enforce` — a `merge` on a non-`low` review is rejected unless the decision carries `acknowledgeRisk: true` (HTTP body `acknowledgeRisk` or `acknowledge_risk`); the rejection surfaces as `409` over HTTP. With acknowledgement the merge proceeds and the audit event is recorded.
 
 The CLI `decide --acknowledge-risk` forwards the flag to the dispatcher so the server gate honors it. Only `merge` is gated; `block` / `rework` / `changes_requested` are never gated.
+
+### Review freshness fence
+
+Worker result 进入 `review` 时，dispatcher 会把 canonical `attemptId`、`artifactBundleId` 和可选 `commitSha` 写入 `reviewMaterial.freshness`。Console 和 orchestrator CLI 提交决策时把这组值作为 `expectedFreshness` 回传：
+
+- 与当前 review material 精确一致时才继续决策。
+- 当前 review 有 freshness 时，缺失 tuple 或 attempt、bundle、commit 任一变化都会返回 `409`，要求 reviewer 重新读取证据。
+- 决策落账时把 canonical tuple 写入 `evidence.reviewedFreshness` 和 `review_decided` 事件。
+- 历史上没有 `reviewMaterial.freshness` 的 review 仍可无 tuple 决策；新的 review 入口必须先读取 snapshot 并发送。
+- review decision 的显式 `at` 必须是有效时间戳，且不得早于当前任务进入 `review` 的状态事件，避免审计时间线倒序。
 
 Current mapping:
 

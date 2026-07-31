@@ -99,20 +99,81 @@ function createWaitingForInputState(): { state: RuntimeState; taskId: string } {
     state: interruptTaskForInput(running, {
       taskId: dispatched.taskId,
       actor: "codex-control",
+      requestId: "input-request-1",
+      sourceSessionId: "session-1",
       reason: "需要恢复输入",
+      expiresAt: "2026-07-05T10:10:00.000Z",
       resumePayloadSchema: RESUME_PAYLOAD_SCHEMA,
       at: "2026-07-05T10:00:04.000Z",
     }),
   };
 }
 
+function resumeIdentity(state: RuntimeState, taskId: string) {
+  const waiting = state.tasks.find((task) => task.id === taskId)?.waitingForInput;
+  return {
+    requestId: waiting?.requestId,
+    attemptId: waiting?.attemptId,
+  };
+}
+
 describe("runtime-state HITL resume schema", () => {
+  it("rejects invalid interrupt and resume timestamps", () => {
+    const dispatched = createDispatchedState();
+    expect(() => interruptTaskForInput(dispatched.state, {
+      taskId: dispatched.taskId,
+      actor: "codex-control",
+      at: "not-a-timestamp",
+    })).toThrow(/at must be a valid timestamp/i);
+
+    const { state, taskId } = createWaitingForInputState();
+    expect(() => resumeTaskFromInput(state, {
+      taskId,
+      actor: "codex-control",
+      ...resumeIdentity(state, taskId),
+      resumePayload: { decision: "continue", reviewers: ["alice"] },
+      at: "not-a-timestamp",
+    })).toThrow(/at must be a valid timestamp/i);
+    expect(() => resumeTaskFromInput(state, {
+      taskId,
+      actor: "codex-control",
+      ...resumeIdentity(state, taskId),
+      resumePayload: { decision: "continue", reviewers: ["alice"] },
+      at: "2026-07-05T10:00:03.000Z",
+    })).toThrow(/must not be before requestedAt/i);
+  });
+
+  it("fails closed when persisted HITL time metadata is invalid", () => {
+    const { state, taskId } = createWaitingForInputState();
+    for (const [field, value] of [
+      ["requestedAt", "not-a-timestamp"],
+      ["requestedAt", 0],
+      ["expiresAt", "not-a-timestamp"],
+      ["expiresAt", 123],
+      ["expiresAt", ""],
+      ["expiresAt", null],
+    ] as const) {
+      const invalidState = structuredClone(state);
+      const waiting = invalidState.tasks[0]!.waitingForInput as unknown as Record<string, unknown>;
+      waiting[field] = value;
+
+      expect(() => resumeTaskFromInput(invalidState, {
+        taskId,
+        actor: "codex-control",
+        ...resumeIdentity(invalidState, taskId),
+        resumePayload: { decision: "continue", reviewers: ["alice"] },
+        at: "2026-07-05T10:00:05.000Z",
+      })).toThrow(new RegExp(`metadata invalid.*${field}`, "i"));
+    }
+  });
+
   it("rejects resume payloads that do not match the stored schema", () => {
     const { state, taskId } = createWaitingForInputState();
 
     expect(() => resumeTaskFromInput(state, {
       taskId,
       actor: "codex-control",
+      ...resumeIdentity(state, taskId),
       resumePayload: { decision: "maybe", reviewers: ["alice"] },
       at: "2026-07-05T10:00:05.000Z",
     })).toThrow("resumePayload.decision must be one of");
@@ -120,6 +181,7 @@ describe("runtime-state HITL resume schema", () => {
     expect(() => resumeTaskFromInput(state, {
       taskId,
       actor: "codex-control",
+      ...resumeIdentity(state, taskId),
       resumePayload: { decision: "continue", retryLimit: 4, reviewers: ["alice"] },
       at: "2026-07-05T10:00:05.000Z",
     })).toThrow("resumePayload.retryLimit must be <= 3");
@@ -127,6 +189,7 @@ describe("runtime-state HITL resume schema", () => {
     expect(() => resumeTaskFromInput(state, {
       taskId,
       actor: "codex-control",
+      ...resumeIdentity(state, taskId),
       resumePayload: { decision: "continue", reviewers: ["mallory"] },
       at: "2026-07-05T10:00:05.000Z",
     })).toThrow("resumePayload.reviewers contains invalid value mallory");
@@ -138,6 +201,7 @@ describe("runtime-state HITL resume schema", () => {
     const resumed = resumeTaskFromInput(state, {
       taskId,
       actor: "codex-control",
+      ...resumeIdentity(state, taskId),
       resumePayload: {
         decision: "continue",
         retryLimit: 2,
@@ -156,6 +220,11 @@ describe("runtime-state HITL resume schema", () => {
         reviewers: ["alice", "bob"],
         acknowledgeRisk: true,
       },
+      lastResolvedInput: {
+        requestId: "input-request-1",
+        attemptId: expect.any(String),
+        resolvedBy: "codex-control",
+      },
     });
     expect(resumed.assignments[0]).toMatchObject({
       status: "pending",
@@ -168,5 +237,54 @@ describe("runtime-state HITL resume schema", () => {
         },
       },
     });
+
+    expect(resumeTaskFromInput(resumed, {
+      taskId,
+      actor: "codex-control",
+      ...resumeIdentity(state, taskId),
+      resumePayload: {
+        decision: "continue",
+        retryLimit: 2,
+        reviewers: ["alice", "bob"],
+        acknowledgeRisk: true,
+      },
+      at: "2026-07-05T10:00:06.000Z",
+    })).toBe(resumed);
+    expect(() => resumeTaskFromInput(resumed, {
+      taskId,
+      actor: "codex-control",
+      ...resumeIdentity(state, taskId),
+      resumePayload: { decision: "stop", reviewers: ["alice"] },
+      at: "2026-07-05T10:00:06.000Z",
+    })).toThrow(/replay payload mismatch/i);
+  });
+
+  it("rejects stale, missing, and expired input request identities", () => {
+    const { state, taskId } = createWaitingForInputState();
+    const identity = resumeIdentity(state, taskId);
+    const payload = { decision: "continue", reviewers: ["alice"] };
+
+    expect(() => resumeTaskFromInput(state, {
+      taskId,
+      actor: "codex-control",
+      attemptId: identity.attemptId,
+      resumePayload: payload,
+      at: "2026-07-05T10:00:05.000Z",
+    })).toThrow(/requestId required/i);
+    expect(() => resumeTaskFromInput(state, {
+      taskId,
+      actor: "codex-control",
+      requestId: "stale-request",
+      attemptId: identity.attemptId,
+      resumePayload: payload,
+      at: "2026-07-05T10:00:05.000Z",
+    })).toThrow(/request mismatch/i);
+    expect(() => resumeTaskFromInput(state, {
+      taskId,
+      actor: "codex-control",
+      ...identity,
+      resumePayload: payload,
+      at: "2026-07-05T10:10:00.000Z",
+    })).toThrow(/request expired/i);
   });
 });

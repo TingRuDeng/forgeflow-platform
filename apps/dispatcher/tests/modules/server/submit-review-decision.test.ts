@@ -217,10 +217,67 @@ describe("submit review decision", () => {
     });
   });
 
+  it("rejects a stale review freshness tuple and accepts the current material", async () => {
+    const stateDir = makeTempDir();
+    const { stateMod, taskId } = await createReviewReadyState(stateDir);
+    const serverMod = await import(serverModulePath);
+    const before = stateMod.buildDashboardSnapshot(stateMod.loadRuntimeState(stateDir));
+    const freshness = before.reviews[0]?.reviewMaterial?.freshness;
+    expect(freshness).toBeTruthy();
+
+    const unfenced = await serverMod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: `/api/reviews/${encodeURIComponent(taskId)}/decision`,
+      internalCall: true,
+      body: {
+        actor: "codex-control",
+        decision: "merge",
+      },
+    });
+    expect(unfenced.status).toBe(409);
+    expect(unfenced.json.error).toMatch(/review freshness required/i);
+
+    const stale = await serverMod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: `/api/reviews/${encodeURIComponent(taskId)}/decision`,
+      internalCall: true,
+      body: {
+        actor: "codex-control",
+        decision: "merge",
+        expectedFreshness: {
+          attemptId: "stale-attempt",
+          artifactBundleId: "stale-bundle",
+        },
+      },
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.json.error).toMatch(/review freshness mismatch/i);
+
+    const current = await serverMod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: `/api/reviews/${encodeURIComponent(taskId)}/decision`,
+      internalCall: true,
+      body: {
+        actor: "codex-control",
+        decision: "merge",
+        expectedFreshness: freshness,
+      },
+    });
+    expect(current.status).toBe(200);
+    const after = stateMod.buildDashboardSnapshot(stateMod.loadRuntimeState(stateDir));
+    expect(after.reviews[0]?.evidence?.reviewedFreshness).toEqual(freshness);
+  });
+
   it("normalizes top-level review reason fields into evidence through the HTTP API", async () => {
     const stateDir = makeTempDir();
     const { stateMod, taskId } = await createReviewReadyState(stateDir);
     const serverMod = await import(serverModulePath);
+    const before = stateMod.buildDashboardSnapshot(stateMod.loadRuntimeState(stateDir));
+    const expectedFreshness = before.reviews[0]?.reviewMaterial?.freshness;
+    expect(expectedFreshness).toBeTruthy();
 
     const response = await serverMod.handleDispatcherHttpRequest({
       stateDir,
@@ -235,6 +292,7 @@ describe("submit review decision", () => {
         mustFix: ["补齐失败测试"],
         canRedrive: true,
         redriveStrategy: "same_worker_continue",
+        expectedFreshness,
       },
     });
 

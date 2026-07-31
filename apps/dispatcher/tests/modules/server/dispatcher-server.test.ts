@@ -29,6 +29,26 @@ function makeTempDir() {
   return tempDir;
 }
 
+function reviewFreshnessFromSnapshot(
+  snapshot: {
+    reviews?: Array<{
+      taskId?: string;
+      reviewMaterial?: {
+        freshness?: unknown;
+      };
+    }>;
+  },
+  taskId: string,
+) {
+  const freshness = snapshot.reviews
+    ?.find((review) => review.taskId === taskId)
+    ?.reviewMaterial?.freshness;
+  if (!freshness) {
+    throw new Error(`missing review freshness for ${taskId}`);
+  }
+  return freshness;
+}
+
 beforeAll(() => {
   process.env.DISPATCHER_AUTH_MODE = "open";
 });
@@ -342,6 +362,30 @@ describe("dispatcher server", () => {
     });
     expect(resultResponse.status).toBe(200);
 
+    const reviewSnapshotResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dashboard/snapshot",
+    });
+    expect(reviewSnapshotResponse.status).toBe(200);
+    const expectedFreshness = reviewFreshnessFromSnapshot(
+      reviewSnapshotResponse.json,
+      dispatchBody.taskIds[0],
+    );
+    const staleDecisionResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: `/api/reviews/${dispatchBody.taskIds[0]}/decision`,
+      body: {
+        actor: "codex-control",
+        decision: "merge",
+        at: "2000-01-01T00:00:00.000Z",
+        expectedFreshness,
+      },
+    });
+    expect(staleDecisionResponse.status).toBe(409);
+    expect(staleDecisionResponse.json.error).toMatch(/must not be before review started/i);
+
     const decisionResponse = await mod.handleDispatcherHttpRequest({
       stateDir,
       method: "POST",
@@ -350,6 +394,7 @@ describe("dispatcher server", () => {
         actor: "codex-control",
         decision: "merge",
         notes: "looks good",
+        expectedFreshness,
       },
     });
     expect(decisionResponse.status).toBe(200);
@@ -481,13 +526,19 @@ describe("dispatcher server", () => {
           changedFiles: ["auth/login.ts"],
         },
       });
+      const reviewSnapshot = await mod.handleDispatcherHttpRequest({
+        stateDir,
+        method: "GET",
+        pathname: "/api/dashboard/snapshot",
+      });
+      const expectedFreshness = reviewFreshnessFromSnapshot(reviewSnapshot.json, taskId);
 
       // Risky merge without acknowledgement is rejected with 409.
       const blocked = await mod.handleDispatcherHttpRequest({
         stateDir,
         method: "POST",
         pathname: `/api/reviews/${encodeURIComponent(taskId)}/decision`,
-        body: { actor: "codex-control", decision: "merge" },
+        body: { actor: "codex-control", decision: "merge", expectedFreshness },
       });
       expect(blocked.status).toBe(409);
       expect(blocked.json.error).toMatch(/merge blocked by risk gate/i);
@@ -497,7 +548,12 @@ describe("dispatcher server", () => {
         stateDir,
         method: "POST",
         pathname: `/api/reviews/${encodeURIComponent(taskId)}/decision`,
-        body: { actor: "codex-control", decision: "merge", acknowledge_risk: true },
+        body: {
+          actor: "codex-control",
+          decision: "merge",
+          acknowledge_risk: true,
+          expectedFreshness,
+        },
       });
       expect(acknowledged.status).toBe(200);
       const mergedTask = acknowledged.json.tasks.find((item: { id: string }) => item.id === taskId);
@@ -1103,6 +1159,27 @@ describe("dispatcher server", () => {
     expect(response.status).toBe(400);
     expect(response.json).toEqual({
       error: "invalid review decision: approve",
+    });
+  });
+
+  it("returns 400 when review decision at is not a valid timestamp", async () => {
+    const stateDir = makeTempDir();
+    const mod = await import(serverModulePath);
+
+    const response = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/reviews/nonexistent-task/decision",
+      body: {
+        actor: "codex-control",
+        decision: "merge",
+        at: "not-a-timestamp",
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.json).toEqual({
+      error: "review decision at must be a valid timestamp when provided",
     });
   });
 
@@ -2183,8 +2260,15 @@ describe("dispatcher server", () => {
     expect(response.json.task.trace_id).toBe("trace-dispatch-1-task-1");
     expect(response.json.task.goal).toBe("Test task");
     expect(response.json.task.default_branch).toBe("main");
-    expect(response.json.task.worktree_dir).toBe(`${repoDir}/.worktrees/dispatch-1-task-1`);
-    expect(response.json.task.assignment_dir).toBe(`${repoDir}/.worktrees/dispatch-1-task-1/.orchestrator/assignments/dispatch-1-task-1`);
+    const worktreeName = path.basename(response.json.task.worktree_dir);
+    expect(worktreeName).toMatch(/^dispatch-1-task-1-[0-9a-f]{12}$/);
+    expect(response.json.task.worktree_dir).toBe(path.join(repoDir, ".worktrees", worktreeName));
+    expect(response.json.task.assignment_dir).toBe(path.join(
+      response.json.task.worktree_dir,
+      ".orchestrator",
+      "assignments",
+      worktreeName,
+    ));
     expect(response.json.task.worker_prompt_mode).toBe("auto");
     expect(response.json.task.report_schema_version).toBe("trae-v1");
     expect(response.json.task.constraints).toContain("allowedPaths: docs/**");
@@ -3020,39 +3104,78 @@ describe("dispatcher server", () => {
       body: { taskId, ...envelope, at: "2026-07-05T10:00:01.000Z" },
     });
 
-    const resultResponse = await mod.handleDispatcherHttpRequest({
+    const workerResult = {
+      taskId,
+      workerId: "hitl-result-worker",
+      provider: "codex",
+      pool: "codex",
+      branchName: "ai/codex/hitl-result-task",
+      repo: "TingRuDeng/forgeflow-platform",
+      defaultBranch: "main",
+      mode: "run",
+      output: "Need product decision before continuing",
+      generatedAt: "2026-07-05T10:00:02.000Z",
+      verification: { allPassed: true, commands: [] },
+      waitingForInput: {
+        requestId: "worker-input-request-1",
+        sourceSessionId: "worker-session-1",
+        reason: "choose rollout scope",
+        prompt: "Ship narrow scope or full rollout?",
+        expiresAt: "2026-07-05T10:30:00.000Z",
+        resumePayloadSchema: {
+          properties: {
+            decision: { type: "string", title: "Decision" },
+            rollout: { type: "string", enum: ["narrow", "full"], title: "Rollout" },
+          },
+          required: ["decision", "rollout"],
+        },
+      },
+    };
+    const resultBody = {
+      ...envelope,
+      result: workerResult,
+      changedFiles: [],
+      pullRequest: null,
+    };
+    const invalidExpiryResponse = await mod.handleDispatcherHttpRequest({
       stateDir,
       method: "POST",
       pathname: "/api/workers/hitl-result-worker/result",
       body: {
-        ...envelope,
+        ...resultBody,
         result: {
-          taskId,
-          workerId: "hitl-result-worker",
-          provider: "codex",
-          pool: "codex",
-          branchName: "ai/codex/hitl-result-task",
-          repo: "TingRuDeng/forgeflow-platform",
-          defaultBranch: "main",
-          mode: "run",
-          output: "Need product decision before continuing",
-          generatedAt: "2026-07-05T10:00:02.000Z",
-          verification: { allPassed: true, commands: [] },
+          ...workerResult,
           waitingForInput: {
-            reason: "choose rollout scope",
-            prompt: "Ship narrow scope or full rollout?",
-            resumePayloadSchema: {
-              properties: {
-                decision: { type: "string", title: "Decision" },
-                rollout: { type: "string", enum: ["narrow", "full"], title: "Rollout" },
-              },
-              required: ["decision", "rollout"],
-            },
+            ...workerResult.waitingForInput,
+            expiresAt: "not-a-timestamp",
           },
         },
-        changedFiles: [],
-        pullRequest: null,
       },
+    });
+    expect(invalidExpiryResponse.status).toBe(400);
+
+    const nonFutureExpiryResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/hitl-result-worker/result",
+      body: {
+        ...resultBody,
+        result: {
+          ...workerResult,
+          waitingForInput: {
+            ...workerResult.waitingForInput,
+            expiresAt: workerResult.generatedAt,
+          },
+        },
+      },
+    });
+    expect(nonFutureExpiryResponse.status).toBe(400);
+
+    const resultResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/hitl-result-worker/result",
+      body: resultBody,
     });
 
     expect(resultResponse.status).toBe(200);
@@ -3067,8 +3190,12 @@ describe("dispatcher server", () => {
     expect(task).toMatchObject({
       status: "waiting_for_input",
       waitingForInput: {
+        requestId: "worker-input-request-1",
+        attemptId: attempt.attemptId,
+        sourceSessionId: "worker-session-1",
         requestedBy: "hitl-result-worker",
         reason: "choose rollout scope",
+        expiresAt: "2026-07-05T10:30:00.000Z",
         resumePayloadSchema: {
           properties: {
             decision: { type: "string", title: "Decision" },
@@ -3617,6 +3744,7 @@ describe("dispatcher server", () => {
         reason: "need scope decision",
       },
     });
+    const requestIdentity = interruptResponse.json.task.waitingForInput;
 
     const resumeResponse = await mod.handleDispatcherHttpRequest({
       stateDir,
@@ -3624,6 +3752,8 @@ describe("dispatcher server", () => {
       pathname: `/api/tasks/${encodeURIComponent(taskId)}/resume`,
       body: {
         actor: "codex-control",
+        requestId: requestIdentity.requestId,
+        attemptId: requestIdentity.attemptId,
         resumePayload: { decision: "continue with narrow scope" },
         at: "2026-04-08T10:20:03.000Z",
       },

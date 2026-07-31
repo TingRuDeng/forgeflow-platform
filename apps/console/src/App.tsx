@@ -152,10 +152,18 @@ const App: React.FC = () => {
     }
   };
 
-  const handleTaskResume = async (task: { id: string }, resumePayload: Record<string, unknown>) => {
+  const handleTaskResume = async (task: {
+    id: string;
+    waitingForInput?: { requestId?: string; attemptId?: string } | null;
+  }, resumePayload: Record<string, unknown>) => {
     try {
       setResumingTaskId(task.id);
-      await postTaskResume({ taskId: task.id, resumePayload });
+      await postTaskResume({
+        taskId: task.id,
+        requestId: task.waitingForInput?.requestId,
+        attemptId: task.waitingForInput?.attemptId,
+        resumePayload,
+      });
       await mutate();
     } catch (err) {
       console.error(err);
@@ -213,7 +221,15 @@ const App: React.FC = () => {
     try {
       setBulkReviewingTaskIds(taskIds);
       setBulkReviewResult(null);
-      const result = await submitBulkReviewDecision(decision, taskIds, input);
+      const freshnessByTaskId = Object.fromEntries(
+        (Array.isArray(data?.reviews) ? data.reviews : [])
+          .filter((review: { taskId?: string }) => taskIds.includes(String(review.taskId || '')))
+          .map((review: {
+            taskId: string;
+            reviewMaterial?: { freshness?: { attemptId: string; artifactBundleId: string; commitSha?: string } };
+          }) => [review.taskId, review.reviewMaterial?.freshness]),
+      );
+      const result = await submitBulkReviewDecision(decision, taskIds, input, freshnessByTaskId);
       await mutate();
       setBulkReviewResult(result);
     } catch (err) {

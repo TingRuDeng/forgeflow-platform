@@ -1,5 +1,11 @@
 export type ReviewDecisionKind = "merge" | "block" | "rework" | "changes_requested";
 
+export interface ReviewFreshness {
+  attemptId: string;
+  artifactBundleId: string;
+  commitSha?: string;
+}
+
 export interface DispatchInput {
   repo: string;
   defaultBranch: string;
@@ -94,6 +100,7 @@ export interface DecideOptions {
   canRedrive?: boolean;
   redriveStrategy?: string;
   acknowledgeRisk?: boolean;
+  expectedFreshness?: ReviewFreshness;
 }
 
 export interface DecideResult {

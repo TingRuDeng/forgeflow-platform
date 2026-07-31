@@ -163,10 +163,12 @@ PR URL: 无
     };
 
     const dirs = mod.materializeTaskWorkspace(task, repoDir);
+    const worktreeName = path.basename(dirs.worktree_dir);
 
-    expect(dirs.worktree_dir).toBe(path.join(repoDir, ".worktrees", "dispatch-1-task-1"));
+    expect(worktreeName).toMatch(/^dispatch-1-task-1-[0-9a-f]{12}$/);
+    expect(dirs.worktree_dir).toBe(path.join(repoDir, ".worktrees", worktreeName));
     expect(dirs.assignment_dir).toBe(
-      path.join(repoDir, ".worktrees", "dispatch-1-task-1", ".orchestrator", "assignments", "dispatch-1-task-1")
+      path.join(dirs.worktree_dir, ".orchestrator", "assignments", worktreeName)
     );
     expect(runGit(["branch", "--show-current"], dirs.worktree_dir)).toBe("ai/trae/task-1");
     expect(fs.existsSync(path.join(dirs.assignment_dir, "assignment.json"))).toBe(true);

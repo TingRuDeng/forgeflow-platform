@@ -69,11 +69,18 @@ export const WorkerEvidenceSchema = z.object({
   artifacts: z.record(z.string()).optional(),
 });
 
+export const ReviewFreshnessSchema = z.object({
+  attemptId: z.string().min(1),
+  artifactBundleId: z.string().min(1),
+  commitSha: z.string().min(1).optional(),
+});
+
 export const ReviewDecisionEvidenceSchema = z.object({
   reasonCode: z.union([ReviewReasonCodeSchema, z.string().min(1)]).optional(),
   mustFix: z.array(z.string()).default([]),
   canRedrive: z.boolean().optional(),
   redriveStrategy: z.string().optional(),
+  reviewedFreshness: ReviewFreshnessSchema.optional(),
 });
 
 export const ArtifactChangedFileSchema = z.object({
@@ -165,6 +172,7 @@ export type WorkerFailureType = z.infer<typeof WorkerFailureTypeSchema>;
 export type ReviewReasonCode = z.infer<typeof ReviewReasonCodeSchema>;
 export type WorkerEvidence = z.infer<typeof WorkerEvidenceSchema>;
 export type ReviewDecisionEvidence = z.infer<typeof ReviewDecisionEvidenceSchema>;
+export type ReviewFreshness = z.infer<typeof ReviewFreshnessSchema>;
 export type ArtifactChangedFile = z.infer<typeof ArtifactChangedFileSchema>;
 export type ArtifactTrajectoryStep = z.infer<typeof ArtifactTrajectoryStepSchema>;
 export type ArtifactTrajectory = z.infer<typeof ArtifactTrajectorySchema>;

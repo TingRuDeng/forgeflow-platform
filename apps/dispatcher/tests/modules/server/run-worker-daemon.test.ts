@@ -274,12 +274,7 @@ describe("worker daemon cycle", () => {
       progressEvents.map((event: { payload?: { data?: { stage?: string } } }) => event.payload?.data?.stage),
     ).toEqual(expect.arrayContaining(["worktree_prepared", "execution_completed"]));
 
-    const materializedAssignmentDir = path.join(
-      summary.worktreeDir,
-      ".orchestrator",
-      "assignments",
-      "dispatch-1-task-1",
-    );
+    const materializedAssignmentDir = path.dirname(summary.outputDir);
     expect(fs.existsSync(path.join(materializedAssignmentDir, "assignment.json"))).toBe(true);
     expect(fs.existsSync(path.join(materializedAssignmentDir, "execution", "worker-result.json"))).toBe(true);
   }, 15_000);

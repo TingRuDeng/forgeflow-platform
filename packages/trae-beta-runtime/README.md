@@ -21,6 +21,7 @@ Current unattended runtime guards:
 - `new_chat` sampling is narrowed to the last visible chat root instead of scanning the whole page by default
 - when baseline sampling still exposes a different completed task id, the runtime fails early with a stale-session error instead of continuing to read the old chat
 - the runtime now reports structured phase events plus `traceId` / `sessionId` / `failureCode` hints back to dispatcher when the control plane is reachable
+- lossy task ids use collision-resistant worktree directories, while an already-registered same-branch worktree at the exact legacy path remains reusable during upgrades
 
 ## Commands
 
@@ -181,6 +182,7 @@ Set this before running `forgeflow-trae-beta start worker` or any other runtime 
 
 - This only changes how SSH connects; if the remote baseline cannot be fetched (network unreachable, auth failed), the worker will still hard-fail.
 - The override applies to git operations during task execution (e.g., fetching baseline, creating worktrees).
+- Worktree reuse is limited to the current task's expected `.worktrees/<task>` path; lossy task ID sanitization adds a stable identity hash, and a branch registered at another path is rejected to preserve task isolation.
 
 ## Dispatcher Authentication
 

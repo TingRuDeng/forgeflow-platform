@@ -272,6 +272,64 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
         dryRunExecution: false,
       })).rejects.toThrow("worker execution timed out after 50ms");
     });
+
+    it("uses an independent bounded cleanup after the assignment signal is aborted", async () => {
+      const tempDir = makeTempDir("worker-cleanup-after-abort-");
+      const repoDir = createRepoWithOrigin(tempDir);
+      const payload = buildPayload(providerCases[0], "task-cleanup-after-abort");
+      const abortController = new AbortController();
+      const cleanupErrors: string[] = [];
+
+      const result = await executeLiveWorkerTask({
+        client: createClient(payload),
+        packageRoot: tempDir,
+        workerId: providerCases[0].workerId,
+        repoDir,
+        payload,
+        dryRunExecution: true,
+        removeWorktreeOnExit: true,
+        forceWorktreeCleanup: true,
+        signal: abortController.signal,
+        reportEvent: async (event) => {
+          const stage = (event.payload as { stage?: string } | undefined)?.stage;
+          if (stage === "worktree_prepared") {
+            abortController.abort();
+          }
+          if (stage === "worktree_cleanup_completed") {
+            throw new Error("cleanup telemetry unavailable");
+          }
+        },
+        onCleanupError: (error) => cleanupErrors.push(error instanceof Error ? error.message : String(error)),
+      });
+
+      expect(fs.existsSync(result.worktreeDir)).toBe(false);
+      expect(cleanupErrors).toContain("cleanup telemetry unavailable");
+    });
+
+    it("cleans the prepared worktree when setup telemetry fails before context returns", async () => {
+      const tempDir = makeTempDir("worker-cleanup-after-prepare-failure-");
+      const repoDir = createRepoWithOrigin(tempDir);
+      const payload = buildPayload(providerCases[0], "task-cleanup-after-prepare-failure");
+
+      await expect(executeLiveWorkerTask({
+        client: createClient(payload),
+        packageRoot: tempDir,
+        workerId: providerCases[0].workerId,
+        repoDir,
+        payload,
+        dryRunExecution: true,
+        removeWorktreeOnExit: true,
+        forceWorktreeCleanup: true,
+        reportEvent: async (event) => {
+          const stage = (event.payload as { stage?: string } | undefined)?.stage;
+          if (stage === "worktree_prepared") {
+            throw new Error("worktree telemetry unavailable");
+          }
+        },
+      })).rejects.toThrow("worktree telemetry unavailable");
+
+      expect(fs.readdirSync(path.join(repoDir, ".worktrees"))).toEqual([]);
+    });
   });
 
   for (const testCase of providerCases) {

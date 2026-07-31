@@ -13,6 +13,13 @@ ForgeFlow beta runtime 的共享 worker daemon 与 task worktree 控制逻辑。
 
 Codex / Gemini assignment 默认使用 `trusted-host`。设置 `FORGEFLOW_EXECUTION_PROFILE=isolated-container` 和固定本地 `FORGEFLOW_EXECUTION_CONTAINER_IMAGE` 后，共享 runner 会把 provider 与 verification 都放入同一容器策略，并在 runtime 或镜像不可用时 fail closed。完整环境变量、挂载、secret、资源与网络边界见 `../../docs/contracts/execution-profile-v1.md`。
 
+## Worktree 生命周期
+
+- live executor 使用可取消的异步 Git 操作，单条命令默认最多运行 60 秒。
+- task ID 必须生成安全的单级目录名；清洗有损或目录名过长时会附加原始 ID 的稳定短哈希以避免碰撞。升级前已登记在旧版无哈希精确路径的同分支 worktree 仍可复用，清理旧路径时必须提供并核对分支身份；符号链接路径会被拒绝。任务分支必须是合法 ref 且不能等于默认分支；复用前会核对 Git 登记的 worktree 路径与分支，拒绝未登记目录、分支占用和路径错配。
+- `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 才会在任务结束后尝试清理。默认不带 `--force`，脏 worktree 会保留并上报 `worktree_cleanup_failed`。
+- 只有同时设置 `FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 才会强制清理；这会丢弃任务 worktree 中尚未提交的内容，应只用于操作者明确接受该风险的环境。
+
 ## 验证
 
 ```bash

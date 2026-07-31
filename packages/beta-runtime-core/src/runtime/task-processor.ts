@@ -6,7 +6,11 @@ import {
   sleepUntilAborted,
   throwIfAborted,
 } from "./abort-signal.js";
-import { safeTaskDirName, prepareTaskWorktree, removeTaskWorktree } from "./task-worktree.js";
+import {
+  safeTaskDirName,
+  prepareTaskWorktreeLifecycle,
+  removeTaskWorktreeLifecycle,
+} from "./task-worktree.js";
 import { nowIso } from "./utils.js";
 import {
   buildDryRunWorkerResult,
@@ -79,7 +83,9 @@ export function resolveWorkerExecutionTimeoutMs(
 export interface ExecuteLiveWorkerTaskInput extends ProcessTaskAssignmentInput {
   createPullRequest?: boolean;
   removeWorktreeOnExit?: boolean;
+  forceWorktreeCleanup?: boolean;
   resetWorktreeOnReuse?: boolean;
+  worktreeCommandTimeoutMs?: number;
   runtimeScriptPath?: string;
   runtimeScriptCwd?: string;
   executionTimeoutMs?: number;
@@ -99,8 +105,11 @@ export function buildWorkerProtocolEnvelope(payload: TaskPayload): WorkerProtoco
 
 export async function executeLiveWorkerTask(input: ExecuteLiveWorkerTaskInput): Promise<TaskExecutionResult> {
   let context: LiveWorkerTaskContext | null = null;
+  let cleanupTarget: Pick<LiveWorkerTaskContext, "taskId" | "worktreeDir"> | null = null;
   try {
-    context = await prepareLiveWorkerTask(input);
+    context = await prepareLiveWorkerTask(input, (preparedTarget) => {
+      cleanupTarget = preparedTarget;
+    });
     const result = await runLiveWorkerTask(input, context);
     const changedFiles = input.dryRunExecution ? [] : collectChangedFiles(context.worktreeDir);
     await reportLiveWorkerExecutionCompleted(input, context.taskId, changedFiles.length);
@@ -113,24 +122,37 @@ export async function executeLiveWorkerTask(input: ExecuteLiveWorkerTaskInput): 
       pullRequest,
     };
   } finally {
-    await cleanupLiveWorkerTask(input, context);
+    await cleanupLiveWorkerTask(input, cleanupTarget);
   }
 }
 
-async function prepareLiveWorkerTask(input: ExecuteLiveWorkerTaskInput): Promise<LiveWorkerTaskContext> {
+async function prepareLiveWorkerTask(
+  input: ExecuteLiveWorkerTaskInput,
+  onWorktreePrepared: (target: Pick<LiveWorkerTaskContext, "taskId" | "worktreeDir">) => void,
+): Promise<LiveWorkerTaskContext> {
   const taskId = input.payload.task.id;
   assertSafeBranchName(input.repoDir, input.payload.assignment.branchName, input.payload.assignment.defaultBranch);
-  const worktreeDir = prepareTaskWorktree(input.repoDir, input.payload.assignment, {
+  const preparedWorktree = await prepareTaskWorktreeLifecycle(input.repoDir, input.payload.assignment, {
     allowReuse: true,
     resetOnReuse: input.resetWorktreeOnReuse ?? true,
+    commandTimeoutMs: input.worktreeCommandTimeoutMs,
+    signal: input.signal,
   });
+  const worktreeDir = preparedWorktree.worktreeDir;
+  onWorktreePrepared({ taskId, worktreeDir });
   const assignmentDir = materializeAssignmentPackage(worktreeDir, input.payload);
   const outputDir = path.join(assignmentDir, "execution");
   fs.mkdirSync(outputDir, { recursive: true });
   await input.reportEvent?.({
     type: "progress_reported",
     taskId,
-    payload: { stage: "worktree_prepared", message: "worktree prepared, running worker assignment" },
+    payload: {
+      stage: "worktree_prepared",
+      action: preparedWorktree.action,
+      branchName: preparedWorktree.branchName,
+      baseRef: preparedWorktree.baseRef,
+      message: `worktree ${preparedWorktree.action}, running worker assignment`,
+    },
   });
   return { taskId, worktreeDir, assignmentDir, outputDir };
 }
@@ -185,14 +207,28 @@ async function finalizeLiveWorkerTask(
 
 async function cleanupLiveWorkerTask(
   input: ExecuteLiveWorkerTaskInput,
-  context: LiveWorkerTaskContext | null,
+  context: Pick<LiveWorkerTaskContext, "taskId" | "worktreeDir"> | null,
 ): Promise<void> {
   if (!context || !input.removeWorktreeOnExit) return;
   try {
-    removeTaskWorktree(input.repoDir, context.taskId);
+    const cleanup = await removeTaskWorktreeLifecycle(input.repoDir, context.taskId, {
+      force: input.forceWorktreeCleanup ?? false,
+      commandTimeoutMs: input.worktreeCommandTimeoutMs,
+      worktreeDir: context.worktreeDir,
+      branchName: input.payload.assignment.branchName,
+    });
+    await reportCleanupEventBestEffort(input, {
+      type: "progress_reported",
+      taskId: context.taskId,
+      payload: {
+        stage: "worktree_cleanup_completed",
+        action: cleanup.action,
+        message: `worktree cleanup ${cleanup.action}`,
+      },
+    });
   } catch (error) {
-    input.onCleanupError?.(error);
-    await input.reportEvent?.({
+    notifyCleanupError(input, error);
+    await reportCleanupEventBestEffort(input, {
       type: "worktree_cleanup_failed",
       taskId: context.taskId,
       payload: {
@@ -200,6 +236,25 @@ async function cleanupLiveWorkerTask(
         failureCode: "cleanup_failed",
       },
     });
+  }
+}
+
+function notifyCleanupError(input: ExecuteLiveWorkerTaskInput, error: unknown): void {
+  try {
+    input.onCleanupError?.(error);
+  } catch {
+    // Cleanup reporting must not replace the assignment's primary result.
+  }
+}
+
+async function reportCleanupEventBestEffort(
+  input: ExecuteLiveWorkerTaskInput,
+  event: LiveWorkerTaskEvent,
+): Promise<void> {
+  try {
+    await input.reportEvent?.(event);
+  } catch (error) {
+    notifyCleanupError(input, error);
   }
 }
 

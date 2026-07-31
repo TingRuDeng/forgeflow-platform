@@ -82,9 +82,12 @@ const WorkerResultBodySchema = z.object({
   }),
   evidence: z.unknown().optional(),
   waitingForInput: z.object({
+    requestId: z.string().optional(),
+    sourceSessionId: z.string().optional(),
     requestedBy: z.string().optional(),
     reason: z.string().optional(),
     prompt: z.string().optional(),
+    expiresAt: z.string().optional(),
     resumePayloadSchema: ResumePayloadSchema.optional(),
   }).optional(),
 });

@@ -64,6 +64,15 @@ function activeWorkerEnvelope(state: RuntimeState, taskId: string) {
   return workerEnvelope(attempt);
 }
 
+function reviewFreshnessFor(state: RuntimeState, taskId: string) {
+  const freshness = state.reviews.find((review) => review.taskId === taskId)
+    ?.reviewMaterial?.freshness;
+  if (!freshness) {
+    throw new Error(`missing review freshness for ${taskId}`);
+  }
+  return freshness;
+}
+
 function recordWorkerResult(
   state: RuntimeState,
   input: Omit<RecordWorkerResultInput, "receivedAt"> & { receivedAt?: string },
@@ -510,6 +519,45 @@ describe("dispatcher runtime state (TypeScript)", () => {
       number: 12,
       status: "opened",
     });
+    const reviewFreshness = snapshotBeforeDecision.reviews[0]?.reviewMaterial?.freshness;
+    expect(reviewFreshness).toMatchObject({
+      attemptId: expect.any(String),
+      artifactBundleId: expect.any(String),
+    });
+    expect(() => recordReviewDecision(state, {
+      taskId: dispatch.taskIds[0],
+      actor: "unfenced-reviewer",
+      decision: "merge",
+    })).toThrow(/review freshness required/i);
+    expect(() => recordReviewDecision(state, {
+      taskId: dispatch.taskIds[0],
+      actor: "stale-reviewer",
+      decision: "merge",
+      expectedFreshness: {
+        attemptId: "stale-attempt",
+        artifactBundleId: "stale-bundle",
+      },
+    })).toThrow(/review freshness mismatch/i);
+    expect(() => recordReviewDecision(state, {
+      taskId: dispatch.taskIds[0],
+      actor: "invalid-time-reviewer",
+      decision: "merge",
+      at: "not-a-timestamp",
+      expectedFreshness: reviewFreshness,
+    })).toThrow(/valid timestamp/i);
+    const reviewStartedAt = state.events.find((event) => (
+      event.taskId === dispatch.taskIds[0]
+      && event.type === "status_changed"
+      && (event.payload as { to?: unknown } | undefined)?.to === "review"
+    ))?.at;
+    expect(reviewStartedAt).toBeTruthy();
+    expect(() => recordReviewDecision(state, {
+      taskId: dispatch.taskIds[0],
+      actor: "time-travel-reviewer",
+      decision: "merge",
+      at: new Date(Date.parse(reviewStartedAt!) - 1).toISOString(),
+      expectedFreshness: reviewFreshness,
+    })).toThrow(/must not be before review started/i);
 
     state = recordReviewDecision(state, {
       taskId: dispatch.taskIds[0],
@@ -517,6 +565,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
       decision: "merge",
       notes: "self test and PR review passed",
       at: "2026-03-16T10:03:00.000Z",
+      expectedFreshness: reviewFreshness,
     });
 
     saveRuntimeState(stateDir, state);
@@ -531,6 +580,9 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(snapshot.reviews[0]).toMatchObject({
       decision: "merge",
       actor: "codex-control",
+      evidence: {
+        reviewedFreshness: reviewFreshness,
+      },
     });
     expect(snapshot.events.some((event) => event.payload && typeof event.payload === "object" && "to" in event.payload && event.payload.to === "merged")).toBe(true);
   });
@@ -661,6 +713,46 @@ describe("dispatcher runtime state (TypeScript)", () => {
       ...recordedState,
       artifactBundles: [],
     }, resultInput)).toThrow(`idempotency replay mismatch for task: ${taskId}`);
+  });
+
+  it("accepts an idempotent replay when changed files exist only in the artifact bundle", () => {
+    const initialState = createRunningAttemptState("task-bundle-replay", "codex-bundle-replay");
+    const task = initialState.tasks[0]!;
+    const attempt = initialState.taskAttempts[0]!;
+    const resultInput: Omit<RecordWorkerResultInput, "receivedAt"> = {
+      workerId: "codex-bundle-replay",
+      ...workerEnvelope(attempt),
+      result: {
+        taskId: task.id,
+        workerId: "codex-bundle-replay",
+        provider: "codex",
+        pool: "codex",
+        branchName: task.branchName,
+        repo: task.repo,
+        defaultBranch: task.defaultBranch,
+        mode: "run",
+        output: "done",
+        generatedAt: "2026-05-12T13:01:00.000Z",
+        verification: {
+          allPassed: true,
+          commands: [],
+        },
+        artifactBundle: {
+          taskId: task.id,
+          attemptId: attempt.attemptId,
+          schemaVersion: "artifact-bundle/v1",
+          summary: "bundle-only changes",
+          changedFiles: [{ path: "auth/login.ts", changeType: "modified" }],
+          refs: {},
+          riskNotes: [],
+          nextActions: [],
+        },
+      },
+    };
+
+    const recordedState = recordWorkerResult(initialState, resultInput);
+    expect(recordedState.reviews[0]?.reviewMaterial?.changedFiles).toEqual(["auth/login.ts"]);
+    expect(recordWorkerResult(recordedState, resultInput)).toBe(recordedState);
   });
 
   it("records the structured terminal failure on the attempt and redrives through the dispatcher policy", () => {
@@ -839,6 +931,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
       actor: "reviewer",
       notes: "address review findings",
       at: "2026-05-12T13:01:30.000Z",
+      expectedFreshness: reviewFreshnessFor(state, task.id),
       evidence: {
         reasonCode: "test_failure",
         mustFix: ["补齐失败路径测试", "保留原始错误码"],
@@ -2210,6 +2303,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
       decision: "merge",
       notes: "upstream approved",
       at: "2026-04-05T10:05:00.000Z",
+      expectedFreshness: reviewFreshnessFor(state, upstreamDispatch.taskIds[0]),
     });
 
     const snapshot = buildDashboardSnapshot(state, {
@@ -3070,6 +3164,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
       actor: "reviewer",
       notes: "needs changes",
       at: "2026-03-17T10:06:00.000Z",
+      expectedFreshness: reviewFreshnessFor(state, taskId!),
       evidence: {
         reasonCode: "test_gap",
         mustFix: ["补充失败场景覆盖"],
@@ -3095,7 +3190,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
       changedFiles: ["src/main.ts"],
       selfTestPassed: true,
     });
-    expect(review?.evidence).toEqual({
+    expect(review?.evidence).toMatchObject({
       reasonCode: "test_gap",
       mustFix: ["补充失败场景覆盖"],
       canRedrive: true,
@@ -3158,10 +3253,11 @@ describe("dispatcher runtime state (TypeScript)", () => {
       claimedAt: "2026-03-17T10:00:12.000Z",
       startedAt: "2026-03-17T10:00:15.000Z",
     });
+    const attempt = state.taskAttempts.find((candidate) => candidate.taskId === taskId)!;
 
     state = recordWorkerResult(state, {
       workerId: "codex-risk",
-      ...activeWorkerEnvelope(state, taskId!),
+      ...workerEnvelope(attempt),
       result: {
         taskId,
         workerId: "codex-risk",
@@ -3177,15 +3273,30 @@ describe("dispatcher runtime state (TypeScript)", () => {
           allPassed: true,
           commands: [{ command: "pnpm test", exitCode: 0, output: "ok" }],
         },
+        artifactBundle: {
+          taskId,
+          attemptId: attempt.attemptId,
+          schemaVersion: "artifact-bundle/v1",
+          summary: "done",
+          changedFiles: [{ path: "auth/login.ts", changeType: "modified" }],
+          refs: {},
+          riskNotes: [],
+          nextActions: [],
+        },
       },
-      changedFiles: ["src/main.ts", "auth/login.ts"],
+      changedFiles: ["src/main.ts"],
       pullRequest: null,
     });
 
     const review = state.reviews.find((item) => item.taskId === taskId);
+    expect(review?.reviewMaterial?.changedFiles).toEqual(["auth/login.ts", "src/main.ts"]);
     expect(review?.riskAssessment?.level).toBe("needs_human_attention");
     expect(review?.riskAssessment?.changedFileCount).toBe(2);
     expect(review?.riskAssessment?.protectedPathHits.length).toBeGreaterThan(0);
+    expect(state.artifactBundles[0]?.changedFiles.map((entry) => entry.path)).toEqual([
+      "auth/login.ts",
+      "src/main.ts",
+    ]);
 
     const riskEvent = state.events.find(
       (event) => event.taskId === taskId && event.type === "review_risk_flagged",
@@ -3361,6 +3472,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
         decision: "merge",
         actor: "reviewer",
         at: "2026-03-17T10:06:00.000Z",
+        expectedFreshness: reviewFreshnessFor(enforce.state, enforce.taskId),
       })).toThrow(/merge blocked by risk gate/i);
 
       // enforce + acknowledge: merge proceeds and records an audit event.
@@ -3371,6 +3483,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
         actor: "reviewer",
         acknowledgeRisk: true,
         at: "2026-03-17T10:06:00.000Z",
+        expectedFreshness: reviewFreshnessFor(acknowledged.state, acknowledged.taskId),
       });
       expect(ackState.tasks.find((item) => item.id === acknowledged.taskId)?.status).toBe("merged");
       expect(ackState.events.some((event) =>
@@ -3387,6 +3500,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
         decision: "merge",
         actor: "reviewer",
         at: "2026-03-17T10:06:00.000Z",
+        expectedFreshness: reviewFreshnessFor(warn.state, warn.taskId),
       });
       expect(warnState.tasks.find((item) => item.id === warn.taskId)?.status).toBe("merged");
       expect(warnState.events.some((event) =>
@@ -3401,6 +3515,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
         decision: "merge",
         actor: "reviewer",
         at: "2026-03-17T10:06:00.000Z",
+        expectedFreshness: reviewFreshnessFor(off.state, off.taskId),
       });
       expect(offState.tasks.find((item) => item.id === off.taskId)?.status).toBe("merged");
       expect(offState.events.some((event) =>
@@ -3507,6 +3622,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
       actor: "reviewer",
       notes: "needs requested changes",
       at: "2026-03-17T10:06:00.000Z",
+      expectedFreshness: reviewFreshnessFor(state, dispatch.taskIds[0]),
     });
 
     const review = state.reviews.find((item) => item.taskId === dispatch.taskIds[0]);
@@ -5146,10 +5262,17 @@ describe("dispatcher runtime state (TypeScript)", () => {
     expect(state.workers[0]).toMatchObject({ status: "idle", currentTaskId: undefined });
     expect(state.taskAttempts[0]).toMatchObject({ status: "checkpointed", endedAt: "2026-04-08T10:10:04.000Z" });
     expect(state.events.some((event) => event.type === "task_interrupted")).toBe(true);
+    const waitingForInput = state.tasks[0]?.waitingForInput;
+    expect(waitingForInput).toMatchObject({
+      requestId: expect.any(String),
+      attemptId: state.taskAttempts[0]?.attemptId,
+    });
 
     state = resumeTaskFromInput(state, {
       taskId: dispatch.taskIds[0],
       actor: "codex-control",
+      requestId: waitingForInput?.requestId,
+      attemptId: waitingForInput?.attemptId,
       resumePayload: { decision: "ship narrow scope", reviewers: ["alice"] },
       at: "2026-04-08T10:10:05.000Z",
     });
@@ -5368,6 +5491,7 @@ describe("dispatcher runtime state (TypeScript)", () => {
       actor: "codex-control",
       notes: "retry after verification",
       at: "2026-04-08T11:00:06+08:00",
+      expectedFreshness: reviewFreshnessFor(state, dispatch.taskIds[0]),
       evidence: {
         reasonCode: "artifact_gate",
         canRedrive: true,

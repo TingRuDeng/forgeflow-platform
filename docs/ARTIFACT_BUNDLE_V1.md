@@ -80,7 +80,7 @@ ai_summary:
 
 - `summary`：worker 对本次 attempt 的简要说明。
 - `branch` / `commit` / `pullRequestUrl`：代码交付定位。
-- `changedFiles`：用于 review 和风险提示的变更摘要。
+- `changedFiles`：用于 review 和风险提示的变更摘要；dispatcher 会与 result 顶层 `changedFiles` 取去重并集，不能用其中一侧的空列表隐藏另一侧文件。
 - `refs`：指向 diff、logs、tests、screenshots、terminal transcript、structured report 或 trajectory。
 - `trajectory`：可选的结构化、可回放步骤轨迹，schemaVersion 固定为 `artifact-trajectory/v1`；每个 step 至少包含 `sequence`、`phase`、`action` 和 `status`，可附带 `observation`、`command`、`exitCode`、`artifactRef`。
 - `retainedContent`：可选的短正文片段，目前支持 `diff`、`logs`、`testResults`、`trajectory`，用于 Console / review 快速查看。
@@ -97,6 +97,7 @@ runtime-state 只应保存 bundle 摘要、引用和受限正文片段。大型 
 - `RuntimeState.artifactBundles[]` 保存 bundle 摘要、refs、可选 `trajectory` 和可选 `retainedContent`。
 - SQLite structured projection 使用 `artifact_bundles` 表承载查询投影，并保存 `trajectory_json` 与 `retained_content_json`。
 - dispatcher 在 worker 未显式提交 `trajectory` 时，会从 verification commands 生成默认 `artifact-trajectory/v1` 步骤轨迹。
+- dispatcher 将 result 顶层和 bundle 内的 `changedFiles` 合并成 canonical 文件清单，并用同一清单生成 review material 与风险等级。
 - dispatcher HTTP 写入 worker result 或 Trae submit-result 时，会把 `trajectory` 或 `retainedContent.trajectory` 以及 `retainedContent.diff`、`retainedContent.logs`、`retainedContent.testResults` 落到 `${stateDir}/artifacts/<bundle-dir>/`。
 - artifact store 使用 `manifest.json` 作为文件索引；当前会按实际内容生成 `result.json`、`diff.patch`、`session.log`、`test-results.txt`、`trajectory.json` 和 `trajectory.traj`。
 - dispatcher 不再信任 worker 预填的本地 `artifact://` 占位引用：落盘后会用真实 `bundleId` 和 manifest 文件名重建 refs；`session.log` 同时作为 `logs` 与 `terminalTranscript` 引用。
@@ -110,6 +111,7 @@ runtime-state 只应保存 bundle 摘要、引用和受限正文片段。大型 
 - Trae runtime 在拿到 `attempt_id` 后会随 submitResult 提交 minimal bundle。
 - Console 任务详情提供摘要、引用、正文和轨迹 tabs；轨迹 tab 支持按步骤前后回放 `trajectory.steps`，并可从当前 step 的 `artifactRef` 直接展开或下载 manifest 登记的观察文件。
 - Console 任务详情在任务处于 `review` 状态时可直接提交 `merge` / `rework` / `block` 审查决策，并携带 `reasonCode`、`mustFix[]`、`canRedrive`、`redriveStrategy` 和高风险合并的 `acknowledgeRisk`，和 attempt timeline / artifact summary 共处同一审查上下文。
+- dispatcher 会把当前 `TaskAttempt.attemptId`、`ArtifactBundle.bundleId` 和可选 bundle commit 组成 `reviewMaterial.freshness`。Console / orchestrator CLI 以 `expectedFreshness` 回传；当前 review 有 freshness 时，缺失或变化的 tuple 都返回 `409`，成功决策把 canonical tuple 记录为 `evidence.reviewedFreshness`。
 
 ## Review 展示
 

@@ -34,9 +34,13 @@ interface Task {
     existingTaskId?: string | null;
   } | null;
   waitingForInput?: {
+    requestId?: string;
+    attemptId?: string;
+    sourceSessionId?: string;
     requestedBy?: string;
     reason?: string;
     requestedAt?: string;
+    expiresAt?: string;
     resumePayloadSchema?: ResumePayloadSchema;
   } | null;
 }
@@ -76,6 +80,13 @@ interface Review {
       blockers?: Array<{ kind?: string; code?: string; message?: string }>;
       failureSummary?: string;
     } | null;
+  } | null;
+  reviewMaterial?: {
+    freshness?: {
+      attemptId: string;
+      artifactBundleId: string;
+      commitSha?: string;
+    };
   } | null;
 }
 
