@@ -89,6 +89,7 @@ function createFakeNpm(rootDir: string) {
 function createVersionAvailabilityFakeNpm(
   rootDir: string,
   exactVersionStatus: "missing" | "published" | "error",
+  requireIsolatedCache = false,
 ) {
   const binDir = path.join(rootDir, "version-check-bin");
   fs.mkdirSync(binDir, { recursive: true });
@@ -102,6 +103,13 @@ function createVersionAvailabilityFakeNpm(
     npmPath,
     [
       "#!/usr/bin/env node",
+      `const requireIsolatedCache = ${JSON.stringify(requireIsolatedCache)};`,
+      'const cacheDir = process.env.NPM_CONFIG_CACHE || "";',
+      'const userCacheDir = process.env.FORGEFLOW_TEST_USER_NPM_CACHE || "";',
+      'if (requireIsolatedCache && (!cacheDir || cacheDir === userCacheDir)) {',
+      '  process.stderr.write("npm ERR! code EACCES\\n");',
+      "  process.exit(1);",
+      "}",
       'const target = process.argv[3] || "";',
       'if (target === "@tingrudeng/beta-runtime-core@0.1.0-beta.1") {',
       `  ${exactVersionBehavior}`,
@@ -206,6 +214,38 @@ describe("release publish preflight", () => {
         encoding: "utf8",
         env: {
           ...process.env,
+          PATH: `${fakeNpmBin}:${process.env.PATH || ""}`,
+        },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Release preflight passed");
+  });
+
+  it("isolates registry queries from the user npm cache", () => {
+    const tempDir = makeTempDir();
+    writePackageJson(tempDir);
+    const fakeNpmBin = createVersionAvailabilityFakeNpm(tempDir, "missing", true);
+    const userCacheDir = path.join(tempDir, "poisoned-npm-cache");
+
+    const result = spawnSync(
+      "node",
+      [
+        preflightScriptPath,
+        "--package-dir",
+        "packages/beta-runtime-core",
+        "--expected-repo",
+        "TingRuDeng/forgeflow-platform",
+        "--require-version-available",
+      ],
+      {
+        cwd: tempDir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          FORGEFLOW_TEST_USER_NPM_CACHE: userCacheDir,
+          NPM_CONFIG_CACHE: userCacheDir,
           PATH: `${fakeNpmBin}:${process.env.PATH || ""}`,
         },
       },
