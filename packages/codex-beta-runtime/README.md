@@ -35,10 +35,10 @@ pnpm --filter @tingrudeng/codex-beta-runtime exec forgeflow-codex-beta version
 forgeflow-codex-beta start worker --detach --log-file /tmp/codex-worker.log
 ```
 
-发布后的预期用法：
+npm beta 安装入口：
 
 ```bash
-npm install -g @tingrudeng/codex-beta-runtime
+npm install -g @tingrudeng/codex-beta-runtime@beta
 forgeflow-codex-beta init
 forgeflow-codex-beta doctor
 forgeflow-codex-beta start worker
@@ -48,6 +48,8 @@ forgeflow-codex-beta update
 forgeflow-codex-beta version
 forgeflow-codex-beta --version
 ```
+
+`forgeflow-codex-beta update` 默认跟踪同一个 npm `beta` dist-tag，不依赖可能滞后的 `latest`。
 
 ## 运行要求
 

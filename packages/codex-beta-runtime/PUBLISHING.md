@@ -65,7 +65,7 @@ node scripts/release-package.js --package codex-beta-runtime --bump prerelease -
 发布后，预期安装形态如下：
 
 ```bash
-pnpm add -g @tingrudeng/codex-beta-runtime
+pnpm add -g @tingrudeng/codex-beta-runtime@beta
 forgeflow-codex-beta init
 forgeflow-codex-beta doctor
 forgeflow-codex-beta start worker

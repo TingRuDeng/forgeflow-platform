@@ -46,7 +46,7 @@ Commands:
   start worker                  Start codex worker daemon
   status                        Show runtime and process status
   stop worker                   Stop codex worker daemon
-  update                        Update the runtime package to latest version
+  update                        Update the runtime package from the beta dist-tag
   version                       Print the package version
 
 Options:

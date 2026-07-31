@@ -105,7 +105,7 @@ The workflow prepares one tarball, publishes that exact file with OIDC provenanc
 After publish, the intended install shape is:
 
 ```bash
-pnpm add -g @tingrudeng/trae-beta-runtime
+pnpm add -g @tingrudeng/trae-beta-runtime@beta
 forgeflow-trae-beta init
 forgeflow-trae-beta doctor
 forgeflow-trae-beta start launch

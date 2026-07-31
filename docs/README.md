@@ -288,7 +288,7 @@ vNext runtime reliability 推进：
   - 源码仓运行：`../scripts/start-control-plane.sh`
   - install-and-run runtime 包：`../packages/forgeflow-dispatcher/README.md`
 - `start-control-plane.sh` 现在默认把 dispatcher 绑定到 `127.0.0.1`；监听非 loopback 地址必须显式传 `FORGEFLOW_DISPATCHER_HOST` 或 `--host`。
-- `codex` / `gemini` 的 `worker daemon` 链路是受支持的多机执行路径，与 Trae 并列；远程 Codex 机器可用已公开的 `@tingrudeng/codex-beta-runtime` 接入，Gemini 远程包源码已在 `../packages/gemini-beta-runtime/`，但 npm 包名当前仍待外部配置。worker-daemon 主循环、worker CLI、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到 `@tingrudeng/beta-runtime-core`，dispatcher runtime-glue 与源码脚本复用同一个 shared daemon cycle，脚本侧 dist bootstrap 已收敛到 `../scripts/lib/runtime-bootstrap.ts`，本地日志 / metrics hook 组装已拆到 `../scripts/lib/worker-daemon-hooks.ts`；CI 和 release workflow 会运行 `pnpm verify:runtime-packages` 校验 runtime 包发布清单，并运行 `pnpm verify:runtime-packages:install` 本地打包 / 安装 codex、gemini、trae runtime tarball；`pnpm report:runtime-packages:setup` 会输出 npm 包名、当前版本、发布顺序和 Trusted Publisher 配置缺口；生产发布窗口可用 `pnpm verify:runtime-packages:published` 强制校验 npm registry 包名、版本和已发布依赖元数据，并用 `pnpm verify:runtime-packages:published-smoke` 从 registry 安装已发布 provider runtime 后验证 CLI；剩余边界是未发布包的外部 npm 配置和生产部署证据。
+- `codex` / `gemini` 的 `worker daemon` 链路是受支持的多机执行路径，与 Trae 并列；远程机器可分别用已公开的 `@tingrudeng/codex-beta-runtime@beta` 与 `@tingrudeng/gemini-beta-runtime@beta` 接入。worker-daemon 主循环、worker CLI、dispatcher client、assignment runner、launch builder、managed executor、live executor 与失败回写已收敛到 `@tingrudeng/beta-runtime-core`，dispatcher runtime-glue 与源码脚本复用同一个 shared daemon cycle，脚本侧 dist bootstrap 已收敛到 `../scripts/lib/runtime-bootstrap.ts`，本地日志 / metrics hook 组装已拆到 `../scripts/lib/worker-daemon-hooks.ts`；CI 和 release workflow 会运行 `pnpm verify:runtime-packages` 校验 runtime 包发布清单，并运行 `pnpm verify:runtime-packages:install` 本地打包 / 安装 codex、gemini、trae runtime tarball；`pnpm report:runtime-packages:setup` 会输出 npm 包名、当前版本、发布顺序和 Trusted Publisher 配置缺口；生产发布窗口可用 `pnpm verify:runtime-packages:published` 强制校验 npm registry 包名、版本和已发布依赖元数据，并用 `pnpm verify:runtime-packages:published-smoke` 从 registry 安装已发布 provider runtime 后验证 CLI；剩余边界是生产部署和真实远程机器验收证据。
 - `worker-daemon` / Trae runtime 现在只有在结果成功回写到 dispatcher 后才会对外呈现“完成”；`submitResult`、`git push`、自动 PR 创建失败都属于显式失败，而不是假完成。Trae terminal result 与 shared daemon cycle 默认都最多尝试 3 次、间隔 2 秒，可用 `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` / `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS` 调整；Trae 在结果未获确认时保留 session，停止任务轮询并以非零状态退出。shared daemon cycle 只维持一条 single-flight heartbeat 并覆盖结果重试；assignment 子进程默认总超时为 30 分钟，可用 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 覆盖。执行 timeout / SIGINT / SIGTERM 会取消 dispatcher HTTP 请求与重试等待，并终止完整子进程树。
 - Codex、Gemini 与 Trae 的 worktree 操作统一由 `@tingrudeng/beta-runtime-core` 提供：Git 命令默认 60 秒超时并响应取消；有损或过长的 task 目录名会附加原始 ID 的稳定短哈希，危险目录、非法 ref、默认分支和 Git 登记错配都会 fail closed。复用时统一执行 `reset --hard` + `clean -fd`。结果被 dispatcher 确认后，只有显式设置 `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 才尝试清理；默认非 force 并保留脏 worktree，`FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 才会丢弃未提交内容。
 - Codex / Gemini shared runtime 默认使用向后兼容的 `trusted-host` profile；操作者可通过 `FORGEFLOW_EXECUTION_PROFILE=isolated-container` 和固定本地镜像，把 provider 与 verification 一起放入 fail-closed 容器边界。策略由 worker 启动环境拥有，task payload 不能覆盖；完整挂载、secret、资源和网络边界见 `contracts/execution-profile-v1.md`。
@@ -315,7 +315,7 @@ vNext runtime reliability 推进：
 - worker 子进程不再继承完整环境变量；自动 PR 创建只有显式设置 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - `codex` / `gemini` 多机执行主线是 `worker daemon`。
 - Codex 远程机器优先入口是 `@tingrudeng/codex-beta-runtime`。
-- Gemini 远程机器当前优先读 `../packages/gemini-beta-runtime/README.md` 的源码入口；`@tingrudeng/gemini-beta-runtime` 完成 npm 包名配置并发布后，才作为远程 npm 安装入口。
+- Gemini 远程机器优先用 `@tingrudeng/gemini-beta-runtime@beta` 安装；仓库内源码入口只用于开发和调试。
 - Trae 的首选无人值守路径是 `automation gateway` + `automation worker`。
 - Trae MCP worker 已降级为 deprecated/fallback 接入。
 - review memory 已进入主线的 dispatch 注入路径，但仍不是完整知识库系统。
@@ -373,13 +373,13 @@ vNext runtime reliability 推进：
   - 适合全局安装 `@tingrudeng/forgeflow-dispatcher` 后直接运行单机 SQLite dispatcher。
 - `../packages/trae-beta-runtime/README.md`
   - 当前对外发布的远程 Trae npm 包入口。
-  - 适合远程机器用 `npm install -g @tingrudeng/trae-beta-runtime` 安装。
+  - 适合远程机器用 `npm install -g @tingrudeng/trae-beta-runtime@beta` 安装。
 - `../packages/codex-beta-runtime/README.md`
   - 当前对外发布的远程 Codex npm 包入口。
-  - 适合远程机器用 `npm install -g @tingrudeng/codex-beta-runtime` 安装。
+  - 适合远程机器用 `npm install -g @tingrudeng/codex-beta-runtime@beta` 安装。
 - `../packages/gemini-beta-runtime/README.md`
-  - 源码内远程 Gemini runtime 包入口。
-  - 当前用于仓库内 `pnpm --filter @tingrudeng/gemini-beta-runtime exec ...` 验证；npm 包名配置完成前不要写成公开安装入口。
+  - 当前对外发布的远程 Gemini npm 包入口。
+  - 适合远程机器用 `npm install -g @tingrudeng/gemini-beta-runtime@beta` 安装；仓库内 `pnpm --filter ... exec` 入口保留给开发验证。
 - `../packages/automation-gateway-core/README.md`
   - 远程 Trae runtime 依赖的共享协议 helper 包。
   - 不是远程机器直接安装入口，主要用于复用 gateway 协议、session 持久化、报告解析和任务 ID 校验逻辑。
