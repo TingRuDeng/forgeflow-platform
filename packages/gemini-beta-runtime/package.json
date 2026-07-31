@@ -1,6 +1,6 @@
 {
   "name": "@tingrudeng/gemini-beta-runtime",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "private": false,
   "description": "Minimal remote-machine runtime package for ForgeFlow Gemini worker daemon",
   "license": "Apache-2.0",
