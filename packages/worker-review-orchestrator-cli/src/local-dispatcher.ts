@@ -15,6 +15,7 @@ type LocalDispatcherHandler = (input: {
   stateDir: string;
   method: string;
   pathname: string;
+  receivedAt: string;
   body?: unknown;
   clientAddress?: string;
   internalCall?: boolean;
@@ -71,6 +72,7 @@ export async function runLocalDispatcherRequest(input: {
     stateDir: path.resolve(input.stateDir),
     method: input.method,
     pathname: input.pathname,
+    receivedAt: new Date().toISOString(),
     body: input.body,
     clientAddress: "127.0.0.1",
     internalCall: true,

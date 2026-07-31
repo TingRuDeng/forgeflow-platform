@@ -51,6 +51,8 @@ Current mainline runtime state is loaded through `scripts/lib/dispatcher-state.j
 
 If you change dispatcher persistence, update `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts` and its tests. Standalone schema constants were removed because they were not the active runtime path.
 
+Control-layer `--state-dir` mutations must go through the local dispatcher bridge. Do not read and rewrite `runtime-state.json` directly: SQLite is the default truth source, and route-local state transitions omit dispatcher validation, audit events, lease release, and risk gates.
+
 ## 2. Do not collapse dispatcher APIs and Trae automation gateway APIs into one generic API story
 
 Dispatcher and automation gateway are separate services with different responsibilities and response envelopes.

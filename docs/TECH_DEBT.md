@@ -70,6 +70,7 @@ Current situation:
 - dispatcher runtime state now defaults to SQLite via `runtime-state-sqlite.ts`
 - JSON fallback still exists for explicit compatibility mode and import bootstrap
 - standalone `apps/dispatcher/src/db/schema.ts` constants have been removed; live SQLite schema ownership is now concentrated in `runtime-state-sqlite.ts`
+- active SQLite reads use WAL-aware read-only connections; immutable mode is limited to a no-WAL/no-SHM compatibility fallback for a fully read-only directory
 
 Impact:
 
@@ -174,6 +175,7 @@ Desired direction:
 - `leases.ts` 当前支持 `assignment`、`repo`、`branch`、`session` resource type
 - `runtime-state.ts` 将 acquisition/release helper 接入 task claim、start、result、cancel、review decision 和 worker offline 路径
 - continuation / follow-up 任务会基于 `continueFromTaskId` / `followUpOfTaskId` 获取 session lease
+- busy worker heartbeat 会在同一个 state mutation 中续租 active attempt 与 assignment / repo / branch / optional session lease；到期 attempt 不会被 heartbeat 复活
 
 影响：
 
@@ -194,6 +196,7 @@ Desired direction:
 - `packages/worker-protocol` 已提供 start/result payload helper，统一第三方 worker adapter 需要回写的 envelope 字段
 - dispatcher runtime state 已有 `taskAttempts[]`，SQLite `task_attempts` projection 会保存 synthetic attempt
 - dispatcher start/result mutation 已强制完整 v1 envelope，并会拒绝缺少 active attempt、缺字段或携带历史终态 `attemptId` 的 stale result
+- start/result admission 现在会在 reconcile 前直接 fence 已到期 attempt；result 还要求同一 worker 持有有效 assignment lease
 - `succeeded` / `failed` result 的精确网络重放现在幂等返回原状态；同一 key 若改变 canonical result、PR metadata 或 ArtifactBundle 会明确冲突
 - 通用 dispatcher worker start/result 会校验 `protocolVersion`、`traceId` 和 `idempotencyKey` 与 active attempt 一致
 - Trae 兼容主链的 `fetch-task` / `start-task` / `submit-result` 已回显并校验 `protocolVersion`、`traceId`、`idempotencyKey`、`attemptId` 和 `leaseToken`

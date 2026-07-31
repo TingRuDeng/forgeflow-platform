@@ -13,7 +13,7 @@ This document is the current implementation-oriented summary of dispatcher task 
 ## 一分钟摘要
 
 - `planned -> ready -> assigned -> in_progress -> review -> merged` 是主线成功流。
-- `in_progress` 的 active attempt lease 过期且 worker 离线时，reconcile 会按最小 retry policy 自动 redrive 或失败。
+- `in_progress` 的 active attempt lease 过期时，reconcile 会按最小 retry policy 自动 redrive 或失败；worker 在线状态不能覆盖 attempt lease 边界。
 - `failed`、`blocked`、`cancelled` 有不同 redrive / follow-up 语义，不能混用。
 - generic worker claim 只能通过 `POST /api/workers/:workerId/claim-task` 产生副作用。
 - worker result 中 dispatcher-owned metadata 会被 canonicalize，worker 不能覆盖。
@@ -68,11 +68,14 @@ Current rules:
 - Claim may either:
   - return an already assigned task for that worker
   - or atomically select a `ready` task for that worker pool and move it to `assigned`
-- Reconcile now scans active running attempts. If `leaseExpiresAt` has passed and the owning worker is offline:
+- Worker start and heartbeat renew the active attempt and its task resource leases to the same expiry in one serialized state mutation while ownership is still valid.
+- Generic worker lifecycle and stale-result admission use the dispatcher-owned request receipt timestamp; worker-provided `at` and `generatedAt` cannot move the lease clock backwards.
+- Reconcile scans active running attempts. If `leaseExpiresAt` has passed, regardless of the worker's last reported online status:
   - dispatcher marks the current attempt as `expired` with `failureCode = attempt_lease_expired`
+  - dispatcher releases assignment / repo / branch / optional session leases owned by that attempt
   - if attempts are still below the default max of 2, dispatcher records `attempt_expired` and `task_redriven`, releases worker / assignment ownership, and moves the task back to `ready`
   - if attempts are exhausted, dispatcher records `attempt_expired` and moves task / assignment to `failed`
-- A late worker result that still carries an expired / terminal `attemptId` is rejected before it can mutate task, assignment, review, artifact, or worker state.
+- Start/result admission checks the lease boundary directly, so a late worker write is rejected even before reconcile runs; historical terminal `attemptId` values remain stale.
 - 已落账 `succeeded` / `failed` result 允许在响应丢失后按同一 v1 envelope 精确重放；canonical result、成功结果的 `changedFiles`、PR metadata 或 ArtifactBundle 任一发生变化都会按 idempotency conflict 拒绝。
 - `POST /api/tasks/:taskId/interrupt` 会把可中断任务置为 `waiting_for_input`，释放 worker / lease，并把 active attempt 标记为 `checkpointed`。
 - `POST /api/tasks/:taskId/resume` 会写入 `resumePayload`，把任务恢复为 `ready`，供下一次 worker claim 时继续使用。

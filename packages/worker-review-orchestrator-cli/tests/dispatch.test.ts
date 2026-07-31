@@ -213,6 +213,39 @@ describe("dispatch", () => {
     expect(result.taskIds).toHaveLength(1);
   }, 20_000);
 
+  it("propagates local dispatcher errors in stateDir mode", async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-dispatch-state-dir-error-"));
+    const duplicateTask = {
+      id: "duplicate-task",
+      title: "Duplicate task",
+      pool: "codex",
+      branchName: "codex/duplicate-task",
+    };
+
+    await expect(runDispatch({
+      dispatcherUrl: "http://127.0.0.1:8787",
+      stateDir,
+      input: "-",
+      payload: {
+        repo: "/repo",
+        defaultBranch: "main",
+        tasks: [duplicateTask, { ...duplicateTask }],
+        packages: [{
+          taskId: "duplicate-task",
+          assignment: {
+            taskId: "duplicate-task",
+            workerId: null,
+            pool: "codex",
+            status: "pending",
+            branchName: "codex/duplicate-task",
+            repo: "/repo",
+            defaultBranch: "main",
+          },
+        }],
+      },
+    })).rejects.toThrow("duplicate task id in dispatch: duplicate-task");
+  }, 20_000);
+
   it("requires an online worker in the task pool when no target worker is pinned", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce({
@@ -817,26 +850,21 @@ describe("dispatch", () => {
     expect(payload.packages[0].reportSchemaVersion).toBeUndefined();
   });
 
-  it("falls back to curl when fetch fails for local dispatcher URL", async () => {
+  it("falls back to curl when a local read fails before receiving a response", async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error("fetch failed"));
     const curlImpl = vi.fn().mockResolvedValue({
-      dispatchId: "dispatch-curl-fallback",
-      taskIds: ["dispatch-curl-fallback:task-1"],
-      assignments: [],
+      tasks: [{ id: "dispatch-curl-fallback:task-1" }],
     });
 
     const client = createJsonHttpClient("http://127.0.0.1:8787", { fetchImpl, curlImpl });
-    const result = await client.request("/api/dispatches", {
-      method: "POST",
-      body: { repo: "/repo", defaultBranch: "main", tasks: [], packages: [] },
-    });
+    const result = await client.request("/api/dashboard/snapshot");
 
-    expect(result).toMatchObject({ dispatchId: "dispatch-curl-fallback" });
+    expect(result).toMatchObject({ tasks: [{ id: "dispatch-curl-fallback:task-1" }] });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(curlImpl).toHaveBeenCalledTimes(1);
     expect(curlImpl).toHaveBeenCalledWith(
-      "http://127.0.0.1:8787/api/dispatches",
-      expect.objectContaining({ method: "POST" }),
+      "http://127.0.0.1:8787/api/dashboard/snapshot",
+      expect.objectContaining({ method: "GET" }),
     );
   });
 
@@ -856,7 +884,7 @@ describe("dispatch", () => {
 
     const client = createJsonHttpClient("http://127.0.0.1:8787", { fetchImpl, curlImpl });
     await expect(
-      client.request("/api/dispatches", { method: "POST", body: {} }),
+      client.request("/api/dashboard/snapshot"),
     ).rejects.toThrow("internal server error");
   });
 
@@ -906,34 +934,98 @@ describe("dispatch", () => {
 
     const client = createJsonHttpClient("http://127.0.0.1:8787", { fetchImpl, curlImpl });
     await expect(
-      client.request("/api/dispatches", { method: "POST", body: {} }),
+      client.request("/api/dashboard/snapshot"),
     ).rejects.toThrow("curl connection refused");
 
     expect(curlImpl).toHaveBeenCalledTimes(1);
   });
 
-  it("passes body with special characters to curl without shell interpretation", async () => {
+  it("does not retry a local mutation after an ambiguous fetch failure", async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error("fetch failed"));
-    const curlImpl = vi.fn().mockResolvedValue({ ok: true });
+    const curlImpl = vi.fn();
 
     const client = createJsonHttpClient("http://127.0.0.1:8787", { fetchImpl, curlImpl });
-    const bodyWithSpecialChars = {
-      message: "hello 'world' with \"quotes\" and $var `backticks`",
-      nested: { arr: [1, 2, 3] },
-      spaces: "  multiple   spaces  ",
-    };
-
-    await client.request("/api/dispatches", {
+    await expect(client.request("/api/dispatches", {
       method: "POST",
-      body: bodyWithSpecialChars,
-    });
+      body: { repo: "/repo", defaultBranch: "main", tasks: [], packages: [] },
+    })).rejects.toThrow("fetch failed");
+    expect(curlImpl).not.toHaveBeenCalled();
+  });
 
-    expect(curlImpl).toHaveBeenCalledWith(
-      "http://127.0.0.1:8787/api/dispatches",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify(bodyWithSpecialChars),
-      }),
+  it("does not fall back after receiving a non-success HTTP response", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => JSON.stringify({ error: "write failed" }),
+    });
+    const curlImpl = vi.fn();
+
+    const client = createJsonHttpClient("http://127.0.0.1:8787", { fetchImpl, curlImpl });
+    await expect(client.request("/api/dispatches", {
+      method: "POST",
+      body: {},
+    })).rejects.toThrow("write failed");
+    expect(curlImpl).not.toHaveBeenCalled();
+  });
+
+  it("keeps the request timeout active while reading the response body", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => new Promise<string>(() => {}),
+    });
+    const curlImpl = vi.fn();
+
+    const client = createJsonHttpClient("http://127.0.0.1:8787", {
+      fetchImpl,
+      curlImpl,
+      requestTimeoutMs: 20,
+    });
+    await expect(client.request("/api/dashboard/snapshot")).rejects.toThrow(
+      "request timeout: /api/dashboard/snapshot",
     );
+    expect(curlImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back after receiving malformed JSON", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => "not-json",
+    });
+    const curlImpl = vi.fn();
+
+    const client = createJsonHttpClient("http://127.0.0.1:8787", { fetchImpl, curlImpl });
+    await expect(client.request("/api/dashboard/snapshot")).rejects.toThrow(
+      "invalid JSON response: /api/dashboard/snapshot",
+    );
+    expect(curlImpl).not.toHaveBeenCalled();
+  });
+
+  it("passes dispatcher authorization to the local read fallback", async () => {
+    const previousToken = process.env.DISPATCHER_API_TOKEN;
+    process.env.DISPATCHER_API_TOKEN = "test-local-token";
+    try {
+      const fetchImpl = vi.fn().mockRejectedValue(new Error("fetch failed"));
+      const curlImpl = vi.fn().mockResolvedValue({ tasks: [] });
+      const client = createJsonHttpClient("http://127.0.0.1:8787", { fetchImpl, curlImpl });
+
+      await client.request("/api/dashboard/snapshot");
+
+      expect(curlImpl).toHaveBeenCalledWith(
+        "http://127.0.0.1:8787/api/dashboard/snapshot",
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: "Bearer test-local-token",
+          }),
+        }),
+      );
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.DISPATCHER_API_TOKEN;
+      } else {
+        process.env.DISPATCHER_API_TOKEN = previousToken;
+      }
+    }
   });
 });

@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { runDecide } from "../src/decide.js";
 import { createEmptyRuntimeState, saveRuntimeState } from "../src/http.js";
+import { loadLocalSnapshot } from "../src/local-dispatcher.js";
 
 describe("decide", () => {
   it("posts review decisions to the dispatcher", async () => {
@@ -64,10 +65,66 @@ describe("decide", () => {
   it("updates local runtime state when only state-dir is available", async () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-review-"));
     const state = createEmptyRuntimeState();
-    state.tasks = [{ id: "dispatch-1:task-1", status: "review" }];
-    state.assignments = [{ taskId: "dispatch-1:task-1", status: "review", assignment: { status: "review" } }];
-    state.reviews = [{ taskId: "dispatch-1:task-1", decision: "block" }];
-    state.pullRequests = [{ taskId: "dispatch-1:task-1", status: "open" }];
+    state.tasks = [{
+      id: "dispatch-1:task-1",
+      externalTaskId: "task-1",
+      traceId: "trace-dispatch-1-task-1",
+      repo: "test/repo",
+      defaultBranch: "main",
+      title: "Review task",
+      pool: "codex",
+      allowedPaths: [],
+      acceptance: [],
+      dependsOn: [],
+      branchName: "codex/task-1",
+      verification: { mode: "run" },
+      status: "review",
+      assignedWorkerId: "codex-worker",
+      lastAssignedWorkerId: "codex-worker",
+      requestedBy: "test",
+      createdAt: "2026-07-31T10:00:00+08:00",
+    }];
+    state.assignments = [{
+      taskId: "dispatch-1:task-1",
+      workerId: "codex-worker",
+      pool: "codex",
+      status: "review",
+      assignment: {
+        taskId: "dispatch-1:task-1",
+        traceId: "trace-dispatch-1-task-1",
+        workerId: "codex-worker",
+        pool: "codex",
+        status: "review",
+        branchName: "codex/task-1",
+        allowedPaths: [],
+        repo: "test/repo",
+        defaultBranch: "main",
+      },
+      assignedAt: "2026-07-31T10:01:00+08:00",
+      claimedAt: "2026-07-31T10:02:00+08:00",
+    }];
+    state.reviews = [{
+      taskId: "dispatch-1:task-1",
+      decision: "pending",
+      actor: null,
+      notes: "",
+      decidedAt: null,
+      riskAssessment: {
+        level: "low",
+        reasons: [],
+      },
+    }];
+    state.pullRequests = [{
+      taskId: "dispatch-1:task-1",
+      number: 1,
+      url: "https://github.com/test/repo/pull/1",
+      headBranch: "codex/task-1",
+      baseBranch: "main",
+      title: "Review task",
+      status: "opened",
+      createdAt: "2026-07-31T10:03:00+08:00",
+      updatedAt: "2026-07-31T10:03:00+08:00",
+    }];
     saveRuntimeState(stateDir, state);
 
     const result = await runDecide({
@@ -89,12 +146,14 @@ describe("decide", () => {
       source: "state-dir",
     });
 
-    const nextState = JSON.parse(fs.readFileSync(path.join(stateDir, "runtime-state.json"), "utf8")) as {
+    expect(fs.existsSync(path.join(stateDir, "runtime-state.db"))).toBe(true);
+    const nextState = await loadLocalSnapshot(stateDir) as {
       updatedAt: string;
       tasks: Array<{ status: string }>;
       assignments: Array<{ status: string; assignment: { status: string } }>;
       reviews: Array<{ decision: string; decidedAt: string; evidence?: Record<string, unknown> }>;
       pullRequests: Array<{ status: string; updatedAt: string }>;
+      events: Array<{ type: string }>;
     };
 
     expect(nextState.updatedAt).toMatch(/[+-]\d{2}:\d{2}$/);
@@ -114,6 +173,9 @@ describe("decide", () => {
     expect(nextState.pullRequests[0]?.status).toBe("changes_requested");
     expect(nextState.pullRequests[0]?.updatedAt).toMatch(/[+-]\d{2}:\d{2}$/);
     expect(nextState.pullRequests[0]?.updatedAt.endsWith("Z")).toBe(false);
+    expect(nextState.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "review_decided" }),
+    ]));
   });
 
   it("blocks a merge when the review risk grade is not low", async () => {

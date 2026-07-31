@@ -454,6 +454,7 @@ This is intentionally not a fully normalized operational schema. The current des
 - a bounded recent revision window for rescue plus append-only runtime audit events
 - checksum validation to detect silent corruption
 - WAL mode for safer concurrent read/write behavior
+- WAL-aware read-only connections for active databases; immutable reads are used only as a compatibility fallback when the directory is read-only and no WAL / SHM sidecar exists
 - transactional snapshot / audit / projection persistence
 - file-backed SQLite correctness
 - simple JSON import from `runtime-state.json`

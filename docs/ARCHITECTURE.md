@@ -114,6 +114,7 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
   - Implemented through `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts`
   - Uses `node:sqlite`
   - Stores a bounded recent snapshot revision window, append-only runtime audit events, and dispatcher-owned structured projection tables
+  - Active snapshot / projection / audit reads use WAL-aware read-only connections; immutable mode is only a compatibility fallback for a fully read-only directory with no WAL / SHM sidecar
 - Dispatcher JSON fallback and import source: `.forgeflow-dispatcher/runtime-state.json`
   - Only used when `RUNTIME_STATE_BACKEND=json` or `--persistence-backend json` is explicitly selected
   - Also used as one-time import source when SQLite is the default but only a JSON snapshot exists

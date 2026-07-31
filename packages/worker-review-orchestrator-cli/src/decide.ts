@@ -1,8 +1,7 @@
-import path from "node:path";
+import type { DecideOptions, DecideResult } from "./types.js";
 
-import type { DecideOptions, DecideResult, LocalRuntimeState } from "./types.js";
-
-import { createJsonHttpClient, createEmptyRuntimeState, loadRuntimeState, saveRuntimeState } from "./http.js";
+import { createJsonHttpClient } from "./http.js";
+import { loadLocalSnapshot, runLocalDispatcherRequest } from "./local-dispatcher.js";
 import { formatLocalTimestamp } from "./time.js";
 
 type DecisionEvidence = {
@@ -62,8 +61,11 @@ async function resolveTaskReviewRisk(
       return pickRisk(review);
     }
     if (options.stateDir) {
-      const state = loadRuntimeState(path.resolve(options.stateDir));
-      const review = (state.reviews as Array<Record<string, unknown>>).find(
+      const snapshot = await loadLocalSnapshot(options.stateDir);
+      const reviews = Array.isArray(snapshot.reviews)
+        ? snapshot.reviews as Array<Record<string, unknown>>
+        : [];
+      const review = reviews.find(
         (item) => item.taskId === options.taskId,
       );
       return pickRisk(review);
@@ -135,125 +137,6 @@ function buildDecisionEvidence(options: DecideOptions): DecisionEvidence | undef
   return evidence;
 }
 
-function upsertByTaskId(items: Array<Record<string, unknown>>, payload: Record<string, unknown>) {
-  const index = items.findIndex((item) => item.taskId === payload.taskId);
-  if (index === -1) {
-    return [...items, payload];
-  }
-
-  const next = [...items];
-  next[index] = {
-    ...next[index],
-    ...payload,
-  };
-  return next;
-}
-
-function buildLocalDecisionState(
-  state: LocalRuntimeState,
-  input: DecideOptions & { decision: "merge" | "block" | "rework" | "changes_requested" },
-) {
-  const task = state.tasks.find((candidate) => candidate.id === input.taskId);
-  if (!task) {
-    throw new Error(`task not found: ${input.taskId}`);
-  }
-
-  const assignment = state.assignments.find((candidate) => candidate.taskId === input.taskId);
-  if (!assignment) {
-    throw new Error(`assignment not found: ${input.taskId}`);
-  }
-
-  if (task.status !== "review") {
-    throw new Error(`task not in review: ${input.taskId}`);
-  }
-
-  const nextStatus = input.decision === "merge" ? "merged" : "blocked";
-  const at = input.at || readNowIso();
-  const evidence = buildDecisionEvidence(input);
-
-  const nextEvents = [
-    ...state.events,
-    {
-      taskId: input.taskId,
-      type: "status_changed",
-      at,
-      payload: {
-        from: "review",
-        to: nextStatus,
-      },
-    },
-  ];
-
-  const nextTasks = state.tasks.map((candidate) =>
-    candidate.id === input.taskId
-      ? {
-          ...candidate,
-          status: nextStatus,
-        }
-      : candidate,
-  );
-
-  const nextAssignments = state.assignments.map((candidate) =>
-    candidate.taskId === input.taskId
-      ? {
-          ...candidate,
-          status: nextStatus,
-          assignment: {
-            ...(candidate.assignment as Record<string, unknown>),
-            status: nextStatus,
-          },
-        }
-      : candidate,
-  );
-
-  const reviewPayload: Record<string, unknown> = {
-    taskId: input.taskId,
-    decision: input.decision,
-    actor: input.actor ?? "codex-control",
-    notes: input.notes ?? "",
-    decidedAt: at,
-  };
-  if (evidence) {
-    reviewPayload.evidence = evidence;
-  }
-
-  const nextReviews = upsertByTaskId(state.reviews, reviewPayload);
-
-  const nextPullRequests = state.pullRequests.map((pullRequest) =>
-    pullRequest.taskId === input.taskId
-      ? {
-          ...pullRequest,
-          status: input.decision === "merge" ? "merged" : "changes_requested",
-          updatedAt: at,
-        }
-      : pullRequest,
-  );
-
-  const nextState: LocalRuntimeState = {
-    ...state,
-    updatedAt: at,
-    events: nextEvents,
-    tasks: nextTasks,
-    assignments: nextAssignments,
-    reviews: nextReviews,
-    pullRequests: nextPullRequests,
-  };
-
-  return {
-    state: nextState,
-    result: {
-      taskId: input.taskId,
-      decision: input.decision,
-      status: nextStatus,
-      actor: input.actor ?? "codex-control",
-      notes: input.notes ?? "",
-      at,
-      task,
-      assignment,
-    },
-  };
-}
-
 export async function runDecide(options: DecideOptions & {
   fetchImpl?: typeof globalThis.fetch;
 }): Promise<DecideResult> {
@@ -292,18 +175,27 @@ export async function runDecide(options: DecideOptions & {
     throw new Error("dispatcherUrl or stateDir is required");
   }
 
-  const state = loadRuntimeState(path.resolve(options.stateDir));
-  const result = buildLocalDecisionState(state, {
-    ...options,
-    decision,
+  const response = await runLocalDispatcherRequest({
+    stateDir: options.stateDir,
+    method: "POST",
+    pathname: `/api/reviews/${encodeURIComponent(options.taskId)}/decision`,
+    body: payload,
   });
-  saveRuntimeState(path.resolve(options.stateDir), result.state);
+  if (response.status < 200 || response.status >= 300) {
+    const responseBody = response.json as { error?: unknown; message?: unknown } | undefined;
+    const message = typeof responseBody?.message === "string"
+      ? responseBody.message
+      : typeof responseBody?.error === "string"
+        ? responseBody.error
+        : `HTTP ${response.status}`;
+    throw new Error(message);
+  }
 
   return {
     taskId: options.taskId,
     decision,
     status: decision === "merge" ? "merged" : "blocked",
     source: "state-dir",
-    payload: result.result as Record<string, unknown>,
+    payload: (response.json ?? {}) as Record<string, unknown>,
   };
 }

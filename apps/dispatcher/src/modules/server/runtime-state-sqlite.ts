@@ -57,6 +57,11 @@ function stateFilePath(stateDir: string): string {
 function readOnlyDbUri(filePath: string): string {
   const url = pathToFileURL(filePath);
   url.searchParams.set("mode", "ro");
+  return url.href;
+}
+
+function immutableReadOnlyDbUri(filePath: string): string {
+  const url = new URL(readOnlyDbUri(filePath));
   url.searchParams.set("immutable", "1");
   return url.href;
 }
@@ -104,6 +109,31 @@ function applyPragmas(db: InstanceType<typeof DatabaseSync>): void {
 
 function applyReadOnlyPragmas(db: InstanceType<typeof DatabaseSync>): void {
   db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`);
+}
+
+function openReadOnlyDb(filePath: string): InstanceType<typeof DatabaseSync> {
+  let db: InstanceType<typeof DatabaseSync> | null = null;
+  try {
+    db = new DatabaseSync(readOnlyDbUri(filePath), { readOnly: true });
+    applyReadOnlyPragmas(db);
+    db.prepare("SELECT name FROM sqlite_master LIMIT 1").get();
+    return db;
+  } catch (error) {
+    db?.close();
+    const message = error instanceof Error ? error.message : String(error);
+    const hasWalSidecar = fs.existsSync(`${filePath}-wal`) || fs.existsSync(`${filePath}-shm`);
+    if (!/readonly|read-only/i.test(message) || hasWalSidecar) {
+      throw error;
+    }
+    db = new DatabaseSync(immutableReadOnlyDbUri(filePath), { readOnly: true });
+    try {
+      applyReadOnlyPragmas(db);
+      return db;
+    } catch (fallbackError) {
+      db.close();
+      throw fallbackError;
+    }
+  }
 }
 
 function ensureColumn(
@@ -872,8 +902,7 @@ export function loadRuntimeState(stateDir: string): RuntimeState {
 
   let db: InstanceType<typeof DatabaseSync> | null = null;
   try {
-    db = new DatabaseSync(readOnlyDbUri(filePath), { readOnly: true });
-    applyReadOnlyPragmas(db);
+    db = openReadOnlyDb(filePath);
     return readLatestRuntimeStateSnapshot(db);
   } catch (error) {
     return loadFromJsonFallback(stateDir, error);
@@ -921,10 +950,8 @@ export function readStructuredRuntimeState(stateDir: string): RuntimeState {
     return createEmptyRuntimeState();
   }
 
-  const db = new DatabaseSync(readOnlyDbUri(filePath), { readOnly: true });
+  const db = openReadOnlyDb(filePath);
   try {
-    applyReadOnlyPragmas(db);
-
     const base = createEmptyRuntimeState();
 
     base.workers = db.prepare(`
@@ -1168,9 +1195,8 @@ export function readRuntimeAuditEvents(
     };
   }
 
-  const db = new DatabaseSync(readOnlyDbUri(filePath), { readOnly: true });
+  const db = openReadOnlyDb(filePath);
   try {
-    applyReadOnlyPragmas(db);
     const hasAuditTable = Boolean(db.prepare(`
       SELECT name
       FROM sqlite_master

@@ -123,6 +123,7 @@ async function createReviewReadyState(stateDir: string) {
   });
   state = stateMod.recordWorkerResult(state, {
     workerId: "codex-mac-mini",
+    receivedAt: "2026-03-16T13:02:00.000Z",
     ...activeWorkerEnvelope(state, dispatch.taskIds[0]),
     result: {
       taskId: dispatch.taskIds[0],

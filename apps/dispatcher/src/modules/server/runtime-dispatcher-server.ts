@@ -345,8 +345,10 @@ export function applyTraeSubmitResult(
   }
 
   try {
+    const receivedAt = nowIso();
     let nextState = recordWorkerResultFn(state, {
       workerId,
+      receivedAt,
       attemptId: input.attemptId,
       leaseToken: input.leaseToken,
       protocolVersion: input.protocolVersion,
@@ -362,7 +364,7 @@ export function applyTraeSubmitResult(
         defaultBranch: task.defaultBranch,
         mode: task.verification.mode,
         output: input.summary ?? "",
-        generatedAt: nowIso(),
+        generatedAt: receivedAt,
         verification: {
           allPassed: input.status === "review_ready",
           commands: input.testOutput
