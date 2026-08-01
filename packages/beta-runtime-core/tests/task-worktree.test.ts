@@ -3,13 +3,17 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  prepareTaskWorktreeLifecycleWithOwnership,
   prepareTaskWorktreeLifecycle,
+  prepareTaskWorktree,
+  releaseTaskWorktreeOwnership,
   removeTaskWorktree,
   removeTaskWorktreeLifecycle,
   safeTaskDirName,
+  TaskWorktreeLockTimeoutError,
 } from "../src/runtime/task-worktree.js";
 
 const tempRoots: string[] = [];
@@ -47,6 +51,219 @@ afterEach(() => {
 });
 
 describe("task worktree lifecycle", () => {
+  it("keeps an active task worktree owned until its worker releases it", async () => {
+    const repoDir = setupRepoWithOrigin();
+    const task = {
+      taskId: "dispatch-owned",
+      branchName: "codex/owned",
+      defaultBranch: "main",
+    };
+    const prepared = await prepareTaskWorktreeLifecycleWithOwnership(repoDir, task);
+    const uncommittedPath = path.join(prepared.worktreeDir, "UNCOMMITTED.md");
+    fs.writeFileSync(uncommittedPath, "worker is still running\n");
+
+    await expect(prepareTaskWorktreeLifecycle(repoDir, task, {
+      allowReuse: true,
+      resetOnReuse: true,
+      lockTimeoutMs: 20,
+      lockRetryMs: 5,
+    })).rejects.toBeInstanceOf(TaskWorktreeLockTimeoutError);
+    await expect(removeTaskWorktreeLifecycle(repoDir, task.taskId, {
+      force: true,
+      branchName: task.branchName,
+      lockTimeoutMs: 20,
+      lockRetryMs: 5,
+    })).rejects.toBeInstanceOf(TaskWorktreeLockTimeoutError);
+    await expect(prepareTaskWorktreeLifecycle(prepared.worktreeDir, {
+      taskId: "dispatch-other-checkout",
+      branchName: "codex/other-checkout",
+      defaultBranch: "main",
+    }, {
+      lockTimeoutMs: 20,
+      lockRetryMs: 5,
+    })).rejects.toBeInstanceOf(TaskWorktreeLockTimeoutError);
+    expect(fs.readFileSync(uncommittedPath, "utf8")).toBe("worker is still running\n");
+
+    releaseTaskWorktreeOwnership(prepared.ownership);
+    await expect(prepareTaskWorktreeLifecycle(repoDir, task, {
+      allowReuse: true,
+      resetOnReuse: true,
+    })).resolves.toMatchObject({ action: "reused" });
+    expect(fs.existsSync(uncommittedPath)).toBe(false);
+  });
+
+  it("aborts while waiting for an active task worktree owner", async () => {
+    const repoDir = setupRepoWithOrigin();
+    const task = {
+      taskId: "dispatch-abort-lock",
+      branchName: "codex/abort-lock",
+      defaultBranch: "main",
+    };
+    const prepared = await prepareTaskWorktreeLifecycleWithOwnership(repoDir, task);
+    const controller = new AbortController();
+
+    const waiting = prepareTaskWorktreeLifecycleWithOwnership(repoDir, task, {
+      allowReuse: true,
+      lockTimeoutMs: 1_000,
+      lockRetryMs: 5,
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+    releaseTaskWorktreeOwnership(prepared.ownership);
+  });
+
+  it("fails synchronous same-process contention without blocking the event loop", async () => {
+    const repoDir = setupRepoWithOrigin();
+    const task = {
+      taskId: "dispatch-sync-contention",
+      branchName: "codex/sync-contention",
+      defaultBranch: "main",
+    };
+    const prepared = await prepareTaskWorktreeLifecycleWithOwnership(repoDir, task);
+    const waitSpy = vi.spyOn(Atomics, "wait");
+
+    try {
+      expect(() => prepareTaskWorktree(repoDir, task, {
+        allowReuse: true,
+        lockTimeoutMs: 20,
+        lockRetryMs: 5,
+      })).toThrow(TaskWorktreeLockTimeoutError);
+      expect(waitSpy).not.toHaveBeenCalled();
+    } finally {
+      waitSpy.mockRestore();
+      releaseTaskWorktreeOwnership(prepared.ownership);
+    }
+  });
+
+  it("reclaims a stale task worktree owner after its process has exited", async () => {
+    const repoDir = setupRepoWithOrigin();
+    const task = {
+      taskId: "dispatch-stale-lock",
+      branchName: "codex/stale-lock",
+      defaultBranch: "main",
+    };
+    const first = await prepareTaskWorktreeLifecycleWithOwnership(repoDir, task);
+    const lockPath = first.ownership.lockPath;
+    releaseTaskWorktreeOwnership(first.ownership);
+    fs.writeFileSync(lockPath, JSON.stringify({
+      pid: 2_147_483_647,
+      ownerToken: "stale-owner",
+      createdAt: "2000-01-01T00:00:00.000Z",
+      taskId: task.taskId,
+      branchName: task.branchName,
+    }));
+
+    await expect(prepareTaskWorktreeLifecycle(repoDir, task, {
+      allowReuse: true,
+      lockStaleMs: 1,
+    })).resolves.toMatchObject({ action: "reused" });
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("does not delete a replacement lock when ownership changes before release", async () => {
+    const repoDir = setupRepoWithOrigin();
+    const task = {
+      taskId: "dispatch-replaced-lock",
+      branchName: "codex/replaced-lock",
+      defaultBranch: "main",
+    };
+    const prepared = await prepareTaskWorktreeLifecycleWithOwnership(repoDir, task);
+    const lockPath = prepared.ownership.lockPath;
+    fs.unlinkSync(lockPath);
+    fs.writeFileSync(lockPath, JSON.stringify({
+      pid: process.pid,
+      ownerToken: "replacement-owner",
+      createdAt: new Date().toISOString(),
+      taskId: "replacement-task",
+      branchName: "codex/replacement",
+    }));
+
+    expect(() => releaseTaskWorktreeOwnership(prepared.ownership))
+      .toThrow(/ownership changed before release/i);
+    expect(fs.existsSync(lockPath)).toBe(true);
+    expect(fs.readFileSync(lockPath, "utf8")).toContain("replacement-owner");
+    fs.unlinkSync(lockPath);
+  });
+
+  it("can retry ownership release after a transient unlink failure", async () => {
+    const repoDir = setupRepoWithOrigin();
+    const prepared = await prepareTaskWorktreeLifecycleWithOwnership(repoDir, {
+      taskId: "dispatch-release-retry",
+      branchName: "codex/release-retry",
+      defaultBranch: "main",
+    });
+    const lockPath = prepared.ownership.lockPath;
+    const unlinkSpy = vi.spyOn(fs, "unlinkSync");
+    unlinkSpy.mockImplementationOnce(() => {
+      throw new Error("simulated transient unlink failure");
+    });
+
+    try {
+      expect(() => releaseTaskWorktreeOwnership(prepared.ownership))
+        .toThrow(/simulated transient unlink failure/i);
+      expect(fs.existsSync(lockPath)).toBe(true);
+      expect(() => releaseTaskWorktreeOwnership(prepared.ownership)).not.toThrow();
+      expect(fs.existsSync(lockPath)).toBe(false);
+    } finally {
+      unlinkSpy.mockRestore();
+      if (fs.existsSync(lockPath)) {
+        fs.unlinkSync(lockPath);
+      }
+    }
+  });
+
+  it("does not let one ownership remove another registered worktree", async () => {
+    const repoDir = setupRepoWithOrigin();
+    const taskId = "dispatch/owned-path";
+    const branchName = "codex/owned-path";
+    const legacyWorktreeDir = path.join(repoDir, ".worktrees", "dispatch-owned-path");
+    fs.mkdirSync(path.dirname(legacyWorktreeDir), { recursive: true });
+    runGit(["worktree", "add", "-b", branchName, legacyWorktreeDir, "origin/main"], repoDir);
+    const owned = await prepareTaskWorktreeLifecycleWithOwnership(repoDir, {
+      taskId,
+      branchName: "codex/owned-path",
+      defaultBranch: "main",
+    }, {
+      allowReuse: true,
+    });
+    expect(owned.worktreeDir).toBe(legacyWorktreeDir);
+    const otherWorktreeDir = path.join(repoDir, ".worktrees", safeTaskDirName(taskId));
+    runGit(["worktree", "add", "-b", "codex/other-path", otherWorktreeDir, "origin/main"], repoDir);
+
+    try {
+      await expect(removeTaskWorktreeLifecycle(repoDir, owned.taskId, {
+        force: true,
+        worktreeDir: otherWorktreeDir,
+        ownership: owned.ownership,
+      })).rejects.toThrow(/ownership does not match worktree path/i);
+      expect(fs.existsSync(otherWorktreeDir)).toBe(true);
+    } finally {
+      releaseTaskWorktreeOwnership(owned.ownership);
+    }
+  });
+
+  it("does not remove an owned path after its registered branch changes", async () => {
+    const repoDir = setupRepoWithOrigin();
+    const owned = await prepareTaskWorktreeLifecycleWithOwnership(repoDir, {
+      taskId: "dispatch-owner-branch",
+      branchName: "codex/owner-branch",
+      defaultBranch: "main",
+    });
+    runGit(["switch", "-c", "codex/rebound-branch"], owned.worktreeDir);
+
+    try {
+      await expect(removeTaskWorktreeLifecycle(repoDir, owned.taskId, {
+        force: true,
+        ownership: owned.ownership,
+      })).rejects.toThrow(/not registered for codex\/owner-branch/i);
+      expect(fs.existsSync(owned.worktreeDir)).toBe(true);
+    } finally {
+      releaseTaskWorktreeOwnership(owned.ownership);
+    }
+  });
+
   it("creates and reports a task worktree from the fetched default branch", async () => {
     const repoDir = setupRepoWithOrigin();
 

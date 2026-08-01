@@ -4,11 +4,14 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const spawnSyncMock = vi.fn(() => ({
-  status: 0,
-  stdout: "",
-  stderr: "",
-}));
+const spawnSyncMock = vi.fn((_command: string, args: string[], options: { cwd?: string } = {}) => {
+  if (args[0] === "rev-parse" && args[1] === "--git-common-dir") {
+    const gitDir = path.join(String(options.cwd || ""), ".git");
+    fs.mkdirSync(gitDir, { recursive: true });
+    return { status: 0, stdout: ".git", stderr: "" };
+  }
+  return { status: 0, stdout: "", stderr: "" };
+});
 const execFileMock = vi.fn();
 
 vi.mock("node:child_process", () => ({
@@ -48,22 +51,27 @@ describe("runtime/task-worktree", () => {
       encoding: "utf8",
       timeout: 60_000,
     });
-    expect(spawnSyncMock).toHaveBeenNthCalledWith(2, "git", ["worktree", "list", "--porcelain"], {
+    expect(spawnSyncMock).toHaveBeenNthCalledWith(2, "git", ["rev-parse", "--git-common-dir"], {
       cwd: tempRoot,
       encoding: "utf8",
       timeout: 60_000,
     });
-    expect(spawnSyncMock).toHaveBeenNthCalledWith(3, "git", ["fetch", "origin", "main"], {
+    expect(spawnSyncMock).toHaveBeenNthCalledWith(3, "git", ["worktree", "list", "--porcelain"], {
       cwd: tempRoot,
       encoding: "utf8",
       timeout: 60_000,
     });
-    expect(spawnSyncMock).toHaveBeenNthCalledWith(4, "git", ["rev-parse", "--verify", "origin/main"], {
+    expect(spawnSyncMock).toHaveBeenNthCalledWith(4, "git", ["fetch", "origin", "main"], {
       cwd: tempRoot,
       encoding: "utf8",
       timeout: 60_000,
     });
-    expect(spawnSyncMock).toHaveBeenNthCalledWith(5, "git", [
+    expect(spawnSyncMock).toHaveBeenNthCalledWith(5, "git", ["rev-parse", "--verify", "origin/main"], {
+      cwd: tempRoot,
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+    expect(spawnSyncMock).toHaveBeenNthCalledWith(6, "git", [
       "worktree",
       "add",
       worktreeDir,
@@ -79,21 +87,17 @@ describe("runtime/task-worktree", () => {
 
   it("fails fast when fetching the default branch fails", async () => {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-task-worktree-"));
-    spawnSyncMock.mockImplementationOnce(() => ({
-      status: 0,
-      stdout: "",
-      stderr: "",
-    }));
-    spawnSyncMock.mockImplementationOnce(() => ({
-      status: 0,
-      stdout: "",
-      stderr: "",
-    }));
-    spawnSyncMock.mockImplementationOnce(() => ({
-      status: 1,
-      stdout: "",
-      stderr: "fatal: unable to fetch origin/main",
-    }));
+    spawnSyncMock.mockImplementation((_command: string, args: string[], options: { cwd?: string } = {}) => {
+      if (args[0] === "rev-parse" && args[1] === "--git-common-dir") {
+        const gitDir = path.join(String(options.cwd || ""), ".git");
+        fs.mkdirSync(gitDir, { recursive: true });
+        return { status: 0, stdout: ".git", stderr: "" };
+      }
+      if (args[0] === "fetch") {
+        return { status: 1, stdout: "", stderr: "fatal: unable to fetch origin/main" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    });
     const { prepareTaskWorktree } = await import("../../src/runtime/task-worktree.js");
 
     expect(() => prepareTaskWorktree(tempRoot, {
@@ -102,18 +106,23 @@ describe("runtime/task-worktree", () => {
       defaultBranch: "main",
     })).toThrow(/unable to fetch origin\/main|failed to fetch origin\/main/i);
 
-    expect(spawnSyncMock).toHaveBeenCalledTimes(3);
+    expect(spawnSyncMock).toHaveBeenCalledTimes(4);
     expect(spawnSyncMock).toHaveBeenNthCalledWith(1, "git", ["check-ref-format", "--branch", "feature/runtime"], {
       cwd: tempRoot,
       encoding: "utf8",
       timeout: 60_000,
     });
-    expect(spawnSyncMock).toHaveBeenNthCalledWith(2, "git", ["worktree", "list", "--porcelain"], {
+    expect(spawnSyncMock).toHaveBeenNthCalledWith(2, "git", ["rev-parse", "--git-common-dir"], {
       cwd: tempRoot,
       encoding: "utf8",
       timeout: 60_000,
     });
-    expect(spawnSyncMock).toHaveBeenNthCalledWith(3, "git", ["fetch", "origin", "main"], {
+    expect(spawnSyncMock).toHaveBeenNthCalledWith(3, "git", ["worktree", "list", "--porcelain"], {
+      cwd: tempRoot,
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+    expect(spawnSyncMock).toHaveBeenNthCalledWith(4, "git", ["fetch", "origin", "main"], {
       cwd: tempRoot,
       encoding: "utf8",
       timeout: 60_000,
@@ -123,16 +132,21 @@ describe("runtime/task-worktree", () => {
   it("refuses to reuse a branch registered at another task worktree path", async () => {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-task-worktree-"));
     const occupiedPath = path.join(tempRoot, ".worktrees", "dispatch-178");
-    spawnSyncMock.mockImplementationOnce(() => ({
-      status: 0,
-      stdout: "",
-      stderr: "",
-    }));
-    spawnSyncMock.mockImplementationOnce(() => ({
-      status: 0,
-      stdout: `worktree ${occupiedPath}\nHEAD abc123\nbranch refs/heads/feature/runtime\n\n`,
-      stderr: "",
-    }));
+    spawnSyncMock.mockImplementation((_command: string, args: string[], options: { cwd?: string } = {}) => {
+      if (args[0] === "rev-parse" && args[1] === "--git-common-dir") {
+        const gitDir = path.join(String(options.cwd || ""), ".git");
+        fs.mkdirSync(gitDir, { recursive: true });
+        return { status: 0, stdout: ".git", stderr: "" };
+      }
+      if (args[0] === "worktree" && args[1] === "list") {
+        return {
+          status: 0,
+          stdout: `worktree ${occupiedPath}\nHEAD abc123\nbranch refs/heads/feature/runtime\n\n`,
+          stderr: "",
+        };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    });
 
     const { prepareTaskWorktree } = await import("../../src/runtime/task-worktree.js");
     expect(() => prepareTaskWorktree(tempRoot, {
@@ -142,8 +156,8 @@ describe("runtime/task-worktree", () => {
     }, {
       allowReuse: true,
     })).toThrow(/branch feature\/runtime is already checked out at .*dispatch-178/i);
-    expect(spawnSyncMock).toHaveBeenCalledTimes(2);
-    expect(spawnSyncMock).toHaveBeenNthCalledWith(2, "git", ["worktree", "list", "--porcelain"], {
+    expect(spawnSyncMock).toHaveBeenCalledTimes(3);
+    expect(spawnSyncMock).toHaveBeenNthCalledWith(3, "git", ["worktree", "list", "--porcelain"], {
       cwd: tempRoot,
       encoding: "utf8",
       timeout: 60_000,
@@ -156,16 +170,21 @@ describe("runtime/task-worktree", () => {
     const branchName = "feature/legacy-runtime";
     const legacyDir = path.join(tempRoot, ".worktrees", "dispatch-legacy-task-1");
     fs.mkdirSync(legacyDir, { recursive: true });
-    spawnSyncMock.mockImplementationOnce(() => ({
-      status: 0,
-      stdout: "",
-      stderr: "",
-    }));
-    spawnSyncMock.mockImplementationOnce(() => ({
-      status: 0,
-      stdout: `worktree ${legacyDir}\nHEAD abc123\nbranch refs/heads/${branchName}\n\n`,
-      stderr: "",
-    }));
+    spawnSyncMock.mockImplementation((_command: string, args: string[], options: { cwd?: string } = {}) => {
+      if (args[0] === "rev-parse" && args[1] === "--git-common-dir") {
+        const gitDir = path.join(String(options.cwd || ""), ".git");
+        fs.mkdirSync(gitDir, { recursive: true });
+        return { status: 0, stdout: ".git", stderr: "" };
+      }
+      if (args[0] === "worktree" && args[1] === "list") {
+        return {
+          status: 0,
+          stdout: `worktree ${legacyDir}\nHEAD abc123\nbranch refs/heads/${branchName}\n\n`,
+          stderr: "",
+        };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    });
 
     const { prepareTaskWorktree, safeTaskDirName } = await import("../../src/runtime/task-worktree.js");
     const worktreeDir = prepareTaskWorktree(tempRoot, {
@@ -178,22 +197,27 @@ describe("runtime/task-worktree", () => {
 
     expect(worktreeDir).toBe(legacyDir);
     expect(worktreeDir).not.toContain(safeTaskDirName(taskId));
-    expect(spawnSyncMock).toHaveBeenCalledTimes(2);
+    expect(spawnSyncMock).toHaveBeenCalledTimes(3);
   });
 
   it("fails fast with occupied path when the branch is already checked out and reuse is disabled", async () => {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "forgeflow-task-worktree-"));
     const occupiedPath = path.join(tempRoot, ".worktrees", "dispatch-178");
-    spawnSyncMock.mockImplementationOnce(() => ({
-      status: 0,
-      stdout: "",
-      stderr: "",
-    }));
-    spawnSyncMock.mockImplementationOnce(() => ({
-      status: 0,
-      stdout: `worktree ${occupiedPath}\nHEAD abc123\nbranch refs/heads/feature/runtime\n\n`,
-      stderr: "",
-    }));
+    spawnSyncMock.mockImplementation((_command: string, args: string[], options: { cwd?: string } = {}) => {
+      if (args[0] === "rev-parse" && args[1] === "--git-common-dir") {
+        const gitDir = path.join(String(options.cwd || ""), ".git");
+        fs.mkdirSync(gitDir, { recursive: true });
+        return { status: 0, stdout: ".git", stderr: "" };
+      }
+      if (args[0] === "worktree" && args[1] === "list") {
+        return {
+          status: 0,
+          stdout: `worktree ${occupiedPath}\nHEAD abc123\nbranch refs/heads/feature/runtime\n\n`,
+          stderr: "",
+        };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    });
 
     const { prepareTaskWorktree } = await import("../../src/runtime/task-worktree.js");
 
@@ -202,7 +226,7 @@ describe("runtime/task-worktree", () => {
       branchName: "feature/runtime",
       defaultBranch: "main",
     })).toThrow(new RegExp(`branch feature/runtime is already checked out at .*dispatch-178`));
-    expect(spawnSyncMock).toHaveBeenCalledTimes(2);
+    expect(spawnSyncMock).toHaveBeenCalledTimes(3);
   });
 
   it("refuses to use the default branch as a task branch", async () => {

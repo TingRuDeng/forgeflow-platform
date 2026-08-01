@@ -58,11 +58,11 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - review memory 已有文件存储契约，并会在 dispatcher 创建 dispatch 时按 repo/scope/worker 条件注入上下文。
 - Trae 的首选无人值守路径是 `Trae automation gateway` + `Trae automation worker`。
 - Trae automation gateway 的 route/session/chat handler、HTTP JSON IO、debug logger、driver 创建规则、持久化 session-store、Trae CDP / DOM driver、clean relaunch 原语、launch target 构建和 debugger wait / spawn 编排已下沉到 `@tingrudeng/automation-gateway-core`；源码脚本和 packaged runtime 只保留默认值、时间格式 / 默认目录等薄适配。session-store 的本机写入使用 `sessions.json.lock` 串行化，并在锁内重读最新文件后变更，避免重叠进程覆盖其他 session。
-- `worker daemon` 与 `Trae automation worker` 现在都会先基于最新抓取的默认分支物化每任务独立 worktree，避免跨任务串味。
+- `worker daemon` 与 `Trae automation worker` 现在都会先基于最新抓取的默认分支物化每任务独立 worktree，避免跨任务串味。同一 Git common-dir 下的 ForgeFlow worktree 生命周期共用一把本机所有权锁：generic worker 会持有到 assignment 执行与 Git 收尾完成，Trae 会持有到 terminal result 回写与可选清理完成；其他 ForgeFlow prepare/reset/remove 会 fail closed，不能在活跃任务期间执行 `reset --hard`、`clean -fd` 或删除 worktree。
 - `forgeflow-review-orchestrator dispatch-task` 在 `pool=trae` 时会默认按结构化任务规范自动渲染 worker prompt，并把最终 prompt 连同 `workerPromptMode/reportSchemaVersion` 一起持久化到 dispatcher assignment；自定义 Trae prompt 若缺少 `任务完成/结果/任务ID` 会在 dispatch 前被拒绝。
 - follow-up / rework 任务只有在源任务已经交付过可验证的远端分支产物、且 worker 不变时才允许复用原分支；否则控制层应改用新的 `-rN` 分支继续修复。
 - Trae runtime 的 `new_chat` 采样现在会优先收窄到最后一个可见聊天根节点，并在基线里检测是否仍持续读到上一个任务的完成回执；发现旧 `任务ID` 污染时会提前失败，而不是继续误读旧会话。
-- Trae runtime 现在只有在远端分支 HEAD 与最终回执里的 commit SHA 完全一致时才会把成功结果提升为 `review_ready`；遇到远端 ref 传播延迟时，会先进入短暂重试窗口，而不是立刻把产物交给 review。terminal result 回写默认最多尝试 3 次、间隔 2 秒，可用 `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` / `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS` 调整；dispatcher 未确认结果时不会把 worker 降为 idle 或释放当前 Trae session，并会停止任务轮询、以非零状态退出，避免重复执行未确认任务。
+- Trae runtime 现在只有在远端分支 HEAD 与最终回执里的 commit SHA 完全一致时才会把成功结果提升为 `review_ready`；遇到远端 ref 传播延迟时，会先进入短暂重试窗口，而不是立刻把产物交给 review。terminal result 回写默认最多尝试 3 次、间隔 2 秒，可用 `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` / `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS` 调整；dispatcher 未确认结果时不会把 worker 降为 idle 或释放当前 Trae session，会保留 worktree 证据并在当前执行退栈时释放本机 owner，同时停止任务轮询、以非零状态退出，避免重复执行未确认任务。
 - dispatcher 的状态型 HTTP 路径现在共用一把跨进程文件锁（`.runtime-state.lock`）；锁竞争超时会显式返回 `503`。锁文件记录 PID、owner token 和创建时间，存活进程持有的锁不会仅因超过 stale 阈值被回收，释放时也会核对 inode 与 owner token，避免旧 callback 删除替换锁。
 - dispatcher SQLite snapshot 现在按 revision 追加落盘、保存 `checksum_sha256`，并默认只保留最近 128 个 revision；可用 `DISPATCHER_SQLITE_SNAPSHOT_RETENTION` 在 2 到 10000 之间调整。完整 runtime event 历史仍由 append-only audit 表保存；snapshot 读取默认 fail-closed。只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 时，SQLite 读取失败才允许非破坏性读取 JSON，已有 DB 不会被覆盖；只有 DB 不存在而 JSON 存在时才会执行一次性导入。
 - `dependsOn` 现在进入调度门控：依赖未满足的任务保持 `planned`，依赖满足后由 dispatcher 自动解锁到 `ready` 并写状态事件。
@@ -87,7 +87,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - `/api/metrics` 现在还会汇总关键失败信号：`submitResultRetryCount`、`deliveryFailedCount`、`cleanupFailureCount`、`sessionInterruptionCount`、`stateLockTimeoutCount`、`branchProtectionHitCount`、`repoConcurrencySaturation`，并输出 `retryRatePct`、`failureCodes`、`reviewReasonCodes`。完整历史审计事件独立写入 SQLite/PostgreSQL audit 表，可通过 `GET /api/query/events?limit=<n>&beforeSequence=<seq>` 分页读取。
 - 脚本侧 pino logger 现在默认对 `Authorization`、`DISPATCHER_API_TOKEN`、`DISPATCHER_WORKER_TOKEN`、`DISPATCHER_WORKER_TOKENS`、`GITHUB_TOKEN` 等敏感字段做 redact，减少 worker / dispatcher 日志泄露风险。
 - Trae runtime 现在会通过 `POST /api/workers/:workerId/events` 回写结构化 phase events 与 failure blocker codes；Trae automation worker 会把同一批 phase events 写入结构化 trajectory artifact 和受限 retained content，generic Codex/Gemini assignment runner 也会在结果里附带 trajectory artifact；dispatcher artifact store 会落盘 `result.json`、retained diff / log / test result、`trajectory.json` 和可下载的 `trajectory.traj`，生成真实 `artifact://<bundleId>/<file>` 引用，并在 retention 删除正文时同步裁剪 runtime bundle 索引。
-- 阶段三核心底座现在已进入主线：dispatcher 运行时状态引入显式 `leases[]`，task claim 生命周期会获取 `assignment` / `repo` / `branch` lease；continuation 或 follow-up 任务还会基于会话锚点获取 `session` lease。该强约束只覆盖 dispatcher 管理的 task 生命周期，不覆盖绕过 dispatcher HTTP 或直接操作 repo、branch、Trae session store 的外部脚本。
+- 阶段三核心底座现在已进入主线：dispatcher 运行时状态引入显式 `leases[]`，task claim 生命周期会获取 `assignment` / `repo` / `branch` lease；continuation 或 follow-up 任务还会基于会话锚点获取 `session` lease。该 dispatcher 强约束只覆盖其管理的 task 生命周期；共享 runtime core 另以 Git common-dir 本机所有权锁保护 ForgeFlow worktree 操作，但直接 `git` / 文件操作、独立 clone、跨主机进程和 Trae session store 仍不受 dispatcher lease 或该本机锁的全局保护。
 - dispatcher SQLite 真相源现在同时维护 query-first 结构化投影；可用 `DISPATCHER_STRUCTURED_READS=1` 切换只读查询到 projection 路径，并通过 `/api/query/*` 与 `/api/query/projection-health` 做一致性核对。
 - dispatcher 现在支持可回滚的 Postgres / queue shadow path：`DISPATCHER_SHADOW_MODE=shadow-write` 与 `DISPATCHER_POSTGRES_URL` 打开后，SQLite 仍是真相源，外部库只承接 best-effort shadow projection。每次 shadow 同步携带已持久化 SQLite revision，旧 revision 不会覆盖新 projection；projection 与 queue 在同一个 PostgreSQL transaction 内推进，内容未变化的表不再重写。shadow 写失败会进入 durable health record、runtime event、metrics 和 SLO。失败事件会在同一 SQLite 写事务内读取最新已提交 snapshot 后再合并，避免异步失败回调把并发业务更新覆盖成旧快照。
 - `scripts/check-shadow-drift.mjs --record-alert` 写入 drift 事件时会与 dispatcher 共用本机 `.runtime-state.lock`，并在锁内重读最新状态，避免本机并发写覆盖；该文件锁不提供跨主机互斥。
@@ -466,7 +466,7 @@ node scripts/run-worker-daemon.js \
 
 每个 assignment 子进程默认最多运行 30 分钟，可用 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS` 覆盖为正整数毫秒值。`SIGINT` / `SIGTERM` 会同时取消 dispatcher HTTP 请求、结果重试等待和完整子进程树，避免 worker 停止时继续等待网络超时。
 
-generic worker 的 worktree Git 命令默认最多运行 60 秒，并响应 assignment 的取消信号。runtime 会拒绝把默认分支当作任务分支，复用前核对 Git 登记路径与分支；`FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 才启用退出清理，且默认保留脏 worktree。只有再显式设置 `FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 才会强制丢弃未提交内容。
+generic worker 的 worktree Git 命令默认最多运行 60 秒，并响应 assignment 的取消信号。runtime 会拒绝把默认分支当作任务分支，复用前核对 Git 登记路径与分支；同一 Git common-dir 的 ForgeFlow 操作默认最多等待所有权锁 2 秒，锁记录 PID、owner token 与创建时间，只回收超过 30 秒且 owner 进程已退出的遗留锁，释放时核对 inode 与 token。`FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 才启用退出清理，且默认保留脏 worktree。只有再显式设置 `FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 才会强制丢弃未提交内容。
 
 Codex / Gemini 默认仍在 `trusted-host` profile 中执行。需要把 provider 与 verification 约束在同一个 fail-closed 容器边界时，由 worker 操作者在启动前配置：
 
@@ -559,7 +559,7 @@ node scripts/run-trae-mcp-worker-server.js \
 
 - Trae automation worker 目前仍是单任务串行 runtime，不支持多任务并发。
 - automation gateway 本体只定义 Trae 自动化控制接口；dispatcher 任务循环与结果回写由 automation worker 负责完成。
-- 所有 provider 的任务 worktree 都复用 `@tingrudeng/beta-runtime-core`：从最新抓取的默认分支派生，目录名在清洗有损或过长时附加原始 task ID 的稳定短哈希，允许复用时先 `reset --hard` + `clean -fd`，且只能复用当前 task 预期路径上的同分支登记。升级前已登记在旧版无哈希精确路径的同分支 worktree 仍可复用；旧路径清理必须同时核对分支身份，符号链接路径会被拒绝。只有结果已被 dispatcher 确认且显式设置 `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 时才尝试删除，默认非 force；`FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 才允许丢弃脏 worktree。
+- 所有 provider 的任务 worktree 都复用 `@tingrudeng/beta-runtime-core`：从最新抓取的默认分支派生，目录名在清洗有损或过长时附加原始 task ID 的稳定短哈希，允许复用时先 `reset --hard` + `clean -fd`，且只能复用当前 task 预期路径上的同分支登记。升级前已登记在旧版无哈希精确路径的同分支 worktree 仍可复用；旧路径清理必须同时核对分支身份，符号链接路径会被拒绝。同一 Git common-dir 下的 ForgeFlow 生命周期以本机 owner lock 串行，活跃 worker 持锁期间其他共享 helper 的 prepare/reset/remove 会超时失败；这不覆盖跨主机、独立 clone 或直接手工 Git。可选删除默认非 force，`FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 才允许丢弃脏 worktree；Trae 在 dispatcher 确认 terminal result 后清理，generic live executor 则在返回外层 shared cycle 前完成自身清理收尾。
 - 每个进入 review 的 material 都必须包含 canonical `attemptId`、`artifactBundleId` 和可选 `commitSha`。Console、orchestrator CLI 与兼容 review CLI 提交 decision 时必须携带完整 `expectedFreshness`；字段缺失是 `400`，与当前 material 不一致是 `409`，不存在无 freshness 的兼容决策路径。
 - 新建 HITL 请求会持久化 `requestId`，运行中的请求还会绑定 active `attemptId`，并可选绑定 `sourceSessionId` / `expiresAt`。Console 恢复会回传 identity；相同 identity 与 payload 的网络重放幂等成功，过期、早于 `requestedAt`、身份错配、损坏的时间元数据或改变 payload 的恢复请求都会被拒绝。
 - review memory 当前是文件存储 + dispatch 注入主线；lesson 的自动提取与落盘仍需外部调用方编排。

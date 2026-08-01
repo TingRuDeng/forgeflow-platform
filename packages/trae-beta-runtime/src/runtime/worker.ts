@@ -41,9 +41,11 @@ import {
 import { checkArtifactReviewability } from "./trae-automation-artifact-checks.js";
 import { launchTraeForAutomation } from "./trae-launcher.js";
 import {
-  prepareTaskWorktree,
+  prepareTaskWorktreeWithOwnership,
+  releaseTaskWorktreeOwnership,
   removeTaskWorktreeLifecycle,
   safeTaskDirName,
+  type TaskWorktreeOwnership,
 } from "./task-worktree.js";
 import {
   submitResultLifecycle,
@@ -795,7 +797,11 @@ export async function waitForAutomationGatewayReady(options: {
   throw new Error("Trae automation gateway is not ready");
 }
 
-export function materializeTaskWorkspace(task: WorkerRuntimeTask, repoDir: string) {
+export function materializeTaskWorkspace(
+  task: WorkerRuntimeTask,
+  repoDir: string,
+  options: { retainOwnership?: boolean } = {},
+) {
   const taskId = String(task?.task_id || "").trim();
   if (!taskId) {
     throw new Error("task_id is required to materialize task workspace");
@@ -806,7 +812,7 @@ export function materializeTaskWorkspace(task: WorkerRuntimeTask, repoDir: strin
     throw new Error("repoDir is required to materialize task workspace");
   }
 
-  const worktreeDir = prepareTaskWorktree(resolvedRepoDir, {
+  const prepared = prepareTaskWorktreeWithOwnership(resolvedRepoDir, {
     taskId,
     branchName: task.branch,
     defaultBranch: task.default_branch || task.defaultBranch,
@@ -814,37 +820,53 @@ export function materializeTaskWorkspace(task: WorkerRuntimeTask, repoDir: strin
     allowReuse: true,
     resetOnReuse: true,
   });
-  const assignmentDir = path.join(
-    worktreeDir,
-    ".orchestrator",
-    "assignments",
-    safeTaskDirName(taskId)
-  );
+  let ownershipRetained = false;
+  try {
+    const worktreeDir = prepared.worktreeDir;
+    const assignmentDir = path.join(
+      worktreeDir,
+      ".orchestrator",
+      "assignments",
+      safeTaskDirName(taskId)
+    );
 
-  fs.mkdirSync(assignmentDir, { recursive: true });
+    fs.mkdirSync(assignmentDir, { recursive: true });
 
-  const assignmentPayload = {
-    taskId,
-    traceId: extractTaskTraceId(task),
-    repo: task.repo || "",
-    branchName: task.branch || "",
-    defaultBranch: task.default_branch || task.defaultBranch || "",
-    allowedPaths: Array.isArray(task.scope) ? task.scope : [],
-    acceptance: Array.isArray(task.acceptance) ? task.acceptance : [],
-    constraints: Array.isArray(task.constraints) ? task.constraints : [],
-    goal: task.goal || "",
-  };
+    const assignmentPayload = {
+      taskId,
+      traceId: extractTaskTraceId(task),
+      repo: task.repo || "",
+      branchName: task.branch || "",
+      defaultBranch: task.default_branch || task.defaultBranch || "",
+      allowedPaths: Array.isArray(task.scope) ? task.scope : [],
+      acceptance: Array.isArray(task.acceptance) ? task.acceptance : [],
+      constraints: Array.isArray(task.constraints) ? task.constraints : [],
+      goal: task.goal || "",
+    };
 
-  fs.writeFileSync(
-    path.join(assignmentDir, "assignment.json"),
-    JSON.stringify(assignmentPayload, null, 2)
-  );
-  fs.writeFileSync(path.join(assignmentDir, "worker-prompt.md"), task.prompt || "");
-  fs.writeFileSync(path.join(assignmentDir, "context.md"), task.prompt || task.goal || "");
+    fs.writeFileSync(
+      path.join(assignmentDir, "assignment.json"),
+      JSON.stringify(assignmentPayload, null, 2)
+    );
+    fs.writeFileSync(path.join(assignmentDir, "worker-prompt.md"), task.prompt || "");
+    fs.writeFileSync(path.join(assignmentDir, "context.md"), task.prompt || task.goal || "");
 
-  task.worktree_dir = worktreeDir;
-  task.assignment_dir = assignmentDir;
-  return { worktree_dir: worktreeDir, assignment_dir: assignmentDir };
+    task.worktree_dir = worktreeDir;
+    task.assignment_dir = assignmentDir;
+    if (options.retainOwnership) {
+      ownershipRetained = true;
+      return {
+        worktree_dir: worktreeDir,
+        assignment_dir: assignmentDir,
+        ownership: prepared.ownership,
+      };
+    }
+    return { worktree_dir: worktreeDir, assignment_dir: assignmentDir };
+  } finally {
+    if (!ownershipRetained) {
+      releaseTaskWorktreeOwnership(prepared.ownership);
+    }
+  }
 }
 
 function createHeartbeatController(
@@ -920,6 +942,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
   }));
   const debugLog = makeDebugLogger(logger, isDebugEnabled(options.debug));
   const phaseEvents: TraeWorkerPhaseEvent[] = [];
+  const worktreeOwnerships = new Map<string, TaskWorktreeOwnership>();
 
   if (!dispatcherClient || !automationClient || !workerId || !repoDir) {
     throw new Error("dispatcherClient, automationClient, workerId, and repoDir are required");
@@ -970,6 +993,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         force: process.env.FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP === "1",
         worktreeDir: task.worktree_dir,
         branchName: task.branch,
+        ownership: worktreeOwnerships.get(task.task_id),
       });
       await emitPhaseEvent("progress_reported", {
         stage: "worktree_cleanup_completed",
@@ -993,6 +1017,24 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         message,
       });
       logger.warn?.(`[trae-automation-worker] failed to clean worktree for ${task.task_id}: ${message}`);
+    }
+  }
+
+  async function releaseWorktreeOwnershipBestEffort(taskId: string): Promise<void> {
+    const ownership = worktreeOwnerships.get(taskId);
+    if (!ownership) {
+      return;
+    }
+    worktreeOwnerships.delete(taskId);
+    try {
+      releaseTaskWorktreeOwnership(ownership);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await emitPhaseEvent("worktree_cleanup_failed", {
+        error: message,
+        failureCode: "ownership_release_failed",
+      }, taskId);
+      logger.warn?.(`[trae-automation-worker] failed to release worktree ownership for ${taskId}: ${message}`);
     }
   }
 
@@ -1449,10 +1491,15 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         branch: task.branch || null,
         repo: task.repo || null,
       });
+      try {
       let startTaskFailed = false;
       try {
         await emitPhaseEvent("workspace_prepare_start", { branch: task.branch || null }, task.task_id);
-        materializeTaskWorkspace(task, repoDir);
+        const workspace = materializeTaskWorkspace(task, repoDir, { retainOwnership: true });
+        if (!workspace.ownership) {
+          throw new Error(`worktree ownership was not retained for ${task.task_id}`);
+        }
+        worktreeOwnerships.set(task.task_id, workspace.ownership);
         await emitPhaseEvent("workspace_prepare_done", {
           worktreeDir: task.worktree_dir || null,
           assignmentDir: task.assignment_dir || null,
@@ -1853,6 +1900,9 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           taskId: task.task_id,
           error: error instanceof Error ? error.message : String(error),
         };
+      }
+      } finally {
+        await releaseWorktreeOwnershipBestEffort(task.task_id);
       }
     },
 

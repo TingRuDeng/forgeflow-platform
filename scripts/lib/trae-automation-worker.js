@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { prepareTaskWorktree, removeTaskWorktreeLifecycle, safeTaskDirName, } from "./task-worktree.js";
+import { prepareTaskWorktreeWithOwnership, releaseTaskWorktreeOwnership, removeTaskWorktreeLifecycle, safeTaskDirName, } from "./task-worktree.js";
 import { checkArtifactReviewability } from "./trae-automation-artifact-checks.js";
 const DEFAULT_DISPATCHER_URL = "http://127.0.0.1:8787";
 const DEFAULT_AUTOMATION_URL = "http://127.0.0.1:8790";
@@ -330,7 +330,7 @@ function basenameFromPath(value) {
     const parts = normalized.split(/[\\/]/).filter(Boolean);
     return parts.at(-1) || "";
 }
-export function materializeTaskWorkspace(task, repoDir) {
+export function materializeTaskWorkspace(task, repoDir, options = {}) {
     const taskId = String(task?.task_id || "").trim();
     if (!taskId) {
         throw new Error("task_id is required to materialize task workspace");
@@ -339,7 +339,7 @@ export function materializeTaskWorkspace(task, repoDir) {
     if (!resolvedRepoDir) {
         throw new Error("repoDir is required to materialize task workspace");
     }
-    const worktreeDir = prepareTaskWorktree(resolvedRepoDir, {
+    const prepared = prepareTaskWorktreeWithOwnership(resolvedRepoDir, {
         taskId,
         branchName: task.branch,
         defaultBranch: task.default_branch || task.defaultBranch,
@@ -347,24 +347,41 @@ export function materializeTaskWorkspace(task, repoDir) {
         allowReuse: true,
         resetOnReuse: true,
     });
-    const assignmentDir = path.join(worktreeDir, ".orchestrator", "assignments", safeTaskDirName(taskId));
-    fs.mkdirSync(assignmentDir, { recursive: true });
-    const assignmentPayload = {
-        taskId,
-        repo: task.repo || "",
-        branchName: task.branch || "",
-        defaultBranch: task.default_branch || task.defaultBranch || "",
-        allowedPaths: Array.isArray(task.scope) ? task.scope : [],
-        acceptance: Array.isArray(task.acceptance) ? task.acceptance : [],
-        constraints: Array.isArray(task.constraints) ? task.constraints : [],
-        goal: task.goal || "",
-    };
-    fs.writeFileSync(path.join(assignmentDir, "assignment.json"), JSON.stringify(assignmentPayload, null, 2));
-    fs.writeFileSync(path.join(assignmentDir, "worker-prompt.md"), task.prompt || "");
-    fs.writeFileSync(path.join(assignmentDir, "context.md"), task.prompt || task.goal || "");
-    task.worktree_dir = worktreeDir;
-    task.assignment_dir = assignmentDir;
-    return { worktree_dir: worktreeDir, assignment_dir: assignmentDir };
+    let ownershipRetained = false;
+    try {
+        const worktreeDir = prepared.worktreeDir;
+        const assignmentDir = path.join(worktreeDir, ".orchestrator", "assignments", safeTaskDirName(taskId));
+        fs.mkdirSync(assignmentDir, { recursive: true });
+        const assignmentPayload = {
+            taskId,
+            repo: task.repo || "",
+            branchName: task.branch || "",
+            defaultBranch: task.default_branch || task.defaultBranch || "",
+            allowedPaths: Array.isArray(task.scope) ? task.scope : [],
+            acceptance: Array.isArray(task.acceptance) ? task.acceptance : [],
+            constraints: Array.isArray(task.constraints) ? task.constraints : [],
+            goal: task.goal || "",
+        };
+        fs.writeFileSync(path.join(assignmentDir, "assignment.json"), JSON.stringify(assignmentPayload, null, 2));
+        fs.writeFileSync(path.join(assignmentDir, "worker-prompt.md"), task.prompt || "");
+        fs.writeFileSync(path.join(assignmentDir, "context.md"), task.prompt || task.goal || "");
+        task.worktree_dir = worktreeDir;
+        task.assignment_dir = assignmentDir;
+        if (options.retainOwnership) {
+            ownershipRetained = true;
+            return {
+                worktree_dir: worktreeDir,
+                assignment_dir: assignmentDir,
+                ownership: prepared.ownership,
+            };
+        }
+        return { worktree_dir: worktreeDir, assignment_dir: assignmentDir };
+    }
+    finally {
+        if (!ownershipRetained) {
+            releaseTaskWorktreeOwnership(prepared.ownership);
+        }
+    }
 }
 export function deriveTaskDiscoveryHints(task = undefined, repoDir = "") {
     const titleContains = [];
@@ -609,6 +626,7 @@ export function createTraeAutomationWorkerRuntime(options) {
     const maxErrorBackoffMs = Number(options.maxErrorBackoffMs || MAX_ERROR_BACKOFF_MS);
     const heartbeat = createHeartbeatController(dispatcherClient, workerId, logger, options);
     const checkArtifactReviewabilityImpl = options.checkArtifactReviewabilityImpl || checkArtifactReviewability;
+    const worktreeOwnerships = new Map();
     if (!dispatcherClient || !automationClient || !workerId || !repoDir) {
         throw new Error("dispatcherClient, automationClient, workerId, and repoDir are required");
     }
@@ -621,6 +639,7 @@ export function createTraeAutomationWorkerRuntime(options) {
                 force: process.env.FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP === "1",
                 worktreeDir: task.worktree_dir,
                 branchName: task.branch,
+                ownership: worktreeOwnerships.get(task.task_id),
             });
             try {
                 await dispatcherClient.reportProgress(task.task_id, `Worktree cleanup ${cleanup.action}`, workerId);
@@ -637,6 +656,26 @@ export function createTraeAutomationWorkerRuntime(options) {
             }
             catch {
                 // Cleanup reporting is best-effort after terminal result acknowledgement.
+            }
+        }
+    }
+    async function releaseWorktreeOwnershipBestEffort(taskId) {
+        const ownership = worktreeOwnerships.get(taskId);
+        if (!ownership) {
+            return;
+        }
+        worktreeOwnerships.delete(taskId);
+        try {
+            releaseTaskWorktreeOwnership(ownership);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.warn?.(`[trae-automation-worker] failed to release worktree ownership for ${taskId}: ${message}`);
+            try {
+                await dispatcherClient.reportProgress(taskId, `Worktree ownership release failed: ${message}`, workerId);
+            }
+            catch {
+                // Ownership release reporting is best-effort after task completion.
             }
         }
     }
@@ -766,73 +805,40 @@ export function createTraeAutomationWorkerRuntime(options) {
                 return { status: "no_task" };
             }
             const task = fetched.task;
-            materializeTaskWorkspace(task, repoDir);
-            await dispatcherClient.startTask(workerId, task.task_id);
-            heartbeat.start("high");
-            await dispatcherClient.reportProgress(task.task_id, "Trae automation worker started task", workerId);
-            const prompt = buildAutomationPrompt(task);
-            const discovery = deriveTaskDiscoveryHints(task, repoDir);
-            let sessionId = null;
-            const startedAt = Date.now();
             try {
-                await dispatcherClient.reportProgress(task.task_id, "Trae automation gateway is preparing session", workerId);
-                const prepareResult = await automationClient.prepareSession({
-                    chatMode: task.chatMode || task.chat_mode || "new_chat",
-                });
-                sessionId = prepareResult?.data?.sessionId || prepareResult?.sessionId || null;
-                await dispatcherClient.reportProgress(task.task_id, "Trae automation gateway is sending prompt", workerId);
-                const softTimeoutMs = Math.min(DEFAULT_SOFT_CHAT_TIMEOUT_MS, DEFAULT_HARD_CHAT_TIMEOUT_MS);
-                const chatTimeoutMs = softTimeoutMs + DEFAULT_CHAT_REQUEST_TIMEOUT_BUFFER_MS;
-                try {
-                    const response = await automationClient.sendChat({
-                        content: prompt,
-                        sessionId,
-                        prepare: false,
-                        discovery: discovery || undefined,
-                        chatMode: task.chatMode || task.chat_mode || "new_chat",
-                        responseRequiredPrefix: "任务完成",
-                        responseTimeoutMs: softTimeoutMs,
-                        timeoutMs: chatTimeoutMs,
-                    });
-                    const r = response;
-                    const finalText = r?.data?.response?.text
-                        || r?.response?.text
-                        || r?.data?.result?.response?.text
-                        || "";
-                    const parsed = parseFinalReport(finalText);
-                    const finalStatus = await submitParsedResult(task, parsed);
-                    return {
-                        status: finalStatus,
-                        taskId: task.task_id,
-                        responseText: finalText,
-                    };
+                const workspace = materializeTaskWorkspace(task, repoDir, { retainOwnership: true });
+                if (!workspace.ownership) {
+                    throw new Error(`worktree ownership was not retained for ${task.task_id}`);
                 }
-                catch (chatError) {
-                    if (!shouldAttemptSessionRecovery(chatError)) {
-                        throw chatError;
-                    }
-                    if (!sessionId) {
-                        await dispatcherClient.reportProgress(task.task_id, "Chat timeout but session id is missing; cannot poll session status", workerId);
-                        throw createMissingSessionIdRecoveryError(chatError);
-                    }
-                    const elapsed = Date.now() - startedAt;
-                    if (elapsed >= DEFAULT_HARD_CHAT_TIMEOUT_MS) {
-                        throw chatError;
-                    }
-                    await dispatcherClient.reportProgress(task.task_id, "Chat timeout, checking session status", workerId);
-                    const sessionStatus = await pollSessionStatus(sessionId, DEFAULT_HARD_CHAT_TIMEOUT_MS - elapsed, DEFAULT_SESSION_POLL_INTERVAL_MS);
-                    if (sessionStatus.status === "completed") {
-                        const replayResponse = await automationClient.sendChat({
+                worktreeOwnerships.set(task.task_id, workspace.ownership);
+                await dispatcherClient.startTask(workerId, task.task_id);
+                heartbeat.start("high");
+                await dispatcherClient.reportProgress(task.task_id, "Trae automation worker started task", workerId);
+                const prompt = buildAutomationPrompt(task);
+                const discovery = deriveTaskDiscoveryHints(task, repoDir);
+                let sessionId = null;
+                const startedAt = Date.now();
+                try {
+                    await dispatcherClient.reportProgress(task.task_id, "Trae automation gateway is preparing session", workerId);
+                    const prepareResult = await automationClient.prepareSession({
+                        chatMode: task.chatMode || task.chat_mode || "new_chat",
+                    });
+                    sessionId = prepareResult?.data?.sessionId || prepareResult?.sessionId || null;
+                    await dispatcherClient.reportProgress(task.task_id, "Trae automation gateway is sending prompt", workerId);
+                    const softTimeoutMs = Math.min(DEFAULT_SOFT_CHAT_TIMEOUT_MS, DEFAULT_HARD_CHAT_TIMEOUT_MS);
+                    const chatTimeoutMs = softTimeoutMs + DEFAULT_CHAT_REQUEST_TIMEOUT_BUFFER_MS;
+                    try {
+                        const response = await automationClient.sendChat({
                             content: prompt,
                             sessionId,
                             prepare: false,
                             discovery: discovery || undefined,
                             chatMode: task.chatMode || task.chat_mode || "new_chat",
                             responseRequiredPrefix: "任务完成",
-                            responseTimeoutMs: 1000,
-                            timeoutMs: 5000,
+                            responseTimeoutMs: softTimeoutMs,
+                            timeoutMs: chatTimeoutMs,
                         });
-                        const r = replayResponse;
+                        const r = response;
                         const finalText = r?.data?.response?.text
                             || r?.response?.text
                             || r?.data?.result?.response?.text
@@ -845,72 +851,114 @@ export function createTraeAutomationWorkerRuntime(options) {
                             responseText: finalText,
                         };
                     }
-                    else if (sessionStatus.status === "failed" || sessionStatus.status === "interrupted") {
-                        throw new Error(sessionStatus.error || `Session ${sessionStatus.status}`);
-                    }
-                    else {
-                        const artifactCheck = checkArtifactReviewability(task);
-                        if (artifactCheck.reviewable) {
-                            if (!artifactCheck.evidence.remoteVerified) {
-                                throw new Error(`Artifact not reviewable: ${artifactCheck.evidence.remoteCheckReason}`);
-                            }
-                            await submitParsedResult(task, {
-                                result: "成功",
-                                taskId: task.task_id,
-                                notes: `Recovered via artifact check: ${artifactCheck.reason}`,
-                                testOutput: "",
-                                risks: ["Session timeout, recovered from git artifacts"],
-                                filesChanged: artifactCheck.evidence.filesChanged,
-                                github: {
-                                    branchName: artifactCheck.evidence.branchName,
-                                    commitSha: artifactCheck.evidence.commitSha,
-                                    pushStatus: "verified",
-                                    pushError: null,
-                                    prNumber: null,
-                                    prUrl: null,
-                                },
+                    catch (chatError) {
+                        if (!shouldAttemptSessionRecovery(chatError)) {
+                            throw chatError;
+                        }
+                        if (!sessionId) {
+                            await dispatcherClient.reportProgress(task.task_id, "Chat timeout but session id is missing; cannot poll session status", workerId);
+                            throw createMissingSessionIdRecoveryError(chatError);
+                        }
+                        const elapsed = Date.now() - startedAt;
+                        if (elapsed >= DEFAULT_HARD_CHAT_TIMEOUT_MS) {
+                            throw chatError;
+                        }
+                        await dispatcherClient.reportProgress(task.task_id, "Chat timeout, checking session status", workerId);
+                        const sessionStatus = await pollSessionStatus(sessionId, DEFAULT_HARD_CHAT_TIMEOUT_MS - elapsed, DEFAULT_SESSION_POLL_INTERVAL_MS);
+                        if (sessionStatus.status === "completed") {
+                            const replayResponse = await automationClient.sendChat({
+                                content: prompt,
+                                sessionId,
+                                prepare: false,
+                                discovery: discovery || undefined,
+                                chatMode: task.chatMode || task.chat_mode || "new_chat",
+                                responseRequiredPrefix: "任务完成",
+                                responseTimeoutMs: 1000,
+                                timeoutMs: 5000,
                             });
+                            const r = replayResponse;
+                            const finalText = r?.data?.response?.text
+                                || r?.response?.text
+                                || r?.data?.result?.response?.text
+                                || "";
+                            const parsed = parseFinalReport(finalText);
+                            const finalStatus = await submitParsedResult(task, parsed);
                             return {
-                                status: "review_ready",
+                                status: finalStatus,
                                 taskId: task.task_id,
-                                responseText: `Recovered via artifact check: ${artifactCheck.reason}`,
+                                responseText: finalText,
                             };
                         }
-                        throw new Error("Hard timeout exceeded");
+                        else if (sessionStatus.status === "failed" || sessionStatus.status === "interrupted") {
+                            throw new Error(sessionStatus.error || `Session ${sessionStatus.status}`);
+                        }
+                        else {
+                            const artifactCheck = checkArtifactReviewability(task);
+                            if (artifactCheck.reviewable) {
+                                if (!artifactCheck.evidence.remoteVerified) {
+                                    throw new Error(`Artifact not reviewable: ${artifactCheck.evidence.remoteCheckReason}`);
+                                }
+                                await submitParsedResult(task, {
+                                    result: "成功",
+                                    taskId: task.task_id,
+                                    notes: `Recovered via artifact check: ${artifactCheck.reason}`,
+                                    testOutput: "",
+                                    risks: ["Session timeout, recovered from git artifacts"],
+                                    filesChanged: artifactCheck.evidence.filesChanged,
+                                    github: {
+                                        branchName: artifactCheck.evidence.branchName,
+                                        commitSha: artifactCheck.evidence.commitSha,
+                                        pushStatus: "verified",
+                                        pushError: null,
+                                        prNumber: null,
+                                        prUrl: null,
+                                    },
+                                });
+                                return {
+                                    status: "review_ready",
+                                    taskId: task.task_id,
+                                    responseText: `Recovered via artifact check: ${artifactCheck.reason}`,
+                                };
+                            }
+                            throw new Error("Hard timeout exceeded");
+                        }
                     }
                 }
-            }
-            catch (error) {
-                const artifactCheck = checkArtifactReviewability(task);
-                if (artifactCheck.reviewable && artifactCheck.evidence.remoteVerified) {
-                    await submitParsedResult(task, {
-                        result: "成功",
-                        taskId: task.task_id,
-                        notes: `Recovered via artifact check after error: ${artifactCheck.reason}`,
-                        testOutput: "",
-                        risks: [`Error: ${error instanceof Error ? error.message : String(error)}`],
-                        filesChanged: artifactCheck.evidence.filesChanged,
-                        github: {
-                            branchName: artifactCheck.evidence.branchName,
-                            commitSha: artifactCheck.evidence.commitSha,
-                            pushStatus: "verified",
-                            pushError: null,
-                            prNumber: null,
-                            prUrl: null,
-                        },
-                    });
+                catch (error) {
+                    const artifactCheck = checkArtifactReviewability(task);
+                    if (artifactCheck.reviewable && artifactCheck.evidence.remoteVerified) {
+                        await submitParsedResult(task, {
+                            result: "成功",
+                            taskId: task.task_id,
+                            notes: `Recovered via artifact check after error: ${artifactCheck.reason}`,
+                            testOutput: "",
+                            risks: [`Error: ${error instanceof Error ? error.message : String(error)}`],
+                            filesChanged: artifactCheck.evidence.filesChanged,
+                            github: {
+                                branchName: artifactCheck.evidence.branchName,
+                                commitSha: artifactCheck.evidence.commitSha,
+                                pushStatus: "verified",
+                                pushError: null,
+                                prNumber: null,
+                                prUrl: null,
+                            },
+                        });
+                        return {
+                            status: "review_ready",
+                            taskId: task.task_id,
+                            responseText: `Recovered via artifact check: ${artifactCheck.reason}`,
+                        };
+                    }
+                    await submitFailure(task, error instanceof Error ? error : new Error(String(error)));
                     return {
-                        status: "review_ready",
+                        status: "failed",
                         taskId: task.task_id,
-                        responseText: `Recovered via artifact check: ${artifactCheck.reason}`,
+                        error: error instanceof Error ? error.message : String(error),
                     };
                 }
-                await submitFailure(task, error instanceof Error ? error : new Error(String(error)));
-                return {
-                    status: "failed",
-                    taskId: task.task_id,
-                    error: error instanceof Error ? error.message : String(error),
-                };
+            }
+            finally {
+                await releaseWorktreeOwnershipBestEffort(task.task_id);
             }
         },
         async runLoop(signal) {

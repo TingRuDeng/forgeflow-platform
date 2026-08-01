@@ -86,7 +86,7 @@ Verified bridge points:
 - HTTP dispatcher server Trae route handling: `scripts/lib/dispatcher-server.js` -> `apps/dispatcher/dist/modules/server/runtime-dispatcher-server.js`
 - Dispatcher state machine: `scripts/lib/dispatcher-state.js` -> `apps/dispatcher/dist/modules/server/runtime-state.js`
 - Review-memory loading and lesson extraction: `scripts/lib/review-memory.js` -> `apps/dispatcher/dist/modules/server/review-memory.js`
-- Task worktree planning, reuse, and cleanup rules: `scripts/lib/task-worktree.js` and `apps/dispatcher/dist/modules/server/task-worktree.js` -> `@tingrudeng/beta-runtime-core/runtime/task-worktree.js`
+- Task worktree planning, reuse, cleanup, and Git common-dir local ownership fencing: `scripts/lib/task-worktree.js` and `apps/dispatcher/dist/modules/server/task-worktree.js` -> `@tingrudeng/beta-runtime-core/runtime/task-worktree.js`
 - Generic worker loop bridge: `scripts/lib/worker-daemon.js` / `scripts/run-worker-daemon.js` -> `apps/dispatcher/dist/modules/server/runtime-glue-dispatcher-client.js`
 - Review decision bridge: `scripts/lib/review-decision.js` / `scripts/submit-review-decision.js` -> `apps/dispatcher/dist/modules/server/runtime-glue-review-decision.js`
 

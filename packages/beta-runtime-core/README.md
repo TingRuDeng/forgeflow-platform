@@ -18,8 +18,10 @@ Codex / Gemini assignment 默认使用 `trusted-host`。设置 `FORGEFLOW_EXECUT
 - live executor 使用可取消的异步 Git 操作，单条命令默认最多运行 60 秒。
 - task ID 必须生成安全的单级目录名；清洗有损或目录名过长时会附加原始 ID 的稳定短哈希以避免碰撞。升级前已登记在旧版无哈希精确路径的同分支 worktree 仍可复用，清理旧路径时必须提供并核对分支身份；符号链接路径会被拒绝。任务分支必须是合法 ref 且不能等于默认分支；复用前会核对 Git 登记的 worktree 路径与分支，拒绝未登记目录、分支占用和路径错配。
 - provider 复用已有 worktree 时统一执行 `git reset --hard HEAD` + `git clean -fd`，避免上一次执行的已跟踪和未跟踪内容污染新 attempt。
-- `FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 只会在 terminal result 已被 dispatcher 确认后尝试清理。默认不带 `--force`，脏 worktree 会保留并上报 `worktree_cleanup_failed`。
+- 同一 Git common-dir 下的 ForgeFlow 生命周期共用 `forgeflow-worktree-owner.lock`。默认等待 2 秒、25 毫秒重试；锁记录 PID、owner token 与创建时间，只有超过 30 秒且 PID 已退出的遗留锁可回收，释放会核对 inode 与 token。`prepareTaskWorktreeWithOwnership` / `prepareTaskWorktreeLifecycleWithOwnership` 用于持有完整任务期所有权；普通 prepare/remove helper 只在单次操作期间持锁。同一进程已持有异步 owner 时，同步 helper 会立即失败，避免阻塞 owner 的事件循环释放路径。
+- generic live executor 持锁覆盖 assignment 与 Git 收尾；Trae worker 持锁覆盖 terminal result 投递尝试与确认后的可选清理。`FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT=1` 才启用删除：Trae 只在 dispatcher 确认结果后执行，未确认时保留 worktree 并在当前执行退栈时释放本机 owner；generic live executor 在返回外层 shared cycle 前执行。默认不带 `--force`，脏 worktree 会保留并上报 `worktree_cleanup_failed`。
 - 只有同时设置 `FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP=1` 才会强制清理；这会丢弃任务 worktree 中尚未提交的内容，应只用于操作者明确接受该风险的环境。
+- owner lock 是本机文件锁，不覆盖独立 clone、跨主机进程或绕过 runtime helper 的直接 Git / 文件操作。
 
 ## 验证
 

@@ -11,6 +11,10 @@ import {
   runWorkerDaemonCycle,
   type DispatcherClient,
 } from "../src/runtime/worker-daemon.js";
+import {
+  prepareTaskWorktreeLifecycle,
+  TaskWorktreeLockTimeoutError,
+} from "../src/runtime/task-worktree.js";
 
 interface ProviderCase {
   pool: "codex" | "gemini";
@@ -271,6 +275,46 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
         payload,
         dryRunExecution: false,
       })).rejects.toThrow("worker execution timed out after 50ms");
+    });
+
+    it("holds worktree ownership until the assignment process exits", async () => {
+      const tempDir = makeTempDir("worker-worktree-owner-");
+      const repoDir = createRepoWithOrigin(tempDir);
+      const packageRoot = createFakePackageRoot(tempDir, { hang: true });
+      const payload = buildPayload(providerCases[0], "task-worktree-owner");
+      let markPrepared: (() => void) | null = null;
+      const worktreePrepared = new Promise<void>((resolve) => {
+        markPrepared = resolve;
+      });
+
+      const execution = executeLiveWorkerTask({
+        client: createClient(payload),
+        packageRoot,
+        workerId: providerCases[0].workerId,
+        repoDir,
+        payload,
+        dryRunExecution: false,
+        executionTimeoutMs: 200,
+        reportEvent: async (event) => {
+          if ((event.payload as { stage?: string } | undefined)?.stage === "worktree_prepared") {
+            markPrepared?.();
+          }
+        },
+      });
+      await worktreePrepared;
+
+      await expect(prepareTaskWorktreeLifecycle(repoDir, payload.assignment, {
+        allowReuse: true,
+        resetOnReuse: true,
+        lockTimeoutMs: 20,
+        lockRetryMs: 5,
+      })).rejects.toBeInstanceOf(TaskWorktreeLockTimeoutError);
+      await expect(execution).rejects.toThrow("worker execution timed out after 200ms");
+      await expect(prepareTaskWorktreeLifecycle(repoDir, payload.assignment, {
+        allowReuse: true,
+        lockTimeoutMs: 20,
+        lockRetryMs: 5,
+      })).resolves.toMatchObject({ action: "reused" });
     });
 
     it("uses an independent bounded cleanup after the assignment signal is aborted", async () => {

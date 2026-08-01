@@ -45,6 +45,8 @@ function createRepoWithOrigin(prefix: string, defaultBranch = "main") {
 }
 
 afterEach(() => {
+  delete process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT;
+  delete process.env.FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP;
   while (tempPaths.length > 0) {
     const tempPath = tempPaths.pop();
     if (tempPath) {
@@ -297,6 +299,95 @@ describe("trae automation worker runtime", () => {
         timeoutMs: 1830000,
       })
     );
+  });
+
+  it("preserves unacknowledged worktree contents and releases the local owner", async () => {
+    process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT = "1";
+    const mod = await import(workerModulePath);
+    const { repoDir } = createRepoWithOrigin("forgeflow-trae-delivery-failure-", "main");
+    const taskId = "dispatch-submit-failure";
+    const dispatcherClient = {
+      register: vi.fn(async () => ({ ok: true })),
+      heartbeat: vi.fn(async () => ({ ok: true })),
+      fetchTask: vi.fn(async () => ({
+        status: "ok",
+        task: {
+          task_id: taskId,
+          repo: "test/repo",
+          branch: "ai/trae/submit-failure",
+          default_branch: "main",
+          scope: ["src/**"],
+          constraints: [],
+          acceptance: ["pnpm test"],
+          prompt: "Preserve the worktree when delivery is unacknowledged",
+        },
+      })),
+      startTask: vi.fn(async () => ({ ok: true })),
+      reportProgress: vi.fn(async () => ({ ok: true })),
+      submitResult: vi.fn(async () => {
+        throw new Error("dispatcher unavailable");
+      }),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ data: { ready: true } })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-delivery-failure" } })),
+      sendChat: vi.fn(async () => ({
+        data: {
+          response: {
+            text: [
+              "## 任务完成",
+              "- 结果: 失败",
+              `- 任务ID: ${taskId}`,
+              "- 修改文件: src/failure.ts",
+              "- 测试结果: dispatcher unavailable",
+              "- 风险: result not acknowledged",
+              "- GitHub 证据:",
+              "  - branch: ai/trae/submit-failure",
+              "  - commit: 无",
+              "  - push: 无",
+              "  - push_error: dispatcher unavailable",
+              "  - PR: 无",
+              "  - PR URL: 无",
+              "- 备注: preserve local evidence",
+            ].join("\n"),
+          },
+        },
+      })),
+    };
+    const runtime = mod.createTraeAutomationWorkerRuntime({
+      dispatcherClient,
+      automationClient,
+      workerId: "trae-delivery-failure",
+      repoDir,
+      setIntervalImpl: () => 1,
+      clearIntervalImpl: () => {},
+      sleep: async () => {},
+      logger: { warn: vi.fn() },
+      checkArtifactReviewabilityImpl: () => ({
+        reviewable: false,
+        reason: "no reviewable remote artifact",
+        evidence: {
+          worktreeExists: true,
+          branchMatches: true,
+          hasChanges: false,
+          allChangesInScope: true,
+          remoteVerified: false,
+          remoteHeadSha: null,
+          branchName: "ai/trae/submit-failure",
+          commitSha: null,
+          filesChanged: [],
+          outOfScopeFiles: [],
+          uncommittedFiles: [],
+          remoteCheckReason: "result not acknowledged",
+        },
+      }),
+    });
+
+    await expect(runtime.runOnce()).rejects.toThrow("dispatcher unavailable");
+
+    expect(dispatcherClient.submitResult).toHaveBeenCalledTimes(2);
+    expect(fs.existsSync(path.join(repoDir, ".worktrees", taskId))).toBe(true);
+    expect(fs.existsSync(path.join(repoDir, ".git", "forgeflow-worktree-owner.lock"))).toBe(false);
   });
 
   it("returns no_task when dispatcher has nothing pending", async () => {
