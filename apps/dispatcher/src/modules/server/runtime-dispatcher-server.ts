@@ -10,6 +10,7 @@ import {
   claimAssignedTaskForWorker,
   heartbeatWorker as heartbeatWorkerFn,
   registerWorker as registerWorkerFn,
+  recordWorkerProgress as recordWorkerProgressFn,
   recordWorkerResult as recordWorkerResultFn,
   reconcileRuntimeState as reconcileRuntimeStateFn,
 } from "./runtime-state.js";
@@ -440,18 +441,37 @@ export function applyTraeHeartbeat(
 
 export function applyTraeReportProgress(
   state: RuntimeState,
-  taskId: string,
-  message: string,
-  workerId?: string
-): RuntimeState {
-  const nextState = appendRuntimeEvent(state, {
-    taskId,
-    type: "progress_reported",
-    at: nowIso(),
-    payload: { message, worker_id: workerId },
-  });
-  overwriteRuntimeState(state, nextState);
-  return state;
+  input: {
+    taskId: string;
+    workerId: string;
+    attemptId?: string;
+    leaseToken?: string;
+    protocolVersion?: string;
+    traceId?: string;
+    idempotencyKey?: string;
+    progressId: string;
+    message: string;
+    stage?: string;
+  },
+): { state: RuntimeState; ok: boolean; error?: string } {
+  const envelopeError = validateCompleteWorkerProtocolEnvelope(input);
+  if (envelopeError) {
+    return { state, ok: false, error: envelopeError };
+  }
+  try {
+    const nextState = recordWorkerProgressFn(state, {
+      ...input,
+      receivedAt: nowIso(),
+    });
+    overwriteRuntimeState(state, nextState);
+    return { state, ok: true };
+  } catch (error) {
+    return {
+      state,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export function applyTraeStartTask(
@@ -725,17 +745,47 @@ function handleTraeRouteImpl(
 
   if (method === "POST" && pathname === "/api/trae/report-progress") {
     const reqBody = body as unknown as TraeReportProgressRequest;
-    const { task_id: taskId, message, worker_id: workerId } = reqBody;
-    if (!taskId || !message) {
+    const {
+      task_id: taskId,
+      worker_id: workerId,
+      attempt_id: attemptId,
+      lease_token: leaseToken,
+      protocol_version: protocolVersion,
+      trace_id: traceId,
+      idempotency_key: idempotencyKey,
+      progress_id: progressId,
+      message,
+      stage,
+    } = reqBody;
+    if (!taskId || !workerId || !progressId || !message) {
       return {
         status: 400,
         headers: { "content-type": "application/json" },
-        json: { error: "task_id and message required" },
-        text: JSON.stringify({ error: "task_id and message required" }),
+        json: { error: "worker_id, task_id, progress_id, and message required" },
+        text: JSON.stringify({ error: "worker_id, task_id, progress_id, and message required" }),
       };
     }
 
-    applyTraeReportProgress(state, taskId, message, workerId);
+    const result = applyTraeReportProgress(state, {
+      taskId,
+      workerId,
+      attemptId,
+      leaseToken,
+      protocolVersion,
+      traceId,
+      idempotencyKey,
+      progressId,
+      message,
+      stage,
+    });
+    if (!result.ok) {
+      return {
+        status: classifyTraeMutationError(result.error),
+        headers: { "content-type": "application/json" },
+        json: { ok: false, error: result.error },
+        text: JSON.stringify({ ok: false, error: result.error }),
+      };
+    }
 
     return {
       status: 200,

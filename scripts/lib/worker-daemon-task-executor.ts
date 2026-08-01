@@ -125,6 +125,7 @@ export async function executeClaimedTask(input: ProcessTaskAssignmentInput): Pro
       input.workerId,
       event,
       input.signal,
+      buildWorkerProtocolEnvelope(input.payload),
     ),
     onCleanupError: (cleanupError) => logCleanupError(taskId, cleanupError),
     ...retryPolicy,

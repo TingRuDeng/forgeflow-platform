@@ -76,7 +76,41 @@ describe("runtime-glue dispatcher-client", () => {
       expect(typeof client.getAssignedTask).toBe("function");
       expect(typeof client.claimTask).toBe("function");
       expect(typeof client.startTask).toBe("function");
+      expect(typeof client.reportProgress).toBe("function");
       expect(typeof client.submitResult).toBe("function");
+    });
+
+    it("sends progress to the attempt-scoped worker endpoint", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve('{"status":"progress_recorded"}'),
+      });
+      const client = createDispatcherHttpClient({
+        dispatcherUrl: "http://localhost:8787",
+        fetchImpl: mockFetch as never,
+      });
+      const payload = {
+        taskId: "task-progress",
+        attemptId: "attempt-progress",
+        leaseToken: "lease-progress",
+        protocolVersion: "2026-05-v1",
+        traceId: "trace-progress",
+        idempotencyKey: "worker-v1:task-progress:attempt-progress",
+        progressId: "progress-1",
+        message: "Running tests",
+        stage: "verification",
+      };
+
+      await client.reportProgress("worker-progress", payload);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:8787/api/workers/worker-progress/progress",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify(payload),
+        }),
+      );
     });
 
     it("throws error when request fails with non-ok status", async () => {

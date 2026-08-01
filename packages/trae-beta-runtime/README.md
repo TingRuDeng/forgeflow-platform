@@ -20,7 +20,7 @@ It depends on `@tingrudeng/automation-gateway-core` for shared automation/sessio
 Current unattended runtime guards:
 - `new_chat` sampling is narrowed to the last visible chat root instead of scanning the whole page by default
 - when baseline sampling still exposes a different completed task id, the runtime fails early with a stale-session error instead of continuing to read the old chat
-- the runtime now reports structured phase events plus `traceId` / `sessionId` / `failureCode` hints back to dispatcher when the control plane is reachable
+- the runtime reports user-visible progress through the fenced worker progress endpoint using the active attempt envelope, while non-progress phase events continue through telemetry with `traceId` / `sessionId` / `failureCode` hints
 - lossy task ids use collision-resistant worktree directories, while an already-registered same-branch worktree at the exact legacy path remains reusable during upgrades
 - reused worktrees are reset with `git reset --hard HEAD` and `git clean -fd` before each task attempt
 - the worker holds the shared Git common-dir local ownership lock from workspace preparation through terminal result delivery attempts and acknowledgement-time optional cleanup, so another ForgeFlow helper cannot reset or remove the active worktree; direct Git commands, independent clones, and cross-host processes remain outside this local lock

@@ -27,13 +27,22 @@ export const WorkerProtocolEnvelopeSchema = z.object({
   idempotencyKey: IdempotencyKeySchema,
 });
 
-export const WorkerMutationKindSchema = z.enum(["start-task", "result"]);
+export const WorkerMutationKindSchema = z.enum(["start-task", "progress", "result"]);
 
 export const WorkerSdkStartPayloadSchema = WorkerProtocolEnvelopeSchema.omit({
   workerId: true,
 }).extend({
   kind: z.literal("start-task"),
   at: z.string().optional(),
+});
+
+export const WorkerSdkProgressPayloadSchema = WorkerProtocolEnvelopeSchema.omit({
+  workerId: true,
+}).extend({
+  kind: z.literal("progress"),
+  progressId: NonEmptyStringSchema,
+  message: NonEmptyStringSchema,
+  stage: NonEmptyStringSchema.optional(),
 });
 
 const WorkerResultVerificationCommandSchema = z.object({
@@ -206,6 +215,26 @@ export function buildWorkerStartPayload(input: {
   });
 }
 
+export function buildWorkerProgressPayload(input: {
+  envelope: WorkerProtocolEnvelope;
+  progressId: string;
+  message: string;
+  stage?: string;
+}): WorkerSdkProgressPayload {
+  return WorkerSdkProgressPayloadSchema.parse({
+    kind: "progress",
+    taskId: input.envelope.taskId,
+    attemptId: input.envelope.attemptId,
+    leaseToken: input.envelope.leaseToken,
+    protocolVersion: input.envelope.protocolVersion,
+    traceId: input.envelope.traceId,
+    idempotencyKey: input.envelope.idempotencyKey,
+    progressId: input.progressId,
+    message: input.message,
+    stage: input.stage,
+  });
+}
+
 export function buildWorkerResultPayload(input: {
   envelope: WorkerProtocolEnvelope;
   result: Omit<WorkerSdkResultPayload["result"], "taskId" | "workerId">;
@@ -249,6 +278,7 @@ export type WorkerRuntime = z.infer<typeof WorkerRuntimeSchema>;
 export type WorkerProtocolEnvelope = z.infer<typeof WorkerProtocolEnvelopeSchema>;
 export type WorkerMutationKind = z.infer<typeof WorkerMutationKindSchema>;
 export type WorkerSdkStartPayload = z.infer<typeof WorkerSdkStartPayloadSchema>;
+export type WorkerSdkProgressPayload = z.infer<typeof WorkerSdkProgressPayloadSchema>;
 export type WorkerSdkResultPayload = z.infer<typeof WorkerSdkResultPayloadSchema>;
 export type WorkerRegistrationRequest = z.infer<typeof WorkerRegistrationRequestSchema>;
 export type WorkerRegistrationResponse = z.infer<typeof WorkerRegistrationResponseSchema>;

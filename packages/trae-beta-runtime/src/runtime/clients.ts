@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as http from "node:http";
 import * as https from "node:https";
 
@@ -218,6 +219,30 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
     sourceLabel: options.sourceLabel || "dispatcher",
   });
   const requestTimeoutMs = Number(options.requestTimeoutMs || DEFAULT_DISPATCHER_REQUEST_TIMEOUT_MS);
+  const attemptLeases = new Map<string, Required<WorkerProtocolEnvelopeInput>>();
+
+  function captureAttemptLease(response: unknown): void {
+    const task = response && typeof response === "object" && "task" in response
+      ? (response as { task?: Record<string, unknown> }).task
+      : undefined;
+    const taskId = typeof task?.task_id === "string" ? task.task_id.trim() : "";
+    const attemptId = typeof task?.attempt_id === "string" ? task.attempt_id.trim() : "";
+    const leaseToken = typeof task?.lease_token === "string" ? task.lease_token.trim() : "";
+    const protocolVersion = typeof task?.protocol_version === "string" ? task.protocol_version.trim() : "";
+    const traceId = typeof task?.trace_id === "string" ? task.trace_id.trim() : "";
+    const idempotencyKey = typeof task?.idempotency_key === "string" ? task.idempotency_key.trim() : "";
+    if (taskId && attemptId && leaseToken && protocolVersion && traceId && idempotencyKey) {
+      attemptLeases.set(taskId, { attemptId, leaseToken, protocolVersion, traceId, idempotencyKey });
+    }
+  }
+
+  function requireAttemptLease(taskId: string): Required<WorkerProtocolEnvelopeInput> {
+    const attemptLease = attemptLeases.get(taskId);
+    if (!attemptLease) {
+      throw new Error(`worker protocol v1 envelope unavailable for task: ${taskId}`);
+    }
+    return attemptLease;
+  }
 
   return {
     async register(worker: { workerId: string; pool: string; repoDir: string; labels?: string[] }) {
@@ -233,12 +258,14 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
       });
     },
     async fetchTask(workerId: string, repoDir: string, requestOptions: { signal?: AbortSignal } = {}) {
-      return http.request("/api/trae/fetch-task", {
+      const response = await http.request("/api/trae/fetch-task", {
         method: "POST",
         body: { worker_id: workerId, repo_dir: repoDir },
         timeoutMs: requestTimeoutMs,
         signal: requestOptions.signal,
       });
+      captureAttemptLease(response);
+      return response;
     },
     async startTask(workerId: string, taskId: string, attemptLease: WorkerProtocolEnvelopeInput = {}) {
       return http.request("/api/trae/start-task", {
@@ -256,9 +283,14 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
       });
     },
     async reportProgress(taskId: string, message: string, workerId: string) {
-      return http.request("/api/trae/report-progress", {
+      return http.request(`/api/workers/${encodeURIComponent(workerId)}/progress`, {
         method: "POST",
-        body: { task_id: taskId, message, worker_id: workerId },
+        body: {
+          taskId,
+          ...requireAttemptLease(taskId),
+          progressId: randomUUID(),
+          message,
+        },
         timeoutMs: requestTimeoutMs,
       });
     },

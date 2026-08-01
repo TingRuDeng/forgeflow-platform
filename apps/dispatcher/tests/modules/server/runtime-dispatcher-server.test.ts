@@ -438,20 +438,52 @@ describe("runtime-dispatcher-server foundation", () => {
   });
 
   describe("applyTraeReportProgress", () => {
-    it("appends progress_reported event", () => {
-      const state = createEmptyRuntimeState();
-      const result = applyTraeReportProgress(state, "task-1", "Working on it...", "trae-01");
-      expect(result.events).toHaveLength(1);
-      expect(result.events[0].type).toBe("progress_reported");
-      expect(result.events[0].eventId).toBe("event-1");
-      expect(result.events[0].payload).toEqual({ message: "Working on it...", worker_id: "trae-01" });
-      expect(result.eventSequence).toBe(1);
+    it("appends attempt-scoped progress and accepts an exact replay", () => {
+      const state = createStartedTraeState("task-progress");
+      const envelope = activeWorkerEnvelope(state, "task-progress");
+      const eventCount = state.events.length;
+      const input = {
+        taskId: "task-progress",
+        workerId: "trae-01",
+        ...envelope,
+        progressId: "progress-1",
+        message: "Working on it...",
+        stage: "execution",
+      };
+
+      const result = applyTraeReportProgress(state, input);
+      expect(result.ok).toBe(true);
+      expect(result.state.events).toHaveLength(eventCount + 1);
+      expect(result.state.events.at(-1)).toMatchObject({
+        taskId: "task-progress",
+        attemptId: envelope.attemptId,
+        workerId: "trae-01",
+        traceId: envelope.traceId,
+        type: "progress_reported",
+        payload: {
+          progressId: "progress-1",
+          message: "Working on it...",
+          stage: "execution",
+          idempotencyKey: envelope.idempotencyKey,
+        },
+      });
+
+      const replay = applyTraeReportProgress(state, input);
+      expect(replay.ok).toBe(true);
+      expect(replay.state.events).toHaveLength(eventCount + 1);
     });
 
-    it("works without worker_id", () => {
-      const state = createEmptyRuntimeState();
-      const result = applyTraeReportProgress(state, "task-1", "Progress update");
-      expect(result.events[0].payload).toEqual({ message: "Progress update", worker_id: undefined });
+    it("rejects progress without a complete v1 envelope", () => {
+      const state = createStartedTraeState("task-progress-incomplete");
+      const result = applyTraeReportProgress(state, {
+        taskId: "task-progress-incomplete",
+        workerId: "trae-01",
+        progressId: "progress-incomplete",
+        message: "Progress update",
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/worker protocol v1 envelope incomplete/i);
     });
   });
 

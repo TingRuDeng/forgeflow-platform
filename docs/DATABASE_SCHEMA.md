@@ -108,8 +108,10 @@ Top-level collections currently include:
 
 - `eventId`（dispatcher 生成的稳定事件 ID）
 - `auditSequence`（从 durable audit 表读取时附带的分页序列）
+- `attemptId`（attempt-scoped 事件的一等关联字段）
+- `workerId`（worker-scoped 事件的一等关联字段）
+- `traceId`（跨 task / attempt / event 的一等关联字段）
 - `summary`
-- `payload.traceId`
 - `payload.sessionId`
 - `payload.failureCode`
 
@@ -402,8 +404,9 @@ Current role of those tables:
 - they support `/api/query/*`, structured reads, and projection health checks
 - `task_attempts` 保存 vNext synthetic attempt projection，authoritative truth 仍以 snapshot 的 `taskAttempts[]` 为准
 - `artifact_bundles` 保存 vNext ArtifactBundle 摘要、refs projection、`trajectory_json` 和可选 retained diff / log / test result / trajectory 正文片段
-- `runtime_events` 只保存 runtime snapshot 当前保留的最近 500 条事件投影
-- `runtime_audit_events` 按 `event_id` 幂等追加完整历史，`sequence` 是分页游标；`/api/query/events` 优先读取该表
+- `runtime_events` 只保存 runtime snapshot 当前保留的最近 500 条事件投影；`attempt_id` / `worker_id` / `trace_id` 保存事件关联字段
+- `runtime_audit_events` 按 `event_id` 幂等追加完整历史，`sequence` 是分页游标，并保留同样的 `attempt_id` / `worker_id` / `trace_id`；`/api/query/events` 优先读取该表
+- 从不含上述三列的旧 SQLite schema 只读启动时，projection / audit 查询会把缺失关联字段映射为 `null`，不要求先取得写权限；下一次正常保存会通过 additive migration 补列并继续写入新事件关联
 - `sessions` 当前是保留表，不由 `RuntimeState` projection 写入；Trae automation session truth 仍在独立 `sessions.json` store
 - they do not replace `snapshots` as the runtime truth source
 
@@ -425,7 +428,7 @@ Artifact 文件正文不进入 SQLite 表：
 - retention 删除 bundle 目录时，同一次 dispatcher 状态写入会同步移除对应 `artifactBundles[]` / SQLite projection 索引；bundle metadata 读取本身不要求当前节点持有本地 manifest，避免 Postgres 多节点读取被本机文件系统错误过滤
 - SQLite `artifact_bundles.refs_json` 保存指向这些文件的 `artifact://<bundleId>/<fileName>` 引用
 
-PostgreSQL primary backend 使用 `dispatcher_runtime_audit_events` 保存同类 append-only 审计记录。`dispatcher_runtime_state.revision` 是独立于业务 `state.sequence` 的持久化 revision；primary save 只有在调用方持有的 revision 仍匹配时才更新并递增，否则返回 `runtime_state_revision_conflict`（HTTP 路径为 `409`）。primary snapshot 与新审计事件在同一个 PostgreSQL transaction 内提交；查询同样使用 `audit_sequence` 做 `beforeSequence` 分页。
+PostgreSQL primary backend 使用 `dispatcher_runtime_audit_events` 保存同类 append-only 审计记录，并以 `attempt_id` / `worker_id` / `trace_id` 保留事件关联。`dispatcher_runtime_state.revision` 是独立于业务 `state.sequence` 的持久化 revision；primary save 只有在调用方持有的 revision 仍匹配时才更新并递增，否则返回 `runtime_state_revision_conflict`（HTTP 路径为 `409`）。primary snapshot 与新审计事件在同一个 PostgreSQL transaction 内提交；查询同样使用 `audit_sequence` 做 `beforeSequence` 分页。
 
 Current stage-3 optional shadow path:
 

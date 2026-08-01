@@ -273,6 +273,9 @@ export interface Event {
   eventId?: string;
   auditSequence?: number;
   taskId: string;
+  attemptId?: string;
+  workerId?: string;
+  traceId?: string;
   type: string;
   at: string;
   summary?: string | null;
@@ -532,6 +535,20 @@ export interface BeginTaskInput {
   traceId?: string;
   idempotencyKey?: string;
   at?: string;
+}
+
+export interface RecordWorkerProgressInput {
+  workerId: string;
+  taskId: string;
+  attemptId?: string;
+  leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
+  progressId: string;
+  message: string;
+  stage?: string;
+  receivedAt?: string;
 }
 
 export interface WorkerVerificationCommandResult {
@@ -3353,6 +3370,108 @@ export function beginTaskForWorker(state: RuntimeState, input: BeginTaskInput): 
   };
 
   return nextState;
+}
+
+export function recordWorkerProgress(
+  state: RuntimeState,
+  input: RecordWorkerProgressInput,
+): RuntimeState {
+  const progressId = normalizeString(input.progressId).trim();
+  const message = normalizeString(input.message).trim();
+  const stage = normalizeString(input.stage).trim();
+  const task = state.tasks.find((candidate) => candidate.id === input.taskId);
+  if (!task) {
+    throw new Error(`task not found: ${input.taskId}`);
+  }
+  const assignment = state.assignments.find((candidate) => candidate.taskId === input.taskId);
+  if (!assignment) {
+    throw new Error(`assignment not found for task: ${input.taskId}`);
+  }
+  const worker = state.workers.find((candidate) => candidate.id === input.workerId);
+  if (!worker) {
+    throw new Error(`worker not found: ${input.workerId}`);
+  }
+  if (!progressId) {
+    throw new Error("worker progress progressId is required");
+  }
+  if (!message) {
+    throw new Error("worker progress message is required");
+  }
+
+  const receivedAt = normalizeTimestamp(input.receivedAt, nowIso());
+  assertActiveAttemptLease({
+    state,
+    taskId: input.taskId,
+    workerId: input.workerId,
+    attemptId: input.attemptId,
+    leaseToken: input.leaseToken,
+    protocolVersion: input.protocolVersion,
+    traceId: input.traceId,
+    idempotencyKey: input.idempotencyKey,
+    operation: "progress",
+    at: receivedAt,
+  });
+  if (task.assignedWorkerId !== input.workerId || assignment.workerId !== input.workerId) {
+    throw new Error(`task not assigned to worker: ${input.workerId}`);
+  }
+  if (task.status !== "in_progress" || assignment.status !== "in_progress") {
+    throw new Error(`task not executable: ${input.taskId}`);
+  }
+
+  const activeAttempt = findActiveTaskAttempt(state, input.taskId)!;
+  const activeAssignmentLease = listActiveLeases(state.leases ?? [], receivedAt)
+    .find((lease) => lease.resourceType === "assignment" && lease.resourceId === input.taskId);
+  if (!activeAssignmentLease) {
+    throw new Error(`stale attempt progress rejected: ${activeAttempt.attemptId} assignment lease expired`);
+  }
+  if (activeAssignmentLease.ownerId !== input.workerId) {
+    throw new Error(`assignment lease owned by another worker: ${activeAssignmentLease.ownerId}`);
+  }
+  if (activeAssignmentLease.ownerToken !== activeAttempt.leaseToken) {
+    throw new Error(`lease token mismatch: ${input.taskId}`);
+  }
+
+  const progressPayload = {
+    progressId,
+    message,
+    ...(stage ? { stage } : {}),
+    idempotencyKey: activeAttempt.idempotencyKey,
+  };
+  const existingEvent = state.events.find((event) => {
+    if (
+      event.taskId !== input.taskId
+      || event.attemptId !== activeAttempt.attemptId
+      || event.type !== "progress_reported"
+      || !isRecord(event.payload)
+    ) {
+      return false;
+    }
+    return event.payload.progressId === progressPayload.progressId;
+  });
+  if (existingEvent) {
+    if (
+      existingEvent.workerId === input.workerId
+      && existingEvent.traceId === activeAttempt.traceId
+      && isDeepStrictEqual(existingEvent.payload, progressPayload)
+    ) {
+      return state;
+    }
+    throw new Error(`progress idempotency conflict for task: ${input.taskId}`);
+  }
+
+  const nextState = appendEvent(state, {
+    taskId: input.taskId,
+    attemptId: activeAttempt.attemptId,
+    workerId: input.workerId,
+    traceId: activeAttempt.traceId,
+    type: "progress_reported",
+    at: receivedAt,
+    payload: progressPayload,
+  });
+  return {
+    ...nextState,
+    updatedAt: receivedAt,
+  };
 }
 
 export function recordWorkerResult(state: RuntimeState, input: RecordWorkerResultInput): RuntimeState {

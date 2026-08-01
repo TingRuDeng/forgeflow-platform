@@ -30,6 +30,7 @@ import {
   redriveTask,
   reconcileRuntimeState,
   recordReviewDecision,
+  recordWorkerProgress,
   recordWorkerResult as recordWorkerResultImpl,
   registerWorker,
   resumeTaskFromInput,
@@ -1574,6 +1575,58 @@ describe("dispatcher runtime state (TypeScript)", () => {
         },
       },
     })).toThrow(/stale attempt result rejected: .* lease expired/i);
+  });
+
+  it("records fenced progress, deduplicates exact replay, and rejects conflicting replay", () => {
+    const state = createRunningAttemptState("task-progress-fence", "codex-progress");
+    const task = state.tasks[0]!;
+    const attempt = state.taskAttempts[0]!;
+    const input = {
+      workerId: "codex-progress",
+      taskId: task.id,
+      ...workerEnvelope(attempt),
+      progressId: "progress-1",
+      message: "running focused tests",
+      stage: "verification",
+      receivedAt: "2026-05-12T13:01:00.000Z",
+    };
+
+    const recorded = recordWorkerProgress(state, input);
+    expect(recorded.updatedAt).toBe(input.receivedAt);
+    expect(recorded.events.at(-1)).toMatchObject({
+      taskId: task.id,
+      attemptId: attempt.attemptId,
+      workerId: "codex-progress",
+      traceId: attempt.traceId,
+      type: "progress_reported",
+      payload: {
+        progressId: "progress-1",
+        message: "running focused tests",
+        stage: "verification",
+        idempotencyKey: attempt.idempotencyKey,
+      },
+    });
+
+    expect(recordWorkerProgress(recorded, input)).toBe(recorded);
+    expect(() => recordWorkerProgress(recorded, {
+      ...input,
+      message: "different payload",
+    })).toThrow(/progress idempotency conflict/i);
+  });
+
+  it("rejects progress received at the attempt lease expiry boundary", () => {
+    const state = createRunningAttemptState("task-expired-progress-fence", "codex-progress-expired");
+    const task = state.tasks[0]!;
+    const attempt = state.taskAttempts[0]!;
+
+    expect(() => recordWorkerProgress(state, {
+      workerId: "codex-progress-expired",
+      taskId: task.id,
+      ...workerEnvelope(attempt),
+      progressId: "progress-expired",
+      message: "late progress",
+      receivedAt: attempt.leaseExpiresAt,
+    })).toThrow(/stale attempt progress rejected: .* lease expired/i);
   });
 
   it("uses dispatcher receipt time for result state changes while retaining worker generatedAt as metadata", () => {

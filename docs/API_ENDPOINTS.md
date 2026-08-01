@@ -281,6 +281,13 @@ Current endpoint families:
   - Required v1 envelope fields are `attemptId`, `leaseToken`, `protocolVersion`, `traceId`, and `idempotencyKey`.
   - Dispatcher validates the complete v1 envelope against the active attempt and rejects missing fields or stale attempt data.
   - Dispatcher rejects an attempt at or after `leaseExpiresAt`, even when reconciliation has not run yet.
+- `POST /api/workers/:workerId/progress`
+  - Append an attempt-scoped progress update for an `in_progress` task.
+  - Required fields are `taskId`, `attemptId`, `leaseToken`, `protocolVersion`, `traceId`, `idempotencyKey`, `progressId`, and `message`; `stage` is optional.
+  - Dispatcher validates the active attempt, worker assignment, assignment lease, and dispatcher receipt time before appending the event.
+  - An exact replay of the same `progressId` and payload is idempotent; reusing that ID with different content returns `409`.
+  - A caller retrying the same logical update must reuse its original `progressId`; built-in progress clients currently make a single delivery attempt.
+  - Stored events retain `attemptId`, `workerId`, and `traceId` as top-level correlation fields.
 - `POST /api/workers/:workerId/result`
   - Submit execution result, changed files, and optional PR metadata.
   - Required v1 envelope fields follow the same validation rule as `start-task`.
@@ -312,6 +319,7 @@ Current endpoint families:
   - `artifactBundle` may be provided as a top-level field; dispatcher validates ownership against the active attempt and stores the bundle summary, refs, and optional retained content.
 - `POST /api/workers/:workerId/events`
   - Best-effort worker telemetry path for control-plane metrics and audit hints.
+  - `progress_reported` and `attempt_progress` are rejected; progress must use the fenced `/progress` endpoint.
   - Current request body validates:
     - `type` required, non-empty string
     - `taskId` optional string
@@ -434,7 +442,9 @@ Current endpoint families:
 - `POST /api/trae/start-task`
   - Mark Trae task as started.
 - `POST /api/trae/report-progress`
-  - Append progress events.
+  - Append an attempt-scoped progress event through the Trae compatibility route.
+  - Requires `worker_id`, `task_id`, `attempt_id`, `lease_token`, `protocol_version`, `trace_id`, `idempotency_key`, `progress_id`, and `message`; `stage` is optional.
+  - Uses the same active-attempt, assignment-lease, receipt-time, and exact-replay rules as the generic worker progress endpoint.
 - `POST /api/trae/submit-result`
   - Accepts `review_ready` or `failed`, then maps to dispatcher task states.
   - `review_ready` now assumes the runtime already verified that remote branch HEAD exactly matches the reported commit SHA.

@@ -79,7 +79,7 @@ runtime 读写以下配置文件：
 
 ## Dispatcher 协议
 
-worker daemon 通过 `POST /api/workers/:workerId/claim-task` 显式领取任务，不再依赖只读的 assigned-task 查询路径。领取成功后，runtime 会把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 v1 envelope 回写到 start/result mutation。
+worker daemon 通过 `POST /api/workers/:workerId/claim-task` 显式领取任务，不再依赖只读的 assigned-task 查询路径。领取成功后，runtime 会把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 v1 envelope 回写到 start/progress/result mutation；progress 使用独立 fenced endpoint，不再伪装成普通 telemetry event。
 
 dispatcher 默认 `token` 模式要求 worker 请求携带与自身 `workerId` 绑定的 bearer token。远程机器启动 worker 前应设置：
 

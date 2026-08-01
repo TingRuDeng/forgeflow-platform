@@ -157,6 +157,14 @@ function hasColumn(
   return columns.some((column) => column.name === columnName);
 }
 
+function optionalColumnSelect(
+  db: InstanceType<typeof DatabaseSync>,
+  tableName: string,
+  columnName: string,
+): string {
+  return hasColumn(db, tableName, columnName) ? columnName : `NULL AS ${columnName}`;
+}
+
 function initDb(db: InstanceType<typeof DatabaseSync>): void {
   applyPragmas(db);
   db.exec(`
@@ -312,6 +320,9 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       event_id TEXT,
       task_id TEXT NOT NULL,
+      attempt_id TEXT,
+      worker_id TEXT,
+      trace_id TEXT,
       type TEXT NOT NULL,
       at TEXT NOT NULL,
       summary TEXT,
@@ -322,6 +333,9 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
       sequence INTEGER PRIMARY KEY AUTOINCREMENT,
       event_id TEXT NOT NULL UNIQUE,
       task_id TEXT NOT NULL,
+      attempt_id TEXT,
+      worker_id TEXT,
+      trace_id TEXT,
       type TEXT NOT NULL,
       at TEXT NOT NULL,
       summary TEXT,
@@ -363,6 +377,12 @@ function initDb(db: InstanceType<typeof DatabaseSync>): void {
   ensureColumn(db, "reviews", "risk_assessment_json", "TEXT");
   ensureColumn(db, "tasks", "termination_policy_json", "TEXT");
   ensureColumn(db, "runtime_events", "event_id", "TEXT");
+  ensureColumn(db, "runtime_events", "attempt_id", "TEXT");
+  ensureColumn(db, "runtime_events", "worker_id", "TEXT");
+  ensureColumn(db, "runtime_events", "trace_id", "TEXT");
+  ensureColumn(db, "runtime_audit_events", "attempt_id", "TEXT");
+  ensureColumn(db, "runtime_audit_events", "worker_id", "TEXT");
+  ensureColumn(db, "runtime_audit_events", "trace_id", "TEXT");
   ensureColumn(db, "projection_table_hashes", "row_count", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "projection_table_hashes", "rewrite_count", "INTEGER NOT NULL DEFAULT 0");
 }
@@ -451,9 +471,9 @@ function appendRuntimeAuditEvents(
 ): void {
   const insertEvent = db.prepare(`
     INSERT INTO runtime_audit_events (
-      event_id, task_id, type, at, summary, payload_json
+      event_id, task_id, attempt_id, worker_id, trace_id, type, at, summary, payload_json
     )
-    SELECT ?, ?, ?, ?, ?, ?
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
     WHERE NOT EXISTS (
       SELECT 1
       FROM runtime_audit_events
@@ -468,6 +488,9 @@ function appendRuntimeAuditEvents(
     insertEvent.run(
       event.eventId,
       event.taskId,
+      event.attemptId ?? null,
+      event.workerId ?? null,
+      event.traceId ?? null,
       event.type,
       event.at,
       event.summary ?? null,
@@ -854,13 +877,16 @@ function rewriteStructuredProjection(
   rewriteProjectionTable(db, "runtime_events", state.events, () => {
     db.exec("DELETE FROM runtime_events;");
     const insertEvent = db.prepare(`
-      INSERT INTO runtime_events (event_id, task_id, type, at, summary, payload_json)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO runtime_events (event_id, task_id, attempt_id, worker_id, trace_id, type, at, summary, payload_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const event of state.events) {
       insertEvent.run(
         event.eventId ?? null,
         event.taskId,
+        event.attemptId ?? null,
+        event.workerId ?? null,
+        event.traceId ?? null,
         event.type,
         event.at,
         event.summary ?? null,
@@ -1131,13 +1157,19 @@ export function readStructuredRuntimeState(stateDir: string): RuntimeState {
     const runtimeEventIdSelect = hasColumn(db, "runtime_events", "event_id")
       ? "event_id"
       : "NULL AS event_id";
+    const runtimeEventAttemptIdSelect = optionalColumnSelect(db, "runtime_events", "attempt_id");
+    const runtimeEventWorkerIdSelect = optionalColumnSelect(db, "runtime_events", "worker_id");
+    const runtimeEventTraceIdSelect = optionalColumnSelect(db, "runtime_events", "trace_id");
     base.events = db.prepare(`
-      SELECT ${runtimeEventIdSelect}, task_id, type, at, summary, payload_json
+      SELECT ${runtimeEventIdSelect}, task_id, ${runtimeEventAttemptIdSelect}, ${runtimeEventWorkerIdSelect}, ${runtimeEventTraceIdSelect}, type, at, summary, payload_json
       FROM runtime_events
       ORDER BY seq
     `).all().map((row: any) => ({
       eventId: row.event_id ?? undefined,
       taskId: row.task_id,
+      attemptId: row.attempt_id ?? undefined,
+      workerId: row.worker_id ?? undefined,
+      traceId: row.trace_id ?? undefined,
       type: row.type,
       at: row.at,
       summary: row.summary ?? null,
@@ -1213,20 +1245,23 @@ export function readRuntimeAuditEvents(
     const eventIdSelect = hasAuditTable || hasColumn(db, "runtime_events", "event_id")
       ? "event_id"
       : "NULL AS event_id";
+    const attemptIdSelect = optionalColumnSelect(db, tableName, "attempt_id");
+    const workerIdSelect = optionalColumnSelect(db, tableName, "worker_id");
+    const traceIdSelect = optionalColumnSelect(db, tableName, "trace_id");
     const totalRow = db.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).get() as { count: number };
     const beforeSequence = Number.isSafeInteger(options.beforeSequence) && (options.beforeSequence ?? 0) > 0
       ? options.beforeSequence
       : undefined;
     const rows = (beforeSequence
       ? db.prepare(`
-          SELECT ${sequenceColumn} AS audit_sequence, ${eventIdSelect}, task_id, type, at, summary, payload_json
+          SELECT ${sequenceColumn} AS audit_sequence, ${eventIdSelect}, task_id, ${attemptIdSelect}, ${workerIdSelect}, ${traceIdSelect}, type, at, summary, payload_json
           FROM ${tableName}
           WHERE ${sequenceColumn} < ?
           ORDER BY ${sequenceColumn} DESC
           LIMIT ?
         `).all(beforeSequence, limit + 1)
       : db.prepare(`
-          SELECT ${sequenceColumn} AS audit_sequence, ${eventIdSelect}, task_id, type, at, summary, payload_json
+          SELECT ${sequenceColumn} AS audit_sequence, ${eventIdSelect}, task_id, ${attemptIdSelect}, ${workerIdSelect}, ${traceIdSelect}, type, at, summary, payload_json
           FROM ${tableName}
           ORDER BY ${sequenceColumn} DESC
           LIMIT ?
@@ -1236,6 +1271,9 @@ export function readRuntimeAuditEvents(
       eventId: row.event_id ?? undefined,
       auditSequence: Number(row.audit_sequence),
       taskId: row.task_id,
+      attemptId: row.attempt_id ?? undefined,
+      workerId: row.worker_id ?? undefined,
+      traceId: row.trace_id ?? undefined,
       type: row.type,
       at: row.at,
       summary: row.summary ?? null,

@@ -204,6 +204,9 @@ export async function saveRuntimeStateToPostgres(stateDir: string, state: Runtim
       return {
         eventId: event.eventId,
         taskId: event.taskId,
+        attemptId: event.attemptId,
+        workerId: event.workerId,
+        traceId: event.traceId,
         type: event.type,
         at: event.at,
         summary: event.summary,

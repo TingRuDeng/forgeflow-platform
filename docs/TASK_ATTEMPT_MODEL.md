@@ -55,16 +55,17 @@ ai_summary:
 - late result 携带历史终态 `attemptId` 时默认会被拒绝，不允许覆盖新 attempt 或 task 状态；唯一例外是已落账 `succeeded` / `failed` result 的精确幂等重放。
 - `taskAttempts[]` 会随 runtime snapshot 一起保存。
 - SQLite structured projection 会写入并读取 `task_attempts`。
-- worker start/result 写入必须携带完整 v1 envelope；dispatcher 会校验 `attemptId`、`leaseToken`、`protocolVersion`、`traceId` 和 `idempotencyKey` 必须匹配当前 active attempt，并在 reconcile 前直接拒绝已到期 attempt。
+- worker start/progress/result 写入必须携带完整 v1 envelope；dispatcher 会校验 `attemptId`、`leaseToken`、`protocolVersion`、`traceId` 和 `idempotencyKey` 必须匹配当前 active attempt，并在 reconcile 前直接拒绝已到期 attempt。
 - generic worker 的 register / claim / start / heartbeat / offline / result 生命周期时间以 dispatcher 接收时间为准；worker 上报的 `at` / `generatedAt` 只作为请求或结果元数据，不能回填旧时间绕过 lease fence。
-- Trae `fetch-task` 会创建或复用 active attempt，并把 `attempt_id` / `lease_token` / `protocol_version` / `trace_id` / `idempotency_key` 返回给 runtime；Trae runtime 在 start/result 回写时会继续携带这些字段。
+- Trae `fetch-task` 会创建或复用 active attempt，并把 `attempt_id` / `lease_token` / `protocol_version` / `trace_id` / `idempotency_key` 返回给 runtime；Trae runtime 在 start/progress/result 回写时会继续携带这些字段。
+- progress mutation 已接入 `/api/workers/:workerId/progress` 与完整 v1 envelope；只有 `in_progress` task、当前 worker、未过期 attempt 和有效 assignment lease 才能写入。进度事件保存 `attemptId` / `workerId` / `traceId`，并以 worker 生成的 `progressId` 区分精确重放与冲突重放。
 - reconcile 支持 `maxTaskAttempts` retry policy；task-level `terminationPolicy.maxAttempts` 优先于 reconcile 调用方传入的全局 `maxTaskAttempts`，未配置时默认最多 2 次 attempt。
 - task-level `terminationPolicy.attemptLeaseTimeoutMs` 会同时覆盖 attempt 与 assignment / repo / branch / optional session lease 的过期时间，避免 attempt 和资源 ownership 出现不同租期；`terminationPolicy.heartbeatTimeoutMs` 会覆盖该 task 的 worker offline 判定；`terminationPolicy.assignmentTimeoutMs` 会覆盖该 task 的未 claim assignment 回收时间。
 - 同一 `idempotencyKey` 的 result 重放会核对 canonical result、成功结果的 `changedFiles`、PR metadata 与 ArtifactBundle；内容不同或 bundle 已被 retention 移除而无法核对时会被拒绝，不能借重放修改终态证据或审查风险输入。
 
-尚未实现：
+尚未统一：
 
-- 独立 progress mutation 仍未升级为 attempt 级 v1 endpoint；当前进度事件仍走既有 report-progress 路径。
+- RFC 中 `/api/tasks/:taskId/attempts/:attemptId/progress` 的目标 URL 形态尚未对外提供；当前通用 worker 与 Trae 兼容入口已经执行同一 attempt fence，这只是后续 API 形态收敛项，不代表 progress 缺少 v1 保护。
 
 ## Task 与 Attempt
 
@@ -109,5 +110,5 @@ v1 状态集合：
 当前兼容迁移：
 
 - dispatcher 为 claim 自动生成 attemptId、leaseToken、protocolVersion、traceId 和 idempotencyKey。
-- claim-backed start/result 缺少任一 envelope 字段都会被拒绝。
-- start/result 没有 active attempt 时会被拒绝，历史夹具或迁移脚本必须先补 claim / attempt 语义再提交结果。
+- claim-backed start/progress/result 缺少任一 envelope 字段都会被拒绝。
+- start/progress/result 没有 active attempt 时会被拒绝，历史夹具或迁移脚本必须先补 claim / attempt 语义再提交 mutation。

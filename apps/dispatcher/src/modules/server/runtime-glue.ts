@@ -4,6 +4,7 @@ export type {
   ReviewSubmitResult,
   HeartbeatPayload,
   StartTaskPayload,
+  ProgressTaskPayload,
   SubmitResultPayload,
   PullRequestInfo,
   WorkerRegistration,

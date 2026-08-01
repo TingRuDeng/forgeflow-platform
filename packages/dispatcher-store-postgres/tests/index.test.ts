@@ -160,6 +160,9 @@ describe("dispatcher-store-postgres", () => {
     const savedRevision = await savePrimaryRuntimeStateSnapshot(client, storedState, null, [{
       eventId: "event-1",
       taskId: "task-1",
+      attemptId: "task-1:attempt-1",
+      workerId: "worker-1",
+      traceId: "trace-1",
       type: "task_created",
       at: storedState.updatedAt,
       payload: { source: "test" },
@@ -176,6 +179,9 @@ describe("dispatcher-store-postgres", () => {
     expect(query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO dispatcher_runtime_audit_events"), [
       "event-1",
       "task-1",
+      "task-1:attempt-1",
+      "worker-1",
+      "trace-1",
       "task_created",
       storedState.updatedAt,
       null,
@@ -197,6 +203,9 @@ describe("dispatcher-store-postgres", () => {
               audit_sequence: "3",
               event_id: "event-3",
               task_id: "task-3",
+              attempt_id: "task-3:attempt-1",
+              worker_id: "worker-3",
+              trace_id: "trace-3",
               event_type: "task_completed",
               event_at: "2026-07-05T10:03:00.000Z",
               summary: null,
@@ -237,6 +246,11 @@ describe("dispatcher-store-postgres", () => {
       limit: 2,
       hasMore: true,
       nextBeforeSequence: 2,
+    });
+    expect(page.events[1]).toMatchObject({
+      attemptId: "task-3:attempt-1",
+      workerId: "worker-3",
+      traceId: "trace-3",
     });
     expect(query).toHaveBeenCalledWith(expect.stringContaining("LIMIT $1"), [3]);
   });

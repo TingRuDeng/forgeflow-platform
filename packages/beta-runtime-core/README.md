@@ -9,6 +9,10 @@ ForgeFlow beta runtime 的共享 worker daemon 与 task worktree 控制逻辑。
 - 这是源码内共享包，不是远程机器直接安装入口。
 - npm 包名和 Trusted Publisher 已配置，版本 PR 合入受保护 `main` 后由 Release workflow 自动发布；源码仓内仍由 workspace 依赖消费。
 
+## Dispatcher 协议
+
+共享 dispatcher client 提供 claim/start/progress/result 主链。progress 使用 `POST /api/workers/:workerId/progress`，携带 claim 返回的完整 v1 attempt envelope，以及每条逻辑更新唯一的 `progressId`；普通 telemetry endpoint 不用于写入 progress。
+
 ## 执行隔离
 
 Codex / Gemini assignment 默认使用 `trusted-host`。设置 `FORGEFLOW_EXECUTION_PROFILE=isolated-container` 和固定本地 `FORGEFLOW_EXECUTION_CONTAINER_IMAGE` 后，共享 runner 会把 provider 与 verification 都放入同一容器策略，并在 runtime 或镜像不可用时 fail closed。完整环境变量、挂载、secret、资源与网络边界见 `../../docs/contracts/execution-profile-v1.md`。

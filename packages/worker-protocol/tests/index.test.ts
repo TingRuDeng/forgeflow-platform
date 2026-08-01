@@ -7,8 +7,10 @@ import {
   RuntimeEventTypeSchema,
   WorkerMutationKindSchema,
   WorkerProtocolEnvelopeSchema,
+  WorkerSdkProgressPayloadSchema,
   WorkerSdkResultPayloadSchema,
   WorkerSdkStartPayloadSchema,
+  buildWorkerProgressPayload,
   buildWorkerResultPayload,
   buildWorkerStartPayload,
   normalizeRuntimeEventType,
@@ -52,6 +54,26 @@ describe("worker SDK payload helpers", () => {
       taskId: "task-1",
       attemptId: "attempt-1",
       leaseToken: "lease-token",
+    });
+  });
+
+  it("builds attempt-scoped progress with a distinct replay identity", () => {
+    const payload = buildWorkerProgressPayload({
+      envelope,
+      progressId: "progress-1",
+      message: "running tests",
+      stage: "verification",
+    });
+
+    expect(WorkerMutationKindSchema.parse(payload.kind)).toBe("progress");
+    expect(WorkerSdkProgressPayloadSchema.parse(payload)).toMatchObject({
+      kind: "progress",
+      taskId: "task-1",
+      attemptId: "attempt-1",
+      leaseToken: "lease-token",
+      progressId: "progress-1",
+      message: "running tests",
+      stage: "verification",
     });
   });
 

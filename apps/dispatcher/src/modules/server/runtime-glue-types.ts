@@ -37,6 +37,18 @@ export interface StartTaskPayload {
   idempotencyKey?: string;
 }
 
+export interface ProgressTaskPayload {
+  taskId: string;
+  attemptId?: string;
+  leaseToken?: string;
+  protocolVersion?: string;
+  traceId?: string;
+  idempotencyKey?: string;
+  progressId: string;
+  message: string;
+  stage?: string;
+}
+
 export interface SubmitResultPayload {
   attemptId?: string;
   leaseToken?: string;
@@ -74,6 +86,7 @@ export interface DispatcherWorkerClient {
   getAssignedTask(workerId: string, options?: DispatcherRequestOptions): Promise<AssignedTaskResponse>;
   claimTask(workerId: string, payload?: { at?: string }, options?: DispatcherRequestOptions): Promise<AssignedTaskResponse>;
   startTask(workerId: string, payload: StartTaskPayload, options?: DispatcherRequestOptions): Promise<unknown>;
+  reportProgress(workerId: string, payload: ProgressTaskPayload, options?: DispatcherRequestOptions): Promise<unknown>;
   submitResult(workerId: string, payload: SubmitResultPayload, options?: DispatcherRequestOptions): Promise<unknown>;
   reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }, options?: DispatcherRequestOptions) => Promise<unknown>;
 }
@@ -200,8 +213,15 @@ export interface TraeHeartbeatRequest {
 
 export interface TraeReportProgressRequest {
   task_id: string;
+  attempt_id?: string;
+  lease_token?: string;
+  protocol_version?: string;
+  trace_id?: string;
+  idempotency_key?: string;
+  progress_id: string;
   message: string;
-  worker_id?: string;
+  stage?: string;
+  worker_id: string;
 }
 
 export interface TraeRegisterRequest {

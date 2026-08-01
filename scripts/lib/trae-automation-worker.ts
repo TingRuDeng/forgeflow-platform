@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -115,6 +116,42 @@ export interface TraeDispatcherClient {
 export function createDispatcherClient(baseUrl: string = DEFAULT_DISPATCHER_URL, options: { fetchImpl?: typeof fetch; requestTimeoutMs?: number | string } = {}): TraeDispatcherClient {
   const http = createJsonHttpClient(baseUrl, options);
   const requestTimeoutMs = Number(options.requestTimeoutMs || DEFAULT_DISPATCHER_REQUEST_TIMEOUT_MS);
+  const attemptLeases = new Map<string, {
+    attempt_id: string;
+    lease_token: string;
+    protocol_version: string;
+    trace_id: string;
+    idempotency_key: string;
+  }>();
+
+  function captureAttemptLease(response: unknown): void {
+    const task = response && typeof response === "object" && "task" in response
+      ? (response as { task?: Record<string, unknown> }).task
+      : undefined;
+    const taskId = typeof task?.task_id === "string" ? task.task_id.trim() : "";
+    const attemptId = typeof task?.attempt_id === "string" ? task.attempt_id.trim() : "";
+    const leaseToken = typeof task?.lease_token === "string" ? task.lease_token.trim() : "";
+    const protocolVersion = typeof task?.protocol_version === "string" ? task.protocol_version.trim() : "";
+    const traceId = typeof task?.trace_id === "string" ? task.trace_id.trim() : "";
+    const idempotencyKey = typeof task?.idempotency_key === "string" ? task.idempotency_key.trim() : "";
+    if (taskId && attemptId && leaseToken && protocolVersion && traceId && idempotencyKey) {
+      attemptLeases.set(taskId, {
+        attempt_id: attemptId,
+        lease_token: leaseToken,
+        protocol_version: protocolVersion,
+        trace_id: traceId,
+        idempotency_key: idempotencyKey,
+      });
+    }
+  }
+
+  function requireAttemptLease(taskId: string) {
+    const attemptLease = attemptLeases.get(taskId);
+    if (!attemptLease) {
+      throw new Error(`worker protocol v1 envelope unavailable for task: ${taskId}`);
+    }
+    return attemptLease;
+  }
 
   return {
     async register(worker) {
@@ -130,23 +167,31 @@ export function createDispatcherClient(baseUrl: string = DEFAULT_DISPATCHER_URL,
       });
     },
     async fetchTask(workerId, repoDir) {
-      return http.request("/api/trae/fetch-task", {
+      const response = await http.request("/api/trae/fetch-task", {
         method: "POST",
         body: { worker_id: workerId, repo_dir: repoDir },
         timeoutMs: requestTimeoutMs,
       });
+      captureAttemptLease(response);
+      return response;
     },
     async startTask(workerId, taskId) {
       return http.request("/api/trae/start-task", {
         method: "POST",
-        body: { worker_id: workerId, task_id: taskId },
+        body: { worker_id: workerId, task_id: taskId, ...requireAttemptLease(taskId) },
         timeoutMs: requestTimeoutMs,
       });
     },
     async reportProgress(taskId, message, workerId) {
       return http.request("/api/trae/report-progress", {
         method: "POST",
-        body: { task_id: taskId, message, worker_id: workerId },
+        body: {
+          task_id: taskId,
+          worker_id: workerId,
+          ...requireAttemptLease(taskId),
+          progress_id: randomUUID(),
+          message,
+        },
         timeoutMs: requestTimeoutMs,
       });
     },
@@ -155,6 +200,7 @@ export function createDispatcherClient(baseUrl: string = DEFAULT_DISPATCHER_URL,
         method: "POST",
         body: {
           task_id: input.taskId,
+          ...requireAttemptLease(input.taskId),
           status: input.status,
           summary: input.summary,
           test_output: input.testOutput,

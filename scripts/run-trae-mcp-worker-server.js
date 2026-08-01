@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 const DEFAULT_DISPATCHER_URL = "http://127.0.0.1:8787";
 const HIGH_HEARTBEAT_INTERVAL_MS = 10_000;
 const IDLE_HEARTBEAT_INTERVAL_MS = 10_000;
@@ -123,6 +124,34 @@ Options:
 }
 function createHttpClient(baseUrl) {
     const base = baseUrl.replace(/\/$/, "");
+    const attemptLeases = new Map();
+    function captureAttemptLease(response) {
+        const task = response && typeof response === "object" && "task" in response
+            ? response.task
+            : undefined;
+        const taskId = typeof task?.task_id === "string" ? task.task_id.trim() : "";
+        const attemptId = typeof task?.attempt_id === "string" ? task.attempt_id.trim() : "";
+        const leaseToken = typeof task?.lease_token === "string" ? task.lease_token.trim() : "";
+        const protocolVersion = typeof task?.protocol_version === "string" ? task.protocol_version.trim() : "";
+        const traceId = typeof task?.trace_id === "string" ? task.trace_id.trim() : "";
+        const idempotencyKey = typeof task?.idempotency_key === "string" ? task.idempotency_key.trim() : "";
+        if (taskId && attemptId && leaseToken && protocolVersion && traceId && idempotencyKey) {
+            attemptLeases.set(taskId, {
+                attempt_id: attemptId,
+                lease_token: leaseToken,
+                protocol_version: protocolVersion,
+                trace_id: traceId,
+                idempotency_key: idempotencyKey,
+            });
+        }
+    }
+    function requireAttemptLease(taskId) {
+        const attemptLease = attemptLeases.get(taskId);
+        if (!attemptLease) {
+            throw new Error(`worker protocol v1 envelope unavailable for task: ${taskId}`);
+        }
+        return attemptLease;
+    }
     async function request(path, body) {
         const url = `${base}${path}`;
         const controller = new AbortController();
@@ -166,17 +195,30 @@ function createHttpClient(baseUrl) {
             });
         },
         async fetchTask(workerId, repoDir) {
-            return request("/api/trae/fetch-task", { worker_id: workerId, repo_dir: repoDir });
+            const response = await request("/api/trae/fetch-task", { worker_id: workerId, repo_dir: repoDir });
+            captureAttemptLease(response);
+            return response;
         },
         async startTask(workerId, taskId) {
-            return request("/api/trae/start-task", { worker_id: workerId, task_id: taskId });
+            return request("/api/trae/start-task", {
+                worker_id: workerId,
+                task_id: taskId,
+                ...requireAttemptLease(taskId),
+            });
         },
         async reportProgress(taskId, message) {
-            return request("/api/trae/report-progress", { task_id: taskId, message });
+            return request("/api/trae/report-progress", {
+                task_id: taskId,
+                worker_id: currentWorkerId,
+                ...requireAttemptLease(taskId),
+                progress_id: randomUUID(),
+                message,
+            });
         },
         async submitResult(input) {
             return request("/api/trae/submit-result", {
                 task_id: input.taskId,
+                ...requireAttemptLease(input.taskId),
                 status: input.status,
                 summary: input.summary,
                 test_output: input.testOutput,
@@ -371,4 +413,3 @@ main().catch((error) => {
     console.error(`[Trae MCP] Fatal error:`, error instanceof Error ? error.message : String(error));
     process.exit(1);
 });
-export {};

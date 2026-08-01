@@ -212,6 +212,33 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it("sends progress through the attempt-scoped worker endpoint", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const client = createDispatcherClient("http://127.0.0.1:8787");
+      const payload = {
+        taskId: "task-progress",
+        attemptId: "attempt-progress",
+        leaseToken: "lease-progress",
+        protocolVersion: "2026-05-v1",
+        traceId: "trace-progress",
+        idempotencyKey: "worker-v1:task-progress:attempt-progress",
+        progressId: "progress-1",
+        message: "Running tests",
+        stage: "verification",
+      };
+
+      await client.reportProgress("codex-progress", payload);
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:8787/api/workers/codex-progress/progress",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify(payload),
+        }),
+      );
+    });
+
     it("propagates the daemon signal through the shared dispatcher cycle", async () => {
       const abortController = new AbortController();
       const client = {
