@@ -1,14 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFile, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 
-import { createAbortError, throwIfAborted } from "./abort-signal.js";
+import { createAbortError, sleepUntilAborted, throwIfAborted } from "./abort-signal.js";
 
 const execFileAsync = promisify(execFile);
 
 export const DEFAULT_WORKTREE_COMMAND_TIMEOUT_MS = 60_000;
+export const DEFAULT_WORKTREE_LOCK_TIMEOUT_MS = 2_000;
+export const DEFAULT_WORKTREE_LOCK_RETRY_MS = 25;
+export const DEFAULT_WORKTREE_LOCK_STALE_MS = 30_000;
+
+const WORKTREE_OWNER_LOCK_FILE = "forgeflow-worktree-owner.lock";
 
 interface GitResult {
   status: number | null;
@@ -29,15 +34,22 @@ export interface PrepareOptions {
   allowReuse?: boolean;
   resetOnReuse?: boolean;
   commandTimeoutMs?: number;
+  lockTimeoutMs?: number;
+  lockRetryMs?: number;
+  lockStaleMs?: number;
   signal?: AbortSignal;
 }
 
 export interface RemoveOptions {
   force?: boolean;
   commandTimeoutMs?: number;
+  lockTimeoutMs?: number;
+  lockRetryMs?: number;
+  lockStaleMs?: number;
   signal?: AbortSignal;
   worktreeDir?: string;
   branchName?: string;
+  ownership?: TaskWorktreeOwnership;
 }
 
 export interface PreparedTaskWorktree {
@@ -46,6 +58,18 @@ export interface PreparedTaskWorktree {
   branchName: string;
   baseRef: string | null;
   worktreeDir: string;
+}
+
+export interface TaskWorktreeOwnership {
+  readonly taskId: string;
+  readonly branchName: string;
+  readonly worktreeDir: string;
+  readonly lockPath: string;
+  readonly ownerToken: string;
+}
+
+export interface OwnedPreparedTaskWorktree extends PreparedTaskWorktree {
+  ownership: TaskWorktreeOwnership;
 }
 
 export interface RemovedTaskWorktree {
@@ -64,6 +88,41 @@ interface NormalizedTaskWorktree {
 interface WorktreeRegistration {
   path: string;
   branch: string | null;
+}
+
+interface WorktreeLockMetadata {
+  pid: number;
+  ownerToken: string;
+  createdAt: string;
+  taskId: string;
+  branchName: string;
+}
+
+interface WorktreeLockSnapshot {
+  dev: number;
+  ino: number;
+  mtimeMs: number;
+  metadata: WorktreeLockMetadata | null;
+}
+
+interface AcquiredWorktreeLock {
+  lockPath: string;
+  ownerToken: string;
+  snapshot: WorktreeLockSnapshot;
+}
+
+interface WorktreeOwnershipState {
+  released: boolean;
+  snapshot: WorktreeLockSnapshot;
+}
+
+const ownershipStates = new WeakMap<TaskWorktreeOwnership, WorktreeOwnershipState>();
+
+export class TaskWorktreeLockTimeoutError extends Error {
+  constructor(lockPath: string, timeoutMs: number) {
+    super(`task worktree lock timeout after ${timeoutMs}ms: ${lockPath}`);
+    this.name = "TaskWorktreeLockTimeoutError";
+  }
 }
 
 function resolveCommandTimeoutMs(value: number | undefined): number {
@@ -155,6 +214,10 @@ function resolveCompatibleWorktreeDir(
   throw new Error(`branch ${normalized.branchName} is already checked out at ${branchRegistration.path}`);
 }
 
+function resolveRemovalBranchName(options: RemoveOptions): string | undefined {
+  return options.branchName || options.ownership?.branchName;
+}
+
 function resolveRemovalWorktreeDir(
   repoDir: string,
   taskId: string,
@@ -186,7 +249,7 @@ function resolveRemovalWorktreeDir(
   if (
     path.resolve(legacyDir) !== path.resolve(preferredDir)
     && selectedDir === path.resolve(legacyDir)
-    && !options.branchName
+    && !resolveRemovalBranchName(options)
   ) {
     throw new Error(`legacy worktree cleanup requires branchName for task: ${taskId}`);
   }
@@ -275,6 +338,302 @@ async function runGitAsync(
       stderr: String(failure.stderr || failure.message || "").trim(),
     };
   }
+}
+
+function resolvePositiveInteger(value: number | undefined, fallback: number): number {
+  return Number.isSafeInteger(value) && (value ?? 0) > 0 ? value as number : fallback;
+}
+
+function resolveWorktreeLockOptions(options: PrepareOptions | RemoveOptions) {
+  return {
+    timeoutMs: resolvePositiveInteger(options.lockTimeoutMs, DEFAULT_WORKTREE_LOCK_TIMEOUT_MS),
+    retryMs: resolvePositiveInteger(options.lockRetryMs, DEFAULT_WORKTREE_LOCK_RETRY_MS),
+    staleMs: resolvePositiveInteger(options.lockStaleMs, DEFAULT_WORKTREE_LOCK_STALE_MS),
+  };
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function readWorktreeLockSnapshot(lockPath: string): WorktreeLockSnapshot | null {
+  try {
+    const stats = fs.statSync(lockPath);
+    let metadata: WorktreeLockMetadata | null = null;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(lockPath, "utf8")) as Partial<WorktreeLockMetadata>;
+      if (
+        Number.isInteger(parsed.pid)
+        && Number(parsed.pid) > 0
+        && typeof parsed.ownerToken === "string"
+        && parsed.ownerToken.length > 0
+        && typeof parsed.createdAt === "string"
+        && typeof parsed.taskId === "string"
+        && typeof parsed.branchName === "string"
+      ) {
+        metadata = {
+          pid: Number(parsed.pid),
+          ownerToken: parsed.ownerToken,
+          createdAt: parsed.createdAt,
+          taskId: parsed.taskId,
+          branchName: parsed.branchName,
+        };
+      }
+    } catch {
+      metadata = null;
+    }
+    return {
+      dev: stats.dev,
+      ino: stats.ino,
+      mtimeMs: stats.mtimeMs,
+      metadata,
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function unlinkMatchingWorktreeLock(
+  lockPath: string,
+  expected: WorktreeLockSnapshot,
+  requireOwnerToken: boolean,
+): boolean {
+  const current = readWorktreeLockSnapshot(lockPath);
+  if (
+    !current
+    || current.dev !== expected.dev
+    || current.ino !== expected.ino
+    || (
+      requireOwnerToken
+      && current.metadata?.ownerToken !== expected.metadata?.ownerToken
+    )
+  ) {
+    return false;
+  }
+  fs.unlinkSync(lockPath);
+  return true;
+}
+
+function tryReclaimStaleWorktreeLock(lockPath: string, staleMs: number): boolean {
+  const snapshot = readWorktreeLockSnapshot(lockPath);
+  if (!snapshot) {
+    return true;
+  }
+  const createdAtMs = snapshot.metadata ? Date.parse(snapshot.metadata.createdAt) : Number.NaN;
+  const ageMs = Date.now() - (Number.isNaN(createdAtMs) ? snapshot.mtimeMs : createdAtMs);
+  if (ageMs < staleMs) {
+    return false;
+  }
+  if (snapshot.metadata && isProcessAlive(snapshot.metadata.pid)) {
+    return false;
+  }
+  return unlinkMatchingWorktreeLock(lockPath, snapshot, Boolean(snapshot.metadata));
+}
+
+function resolveGitCommonDir(repoDir: string, options: PrepareOptions | RemoveOptions): string {
+  const result = runGit(["rev-parse", "--git-common-dir"], repoDir, options);
+  ensureSuccess(result, `failed to resolve git common directory for ${repoDir}`);
+  return canonicalPath(path.isAbsolute(result.stdout) ? result.stdout : path.resolve(repoDir, result.stdout));
+}
+
+async function resolveGitCommonDirAsync(
+  repoDir: string,
+  options: PrepareOptions | RemoveOptions,
+): Promise<string> {
+  const result = await runGitAsync(["rev-parse", "--git-common-dir"], repoDir, options);
+  ensureSuccess(result, `failed to resolve git common directory for ${repoDir}`);
+  return canonicalPath(path.isAbsolute(result.stdout) ? result.stdout : path.resolve(repoDir, result.stdout));
+}
+
+function createWorktreeLockMetadata(normalized: NormalizedTaskWorktree): WorktreeLockMetadata {
+  return {
+    pid: process.pid,
+    ownerToken: randomUUID(),
+    createdAt: new Date().toISOString(),
+    taskId: normalized.taskId,
+    branchName: normalized.branchName,
+  };
+}
+
+function tryCreateWorktreeLock(
+  lockPath: string,
+  metadata: WorktreeLockMetadata,
+): AcquiredWorktreeLock | null {
+  let fd: number | null = null;
+  let createdSnapshot: WorktreeLockSnapshot | null = null;
+  try {
+    fd = fs.openSync(lockPath, "wx");
+    const stats = fs.fstatSync(fd);
+    createdSnapshot = {
+      dev: stats.dev,
+      ino: stats.ino,
+      mtimeMs: stats.mtimeMs,
+      metadata,
+    };
+    fs.writeFileSync(fd, JSON.stringify(metadata), "utf8");
+    fs.closeSync(fd);
+    fd = null;
+    return {
+      lockPath,
+      ownerToken: metadata.ownerToken,
+      snapshot: createdSnapshot,
+    };
+  } catch (error) {
+    if (fd !== null) {
+      fs.closeSync(fd);
+    }
+    if (createdSnapshot) {
+      try {
+        unlinkMatchingWorktreeLock(lockPath, createdSnapshot, false);
+      } catch {
+        // Preserve the acquisition error.
+      }
+    }
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function acquireWorktreeLock(
+  repoDir: string,
+  normalized: NormalizedTaskWorktree,
+  options: PrepareOptions | RemoveOptions,
+): AcquiredWorktreeLock {
+  const lockPath = path.join(resolveGitCommonDir(repoDir, options), WORKTREE_OWNER_LOCK_FILE);
+  const lockOptions = resolveWorktreeLockOptions(options);
+  const startedAt = Date.now();
+
+  while (true) {
+    throwIfAborted(options.signal, `task worktree lock acquisition aborted: ${lockPath}`);
+    const acquired = tryCreateWorktreeLock(lockPath, createWorktreeLockMetadata(normalized));
+    if (acquired) {
+      return acquired;
+    }
+    if (readWorktreeLockSnapshot(lockPath)?.metadata?.pid === process.pid) {
+      throw new TaskWorktreeLockTimeoutError(lockPath, 0);
+    }
+    if (tryReclaimStaleWorktreeLock(lockPath, lockOptions.staleMs)) {
+      continue;
+    }
+    if (Date.now() - startedAt >= lockOptions.timeoutMs) {
+      throw new TaskWorktreeLockTimeoutError(lockPath, lockOptions.timeoutMs);
+    }
+    sleepSync(lockOptions.retryMs);
+  }
+}
+
+async function acquireWorktreeLockAsync(
+  repoDir: string,
+  normalized: NormalizedTaskWorktree,
+  options: PrepareOptions | RemoveOptions,
+): Promise<AcquiredWorktreeLock> {
+  const lockPath = path.join(await resolveGitCommonDirAsync(repoDir, options), WORKTREE_OWNER_LOCK_FILE);
+  const lockOptions = resolveWorktreeLockOptions(options);
+  const startedAt = Date.now();
+
+  while (true) {
+    throwIfAborted(options.signal, `task worktree lock acquisition aborted: ${lockPath}`);
+    const acquired = tryCreateWorktreeLock(lockPath, createWorktreeLockMetadata(normalized));
+    if (acquired) {
+      return acquired;
+    }
+    if (tryReclaimStaleWorktreeLock(lockPath, lockOptions.staleMs)) {
+      continue;
+    }
+    if (Date.now() - startedAt >= lockOptions.timeoutMs) {
+      throw new TaskWorktreeLockTimeoutError(lockPath, lockOptions.timeoutMs);
+    }
+    await sleepUntilAborted(
+      lockOptions.retryMs,
+      options.signal,
+      `task worktree lock acquisition aborted: ${lockPath}`,
+    );
+  }
+}
+
+function releaseAcquiredWorktreeLock(lock: AcquiredWorktreeLock): void {
+  if (!unlinkMatchingWorktreeLock(lock.lockPath, lock.snapshot, true)) {
+    throw new Error(`task worktree lock ownership changed before release: ${lock.lockPath}`);
+  }
+}
+
+function releaseAcquiredWorktreeLockAfterFailure(lock: AcquiredWorktreeLock): void {
+  try {
+    releaseAcquiredWorktreeLock(lock);
+  } catch {
+    // Preserve the worktree operation error.
+  }
+}
+
+function createTaskWorktreeOwnership(
+  lock: AcquiredWorktreeLock,
+  prepared: PreparedTaskWorktree,
+): TaskWorktreeOwnership {
+  const ownership: TaskWorktreeOwnership = Object.freeze({
+    taskId: prepared.taskId,
+    branchName: prepared.branchName,
+    worktreeDir: prepared.worktreeDir,
+    lockPath: lock.lockPath,
+    ownerToken: lock.ownerToken,
+  });
+  ownershipStates.set(ownership, { released: false, snapshot: lock.snapshot });
+  return ownership;
+}
+
+function assertActiveTaskWorktreeOwnership(
+  ownership: TaskWorktreeOwnership,
+  expectedLockPath: string,
+  taskId: string,
+  branchName: string | undefined,
+): void {
+  const state = ownershipStates.get(ownership);
+  if (!state || state.released) {
+    throw new Error(`task worktree ownership is not active for ${taskId}`);
+  }
+  if (
+    ownership.lockPath !== expectedLockPath
+    || ownership.taskId !== taskId
+    || (branchName && ownership.branchName !== branchName)
+  ) {
+    throw new Error(`task worktree ownership does not match ${taskId}`);
+  }
+  const current = readWorktreeLockSnapshot(expectedLockPath);
+  if (
+    !current
+    || current.dev !== state.snapshot.dev
+    || current.ino !== state.snapshot.ino
+    || current.metadata?.ownerToken !== ownership.ownerToken
+  ) {
+    throw new Error(`task worktree lock ownership changed before operation: ${expectedLockPath}`);
+  }
+}
+
+export function releaseTaskWorktreeOwnership(ownership: TaskWorktreeOwnership): void {
+  const state = ownershipStates.get(ownership);
+  if (!state) {
+    throw new Error("unknown task worktree ownership");
+  }
+  if (state.released) {
+    return;
+  }
+  if (!unlinkMatchingWorktreeLock(ownership.lockPath, state.snapshot, true)) {
+    throw new Error(`task worktree lock ownership changed before release: ${ownership.lockPath}`);
+  }
+  state.released = true;
 }
 
 function parseWorktreeRegistrations(stdout: string): WorktreeRegistration[] {
@@ -383,12 +742,11 @@ async function resetExistingWorktreeAsync(
   );
 }
 
-export function prepareTaskWorktree(repoDir: string, task: TaskWorktreeInfo, options: PrepareOptions = {}): string {
-  const normalized = normalizeTaskWorktree(repoDir, task);
-  ensureSuccess(
-    runGit(["check-ref-format", "--branch", normalized.branchName], repoDir, options),
-    `invalid task branch name: ${normalized.branchName}`,
-  );
+function prepareTaskWorktreeUnlocked(
+  repoDir: string,
+  normalized: NormalizedTaskWorktree,
+  options: PrepareOptions,
+): PreparedTaskWorktree {
   const worktreeRoot = path.dirname(normalized.worktreeDir);
   fs.mkdirSync(worktreeRoot, { recursive: true });
 
@@ -404,7 +762,13 @@ export function prepareTaskWorktree(repoDir: string, task: TaskWorktreeInfo, opt
     if (options.resetOnReuse) {
       resetExistingWorktree(effectiveNormalized.worktreeDir, normalized.taskId, options);
     }
-    return effectiveNormalized.worktreeDir;
+    return {
+      action,
+      taskId: normalized.taskId,
+      branchName: normalized.branchName,
+      baseRef: null,
+      worktreeDir: effectiveNormalized.worktreeDir,
+    };
   }
 
   ensureSuccess(
@@ -423,19 +787,20 @@ export function prepareTaskWorktree(repoDir: string, task: TaskWorktreeInfo, opt
     ], repoDir, options),
     `failed to create worktree for ${normalized.taskId}`,
   );
-  return effectiveNormalized.worktreeDir;
+  return {
+    action: "created",
+    taskId: normalized.taskId,
+    branchName: normalized.branchName,
+    baseRef,
+    worktreeDir: effectiveNormalized.worktreeDir,
+  };
 }
 
-export async function prepareTaskWorktreeLifecycle(
+async function prepareTaskWorktreeUnlockedAsync(
   repoDir: string,
-  task: TaskWorktreeInfo,
-  options: PrepareOptions = {},
+  normalized: NormalizedTaskWorktree,
+  options: PrepareOptions,
 ): Promise<PreparedTaskWorktree> {
-  const normalized = normalizeTaskWorktree(repoDir, task);
-  ensureSuccess(
-    await runGitAsync(["check-ref-format", "--branch", normalized.branchName], repoDir, options),
-    `invalid task branch name: ${normalized.branchName}`,
-  );
   const worktreeRoot = path.dirname(normalized.worktreeDir);
   fs.mkdirSync(worktreeRoot, { recursive: true });
 
@@ -485,19 +850,108 @@ export async function prepareTaskWorktreeLifecycle(
   };
 }
 
-export function removeTaskWorktree(repoDir: string, taskId: unknown, options: RemoveOptions = {}): void {
+export function prepareTaskWorktreeWithOwnership(
+  repoDir: string,
+  task: TaskWorktreeInfo,
+  options: PrepareOptions = {},
+): OwnedPreparedTaskWorktree {
+  const normalized = normalizeTaskWorktree(repoDir, task);
+  ensureSuccess(
+    runGit(["check-ref-format", "--branch", normalized.branchName], repoDir, options),
+    `invalid task branch name: ${normalized.branchName}`,
+  );
+  const lock = acquireWorktreeLock(repoDir, normalized, options);
+  try {
+    const prepared = prepareTaskWorktreeUnlocked(repoDir, normalized, options);
+    return {
+      ...prepared,
+      ownership: createTaskWorktreeOwnership(lock, prepared),
+    };
+  } catch (error) {
+    releaseAcquiredWorktreeLockAfterFailure(lock);
+    throw error;
+  }
+}
+
+export async function prepareTaskWorktreeLifecycleWithOwnership(
+  repoDir: string,
+  task: TaskWorktreeInfo,
+  options: PrepareOptions = {},
+): Promise<OwnedPreparedTaskWorktree> {
+  const normalized = normalizeTaskWorktree(repoDir, task);
+  ensureSuccess(
+    await runGitAsync(["check-ref-format", "--branch", normalized.branchName], repoDir, options),
+    `invalid task branch name: ${normalized.branchName}`,
+  );
+  const lock = await acquireWorktreeLockAsync(repoDir, normalized, options);
+  try {
+    const prepared = await prepareTaskWorktreeUnlockedAsync(repoDir, normalized, options);
+    return {
+      ...prepared,
+      ownership: createTaskWorktreeOwnership(lock, prepared),
+    };
+  } catch (error) {
+    releaseAcquiredWorktreeLockAfterFailure(lock);
+    throw error;
+  }
+}
+
+export function prepareTaskWorktree(repoDir: string, task: TaskWorktreeInfo, options: PrepareOptions = {}): string {
+  const prepared = prepareTaskWorktreeWithOwnership(repoDir, task, options);
+  try {
+    return prepared.worktreeDir;
+  } finally {
+    releaseTaskWorktreeOwnership(prepared.ownership);
+  }
+}
+
+export async function prepareTaskWorktreeLifecycle(
+  repoDir: string,
+  task: TaskWorktreeInfo,
+  options: PrepareOptions = {},
+): Promise<PreparedTaskWorktree> {
+  const prepared = await prepareTaskWorktreeLifecycleWithOwnership(repoDir, task, options);
+  try {
+    const { ownership: _ownership, ...result } = prepared;
+    return result;
+  } finally {
+    releaseTaskWorktreeOwnership(prepared.ownership);
+  }
+}
+
+function normalizeRemovalWorktree(
+  repoDir: string,
+  taskId: unknown,
+  options: RemoveOptions,
+): NormalizedTaskWorktree {
   const normalizedTaskId = String(taskId || "").trim();
   if (!normalizedTaskId) {
     throw new Error("taskId is required");
   }
-  requireSafeTaskDirName(normalizedTaskId);
+  const directoryName = requireSafeTaskDirName(normalizedTaskId);
+  return {
+    taskId: normalizedTaskId,
+    branchName: String(options.branchName || ""),
+    defaultBranch: "",
+    worktreeDir: options.worktreeDir
+      ? path.resolve(options.worktreeDir)
+      : path.join(repoDir, ".worktrees", directoryName),
+  };
+}
+
+function removeTaskWorktreeUnlocked(
+  repoDir: string,
+  normalizedTaskId: string,
+  options: RemoveOptions,
+): RemovedTaskWorktree {
   const listResult = runGit(["worktree", "list", "--porcelain"], repoDir, options);
   ensureSuccess(listResult, "failed to list git worktrees");
   const registrations = parseWorktreeRegistrations(listResult.stdout);
   const worktreeDir = resolveRemovalWorktreeDir(repoDir, normalizedTaskId, options, registrations);
+  assertOwnedWorktreePath(options.ownership, worktreeDir);
   const registration = registrations.find((entry) => entry.path === canonicalPath(worktreeDir));
   if (!registration && !fs.existsSync(worktreeDir)) {
-    return;
+    return { action: "absent", taskId: normalizedTaskId, worktreeDir };
   }
   if (!registration) {
     throw new Error(`refusing to remove unregistered worktree path: ${worktreeDir}`);
@@ -505,8 +959,9 @@ export function removeTaskWorktree(repoDir: string, taskId: unknown, options: Re
   if (!fs.existsSync(worktreeDir)) {
     throw new Error(`registered worktree path is missing from disk: ${worktreeDir}`);
   }
-  if (options.branchName && registration.branch !== options.branchName) {
-    throw new Error(`refusing to remove worktree not registered for ${options.branchName}: ${worktreeDir}`);
+  const expectedBranchName = resolveRemovalBranchName(options);
+  if (expectedBranchName && registration.branch !== expectedBranchName) {
+    throw new Error(`refusing to remove worktree not registered for ${expectedBranchName}: ${worktreeDir}`);
   }
   const force = options.force ?? false;
   const args = ["worktree", "remove", ...(force ? ["--force"] : []), worktreeDir];
@@ -516,22 +971,19 @@ export function removeTaskWorktree(repoDir: string, taskId: unknown, options: Re
       ? `failed to force-remove worktree for ${normalizedTaskId}`
       : `failed to remove worktree for ${normalizedTaskId}; preserve dirty worktree or retry with force`,
   );
+  return { action: "removed", taskId: normalizedTaskId, worktreeDir };
 }
 
-export async function removeTaskWorktreeLifecycle(
+async function removeTaskWorktreeUnlockedAsync(
   repoDir: string,
-  taskId: unknown,
-  options: RemoveOptions = {},
+  normalizedTaskId: string,
+  options: RemoveOptions,
 ): Promise<RemovedTaskWorktree> {
-  const normalizedTaskId = String(taskId || "").trim();
-  if (!normalizedTaskId) {
-    throw new Error("taskId is required");
-  }
-  requireSafeTaskDirName(normalizedTaskId);
   const listResult = await runGitAsync(["worktree", "list", "--porcelain"], repoDir, options);
   ensureSuccess(listResult, "failed to list git worktrees");
   const registrations = parseWorktreeRegistrations(listResult.stdout);
   const worktreeDir = resolveRemovalWorktreeDir(repoDir, normalizedTaskId, options, registrations);
+  assertOwnedWorktreePath(options.ownership, worktreeDir);
   const registration = registrations
     .find((entry) => entry.path === canonicalPath(worktreeDir));
   if (!registration && !fs.existsSync(worktreeDir)) {
@@ -543,8 +995,9 @@ export async function removeTaskWorktreeLifecycle(
   if (!fs.existsSync(worktreeDir)) {
     throw new Error(`registered worktree path is missing from disk: ${worktreeDir}`);
   }
-  if (options.branchName && registration.branch !== options.branchName) {
-    throw new Error(`refusing to remove worktree not registered for ${options.branchName}: ${worktreeDir}`);
+  const expectedBranchName = resolveRemovalBranchName(options);
+  if (expectedBranchName && registration.branch !== expectedBranchName) {
+    throw new Error(`refusing to remove worktree not registered for ${expectedBranchName}: ${worktreeDir}`);
   }
 
   const args = ["worktree", "remove", ...(options.force ? ["--force"] : []), worktreeDir];
@@ -555,4 +1008,87 @@ export async function removeTaskWorktreeLifecycle(
       : `failed to remove worktree for ${normalizedTaskId}; preserve dirty worktree or retry with force`,
   );
   return { action: "removed", taskId: normalizedTaskId, worktreeDir };
+}
+
+function assertOwnedWorktreePath(
+  ownership: TaskWorktreeOwnership | undefined,
+  worktreeDir: string,
+): void {
+  if (ownership && canonicalPath(ownership.worktreeDir) !== canonicalPath(worktreeDir)) {
+    throw new Error(`task worktree ownership does not match worktree path: ${worktreeDir}`);
+  }
+}
+
+function assertRemovalOwnership(
+  repoDir: string,
+  normalized: NormalizedTaskWorktree,
+  options: RemoveOptions,
+): void {
+  if (!options.ownership) {
+    return;
+  }
+  const expectedLockPath = path.join(resolveGitCommonDir(repoDir, options), WORKTREE_OWNER_LOCK_FILE);
+  assertActiveTaskWorktreeOwnership(
+    options.ownership,
+    expectedLockPath,
+    normalized.taskId,
+    resolveRemovalBranchName(options),
+  );
+}
+
+async function assertRemovalOwnershipAsync(
+  repoDir: string,
+  normalized: NormalizedTaskWorktree,
+  options: RemoveOptions,
+): Promise<void> {
+  if (!options.ownership) {
+    return;
+  }
+  const expectedLockPath = path.join(await resolveGitCommonDirAsync(repoDir, options), WORKTREE_OWNER_LOCK_FILE);
+  assertActiveTaskWorktreeOwnership(
+    options.ownership,
+    expectedLockPath,
+    normalized.taskId,
+    resolveRemovalBranchName(options),
+  );
+}
+
+export function removeTaskWorktree(repoDir: string, taskId: unknown, options: RemoveOptions = {}): void {
+  const normalized = normalizeRemovalWorktree(repoDir, taskId, options);
+  if (options.ownership) {
+    assertRemovalOwnership(repoDir, normalized, options);
+    removeTaskWorktreeUnlocked(repoDir, normalized.taskId, options);
+    return;
+  }
+
+  const lock = acquireWorktreeLock(repoDir, normalized, options);
+  try {
+    removeTaskWorktreeUnlocked(repoDir, normalized.taskId, options);
+    releaseAcquiredWorktreeLock(lock);
+  } catch (error) {
+    releaseAcquiredWorktreeLockAfterFailure(lock);
+    throw error;
+  }
+}
+
+export async function removeTaskWorktreeLifecycle(
+  repoDir: string,
+  taskId: unknown,
+  options: RemoveOptions = {},
+): Promise<RemovedTaskWorktree> {
+  const normalized = normalizeRemovalWorktree(repoDir, taskId, options);
+  if (options.ownership) {
+    await assertRemovalOwnershipAsync(repoDir, normalized, options);
+    return removeTaskWorktreeUnlockedAsync(repoDir, normalized.taskId, options);
+  }
+
+  const lock = await acquireWorktreeLockAsync(repoDir, normalized, options);
+  try {
+    const removed = await removeTaskWorktreeUnlockedAsync(repoDir, normalized.taskId, options);
+    releaseAcquiredWorktreeLock(lock);
+    return removed;
+  } catch (error) {
+    releaseAcquiredWorktreeLockAfterFailure(lock);
+    throw error;
+  }
 }

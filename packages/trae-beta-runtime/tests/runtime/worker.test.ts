@@ -3,6 +3,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const prepareTaskWorktreeMock = vi.fn((_repoDir: string, task: { taskId?: string }) => (
   `/tmp/project/.worktrees/${task?.taskId || "task-1"}`
 ));
+const worktreeOwnership = {
+  taskId: "task-1",
+  branchName: "feature/runtime",
+  worktreeDir: "/tmp/project/.worktrees/task-1",
+  lockPath: "/tmp/project/.git/forgeflow-worktree-owner.lock",
+  ownerToken: "owner-token",
+};
+const prepareTaskWorktreeWithOwnershipMock = vi.fn((_repoDir: string, task: { taskId?: string; branchName?: string }) => ({
+  action: "created" as const,
+  taskId: task.taskId || "task-1",
+  branchName: task.branchName || "feature/runtime",
+  baseRef: "origin/main",
+  worktreeDir: `/tmp/project/.worktrees/${task?.taskId || "task-1"}`,
+  ownership: worktreeOwnership,
+}));
+const releaseTaskWorktreeOwnershipMock = vi.fn();
 const removeTaskWorktreeLifecycleMock = vi.fn(async (_repoDir: string, taskId: string) => ({
   action: "removed" as const,
   taskId,
@@ -55,6 +71,8 @@ function unreviewableArtifact(reason = "remote artifact verification failed") {
 
 vi.mock("../../src/runtime/task-worktree.js", () => ({
   prepareTaskWorktree: prepareTaskWorktreeMock,
+  prepareTaskWorktreeWithOwnership: prepareTaskWorktreeWithOwnershipMock,
+  releaseTaskWorktreeOwnership: releaseTaskWorktreeOwnershipMock,
   removeTaskWorktreeLifecycle: removeTaskWorktreeLifecycleMock,
   safeTaskDirName: safeTaskDirNameMock,
 }));
@@ -76,6 +94,8 @@ describe("runtime/worker", () => {
     delete process.env.FORGEFLOW_WORKER_FORCE_WORKTREE_CLEANUP;
     vi.restoreAllMocks();
     prepareTaskWorktreeMock.mockClear();
+    prepareTaskWorktreeWithOwnershipMock.mockClear();
+    releaseTaskWorktreeOwnershipMock.mockClear();
     removeTaskWorktreeLifecycleMock.mockClear();
     safeTaskDirNameMock.mockClear();
     checkArtifactReviewabilityMock.mockReset();
@@ -187,7 +207,7 @@ describe("runtime/worker", () => {
         titleContains: ["project"],
       },
     });
-    expect(prepareTaskWorktreeMock).toHaveBeenCalledWith("/tmp/project", {
+    expect(prepareTaskWorktreeWithOwnershipMock).toHaveBeenCalledWith("/tmp/project", {
       taskId: "task-1",
       branchName: "feature/runtime",
       defaultBranch: "main",
@@ -224,7 +244,9 @@ describe("runtime/worker", () => {
       force: false,
       worktreeDir: "/tmp/project/.worktrees/task-1",
       branchName: "feature/runtime",
+      ownership: worktreeOwnership,
     });
+    expect(releaseTaskWorktreeOwnershipMock).toHaveBeenCalledWith(worktreeOwnership);
     expect(automationClient.releaseSession.mock.invocationCallOrder[0]).toBeLessThan(
       removeTaskWorktreeLifecycleMock.mock.invocationCallOrder[0]!,
     );
@@ -330,10 +352,87 @@ describe("runtime/worker", () => {
       force: true,
       worktreeDir: "/tmp/project/.worktrees/task-1",
       branchName: "feature/runtime",
+      ownership: worktreeOwnership,
     });
     expect(resultWithCleanupFailure.status).toBe("review_ready");
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("dirty worktree preserved"));
 
+    runtime.stop();
+  });
+
+  it("preserves an unacknowledged worktree while releasing its local owner", async () => {
+    process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT = "1";
+    checkArtifactReviewabilityMock.mockReturnValue(reviewableArtifact());
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      fetchTask: vi.fn(async () => ({
+        status: "task",
+        task: {
+          task_id: "task-1",
+          repo: "repo",
+          branch: "feature/runtime",
+          default_branch: "main",
+          scope: ["src/**"],
+          acceptance: ["pnpm test"],
+          constraints: [],
+          prompt: "Preserve work when result delivery fails",
+          chat_mode: "new_chat",
+        },
+      })),
+      startTask: vi.fn(async () => ({})),
+      reportProgress: vi.fn(async () => ({})),
+      submitResult: vi.fn(async () => {
+        throw new Error("dispatcher unavailable");
+      }),
+      heartbeat: vi.fn(async () => ({})),
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+      prepareSession: vi.fn(async () => ({ data: { sessionId: "session-unacknowledged" } })),
+      sendChat: vi.fn(async () => ({
+        response: {
+          text: [
+            "## 任务完成",
+            "- 结果: 成功",
+            "- 任务ID: task-1",
+            "- 修改文件: src/runtime/worker.ts",
+            "- 测试结果: pnpm test",
+            "- 风险: 无",
+            "- GitHub 证据:",
+            "  - branch: feature/runtime",
+            "  - commit: abc123",
+            "  - push: success",
+            "  - push_error: 无",
+            "  - PR: 无",
+            "  - PR URL: 无",
+            "- 备注: result delivery should fail",
+          ].join("\n"),
+        },
+      })),
+      releaseSession: vi.fn(async () => ({})),
+    };
+
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-remote",
+      repoDir: "/tmp/project",
+      logger: { warn: vi.fn(), log: vi.fn() },
+      sleep: vi.fn(async () => undefined),
+      setIntervalImpl: vi.fn(() => ({}) as never),
+      clearIntervalImpl: vi.fn(),
+    });
+
+    await expect(runtime.runOnce()).rejects.toMatchObject({
+      name: "WorkerResultDeliveryError",
+      attempts: 3,
+    });
+
+    expect(dispatcherClient.submitResult).toHaveBeenCalledTimes(3);
+    expect(removeTaskWorktreeLifecycleMock).not.toHaveBeenCalled();
+    expect(releaseTaskWorktreeOwnershipMock).toHaveBeenCalledWith(worktreeOwnership);
+    expect(automationClient.releaseSession).not.toHaveBeenCalled();
     runtime.stop();
   });
 
@@ -552,7 +651,7 @@ describe("runtime/worker", () => {
   });
 
   it("submits a failed result when workspace preparation fails before start-task", async () => {
-    prepareTaskWorktreeMock.mockImplementationOnce(() => {
+    prepareTaskWorktreeWithOwnershipMock.mockImplementationOnce(() => {
       throw new Error("branch feature/runtime is already checked out at /tmp/project/.worktrees/dispatch-178");
     });
 

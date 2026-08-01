@@ -170,7 +170,7 @@ Desired direction:
 
 - keep Wave 5 explicitly out of “already supported” docs until governance and compatibility policy are finalized
 
-## 7. Repo / branch / session lease guards 已接入 task 生命周期但仍有边界
+## 7. Dispatcher resource lease 与本机 worktree ownership 已接入，但跨主机和 session 仍有边界
 
 当前情况：
 
@@ -178,15 +178,19 @@ Desired direction:
 - `runtime-state.ts` 将 acquisition/release helper 接入 task claim、start、result、cancel、review decision 和 worker offline 路径
 - continuation / follow-up 任务会基于 `continueFromTaskId` / `followUpOfTaskId` 获取 session lease
 - busy worker heartbeat 会在同一个 state mutation 中续租 active attempt 与 assignment / repo / branch / optional session lease；到期 attempt 不会被 heartbeat 复活
+- `@tingrudeng/beta-runtime-core` 在 Git common-dir 下使用独占 owner lock 串行所有 ForgeFlow task worktree 生命周期；锁记录 PID、owner token、task、branch 与创建时间，活跃 PID 不因 age 被回收，释放核对 inode + token，崩溃遗留锁只在超过 stale threshold 且 PID 已退出后回收
+- generic worker 持锁覆盖 prepare、assignment 执行、commit/push/PR 与 live executor 清理；源码与 packaged Trae worker 持锁覆盖 prepare、automation session 执行、terminal result 投递尝试与确认后的可选清理，未确认时保留 worktree 并在当前执行退栈时释放 owner；直接调用共享 prepare/remove helper 也会短暂获取同一锁
 
 影响：
 
 - dispatcher 管理的 task 生命周期已经有 repo/branch/session lease ownership
-- dispatcher 外部脚本直接操作同一 repo、branch 或 Trae session store 仍不受该 lease 保护
+- 同一 Git common-dir 下，通过共享 runtime helper 执行的 prepare/reset/remove 不再能破坏活跃 worker 的未提交内容
+- dispatcher 外的直接 `git` / 文件操作、独立 clone、跨主机进程和 Trae session store 仍不受全局 lease 保护
 
 期望方向：
 
-- 如果要覆盖 dispatcher 外部脚本，需要新增统一入口或 operator-level lock，而不是误用 runtime task lease
+- 需要跨主机或多 clone 强约束时，把 canonical repo identity 与 opaque attempt ownership 接入共享协调存储；不要把本机 PID lock 描述成分布式 lease
+- 真实 Trae session ownership 继续单独设计，不要复用 worktree owner lock 或 lineage anchor 代替 sessionId
 
 ## 8. vNext runtime reliability 目标契约已接入 worker mutation 主链
 

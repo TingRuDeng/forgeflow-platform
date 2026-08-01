@@ -251,9 +251,9 @@ Do not describe read-only mode as an infrastructure-wide write barrier: direct r
 
 `apps/dispatcher/src/modules/server/runtime-state.ts` 当前通过 `acquireTaskResourceLeases()` 和 `releaseTaskResourceLeases()` 在 task 被 worker claim、start、result、cancel、review decision 或 worker offline 时获取和释放资源。
 
-不要把它描述成全局 Git 仓库互斥锁：它约束 dispatcher 管理的 task 生命周期，不覆盖 dispatcher 外部脚本直接操作同一 repo、branch 或 Trae session 的情况。
+不要把 dispatcher lease 描述成全局 Git 仓库互斥锁：它约束 dispatcher 管理的 task 生命周期。`@tingrudeng/beta-runtime-core` 另在 Git common-dir 下维护本机 worktree owner lock，能阻止使用共享 helper 的重叠 prepare/reset/remove 破坏活跃 worker，但它不是 dispatcher lease，也不覆盖独立 clone、跨主机进程或直接手工 Git。
 
-不要因为其他位置存在 worktree 检查、Trae session 文件锁和 repo concurrency 指标，就假定 repo、branch 或 session ownership 已经是全局硬并发保护。`sessions.json.lock` 只串行化同一状态目录内的本机文件变更，不提供跨主机 ownership。
+不要因为其他位置存在 worktree owner lock、Trae session 文件锁和 repo concurrency 指标，就假定 repo、branch 或 session ownership 已经是全局硬并发保护。worktree lock 只协调共享 Git common-dir 内的 ForgeFlow helper，`sessions.json.lock` 只串行化同一状态目录内的本机文件变更；两者都不提供跨主机 ownership。
 
 ## 16. Source DR scripts and packaged dispatcher CLI have different argument shapes
 

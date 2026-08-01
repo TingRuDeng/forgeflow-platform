@@ -8,8 +8,10 @@ import {
 } from "./abort-signal.js";
 import {
   safeTaskDirName,
-  prepareTaskWorktreeLifecycle,
+  prepareTaskWorktreeLifecycleWithOwnership,
+  releaseTaskWorktreeOwnership,
   removeTaskWorktreeLifecycle,
+  type TaskWorktreeOwnership,
 } from "./task-worktree.js";
 import { nowIso } from "./utils.js";
 import {
@@ -47,6 +49,7 @@ interface LiveWorkerTaskContext {
   worktreeDir: string;
   assignmentDir: string;
   outputDir: string;
+  ownership: TaskWorktreeOwnership;
 }
 
 export interface SubmitFailedWorkerResultInput {
@@ -105,7 +108,7 @@ export function buildWorkerProtocolEnvelope(payload: TaskPayload): WorkerProtoco
 
 export async function executeLiveWorkerTask(input: ExecuteLiveWorkerTaskInput): Promise<TaskExecutionResult> {
   let context: LiveWorkerTaskContext | null = null;
-  let cleanupTarget: Pick<LiveWorkerTaskContext, "taskId" | "worktreeDir"> | null = null;
+  let cleanupTarget: Pick<LiveWorkerTaskContext, "taskId" | "worktreeDir" | "ownership"> | null = null;
   try {
     context = await prepareLiveWorkerTask(input, (preparedTarget) => {
       cleanupTarget = preparedTarget;
@@ -128,18 +131,20 @@ export async function executeLiveWorkerTask(input: ExecuteLiveWorkerTaskInput): 
 
 async function prepareLiveWorkerTask(
   input: ExecuteLiveWorkerTaskInput,
-  onWorktreePrepared: (target: Pick<LiveWorkerTaskContext, "taskId" | "worktreeDir">) => void,
+  onWorktreePrepared: (
+    target: Pick<LiveWorkerTaskContext, "taskId" | "worktreeDir" | "ownership">,
+  ) => void,
 ): Promise<LiveWorkerTaskContext> {
   const taskId = input.payload.task.id;
   assertSafeBranchName(input.repoDir, input.payload.assignment.branchName, input.payload.assignment.defaultBranch);
-  const preparedWorktree = await prepareTaskWorktreeLifecycle(input.repoDir, input.payload.assignment, {
+  const preparedWorktree = await prepareTaskWorktreeLifecycleWithOwnership(input.repoDir, input.payload.assignment, {
     allowReuse: true,
     resetOnReuse: input.resetWorktreeOnReuse ?? true,
     commandTimeoutMs: input.worktreeCommandTimeoutMs,
     signal: input.signal,
   });
   const worktreeDir = preparedWorktree.worktreeDir;
-  onWorktreePrepared({ taskId, worktreeDir });
+  onWorktreePrepared({ taskId, worktreeDir, ownership: preparedWorktree.ownership });
   const assignmentDir = materializeAssignmentPackage(worktreeDir, input.payload);
   const outputDir = path.join(assignmentDir, "execution");
   fs.mkdirSync(outputDir, { recursive: true });
@@ -154,7 +159,13 @@ async function prepareLiveWorkerTask(
       message: `worktree ${preparedWorktree.action}, running worker assignment`,
     },
   });
-  return { taskId, worktreeDir, assignmentDir, outputDir };
+  return {
+    taskId,
+    worktreeDir,
+    assignmentDir,
+    outputDir,
+    ownership: preparedWorktree.ownership,
+  };
 }
 
 function runLiveWorkerTask(input: ExecuteLiveWorkerTaskInput, context: LiveWorkerTaskContext): Promise<WorkerResult> | WorkerResult {
@@ -207,15 +218,17 @@ async function finalizeLiveWorkerTask(
 
 async function cleanupLiveWorkerTask(
   input: ExecuteLiveWorkerTaskInput,
-  context: Pick<LiveWorkerTaskContext, "taskId" | "worktreeDir"> | null,
+  context: Pick<LiveWorkerTaskContext, "taskId" | "worktreeDir" | "ownership"> | null,
 ): Promise<void> {
-  if (!context || !input.removeWorktreeOnExit) return;
+  if (!context) return;
   try {
+    if (!input.removeWorktreeOnExit) return;
     const cleanup = await removeTaskWorktreeLifecycle(input.repoDir, context.taskId, {
       force: input.forceWorktreeCleanup ?? false,
       commandTimeoutMs: input.worktreeCommandTimeoutMs,
       worktreeDir: context.worktreeDir,
       branchName: input.payload.assignment.branchName,
+      ownership: context.ownership,
     });
     await reportCleanupEventBestEffort(input, {
       type: "progress_reported",
@@ -236,6 +249,20 @@ async function cleanupLiveWorkerTask(
         failureCode: "cleanup_failed",
       },
     });
+  } finally {
+    try {
+      releaseTaskWorktreeOwnership(context.ownership);
+    } catch (error) {
+      notifyCleanupError(input, error);
+      await reportCleanupEventBestEffort(input, {
+        type: "worktree_cleanup_failed",
+        taskId: context.taskId,
+        payload: {
+          error: error instanceof Error ? error.message : String(error),
+          failureCode: "ownership_release_failed",
+        },
+      });
+    }
   }
 }
 
