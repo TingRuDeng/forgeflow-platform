@@ -1,6 +1,13 @@
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+import {
+  inspectSecureConfigFile,
+  readSecureConfigFile,
+  repairSecureConfigFilePermissions,
+  writeSecureConfigFile,
+  type SecureConfigFilePolicy,
+} from "@tingrudeng/beta-runtime-core/runtime/secure-config-file.js";
 
 import type {
   CodexBetaConfig,
@@ -67,6 +74,28 @@ export function resolveCodexBetaConfigPaths(
   };
 }
 
+function getConfigPolicy(): SecureConfigFilePolicy {
+  return {
+    label: "Codex beta config",
+    privateDirectory: resolveCodexBetaConfigPaths().configDir,
+  };
+}
+
+export function inspectCodexBetaConfigPermissions(
+  options: CodexBetaConfigLoadOptions = {},
+) {
+  const paths = resolveCodexBetaConfigPaths(options);
+  return inspectSecureConfigFile(paths.configPath, getConfigPolicy());
+}
+
+export function secureCodexBetaConfigPermissions(
+  options: CodexBetaConfigLoadOptions = {},
+) {
+  const paths = resolveCodexBetaConfigPaths(options);
+  repairSecureConfigFilePermissions(paths.configPath, getConfigPolicy());
+  return paths;
+}
+
 export function createDefaultCodexBetaConfig(
   input: CodexBetaConfigInput = {},
   options: { cwd?: string } = {},
@@ -106,11 +135,10 @@ export function readCodexBetaConfig(
   options: CodexBetaConfigLoadOptions = {},
 ): CodexBetaConfig | null {
   const { configPath } = resolveCodexBetaConfigPaths(options);
-  if (!fs.existsSync(configPath)) {
+  const raw = readSecureConfigFile(configPath, getConfigPolicy());
+  if (raw === null) {
     return null;
   }
-
-  const raw = fs.readFileSync(configPath, "utf8");
   const parsed = JSON.parse(raw) as Partial<CodexBetaConfig>;
   return normalizeCodexBetaConfig(parsed, { cwd: path.dirname(configPath) });
 }
@@ -120,7 +148,10 @@ export function writeCodexBetaConfig(
   options: CodexBetaConfigLoadOptions = {},
 ): CodexBetaConfigPaths {
   const paths = resolveCodexBetaConfigPaths(options);
-  fs.mkdirSync(paths.configDir, { recursive: true });
-  fs.writeFileSync(paths.configPath, `${JSON.stringify(config, null, 2)}\n`);
+  writeSecureConfigFile(
+    paths.configPath,
+    `${JSON.stringify(config, null, 2)}\n`,
+    getConfigPolicy(),
+  );
   return paths;
 }

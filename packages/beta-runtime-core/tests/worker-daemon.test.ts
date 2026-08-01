@@ -47,6 +47,8 @@ const originalEnv = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   WORKER_DAEMON_EXECUTION_TIMEOUT_MS: process.env.WORKER_DAEMON_EXECUTION_TIMEOUT_MS,
+  WORKER_PROGRESS_MAX_ATTEMPTS: process.env.WORKER_PROGRESS_MAX_ATTEMPTS,
+  WORKER_PROGRESS_RETRY_DELAY_MS: process.env.WORKER_PROGRESS_RETRY_DELAY_MS,
 };
 const workerDaemonSourcePath = path.resolve("src/runtime/worker-daemon.ts");
 
@@ -237,6 +239,59 @@ describe("beta runtime worker daemon dispatcher protocol", () => {
           body: JSON.stringify(payload),
         }),
       );
+    });
+
+    it("retries progress with the exact same attempt-scoped payload", async () => {
+      process.env.WORKER_PROGRESS_MAX_ATTEMPTS = "3";
+      process.env.WORKER_PROGRESS_RETRY_DELAY_MS = "0";
+      const payload = {
+        taskId: "task-progress-retry",
+        attemptId: "attempt-progress-retry",
+        leaseToken: "lease-progress-retry",
+        protocolVersion: "2026-05-v1",
+        traceId: "trace-progress-retry",
+        idempotencyKey: "worker-v1:task-progress-retry:attempt-progress-retry",
+        progressId: "progress-retry-1",
+        message: "Running tests",
+      };
+      const expectedBody = JSON.stringify(payload);
+      const fetchMock = vi.fn()
+        .mockImplementationOnce(async () => {
+          payload.message = "Mutated by caller";
+          return new Response('{"error":"temporarily unavailable"}', { status: 503 });
+        })
+        .mockResolvedValueOnce(new Response('{"status":"progress_recorded"}', { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const client = createDispatcherClient("http://127.0.0.1:8787");
+
+      await client.reportProgress("codex-progress", payload);
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const requestBodies = fetchMock.mock.calls.map(([, init]) => (init as RequestInit).body);
+      expect(requestBodies).toEqual([expectedBody, expectedBody]);
+    });
+
+    it("does not retry a progress lease conflict", async () => {
+      process.env.WORKER_PROGRESS_MAX_ATTEMPTS = "3";
+      process.env.WORKER_PROGRESS_RETRY_DELAY_MS = "0";
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response("null", { status: 409 }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const client = createDispatcherClient("http://127.0.0.1:8787");
+
+      await expect(client.reportProgress("codex-progress", {
+        taskId: "task-progress-conflict",
+        attemptId: "attempt-progress-conflict",
+        leaseToken: "lease-progress-conflict",
+        protocolVersion: "2026-05-v1",
+        traceId: "trace-progress-conflict",
+        idempotencyKey: "worker-v1:task-progress-conflict:attempt-progress-conflict",
+        progressId: "progress-conflict-1",
+        message: "Running tests",
+      })).rejects.toMatchObject({ status: 409 });
+
+      expect(fetchMock).toHaveBeenCalledOnce();
     });
 
     it("propagates the daemon signal through the shared dispatcher cycle", async () => {

@@ -3,6 +3,19 @@ import * as http from "node:http";
 import * as https from "node:https";
 
 import { readDispatcherTokenFromConfig } from "../config.js";
+import {
+  DispatcherHttpError,
+  DispatcherResponseError,
+  DispatcherTransportError,
+  normalizeOptionalDispatcherToken,
+  readDispatcherHttpErrorMessage,
+  resolveDispatcherAuthToken,
+  resolveProgressDeliveryPolicy,
+  retryHeartbeatDelivery,
+  retryProgressDelivery,
+  snapshotHeartbeatPayload,
+  snapshotProgressPayload,
+} from "@tingrudeng/beta-runtime-core";
 import type { TraeWorkerArtifactBundle } from "./trae-worker-artifacts.js";
 
 interface WorkerFailure {
@@ -141,6 +154,26 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
   const sourceLabel = String(options.sourceLabel || "").trim();
 
   async function request(path: string, init: JsonHttpRequestOptions = {}) {
+    const method = init.method || "GET";
+    const environmentToken = typeof process !== "undefined"
+      ? resolveDispatcherAuthToken(process.env)
+      : undefined;
+    const explicitToken = environmentToken === undefined
+      ? normalizeOptionalDispatcherToken(options.dispatcherToken, "Trae dispatcherToken option")
+      : undefined;
+    const configToken = environmentToken === undefined && explicitToken === undefined
+      ? normalizeOptionalDispatcherToken(
+        readDispatcherTokenFromConfig(),
+        "Trae config dispatcherToken",
+      )
+      : undefined;
+    const dispatcherToken = environmentToken ?? explicitToken ?? configToken;
+    const headers: Record<string, string> = {};
+    if (init.body) headers["content-type"] = "application/json";
+    if (dispatcherToken !== undefined) {
+      headers["Authorization"] = `Bearer ${dispatcherToken}`;
+    }
+    const body = init.body ? JSON.stringify(init.body) : undefined;
     const controller = new AbortController();
     const timeoutMs = Number(init.timeoutMs || 10000);
     let timedOut = false;
@@ -156,17 +189,7 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
     }, timeoutMs);
 
     try {
-      const method = init.method || "GET";
-      const authToken = typeof process !== "undefined"
-        ? (process.env.DISPATCHER_WORKER_TOKEN || process.env.DISPATCHER_API_TOKEN)
-        : undefined;
-      const configToken = !authToken ? (options.dispatcherToken || readDispatcherTokenFromConfig()) : undefined;
-      const headers: Record<string, string> = {};
-      if (init.body) headers["content-type"] = "application/json";
-      if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
-      else if (configToken) headers["Authorization"] = `Bearer ${configToken}`;
-    const body = init.body ? JSON.stringify(init.body) : undefined;
-    const response = fetchImpl
+      const response = fetchImpl
         ? await fetchImpl(`${base}${path}`, {
           method,
           headers,
@@ -185,9 +208,24 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
           signal: controller.signal,
         });
 
-      const json = response.text ? JSON.parse(response.text) : {};
+      let json: Record<string, unknown> = {};
+      if (response.text) {
+        try {
+          json = JSON.parse(response.text) as Record<string, unknown>;
+        } catch (error) {
+          if (response.ok) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new DispatcherResponseError(
+              `${sourceLabel || "request"} ${path} returned invalid JSON: ${message}`,
+            );
+          }
+        }
+      }
       if (!response.ok) {
-        throw new Error(json.message || json.error || `HTTP ${response.status}`);
+        throw new DispatcherHttpError(
+          readDispatcherHttpErrorMessage(json, response.text, `HTTP ${response.status}`),
+          response.status,
+        );
       }
       return json;
     } catch (error) {
@@ -201,9 +239,22 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
           throw aborted;
         }
         const timeoutMessage = `request timeout: ${path}`;
-        throw new Error(sourceLabel ? `${sourceLabel} ${path} failed: ${timeoutMessage}` : timeoutMessage);
+        throw new DispatcherTransportError(
+          sourceLabel ? `${sourceLabel} ${path} failed: ${timeoutMessage}` : timeoutMessage,
+        );
       }
-      throw new Error(sourceLabel ? `${sourceLabel} ${path} failed: ${message}` : message);
+      if (error instanceof DispatcherHttpError) {
+        throw new DispatcherHttpError(
+          sourceLabel ? `${sourceLabel} ${path} failed: ${error.message}` : error.message,
+          error.status,
+        );
+      }
+      if (error instanceof DispatcherResponseError) {
+        throw error;
+      }
+      throw new DispatcherTransportError(
+        sourceLabel ? `${sourceLabel} ${path} failed: ${message}` : message,
+      );
     } finally {
       clearTimeout(timeoutId);
       init.signal?.removeEventListener("abort", abortFromCaller);
@@ -219,6 +270,7 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
     sourceLabel: options.sourceLabel || "dispatcher",
   });
   const requestTimeoutMs = Number(options.requestTimeoutMs || DEFAULT_DISPATCHER_REQUEST_TIMEOUT_MS);
+  const progressDeliveryPolicy = resolveProgressDeliveryPolicy();
   const attemptLeases = new Map<string, Required<WorkerProtocolEnvelopeInput>>();
 
   function captureAttemptLease(response: unknown): void {
@@ -267,7 +319,12 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
       captureAttemptLease(response);
       return response;
     },
-    async startTask(workerId: string, taskId: string, attemptLease: WorkerProtocolEnvelopeInput = {}) {
+    async startTask(
+      workerId: string,
+      taskId: string,
+      attemptLease: WorkerProtocolEnvelopeInput = {},
+      requestOptions: { signal?: AbortSignal } = {},
+    ) {
       return http.request("/api/trae/start-task", {
         method: "POST",
         body: {
@@ -280,18 +337,30 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
           idempotency_key: attemptLease.idempotencyKey,
         },
         timeoutMs: requestTimeoutMs,
+        signal: requestOptions.signal,
       });
     },
-    async reportProgress(taskId: string, message: string, workerId: string) {
-      return http.request(`/api/workers/${encodeURIComponent(workerId)}/progress`, {
-        method: "POST",
-        body: {
-          taskId,
-          ...requireAttemptLease(taskId),
-          progressId: randomUUID(),
-          message,
-        },
-        timeoutMs: requestTimeoutMs,
+    async reportProgress(
+      taskId: string,
+      message: string,
+      workerId: string,
+      requestOptions: { signal?: AbortSignal } = {},
+    ) {
+      const body = snapshotProgressPayload({
+        taskId,
+        ...requireAttemptLease(taskId),
+        progressId: randomUUID(),
+        message,
+      });
+      return retryProgressDelivery({
+        ...progressDeliveryPolicy,
+        signal: requestOptions.signal,
+        send: () => http.request(`/api/workers/${encodeURIComponent(workerId)}/progress`, {
+          method: "POST",
+          body,
+          timeoutMs: requestTimeoutMs,
+          signal: requestOptions.signal,
+        }),
       });
     },
     async reportEvent(workerId: string, input: {
@@ -361,11 +430,16 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
         signal: requestOptions.signal,
       });
     },
-    async heartbeat(workerId: string) {
-      return http.request("/api/trae/heartbeat", {
-        method: "POST",
-        body: { worker_id: workerId },
-        timeoutMs: requestTimeoutMs,
+    async heartbeat(workerId: string, requestOptions: { signal?: AbortSignal } = {}) {
+      const body = snapshotHeartbeatPayload({ worker_id: workerId });
+      return retryHeartbeatDelivery({
+        signal: requestOptions.signal,
+        send: () => http.request("/api/trae/heartbeat", {
+          method: "POST",
+          body,
+          timeoutMs: requestTimeoutMs,
+          signal: requestOptions.signal,
+        }),
       });
     },
   };

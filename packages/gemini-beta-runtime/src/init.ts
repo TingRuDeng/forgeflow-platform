@@ -3,6 +3,7 @@ import {
   normalizeGeminiBetaConfig,
   readGeminiBetaConfig,
   resolveGeminiBetaConfigPaths,
+  secureGeminiBetaConfigPermissions,
   writeGeminiBetaConfig,
 } from "./config.js";
 
@@ -16,6 +17,7 @@ export interface GeminiBetaInitResult {
 
 export function initGeminiBetaConfig(options: GeminiBetaInitOptions = {}): GeminiBetaInitResult {
   const paths = resolveGeminiBetaConfigPaths(options);
+  secureGeminiBetaConfigPermissions({ configPath: paths.configPath });
   const existing = readGeminiBetaConfig({ configPath: paths.configPath });
 
   if (existing && !options.overwrite) {

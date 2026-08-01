@@ -18,4 +18,4 @@ node scripts/release-package.js --package beta-runtime-core --bump prerelease --
 
 ## 发布顺序
 
-当 Codex/Gemini runtime 依赖新的 core 版本时，必须先发布 `@tingrudeng/beta-runtime-core`，再发布对应 provider runtime 包。
+当 dispatcher、Codex、Gemini、Trae 或 worker review CLI 依赖新的 core 版本 / export 时，必须先发布 `@tingrudeng/beta-runtime-core`，再分别准备对应下游包的单包版本 PR。Console 是仓库内私有应用，不单独发布。

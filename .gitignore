@@ -1,6 +1,8 @@
 .worktrees/
 .forgeflow-dispatcher/
 .forgeflow-trae-gateway/
+.forgeflow-console.json
+.forgeflow-console.json.*.tmp
 .orchestrator/*
 !.orchestrator/project.yaml
 node_modules/

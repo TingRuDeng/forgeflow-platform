@@ -162,4 +162,64 @@ describe("@tingrudeng/trae-beta-runtime doctor", () => {
       ]),
     );
   });
+
+  it("reports insecure persisted config permissions with a repair command", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const rootDir = makeTempDir("trae-beta-doctor-config-permissions-");
+    const projectPath = path.join(rootDir, "project");
+    fs.mkdirSync(projectPath, { recursive: true });
+    execFileSync("git", ["init"], {
+      cwd: projectPath,
+      stdio: "ignore",
+    });
+    const traeBin = createFakeTraeApp(rootDir);
+    const configPath = path.join(rootDir, "config.json");
+
+    writeTraeBetaConfig(
+      {
+        version: 2,
+        projectPath,
+        dispatcherUrl: "http://127.0.0.1:8787",
+        dispatcherToken: "test-dispatcher-token",
+        automationUrl: "http://127.0.0.1:8790",
+        workerId: "trae-remote",
+        traeBin,
+        remoteDebuggingPort: 9222,
+      },
+      { configPath },
+    );
+    fs.chmodSync(configPath, 0o644);
+
+    const result = runTraeBetaDoctor({ configPath });
+    const permissions = result.checks.find((check) => check.name === "config-permissions");
+
+    expect(result.ok).toBe(false);
+    expect(permissions).toEqual(expect.objectContaining({
+      ok: false,
+      message: expect.stringMatching(/chmod 600/),
+    }));
+  });
+
+  it("reports an insecure config directory even when the config file is missing", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const rootDir = makeTempDir("trae-beta-doctor-missing-config-");
+    const configDir = path.join(rootDir, "config");
+    fs.mkdirSync(configDir, { mode: 0o777 });
+    fs.chmodSync(configDir, 0o777);
+    const configPath = path.join(configDir, "config.json");
+
+    const result = runTraeBetaDoctor({ configPath });
+    const permissions = result.checks.find((check) => check.name === "config-permissions");
+
+    expect(permissions).toEqual(expect.objectContaining({
+      ok: false,
+      message: expect.stringMatching(/config directory.*writable/i),
+    }));
+  });
 });

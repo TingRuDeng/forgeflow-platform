@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 
 import {
   createDefaultTraeBetaConfig,
+  inspectTraeBetaConfigPermissions,
   readTraeBetaConfig,
   resolveTraeBetaConfigPaths,
 } from "./config.js";
@@ -301,7 +302,10 @@ export function runTraeBetaDoctor(options: {
   config?: Partial<TraeBetaConfig>;
 } = {}): TraeBetaDoctorResult {
   const paths = resolveTraeBetaConfigPaths({ configPath: options.configPath });
-  const loaded = readTraeBetaConfig({ configPath: paths.configPath });
+  const configPermissions = inspectTraeBetaConfigPermissions({ configPath: paths.configPath });
+  const loaded = configPermissions.ok
+    ? readTraeBetaConfig({ configPath: paths.configPath })
+    : null;
   const config = createDefaultTraeBetaConfig(
     {
       ...(loaded || {}),
@@ -333,10 +337,21 @@ export function runTraeBetaDoctor(options: {
 
   checks.push({
     name: "config-file",
-    ok: Boolean(loaded),
-    message: loaded ? "config file exists" : "config file is missing",
+    ok: configPermissions.configExists,
+    message: configPermissions.configExists ? "config file exists" : "config file is missing",
     details: {
       configPath: paths.configPath,
+    },
+  });
+
+  checks.push({
+    name: "config-permissions",
+    ok: configPermissions.ok,
+    message: configPermissions.message,
+    details: {
+      configFileMode: configPermissions.configFileMode,
+      configDirMode: configPermissions.configDirMode,
+      requiresPrivateConfigDir: configPermissions.requiresPrivateConfigDir,
     },
   });
 

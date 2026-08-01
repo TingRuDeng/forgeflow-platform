@@ -62,7 +62,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - `forgeflow-review-orchestrator dispatch-task` 在 `pool=trae` 时会默认按结构化任务规范自动渲染 worker prompt，并把最终 prompt 连同 `workerPromptMode/reportSchemaVersion` 一起持久化到 dispatcher assignment；自定义 Trae prompt 若缺少 `任务完成/结果/任务ID` 会在 dispatch 前被拒绝。
 - follow-up / rework 任务只有在源任务已经交付过可验证的远端分支产物、且 worker 不变时才允许复用原分支；否则控制层应改用新的 `-rN` 分支继续修复。
 - Trae runtime 的 `new_chat` 采样现在会优先收窄到最后一个可见聊天根节点，并在基线里检测是否仍持续读到上一个任务的完成回执；发现旧 `任务ID` 污染时会提前失败，而不是继续误读旧会话。
-- Trae runtime 现在只有在远端分支 HEAD 与最终回执里的 commit SHA 完全一致时才会把成功结果提升为 `review_ready`；遇到远端 ref 传播延迟时，会先进入短暂重试窗口，而不是立刻把产物交给 review。terminal result 回写默认最多尝试 3 次、间隔 2 秒，可用 `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` / `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS` 调整；dispatcher 未确认结果时不会把 worker 降为 idle 或释放当前 Trae session，会保留 worktree 证据并在当前执行退栈时释放本机 owner，同时停止任务轮询、以非零状态退出，避免重复执行未确认任务。
+- Trae runtime 现在只有在远端分支 HEAD 与最终回执里的 commit SHA 完全一致时才会把成功结果提升为 `review_ready`；遇到远端 ref 传播延迟时，会先进入短暂重试窗口，而不是立刻把产物交给 review。terminal result 回写默认最多尝试 3 次、间隔 2 秒，可用 `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` / `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS` 调整；dispatcher 未确认结果时不会把 worker 降为 idle 或释放当前 Trae session，会保留 worktree 证据并在当前执行退栈时释放本机 owner，同时停止任务轮询、以非零状态退出，避免重复执行未确认任务。generic、Trae automation 与 Trae MCP 的 progress client 复用共享投递策略：同一逻辑更新固定复用一个 `progressId`，仅对网络/超时、`408`、`425`、`429` 和 `5xx` 默认最多投递 3 次、间隔 1 秒；`WORKER_PROGRESS_MAX_ATTEMPTS` / `WORKER_PROGRESS_RETRY_DELAY_MS` 可覆盖，支持 `AbortSignal` 的 generic 与 Trae automation 调用链会终止请求或重试等待。
 - dispatcher 的状态型 HTTP 路径现在共用一把跨进程文件锁（`.runtime-state.lock`）；锁竞争超时会显式返回 `503`。锁文件记录 PID、owner token 和创建时间，存活进程持有的锁不会仅因超过 stale 阈值被回收，释放时也会核对 inode 与 owner token，避免旧 callback 删除替换锁。
 - dispatcher SQLite snapshot 现在按 revision 追加落盘、保存 `checksum_sha256`，并默认只保留最近 128 个 revision；可用 `DISPATCHER_SQLITE_SNAPSHOT_RETENTION` 在 2 到 10000 之间调整。完整 runtime event 历史仍由 append-only audit 表保存；snapshot 读取默认 fail-closed。只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 时，SQLite 读取失败才允许非破坏性读取 JSON，已有 DB 不会被覆盖；只有 DB 不存在而 JSON 存在时才会执行一次性导入。
 - `dependsOn` 现在进入调度门控：依赖未满足的任务保持 `planned`，依赖满足后由 dispatcher 自动解锁到 `ready` 并写状态事件。
@@ -75,7 +75,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - dispatcher 现在额外暴露只读 `GET /api/context`：一次性聚合控制层关心的 active 任务、review backlog（含确定性风险分级）、可 redrive 的 blocked 任务和带 traceId 的 recent events，支持 `since` / `eventLimit` 过滤，减少控制层多次拉取 snapshot/query。
 - dispatcher 现在会 canonicalize worker result 的 `taskId/workerId/pool/repo/defaultBranch/branchName/mode`，worker 只能上送 `output/verification/evidence` 等执行证据；不合法元数据会被拒绝。
 - dispatcher 任务状态机现在接上了 `cancelled` 和 `waiting_for_input`：控制面可通过 `POST /api/tasks/:taskId/cancel` 手动作废非终态任务；worker result 可携带 `waitingForInput` 主动请求 HITL 暂停，dispatcher 会 checkpoint active attempt 并释放 worker / lease；Console 详情页会按 `resumePayloadSchema` 渲染恢复表单，支持 `string` / `number` / `integer` / `boolean` / `array` 字段、textarea、范围和数组数量校验，未提供 schema 时保留 JSON `resumePayload` fallback；dispatcher resume API 也会按任务保存的 `resumePayloadSchema` 做服务端校验，非法恢复输入返回 `400`；同一详情页也会展示任务级 `terminationPolicy`，用于审查 maxAttempts、attempt lease、heartbeat 和 assignment timeout 边界。
-- `worker-daemon` 不再把 `submitResult` 重试耗尽、`git push` 失败或自动 PR 创建失败记成“completed”；这些路径现在都会保留在显式 failed 语义里。每个 task 只由 shared daemon cycle 维持一条 single-flight heartbeat，覆盖执行和结果回写重试；执行超时或 daemon 收到终止信号时会终止完整子进程树，避免遗留 provider / verification 进程。
+- `worker-daemon` 不再把 `submitResult` 重试耗尽、`git push` 失败或自动 PR 创建失败记成“completed”；这些路径现在都会保留在显式 failed 语义里。generic HTTP / state-dir、Trae automation、packaged Trae runtime 与 Trae MCP heartbeat 复用共享投递语义，固定最多尝试 4 次、间隔 1 秒，仅重试网络/超时、`408`、`425`、`429` 和 `5xx`，普通 `4xx` 立即失败。generic daemon 与 Trae automation heartbeat 都保持 single-flight；切换模式、停止 worker、执行超时或 daemon 收到终止信号时会取消当前请求或重试等待，generic assignment 还会终止完整子进程树，避免遗留 provider / verification 进程。
 - `worker-daemon` 子进程现在使用 env allowlist，而不是继承完整 `process.env`；自动 PR 创建也改成显式 `FORGEFLOW_WORKER_CREATE_PR=1` 才会启用。
 - `forgeflow-review-orchestrator` 现在补齐了阶段二控制层闭环：`dispatch/dispatch-task/watch/inspect/decide` 都支持 `--state-dir` 本地 dispatcher bridge，mutation 仍经过 dispatcher 权威状态机并写入默认 SQLite 真相源；`watch --summary` 与 `inspect --summary` 统一输出 review/failure/redrive/progress/trace 摘要，并会附带结构化 `failureCode`。
 - `inspect --summary` / `watch --summary` 现在还会带上 review 风险分级；`decide --decision merge` 受该分级软门禁：读取到非 `low` 风险时 fail closed，需 `--acknowledge-risk` 显式覆盖；只有风险字段缺失时才放行，且仅约束 merge。Console 任务详情也会展示该风险分级 badge 与合并前人工确认提示。
@@ -308,6 +308,8 @@ forgeflow-gemini-beta start worker
 
 `codex` / `gemini` 远程 runtime 会通过 `POST /api/workers/:workerId/claim-task` 领取任务，并把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 v1 envelope 回写到 start/result mutation。远程机器应设置自己的 `DISPATCHER_WORKER_TOKEN`；仅迁移期继续兼容 `DISPATCHER_API_TOKEN`，不要把控制层主 token 分发到 worker 主机。
 
+Codex / Gemini 配置不持久化 token，argv 凭据参数会被拒绝；认证保持 env-only。两者配置可控制 repo 与 provider binary，仍通过共享安全配置原语写入：默认目录 / 文件为 `0700` / `0600`；同目录原子替换会拒绝 symlink、过宽权限和可被其他用户替换的目录祖先，并从完成身份与权限校验的同一 fd 读取。安全配置入口当前仅支持 Unix-like 平台（macOS / Linux），其他平台会 fail closed；旧配置可分别重新执行 `forgeflow-codex-beta init` / `forgeflow-gemini-beta init` 原地修复权限。
+
 远程 Trae 运行时：
 
 ```bash
@@ -346,6 +348,7 @@ npm ls -g --depth=0 @tingrudeng/trae-beta-runtime
 补充：
 
 - `forgeflow-trae-beta` 的 `start` / `restart` 读取的是 `~/.forgeflow-trae-beta/config.json`，不会因为你在别的 shell 目录执行命令就自动切换 `projectPath`
+- 该配置可能包含 dispatcher token；只能用 `--token-stdin` 持久化 token，argv `--token` 会被拒绝。默认目录与文件权限分别为 `0700` / `0600`；写入采用同目录安全临时文件原子替换，读取拒绝 symlink、过宽权限和可被其他用户替换的目录祖先，并从完成身份与权限校验的同一文件句柄读取。安全配置入口当前仅支持 Unix-like 平台（macOS / Linux），其他平台会 fail closed；旧版本生成的配置可重新执行 `forgeflow-trae-beta init` 原地修复，已保存 token 不会丢失
 - `restart launch` / `restart all` 现在会在 clean relaunch 时先等待旧 CDP 端口 drain，再拉起新的 Trae 进程，减少 launch 误判 ready、但 gateway `/ready` 随后失败的竞态
 - `stop worker` / `restart worker` / `stop all` / `restart all` 现在会 best-effort 把对应 worker 先标记为 dispatcher `offline`，避免页面在 heartbeat 租约未过期时继续显示在线
 
@@ -432,9 +435,11 @@ node scripts/run-dispatcher-server.js \
 - `legacy`：兼容模式，当 `DISPATCHER_API_TOKEN` 未设置时，只允许 loopback 匿名访问，也接受已配置的远程 worker token；设置控制层 token 后需认证
 - `open`：完全开放模式，所有接口可匿名访问，适合本地开发
 
-`DISPATCHER_API_TOKEN` 是控制层 token，可访问全部 API。`DISPATCHER_WORKER_TOKENS` 是 `workerId -> token` 的 JSON 映射；每个 token 必须唯一、不得带首尾空白，也不能与控制层 token 相同。映射中的 token 只能注册对应 worker，并访问该 worker 自己的 claim/start/result/event/heartbeat 路由，不能读取 dashboard 或其他 worker。worker runtime 会优先读取 `DISPATCHER_WORKER_TOKEN`，再兼容回退到 `DISPATCHER_API_TOKEN`。
+`DISPATCHER_API_TOKEN` 是控制层 token，可访问全部 API。`DISPATCHER_WORKER_TOKENS` 是 `workerId -> token` 的 JSON 映射；每个 token 必须唯一、不得带首尾空白，也不能与控制层 token 相同。映射中的 token 只能注册对应 worker，并访问该 worker 自己的 claim/start/result/event/heartbeat 路由，不能读取 dashboard 或其他 worker。worker runtime 会优先读取 `DISPATCHER_WORKER_TOKEN`，只有该变量未定义时才兼容回退到 `DISPATCHER_API_TOKEN`；任一已定义 token 为空或带首尾空白都会在发起请求前失败。
 
-`forgeflow-dispatcher init` 与源码侧 config CLI 在 Unix 上会把 dispatcher 配置文件创建或修正为 `0600`；服务端也会拒绝 group / other 可读的凭据配置。不要用手工复制重新放宽该文件权限。
+发布包只允许通过 stdin 提供显式 token：`printf '%s' "$DISPATCHER_API_TOKEN" | forgeflow-dispatcher init --token-stdin`；argv `--token` 会被拒绝。`forgeflow-dispatcher init` 会把默认配置目录 / 文件创建或修正为 `0700` / `0600`，通过同目录安全临时文件原子替换，并拒绝 symlink、过宽权限及可被其他用户替换的目录祖先。读取始终使用完成身份与权限校验的同一文件句柄。该安全配置入口当前仅支持 Unix-like 平台（macOS / Linux），其他平台会 fail closed。
+
+源码 server 不再维护另一套配置写入 CLI。它优先使用 `DISPATCHER_API_TOKEN` / `DISPATCHER_WORKER_TOKENS`；若读取 `~/.forgeflow-dispatcher.json` 或 `FORGEFLOW_DISPATCHER_CONFIG_PATH` 指定的只读配置，文件必须为普通文件且权限为 `0600`，父目录不得为 symlink 或可被 group / other 写入。手工迁移时先执行 `chmod 600 <config-file>`，并按报错收紧父目录权限。
 
 dispatcher 状态锁说明：
 - 所有基于状态目录的 dispatcher 路径当前共用 `.runtime-state.lock`

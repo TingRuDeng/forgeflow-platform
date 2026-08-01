@@ -257,6 +257,8 @@ Current endpoint families:
   - Worker start and heartbeat renew the active attempt plus its assignment / repo / branch / optional session leases in the same serialized state mutation while ownership is still valid.
   - Attempt and task resource lease expiry use the task-level `terminationPolicy.attemptLeaseTimeoutMs` when configured.
   - A heartbeat at or after `leaseExpiresAt` does not revive the attempt or reacquire expired resource leases.
+  - Built-in generic HTTP and state-dir clients keep one payload across a bounded retry sequence. They make at most 4 total attempts with a 1-second delay, retrying network/timeouts and HTTP `408` / `425` / `429` / `5xx`; ordinary `4xx` fails immediately.
+  - An available caller cancellation signal stops the active request or retry wait.
 - `POST /api/workers/:workerId/offline`
   - Best-effort operator/runtime path to mark a worker `offline` immediately instead of waiting for heartbeat lease expiry.
   - Current request body may include:
@@ -286,7 +288,7 @@ Current endpoint families:
   - Required fields are `taskId`, `attemptId`, `leaseToken`, `protocolVersion`, `traceId`, `idempotencyKey`, `progressId`, and `message`; `stage` is optional.
   - Dispatcher validates the active attempt, worker assignment, assignment lease, and dispatcher receipt time before appending the event.
   - An exact replay of the same `progressId` and payload is idempotent; reusing that ID with different content returns `409`.
-  - A caller retrying the same logical update must reuse its original `progressId`; built-in progress clients currently make a single delivery attempt.
+  - A caller retrying the same logical update must reuse its original `progressId`. Built-in generic, Trae automation, and Trae MCP progress clients keep one ID and payload across a bounded retry sequence; they retry network/timeouts and HTTP `408` / `425` / `429` / `5xx`, but fail ordinary `4xx` immediately. Defaults are 3 total attempts with a 1-second delay, configurable through `WORKER_PROGRESS_MAX_ATTEMPTS` and `WORKER_PROGRESS_RETRY_DELAY_MS`; an available caller cancellation signal stops the active request or retry wait.
   - Stored events retain `attemptId`, `workerId`, and `traceId` as top-level correlation fields.
 - `POST /api/workers/:workerId/result`
   - Submit execution result, changed files, and optional PR metadata.
@@ -464,6 +466,8 @@ Current endpoint families:
     - `prompt_contract_mismatch`
 - `POST /api/trae/heartbeat`
   - Heartbeat endpoint for Trae workers.
+  - Built-in Trae automation, packaged runtime, and MCP clients keep one `{ worker_id }` payload across a bounded retry sequence. They make at most 4 total attempts with a 1-second delay, retrying network/timeouts and HTTP `408` / `425` / `429` / `5xx`; ordinary `4xx` fails immediately.
+  - Scheduled Trae automation heartbeats are single-flight. Switching mode or stopping the worker cancels the active request or retry wait instead of leaving overlapping intervals behind.
 
 ## 2. Trae Automation Gateway
 

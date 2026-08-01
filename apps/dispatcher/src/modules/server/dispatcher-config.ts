@@ -1,6 +1,7 @@
-import fs from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
+
+import { readSecureConfigFile } from "@tingrudeng/beta-runtime-core/runtime/secure-config-file.js";
 
 export interface DispatcherConfig {
   authMode?: "legacy" | "token" | "open";
@@ -13,34 +14,37 @@ const CONFIG_FILENAME = ".forgeflow-dispatcher.json";
 const CONFIG_PATH_ENV = "FORGEFLOW_DISPATCHER_CONFIG_PATH";
 export type DispatcherAuthMode = "legacy" | "token" | "open";
 
+function normalizeOptionalToken(value: unknown, source: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string" || !value.trim() || value !== value.trim()) {
+    throw new Error(`${source} must be a non-empty string without surrounding whitespace`);
+  }
+  return value;
+}
+
+function resolveDispatcherApiToken(config: DispatcherConfig) {
+  const environmentToken = process.env.DISPATCHER_API_TOKEN;
+  return environmentToken !== undefined
+    ? normalizeOptionalToken(environmentToken, "DISPATCHER_API_TOKEN")
+    : normalizeOptionalToken(config.apiToken, "dispatcher config apiToken");
+}
+
 function getConfigPath(): string {
   const override = process.env[CONFIG_PATH_ENV];
   if (override) {
-    return override;
+    return path.resolve(override);
   }
   return path.join(os.homedir(), CONFIG_FILENAME);
 }
 
-function assertSecureConfigFilePermissions(configPath: string): void {
-  if (process.platform === "win32") {
-    return;
-  }
-
-  const stat = fs.statSync(configPath);
-  if ((stat.mode & 0o077) !== 0) {
-    throw new Error(
-      `insecure dispatcher config permissions for ${configPath} (expected 600). Fix: chmod 600 ${configPath}`,
-    );
-  }
-}
-
 export function loadDispatcherConfig(): DispatcherConfig {
   const configPath = getConfigPath();
-  if (!fs.existsSync(configPath)) {
+  const raw = readSecureConfigFile(configPath, { label: "dispatcher config" });
+  if (raw === null) {
     return {};
   }
-  assertSecureConfigFilePermissions(configPath);
-  const raw = fs.readFileSync(configPath, "utf8");
   try {
     return JSON.parse(raw);
   } catch (error) {
@@ -61,13 +65,13 @@ export function getDispatcherAuthMode(): DispatcherAuthMode {
 
 export function getDispatcherApiToken(): string | null {
   const config = loadDispatcherConfig();
-  return process.env.DISPATCHER_API_TOKEN || config.apiToken || null;
+  return resolveDispatcherApiToken(config);
 }
 
 export function getDispatcherWorkerTokens(): Record<string, string> {
   const config = loadDispatcherConfig();
   const raw = process.env.DISPATCHER_WORKER_TOKENS;
-  const apiToken = process.env.DISPATCHER_API_TOKEN || config.apiToken || null;
+  const apiToken = resolveDispatcherApiToken(config);
   let candidate: unknown = config.workerTokens ?? {};
 
   if (raw) {

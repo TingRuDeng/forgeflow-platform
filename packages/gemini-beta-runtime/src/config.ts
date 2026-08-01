@@ -1,6 +1,13 @@
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+import {
+  inspectSecureConfigFile,
+  readSecureConfigFile,
+  repairSecureConfigFilePermissions,
+  writeSecureConfigFile,
+  type SecureConfigFilePolicy,
+} from "@tingrudeng/beta-runtime-core/runtime/secure-config-file.js";
 
 import type {
   GeminiBetaConfig,
@@ -67,6 +74,28 @@ export function resolveGeminiBetaConfigPaths(
   };
 }
 
+function getConfigPolicy(): SecureConfigFilePolicy {
+  return {
+    label: "Gemini beta config",
+    privateDirectory: resolveGeminiBetaConfigPaths().configDir,
+  };
+}
+
+export function inspectGeminiBetaConfigPermissions(
+  options: GeminiBetaConfigLoadOptions = {},
+) {
+  const paths = resolveGeminiBetaConfigPaths(options);
+  return inspectSecureConfigFile(paths.configPath, getConfigPolicy());
+}
+
+export function secureGeminiBetaConfigPermissions(
+  options: GeminiBetaConfigLoadOptions = {},
+) {
+  const paths = resolveGeminiBetaConfigPaths(options);
+  repairSecureConfigFilePermissions(paths.configPath, getConfigPolicy());
+  return paths;
+}
+
 export function createDefaultGeminiBetaConfig(
   input: GeminiBetaConfigInput = {},
   options: { cwd?: string } = {},
@@ -106,11 +135,10 @@ export function readGeminiBetaConfig(
   options: GeminiBetaConfigLoadOptions = {},
 ): GeminiBetaConfig | null {
   const { configPath } = resolveGeminiBetaConfigPaths(options);
-  if (!fs.existsSync(configPath)) {
+  const raw = readSecureConfigFile(configPath, getConfigPolicy());
+  if (raw === null) {
     return null;
   }
-
-  const raw = fs.readFileSync(configPath, "utf8");
   const parsed = JSON.parse(raw) as Partial<GeminiBetaConfig>;
   return normalizeGeminiBetaConfig(parsed, { cwd: path.dirname(configPath) });
 }
@@ -120,7 +148,10 @@ export function writeGeminiBetaConfig(
   options: GeminiBetaConfigLoadOptions = {},
 ): GeminiBetaConfigPaths {
   const paths = resolveGeminiBetaConfigPaths(options);
-  fs.mkdirSync(paths.configDir, { recursive: true });
-  fs.writeFileSync(paths.configPath, `${JSON.stringify(config, null, 2)}\n`);
+  writeSecureConfigFile(
+    paths.configPath,
+    `${JSON.stringify(config, null, 2)}\n`,
+    getConfigPolicy(),
+  );
   return paths;
 }

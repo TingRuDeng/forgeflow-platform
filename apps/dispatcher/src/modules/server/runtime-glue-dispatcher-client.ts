@@ -1,3 +1,16 @@
+import {
+  DispatcherHttpError,
+  DispatcherResponseError,
+  DispatcherTransportError,
+  getDispatcherAuthHeader,
+  readDispatcherHttpErrorMessage,
+  resolveProgressDeliveryPolicy,
+  retryHeartbeatDelivery,
+  retryProgressDelivery,
+  snapshotHeartbeatPayload,
+  snapshotProgressPayload,
+} from "@tingrudeng/beta-runtime-core";
+
 import type {
   DispatcherWorkerClient,
   WorkerRegistration,
@@ -10,12 +23,6 @@ import type {
 } from "./runtime-glue-types.js";
 
 const HEARTBEAT_TIMEOUT_MS = 5_000;
-const HEARTBEAT_MAX_RETRIES = 3;
-const HEARTBEAT_RETRY_DELAY_MS = 1_000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function createAbortError(message: string): Error {
   const error = new Error(message);
@@ -27,25 +34,6 @@ function throwIfAborted(signal: AbortSignal | undefined, message: string): void 
   if (signal?.aborted) {
     throw createAbortError(message);
   }
-}
-
-function sleepUntilAborted(ms: number, signal?: AbortSignal): Promise<void> {
-  if (!signal) {
-    return sleep(ms);
-  }
-  throwIfAborted(signal, "dispatcher retry aborted");
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(finish, ms);
-    function finish() {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }
-    function onAbort() {
-      clearTimeout(timer);
-      reject(createAbortError("dispatcher retry aborted"));
-    }
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }
 
 export interface DispatcherHttpClient extends DispatcherWorkerClient {
@@ -81,6 +69,7 @@ export function createDispatcherHttpClient(
   const baseUrl = options.dispatcherUrl.replace(/\/$/, "");
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const defaultTimeout = options.requestTimeoutMs ?? 10_000;
+  const progressDeliveryPolicy = resolveProgressDeliveryPolicy();
 
   async function call(
     method: string,
@@ -90,6 +79,7 @@ export function createDispatcherHttpClient(
   ): Promise<unknown> {
     const url = `${baseUrl}${pathname}`;
     throwIfAborted(callOptions.signal, `dispatcher request aborted: ${method} ${url}`);
+    const authHeader = getDispatcherAuthHeader();
     const timeoutMs = callOptions.timeout ?? defaultTimeout;
     const controller = new AbortController();
     let timedOut = false;
@@ -105,16 +95,29 @@ export function createDispatcherHttpClient(
         method,
         headers: {
           "content-type": "application/json",
-          ...getDispatcherAuthHeader(),
+          ...authHeader,
         },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
       const text = await response.text();
-      const json = text ? JSON.parse(text) : {};
+      let json: unknown = {};
+      if (text) {
+        try {
+          json = JSON.parse(text);
+        } catch (error) {
+          if (response.ok) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new DispatcherResponseError(
+              `dispatcher response was not valid JSON: ${method} ${url} - ${message}`,
+            );
+          }
+        }
+      }
       if (!response.ok) {
-        throw new Error(
-          json.error || text || `dispatcher request failed: ${method} ${url} -> ${response.status}`,
+        throw new DispatcherHttpError(
+          readDispatcherHttpErrorMessage(json, text, `HTTP ${response.status}`),
+          response.status,
         );
       }
       return json;
@@ -122,50 +125,28 @@ export function createDispatcherHttpClient(
       if (callOptions.signal?.aborted) {
         throw createAbortError(`dispatcher request aborted: ${method} ${url}`);
       }
+      if (error instanceof DispatcherHttpError) {
+        throw new DispatcherHttpError(
+          `dispatcher request failed: ${method} ${url} - ${error.message}`,
+          error.status,
+        );
+      }
+      if (error instanceof DispatcherResponseError) {
+        throw error;
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (timedOut) {
-        throw new Error(`dispatcher request failed: ${method} ${url} - timed out after ${timeoutMs}ms`);
+        throw new DispatcherTransportError(
+          `dispatcher request failed: ${method} ${url} - timed out after ${timeoutMs}ms`,
+        );
       }
-      throw new Error(`dispatcher request failed: ${method} ${url} - ${errorMessage}`);
+      throw new DispatcherTransportError(
+        `dispatcher request failed: ${method} ${url} - ${errorMessage}`,
+      );
     } finally {
       clearTimeout(timeoutId);
       callOptions.signal?.removeEventListener("abort", onAbort);
     }
-  }
-
-  async function callWithRetry(
-    method: string,
-    pathname: string,
-    body: unknown,
-    callOptions: {
-      timeout?: number;
-      maxRetries?: number;
-      retryDelayMs?: number;
-      signal?: AbortSignal;
-    } = {},
-  ): Promise<unknown> {
-    const maxRetries = callOptions.maxRetries ?? 0;
-    const retryDelayMs = callOptions.retryDelayMs ?? 1_000;
-    let lastError: unknown = null;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      throwIfAborted(callOptions.signal, `dispatcher request aborted: ${method} ${baseUrl}${pathname}`);
-      try {
-        return await call(method, pathname, body, {
-          timeout: callOptions.timeout,
-          signal: callOptions.signal,
-        });
-      } catch (error) {
-        if (callOptions.signal?.aborted) {
-          throw createAbortError(`dispatcher request aborted: ${method} ${baseUrl}${pathname}`);
-        }
-        lastError = error;
-        if (attempt < maxRetries) {
-          await sleepUntilAborted(retryDelayMs, callOptions.signal);
-        }
-      }
-    }
-    throw lastError;
   }
 
   return {
@@ -176,17 +157,19 @@ export function createDispatcherHttpClient(
     },
 
     heartbeat(workerId: string, payload: HeartbeatPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
-      return callWithRetry(
-        "POST",
-        `/api/workers/${encodeURIComponent(workerId)}/heartbeat`,
-        payload,
-        {
-          timeout: HEARTBEAT_TIMEOUT_MS,
-          maxRetries: HEARTBEAT_MAX_RETRIES,
-          retryDelayMs: HEARTBEAT_RETRY_DELAY_MS,
-          signal: requestOptions?.signal,
-        },
-      ) as Promise<unknown>;
+      const stablePayload = snapshotHeartbeatPayload(payload);
+      return retryHeartbeatDelivery({
+        signal: requestOptions?.signal,
+        send: () => call(
+          "POST",
+          `/api/workers/${encodeURIComponent(workerId)}/heartbeat`,
+          stablePayload,
+          {
+            timeout: HEARTBEAT_TIMEOUT_MS,
+            signal: requestOptions?.signal,
+          },
+        ),
+      });
     },
 
     getAssignedTask(workerId: string, requestOptions?: DispatcherRequestOptions): Promise<AssignedTaskResponse> {
@@ -217,12 +200,17 @@ export function createDispatcherHttpClient(
     },
 
     reportProgress(workerId: string, payload: ProgressTaskPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
-      return call(
-        "POST",
-        `/api/workers/${encodeURIComponent(workerId)}/progress`,
-        payload,
-        { signal: requestOptions?.signal },
-      ) as Promise<unknown>;
+      const stablePayload = snapshotProgressPayload(payload);
+      return retryProgressDelivery({
+        ...progressDeliveryPolicy,
+        signal: requestOptions?.signal,
+        send: () => call(
+          "POST",
+          `/api/workers/${encodeURIComponent(workerId)}/progress`,
+          stablePayload,
+          { signal: requestOptions?.signal },
+        ),
+      });
     },
 
     submitResult(workerId: string, payload: SubmitResultPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
@@ -259,6 +247,7 @@ export function createDispatcherStateDirClientFactory(
   options: CreateDispatcherStateDirClientOptions,
 ): (stateDir: string) => DispatcherStateDirClient {
   const { handleRequest } = options;
+  const progressDeliveryPolicy = resolveProgressDeliveryPolicy();
 
   return (stateDir: string): DispatcherStateDirClient => {
     return {
@@ -274,14 +263,22 @@ export function createDispatcherStateDirClientFactory(
       },
 
       async heartbeat(workerId: string, payload: HeartbeatPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
-        throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
-        return readStateDirResponseJson(await handleRequest({
-          stateDir,
-          method: "POST",
-          pathname: `/api/workers/${encodeURIComponent(workerId)}/heartbeat`,
-          body: payload,
-          internalCall: true,
-        }));
+        const stablePayload = snapshotHeartbeatPayload(payload);
+        return retryHeartbeatDelivery({
+          signal: requestOptions?.signal,
+          send: async () => {
+            throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
+            const response = await handleRequest({
+              stateDir,
+              method: "POST",
+              pathname: `/api/workers/${encodeURIComponent(workerId)}/heartbeat`,
+              body: stablePayload,
+              internalCall: true,
+            });
+            throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
+            return readStateDirResponseJson(response);
+          },
+        });
       },
 
       async getAssignedTask(workerId: string, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
@@ -317,14 +314,23 @@ export function createDispatcherStateDirClientFactory(
       },
 
       async reportProgress(workerId: string, payload: ProgressTaskPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
-        throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
-        return readStateDirResponseJson(await handleRequest({
-          stateDir,
-          method: "POST",
-          pathname: `/api/workers/${encodeURIComponent(workerId)}/progress`,
-          body: payload,
-          internalCall: true,
-        }));
+        const stablePayload = snapshotProgressPayload(payload);
+        return retryProgressDelivery({
+          ...progressDeliveryPolicy,
+          signal: requestOptions?.signal,
+          send: async () => {
+            throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
+            const response = await handleRequest({
+              stateDir,
+              method: "POST",
+              pathname: `/api/workers/${encodeURIComponent(workerId)}/progress`,
+              body: stablePayload,
+              internalCall: true,
+            });
+            throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
+            return readStateDirResponseJson(response);
+          },
+        });
       },
 
       async submitResult(workerId: string, payload: SubmitResultPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
@@ -352,18 +358,12 @@ export function createDispatcherStateDirClientFactory(
   };
 }
 
-function getDispatcherAuthHeader(): Record<string, string> {
-  const token = process.env.DISPATCHER_WORKER_TOKEN || process.env.DISPATCHER_API_TOKEN;
-  if (!token) return {};
-  return { Authorization: `Bearer ${token}` };
-}
-
 function readStateDirResponseJson(response: { status?: number; json: unknown }): unknown {
   if (response.status !== undefined && response.status >= 400) {
     const error = response.json && typeof response.json === "object" && "error" in response.json
       ? String((response.json as { error?: unknown }).error)
       : `dispatcher state-dir request failed: ${response.status}`;
-    throw new Error(error);
+    throw new DispatcherHttpError(error, response.status);
   }
   return response.json;
 }

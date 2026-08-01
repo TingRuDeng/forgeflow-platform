@@ -5,6 +5,9 @@
 Before publishing:
 
 ```bash
+pnpm --filter @tingrudeng/beta-runtime-core typecheck
+pnpm --filter @tingrudeng/beta-runtime-core test
+pnpm --filter @tingrudeng/beta-runtime-core build
 pnpm --filter @tingrudeng/worker-review-orchestrator-cli typecheck
 pnpm --filter @tingrudeng/worker-review-orchestrator-cli test
 pnpm --filter @tingrudeng/worker-review-orchestrator-cli build
@@ -12,6 +15,12 @@ git diff --check
 ```
 
 If the package behavior depends on live dispatcher flows, also run the relevant focused dispatcher tests from the repository root.
+
+This CLI imports `@tingrudeng/beta-runtime-core/runtime/secure-config-file.js`. When that
+subpath or its behavior changes, publish the matching `beta-runtime-core` version first,
+then prepare the CLI version pull request. The release preflight rejects an unpublished
+workspace dependency version, but the dependency order must still be preserved across the
+separate one-package release merges.
 
 ## Publish
 

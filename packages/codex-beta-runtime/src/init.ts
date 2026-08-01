@@ -3,6 +3,7 @@ import {
   normalizeCodexBetaConfig,
   readCodexBetaConfig,
   resolveCodexBetaConfigPaths,
+  secureCodexBetaConfigPermissions,
   writeCodexBetaConfig,
 } from "./config.js";
 
@@ -16,6 +17,7 @@ export interface CodexBetaInitResult {
 
 export function initCodexBetaConfig(options: CodexBetaInitOptions = {}): CodexBetaInitResult {
   const paths = resolveCodexBetaConfigPaths(options);
+  secureCodexBetaConfigPermissions({ configPath: paths.configPath });
   const existing = readCodexBetaConfig({ configPath: paths.configPath });
 
   if (existing && !options.overwrite) {

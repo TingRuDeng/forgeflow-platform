@@ -877,6 +877,7 @@ function createHeartbeatController(
 ) {
   const timers = {
     interval: null as ReturnType<typeof setInterval> | null,
+    activeRequest: null as AbortController | null,
     mode: "idle",
   };
   const setIntervalImpl = options.setIntervalImpl || setInterval;
@@ -886,13 +887,25 @@ function createHeartbeatController(
     if (timers.interval) {
       clearIntervalImpl(timers.interval);
     }
+    timers.activeRequest?.abort();
     timers.mode = mode;
     const intervalMs = mode === "high" ? HIGH_HEARTBEAT_INTERVAL_MS : IDLE_HEARTBEAT_INTERVAL_MS;
     timers.interval = setIntervalImpl(async () => {
+      if (timers.activeRequest) {
+        return;
+      }
+      const controller = new AbortController();
+      timers.activeRequest = controller;
       try {
-        await dispatcherClient.heartbeat(workerId);
+        await dispatcherClient.heartbeat(workerId, { signal: controller.signal });
       } catch (error) {
-        logger?.warn?.(`[trae-automation-worker] heartbeat failed: ${(error as Error).message}`);
+        if (!controller.signal.aborted) {
+          logger?.warn?.(`[trae-automation-worker] heartbeat failed: ${(error as Error).message}`);
+        }
+      } finally {
+        if (timers.activeRequest === controller) {
+          timers.activeRequest = null;
+        }
       }
     }, intervalMs);
   }
@@ -908,6 +921,8 @@ function createHeartbeatController(
       clearIntervalImpl(timers.interval);
       timers.interval = null;
     }
+    timers.activeRequest?.abort();
+    timers.activeRequest = null;
   }
 
   return { start, promoteToIdle, stop };
@@ -946,6 +961,12 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
 
   if (!dispatcherClient || !automationClient || !workerId || !repoDir) {
     throw new Error("dispatcherClient, automationClient, workerId, and repoDir are required");
+  }
+
+  function reportProgress(taskId: string, message: string, signal?: AbortSignal) {
+    return signal
+      ? dispatcherClient.reportProgress(taskId, message, workerId, { signal })
+      : dispatcherClient.reportProgress(taskId, message, workerId);
   }
 
   async function emitPhaseEvent(
@@ -1105,10 +1126,10 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
             break;
           }
 
-          await dispatcherClient.reportProgress(
+          await reportProgress(
             task.task_id,
             `Push reported, waiting for remote SHA verification (${attempt}/${DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS}): ${remoteReason}`,
-            workerId,
+            signal,
           );
           await sleep(DEFAULT_REMOTE_SHA_RETRY_MS);
         }
@@ -1308,10 +1329,10 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       return null;
     }
 
-    await dispatcherClient.reportProgress(
+    await reportProgress(
       task.task_id,
       "Task ID mismatch detected, checking current session response",
-      workerId,
+      signal,
     );
     const session = await automationClient.getSession(sessionId);
     const sessionData = (session as {
@@ -1344,10 +1365,10 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       return null;
     }
 
-    await dispatcherClient.reportProgress(
+    await reportProgress(
       task.task_id,
       "Session completed, extracting stored response",
-      workerId,
+      signal,
     );
     const finalStatus = await submitParsedResult(task, parsed, sessionId, signal);
     return {
@@ -1507,7 +1528,16 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
         task.execution_dir = repoDir;
         await emitPhaseEvent("start_task_start", {}, task.task_id);
         try {
-          await dispatcherClient.startTask(workerId, task.task_id, buildAttemptLeaseInput(task));
+          if (signal) {
+            await dispatcherClient.startTask(
+              workerId,
+              task.task_id,
+              buildAttemptLeaseInput(task),
+              { signal },
+            );
+          } else {
+            await dispatcherClient.startTask(workerId, task.task_id, buildAttemptLeaseInput(task));
+          }
           await emitPhaseEvent("start_task_done", {}, task.task_id);
         } catch (error) {
           startTaskFailed = true;
@@ -1517,7 +1547,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           throw error;
         }
         heartbeat.start("high");
-        await dispatcherClient.reportProgress(task.task_id, "Trae automation worker started task", workerId);
+        await reportProgress(task.task_id, "Trae automation worker started task", signal);
       } catch (error) {
         const normalizedError = error instanceof Error ? error : new Error(String(error));
         const summary = classifyPreStartFailure(normalizedError);
@@ -1525,7 +1555,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           await emitPhaseEvent("workspace_prepare_failed", { message: summary }, task.task_id);
         }
         try {
-          await dispatcherClient.reportProgress(task.task_id, `Task bootstrap failed: ${summary}`, workerId);
+          await reportProgress(task.task_id, `Task bootstrap failed: ${summary}`, signal);
         } catch {
           // progress reporting failure should not block terminal failure submission
         }
@@ -1547,10 +1577,10 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
       const startedAt = Date.now();
       try {
         await emitPhaseEvent("readiness_wait_start", {}, task.task_id);
-        await dispatcherClient.reportProgress(
+        await reportProgress(
           task.task_id,
           "Trae automation gateway is waiting for task target readiness",
-          workerId,
+          signal,
         );
         try {
           await waitForAutomationGatewayReady({
@@ -1569,7 +1599,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           throw error;
         }
         await emitPhaseEvent("readiness_wait_done", {}, task.task_id);
-        await dispatcherClient.reportProgress(task.task_id, "Trae automation gateway is preparing session", workerId);
+        await reportProgress(task.task_id, "Trae automation gateway is preparing session", signal);
         const continuationMode = (task as WorkerRuntimeTask & { continuationMode?: string; continuation_mode?: string }).continuationMode
           || (task as WorkerRuntimeTask & { continuation_mode?: string }).continuation_mode;
         const explicitChatMode = (task as WorkerRuntimeTask & { chatMode?: string; chat_mode?: string }).chatMode
@@ -1601,7 +1631,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           chatMode,
         });
 
-        await dispatcherClient.reportProgress(task.task_id, "Trae automation gateway is sending prompt", workerId);
+        await reportProgress(task.task_id, "Trae automation gateway is sending prompt", signal);
         const hardTimeoutMs = Math.min(DEFAULT_HARD_CHAT_TIMEOUT_MS, MAX_HARD_CHAT_TIMEOUT_MS);
         const softTimeoutMs = Math.min(DEFAULT_SOFT_CHAT_TIMEOUT_MS, hardTimeoutMs);
         const chatTimeoutMs = softTimeoutMs + DEFAULT_CHAT_REQUEST_TIMEOUT_BUFFER_MS;
@@ -1639,7 +1669,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           });
           const parsed = parseFinalReport(finalText);
           if (isPlaceholderTaskId(parsed.taskId)) {
-            await dispatcherClient.reportProgress(task.task_id, "Template placeholder detected in final report, waiting for real response", workerId);
+            await reportProgress(task.task_id, "Template placeholder detected in final report, waiting for real response", signal);
             throw new Error("Response appears to be a template echo; waiting for real response");
           }
           if (!isEquivalentReportedTaskId(task.task_id, parsed.taskId)) {
@@ -1676,10 +1706,10 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
           }
 
           if (!sessionId) {
-            await dispatcherClient.reportProgress(
+            await reportProgress(
               task.task_id,
               "Chat timeout but session id is missing; cannot poll session status",
-              workerId,
+              signal,
             );
             throw createMissingSessionIdRecoveryError(chatError);
           }
@@ -1689,7 +1719,7 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
             throw chatError;
           }
 
-          await dispatcherClient.reportProgress(task.task_id, "Chat timeout, checking session status", workerId);
+          await reportProgress(task.task_id, "Chat timeout, checking session status", signal);
           await emitPhaseEvent("session_recovery_start", { sessionId }, task.task_id);
 
           let sessionStatus = await pollSessionStatus(
@@ -1702,10 +1732,10 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
             if (sessionStatus.status === "completed") {
               const sessionResponseText = (sessionStatus as { responseText?: string | null }).responseText;
               if (sessionResponseText && typeof sessionResponseText === "string" && sessionResponseText.trim()) {
-                await dispatcherClient.reportProgress(
+                await reportProgress(
                   task.task_id,
                   "Session completed, extracting stored response",
-                  workerId
+                  signal,
                 );
                 await emitPhaseEvent("session_recovery_done", {
                   sessionId,
@@ -1748,10 +1778,10 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
                 sessionId,
                 idleDuration,
               });
-              await dispatcherClient.reportProgress(
+              await reportProgress(
                 task.task_id,
                 `Session activity stopped (idle for ${Math.round(idleDuration / 1000)}s), checking artifacts`,
-                workerId
+                signal,
               );
               break;
             }
@@ -1767,10 +1797,10 @@ export function createTraeAutomationWorkerRuntime(options: WorkerRuntimeOptions)
                 sessionId,
                 remainingMs,
               });
-              await dispatcherClient.reportProgress(
+              await reportProgress(
                 task.task_id,
                 "Session still active, extending soft timeout by 5 minutes",
-                workerId
+                signal,
               );
             }
 

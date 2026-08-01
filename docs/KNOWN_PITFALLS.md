@@ -275,3 +275,25 @@ Shadow write status is persisted to `runtime-state-shadow-status.json` and expos
 Do not treat a green SQLite write as proof that Postgres / queue shadow stores are healthy; check `/api/dr/status.shadowWrite` and `/api/dr/status.shadowReconciler` before shadow rollout or DR cutover decisions.
 
 Shadow projection / queue synchronization is ordered by the persisted SQLite snapshot revision. Replaying an older snapshot is a no-op, and reusing one revision with different content is a conflict; do not fabricate `sourceRevision` values in repair scripts. PostgreSQL primary writes also use a separate storage revision CAS. A `409 runtime_state_revision_conflict` means another writer committed first: reload the latest state and reapply the intended mutation instead of retrying the stale full snapshot.
+
+## 18. Local config files that contain dispatcher tokens must remain owner-only
+
+These local configuration paths can persist a dispatcher token in plaintext:
+
+- `~/.forgeflow-dispatcher/config.json` for the published dispatcher package
+- `~/.forgeflow-dispatcher.json` or a `FORGEFLOW_DISPATCHER_CONFIG_PATH` override for the source dispatcher
+- `~/.forgeflow-trae-beta/config.json`
+- `~/.forgeflow-review-orchestrator.json`
+- `.forgeflow-console.json` or `~/.forgeflow-console.json`
+
+Do not pass a persisted token through `--token`: process arguments and shell history can expose it. The published dispatcher, Trae, review orchestrator, and Console configuration CLIs accept token input through `--token-stdin` instead. The source dispatcher no longer has a second config writer; prefer environment variables for that entrypoint. An explicitly defined dispatcher token must be non-empty and have no surrounding whitespace; invalid higher-priority environment input fails closed instead of falling back to a lower-priority environment or config token.
+
+These secure-config entrypoints support Unix-like platforms (macOS / Linux) only and fail closed elsewhere. Files must not grant group or other access. Dedicated default config directories remain owner-only, and every directory ancestor must prevent another user from replacing the next path component; a sticky directory is accepted only when its parent and child owners are trusted. Writes use an owner-only temporary file in the same directory and atomic replacement. Runtime reads reject symbolic links in the config file or user-controlled directory path, compare the opened descriptor with the inspected file identity, and read from that same descriptor; do not bypass the check or copy the token into another repository file.
+
+Use the owning configuration command to repair a legacy file without dropping its saved token: `forgeflow-dispatcher init`, `forgeflow-trae-beta init`, `forgeflow-review-orchestrator init`, or the Console `config:set` command. For the source dispatcher's read-only config, run `chmod 600 <config-file>` and remove group / other replacement rights from the full directory ancestry. The Console project-local file is ignored by Git, but ignore rules are not a substitute for checking staged changes before commit.
+
+## 19. Codex / Gemini config is token-free, but still executable configuration
+
+`~/.forgeflow-codex-beta/config.json` and `~/.forgeflow-gemini-beta/config.json` do not persist dispatcher credentials. Worker authentication remains environment-only through `DISPATCHER_WORKER_TOKEN`, and token-shaped CLI arguments are rejected instead of being silently ignored.
+
+Do not treat these files as harmless preferences: they control the repository and provider binary used by an unattended worker. They share `@tingrudeng/beta-runtime-core/runtime/secure-config-file` with the packaged dispatcher and Trae runtime, including owner-only default paths, descriptor identity checks, user-controlled directory symlink rejection and atomic writes. Rerun the matching provider `init` command to repair legacy permissions.

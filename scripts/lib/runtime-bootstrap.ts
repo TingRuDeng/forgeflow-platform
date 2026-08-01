@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, type StdioOptions } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 function resolveRepoRoot(): string {
@@ -20,18 +20,24 @@ function newestMtimeMs(targetPath: string): number {
     .reduce((max, current) => Math.max(max, current), stat.mtimeMs);
 }
 
-function ensureDistFile(input: { distPath: string; buildCommand: string; repoRoot: string; sourceDir?: string }): void {
+function ensureDistFile(input: {
+  distPath: string;
+  buildCommand: string;
+  repoRoot: string;
+  sourceDir?: string;
+  stdio?: StdioOptions;
+}): void {
   const distMtime = fs.existsSync(input.distPath) ? fs.statSync(input.distPath).mtimeMs : 0;
   if (distMtime > 0 && (!input.sourceDir || newestMtimeMs(input.sourceDir) <= distMtime)) {
     return;
   }
   execSync(input.buildCommand, {
     cwd: input.repoRoot,
-    stdio: "inherit",
+    stdio: input.stdio ?? "inherit",
   });
 }
 
-function ensureBetaRuntimeCoreDist(relativeDistPath: string): string {
+function ensureBetaRuntimeCoreDist(relativeDistPath: string, stdio?: StdioOptions): string {
   const repoRoot = resolveRepoRoot();
   const distPath = path.join(repoRoot, "packages/beta-runtime-core/dist", relativeDistPath);
   ensureDistFile({
@@ -39,6 +45,7 @@ function ensureBetaRuntimeCoreDist(relativeDistPath: string): string {
     distPath,
     buildCommand: "pnpm --filter @tingrudeng/beta-runtime-core build",
     sourceDir: path.join(repoRoot, "packages/beta-runtime-core/src"),
+    stdio,
   });
   return distPath;
 }
@@ -72,6 +79,35 @@ export async function importWorkerDaemonRuntime<T>(): Promise<T> {
 export async function importWorkerAssignmentRuntime<T>(): Promise<T> {
   const distPath = ensureBetaRuntimeCoreDist("index.js");
   return import(pathToFileURL(distPath).href) as Promise<T>;
+}
+
+export interface DispatcherDeliveryRuntimeModule {
+  getDispatcherAuthHeader: () => Record<string, string>;
+  retryHeartbeatDelivery: <T>(input: {
+    maxAttempts?: number;
+    retryDelayMs?: number;
+    send: (attempt: number) => Promise<T>;
+    signal?: AbortSignal;
+  }) => Promise<T>;
+  snapshotHeartbeatPayload: <T>(payload: T) => T;
+  resolveProgressDeliveryPolicy: () => { maxAttempts: number; retryDelayMs: number };
+  retryProgressDelivery: <T>(input: {
+    maxAttempts: number;
+    retryDelayMs: number;
+    send: (attempt: number) => Promise<T>;
+    signal?: AbortSignal;
+  }) => Promise<T>;
+  snapshotProgressPayload: <T>(payload: T) => T;
+}
+
+export async function importDispatcherDeliveryRuntime(
+  options: { quiet?: boolean } = {},
+): Promise<DispatcherDeliveryRuntimeModule> {
+  const stdio: StdioOptions | undefined = options.quiet
+    ? ["ignore", "ignore", "inherit"]
+    : undefined;
+  const distPath = ensureBetaRuntimeCoreDist("index.js", stdio);
+  return import(pathToFileURL(distPath).href) as Promise<DispatcherDeliveryRuntimeModule>;
 }
 
 export async function importDispatcherWorkerRuntimeFactories<T>(): Promise<T> {

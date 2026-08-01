@@ -11,7 +11,13 @@ ForgeFlow beta runtime 的共享 worker daemon 与 task worktree 控制逻辑。
 
 ## Dispatcher 协议
 
-共享 dispatcher client 提供 claim/start/progress/result 主链。progress 使用 `POST /api/workers/:workerId/progress`，携带 claim 返回的完整 v1 attempt envelope，以及每条逻辑更新唯一的 `progressId`；普通 telemetry endpoint 不用于写入 progress。
+共享 dispatcher client 提供 claim/start/progress/result 主链。`runtime/dispatcher-auth` 统一执行 worker token 优先级和非空 / 无首尾空白校验；高优先级变量已定义但无效时 fail closed，不回退其他 token。generic HTTP / state-dir 与 Trae heartbeat client 复用 `heartbeat-delivery` 和共享 dispatcher retry 内核，固定最多尝试 4 次、间隔 1 秒，并在重试间复用同一 payload；网络/超时、`408`、`425`、`429` 与 `5xx` 会重试，普通 `4xx` 立即失败。
+
+progress 使用 `POST /api/workers/:workerId/progress`，携带 claim 返回的完整 v1 attempt envelope，以及每条逻辑更新唯一的 `progressId`；普通 telemetry endpoint 不用于写入 progress。同一次逻辑更新会在所有网络投递中复用原 payload 和 `progressId`；它使用同一瞬时错误分类，默认总计最多尝试 3 次、间隔 1 秒。`WORKER_PROGRESS_MAX_ATTEMPTS` 与 `WORKER_PROGRESS_RETRY_DELAY_MS` 可覆盖 progress 默认值；调用方 `AbortSignal` 会中止 heartbeat / progress 请求或重试等待。
+
+## 本地配置安全
+
+`runtime/secure-config-file` 提供共享的 Node-only 配置路径安全原语，供 dispatcher、provider runtime、Console 的 Node 配置助手与 review orchestrator 复用。它只负责目录链 symlink、可替换目录祖先、文件类型 / mode、打开前后 identity、同一 fd 读取、旧权限修复及同目录原子写，不接管各消费者的 schema、默认路径或认证策略。它只支持 Unix-like 平台（macOS / Linux），会拒绝 group / other 可替换路径组件并在其他平台 fail closed。发布含该新子路径的消费者前，必须先发布对应版本的 `beta-runtime-core`。
 
 ## 执行隔离
 

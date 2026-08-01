@@ -1,9 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
-
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const repoRoot = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
@@ -24,6 +22,7 @@ function makeTempDir() {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const tempDir of tempRoots.splice(0)) {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -80,28 +79,85 @@ describe("dispatcher-config", () => {
     expect(() => mod.loadDispatcherConfig()).toThrow(/insecure dispatcher config permissions/i);
   });
 
-  it("writes dispatcher CLI config with private permissions", () => {
+  it("rejects symbolic-link dispatcher config files", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const tempDir = makeTempDir();
+    const targetPath = path.join(tempDir, "target.json");
+    const configPath = path.join(tempDir, ".forgeflow-dispatcher.json");
+    fs.writeFileSync(targetPath, JSON.stringify({ authMode: "token", apiToken: "secret" }), { mode: 0o600 });
+    fs.symlinkSync(targetPath, configPath);
+    process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH = configPath;
+
+    const mod = await import(configModulePath);
+
+    expect(() => mod.loadDispatcherConfig()).toThrow(/symbolic link/i);
+  });
+
+  it("rejects dispatcher config directories writable by group or others", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const tempDir = makeTempDir();
+    fs.chmodSync(tempDir, 0o777);
+    const configPath = path.join(tempDir, ".forgeflow-dispatcher.json");
+    fs.writeFileSync(configPath, JSON.stringify({ authMode: "token", apiToken: "secret" }), { mode: 0o600 });
+    process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH = configPath;
+
+    const mod = await import(configModulePath);
+
+    expect(() => mod.loadDispatcherConfig()).toThrow(/config directory.*writable/i);
+  });
+
+  it("rejects symbolic links in dispatcher config directory paths", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const tempDir = makeTempDir();
+    const targetDir = path.join(tempDir, "target", "config");
+    const linkedParent = path.join(tempDir, "linked-parent");
+    fs.mkdirSync(targetDir, { recursive: true, mode: 0o700 });
+    fs.symlinkSync(path.join(tempDir, "target"), linkedParent, "dir");
+    const configPath = path.join(linkedParent, "config", ".forgeflow-dispatcher.json");
+    fs.writeFileSync(
+      path.join(targetDir, ".forgeflow-dispatcher.json"),
+      JSON.stringify({ authMode: "token", apiToken: "secret" }),
+      { mode: 0o600 },
+    );
+    process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH = configPath;
+
+    const mod = await import(configModulePath);
+
+    expect(() => mod.loadDispatcherConfig()).toThrow(/directory path.*symbolic link/i);
+  });
+
+  it("rejects dispatcher config replacement between inspection and file open", async () => {
     const tempDir = makeTempDir();
     const configPath = path.join(tempDir, ".forgeflow-dispatcher.json");
-    const result = spawnSync(process.execPath, [
-      path.join(repoRoot, "apps/dispatcher/scripts/config-cli.mjs"),
-      "--mode",
-      "token",
-      "--token",
-      "secret",
-    ], {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        FORGEFLOW_DISPATCHER_CONFIG_PATH: configPath,
-      },
+    const canonicalPath = path.join(fs.realpathSync.native(tempDir), path.basename(configPath));
+    const replacementPath = path.join(tempDir, "replacement.json");
+    fs.writeFileSync(configPath, JSON.stringify({ authMode: "token", apiToken: "original" }), { mode: 0o600 });
+    fs.writeFileSync(replacementPath, JSON.stringify({ authMode: "token", apiToken: "replacement" }), { mode: 0o600 });
+    process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH = configPath;
+    const mod = await import(configModulePath);
+
+    const originalOpenSync = fs.openSync.bind(fs);
+    let replaced = false;
+    vi.spyOn(fs, "openSync").mockImplementation((file, flags, mode) => {
+      if (!replaced && path.resolve(String(file)) === path.resolve(canonicalPath)) {
+        replaced = true;
+        fs.renameSync(replacementPath, canonicalPath);
+      }
+      return mode === undefined
+        ? originalOpenSync(file, flags)
+        : originalOpenSync(file, flags, mode);
     });
 
-    expect(result.status).toBe(0);
-    expect(fs.existsSync(configPath)).toBe(true);
-    if (process.platform !== "win32") {
-      expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-    }
+    expect(() => mod.loadDispatcherConfig()).toThrow(/changed during security validation/i);
   });
 
   it("rejects invalid auth mode values instead of silently accepting them", async () => {
@@ -117,6 +173,23 @@ describe("dispatcher-config", () => {
     const mod = await import(configModulePath);
 
     expect(() => mod.getDispatcherAuthMode()).toThrow(/invalid DISPATCHER_AUTH_MODE/i);
+  });
+
+  it("rejects invalid dispatcher API tokens from config or environment", async () => {
+    const tempDir = makeTempDir();
+    const configPath = path.join(tempDir, ".forgeflow-dispatcher.json");
+    fs.writeFileSync(configPath, JSON.stringify({ authMode: "token", apiToken: 42 }), { mode: 0o600 });
+    process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH = configPath;
+    const mod = await import(configModulePath);
+
+    expect(() => mod.getDispatcherApiToken()).toThrow(/config apiToken must be a non-empty string/i);
+
+    fs.writeFileSync(configPath, JSON.stringify({ authMode: "token", apiToken: "valid-token" }), { mode: 0o600 });
+    process.env.DISPATCHER_API_TOKEN = " token-with-spaces ";
+    expect(() => mod.getDispatcherApiToken()).toThrow(/DISPATCHER_API_TOKEN must be a non-empty string/i);
+
+    process.env.DISPATCHER_API_TOKEN = "";
+    expect(() => mod.getDispatcherApiToken()).toThrow(/DISPATCHER_API_TOKEN must be a non-empty string/i);
   });
 
   it("loads validated worker-scoped tokens from the environment", async () => {

@@ -24,10 +24,10 @@ function ensureDistFile(input) {
     }
     execSync(input.buildCommand, {
         cwd: input.repoRoot,
-        stdio: "inherit",
+        stdio: input.stdio ?? "inherit",
     });
 }
-function ensureBetaRuntimeCoreDist(relativeDistPath) {
+function ensureBetaRuntimeCoreDist(relativeDistPath, stdio) {
     const repoRoot = resolveRepoRoot();
     const distPath = path.join(repoRoot, "packages/beta-runtime-core/dist", relativeDistPath);
     ensureDistFile({
@@ -35,6 +35,7 @@ function ensureBetaRuntimeCoreDist(relativeDistPath) {
         distPath,
         buildCommand: "pnpm --filter @tingrudeng/beta-runtime-core build",
         sourceDir: path.join(repoRoot, "packages/beta-runtime-core/src"),
+        stdio,
     });
     return distPath;
 }
@@ -62,6 +63,13 @@ export async function importWorkerDaemonRuntime() {
 }
 export async function importWorkerAssignmentRuntime() {
     const distPath = ensureBetaRuntimeCoreDist("index.js");
+    return import(pathToFileURL(distPath).href);
+}
+export async function importDispatcherDeliveryRuntime(options = {}) {
+    const stdio = options.quiet
+        ? ["ignore", "ignore", "inherit"]
+        : undefined;
+    const distPath = ensureBetaRuntimeCoreDist("index.js", stdio);
     return import(pathToFileURL(distPath).href);
 }
 export async function importDispatcherWorkerRuntimeFactories() {

@@ -187,6 +187,11 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
     index += 1;
   }
 
+  const credentialOptions = ["token", "tokenStdin", "dispatcherToken", "dispatcherTokenStdin", "apiToken", "workerToken"];
+  if (credentialOptions.some((key) => options[key] !== undefined)) {
+    throw new Error("dispatcher credentials are environment-only for Codex workers; set DISPATCHER_WORKER_TOKEN instead of passing token arguments");
+  }
+
   if (!["init", "doctor", "start", "status", "stop", "update", "version"].includes(command)) {
     throw new Error(`unknown command: ${command}`);
   }

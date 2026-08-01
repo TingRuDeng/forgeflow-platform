@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
+
+import {
+  readSecureConfigFile,
+  repairSecureConfigFilePermissions,
+  writeSecureConfigFile,
+  type SecureConfigFilePolicy,
+} from "@tingrudeng/beta-runtime-core/runtime/secure-config-file.js";
 
 import { CONFIG_DIR, DEFAULT_CONFIG_PATH, DEFAULT_STATE_DIR } from "./paths.ts";
 
@@ -16,8 +22,19 @@ export interface DispatcherRuntimeConfig {
   apiToken?: string;
 }
 
+const CONFIG_POLICY: SecureConfigFilePolicy = {
+  label: "dispatcher config",
+  privateDirectory: CONFIG_DIR,
+};
+
+function assertValidApiToken(value: unknown): asserts value is string {
+  if (typeof value !== "string" || !value.trim() || value !== value.trim()) {
+    throw new Error("dispatcher config apiToken must be a non-empty string without surrounding whitespace");
+  }
+}
+
 export function getConfigPath() {
-  return process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH || DEFAULT_CONFIG_PATH;
+  return path.resolve(process.env.FORGEFLOW_DISPATCHER_CONFIG_PATH || DEFAULT_CONFIG_PATH);
 }
 
 export function buildDefaultConfig(): DispatcherRuntimeConfig {
@@ -31,38 +48,29 @@ export function buildDefaultConfig(): DispatcherRuntimeConfig {
   };
 }
 
-function assertSecureConfigFilePermissions(configPath: string): void {
-  if (process.platform === "win32") {
-    return;
-  }
-
-  if ((fs.statSync(configPath).mode & 0o077) !== 0) {
-    throw new Error(
-      `insecure dispatcher config permissions for ${configPath} (expected 600). Fix: chmod 600 ${configPath}`,
-    );
-  }
+export function secureConfigPermissions(): string {
+  return repairSecureConfigFilePermissions(getConfigPath(), CONFIG_POLICY);
 }
 
 export function loadConfig(): DispatcherRuntimeConfig {
-  const configPath = getConfigPath();
-  if (!fs.existsSync(configPath)) {
+  const content = readSecureConfigFile(getConfigPath(), CONFIG_POLICY);
+  if (content === null) {
     return buildDefaultConfig();
   }
-
-  assertSecureConfigFilePermissions(configPath);
-  const raw = JSON.parse(fs.readFileSync(configPath, "utf8")) as Partial<DispatcherRuntimeConfig>;
-  return {
+  const raw = JSON.parse(content) as Partial<DispatcherRuntimeConfig>;
+  const config = {
     ...buildDefaultConfig(),
     ...raw,
   };
+  assertValidApiToken(config.apiToken);
+  return config;
 }
 
 export function saveConfig(config: DispatcherRuntimeConfig): string {
-  const configPath = getConfigPath();
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-  if (process.platform !== "win32") {
-    fs.chmodSync(configPath, 0o600);
-  }
-  return configPath;
+  assertValidApiToken(config.apiToken);
+  return writeSecureConfigFile(
+    getConfigPath(),
+    `${JSON.stringify(config, null, 2)}\n`,
+    CONFIG_POLICY,
+  );
 }

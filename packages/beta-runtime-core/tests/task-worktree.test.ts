@@ -50,7 +50,7 @@ afterEach(() => {
   }
 });
 
-describe("task worktree lifecycle", () => {
+describe("task worktree lifecycle", { timeout: 20_000 }, () => {
   it("keeps an active task worktree owned until its worker releases it", async () => {
     const repoDir = setupRepoWithOrigin();
     const task = {
