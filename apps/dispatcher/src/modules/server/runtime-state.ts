@@ -1333,15 +1333,19 @@ function createOrReuseTaskAttempt(
   const activeAttempt = findActiveTaskAttempt(state, task.id);
   const leaseExpiresAt = new Date(Date.parse(at) + resolveAttemptLeaseTimeoutMs(task)).toISOString();
   if (activeAttempt) {
+    const resumesCheckpointedAttempt = activeAttempt.status === "checkpointed";
     return {
       ...state,
       taskAttempts: upsertTaskAttempt(state.taskAttempts ?? [], {
         ...activeAttempt,
         workerId,
         leaseToken: `assignment:${workerId}`,
-        status: activeAttempt.status === "created" ? "leased" : activeAttempt.status,
+        status: activeAttempt.status === "created" || resumesCheckpointedAttempt
+          ? "leased"
+          : activeAttempt.status,
         heartbeatAt: at,
         leaseExpiresAt,
+        endedAt: resumesCheckpointedAttempt ? undefined : activeAttempt.endedAt,
       }),
     };
   }

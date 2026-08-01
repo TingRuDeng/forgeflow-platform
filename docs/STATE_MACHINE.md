@@ -79,6 +79,7 @@ Current rules:
 - 已落账 `succeeded` / `failed` result 允许在响应丢失后按同一 v1 envelope 精确重放；canonical result、成功结果的 `changedFiles`、PR metadata 或 ArtifactBundle 任一发生变化都会按 idempotency conflict 拒绝。
 - `POST /api/tasks/:taskId/interrupt` 会把可中断任务置为 `waiting_for_input`，生成或接纳 `requestId`，绑定当时的 active `attemptId`，可选记录 `sourceSessionId` / `expiresAt`，释放 worker / lease，并把 active attempt 标记为 `checkpointed`。
 - `POST /api/tasks/:taskId/resume` 必须回传 identity-aware 请求的 `requestId` 与绑定 `attemptId`；错配、缺失或过期请求会被拒绝。成功后写入 `resumePayload` 与 `lastResolvedInput`，把任务恢复为 `ready`；同 identity、同 payload 的重复提交幂等返回，改变 payload 的重放会冲突。
+- 恢复后的下一次 claim 会复用该 `attemptId`，把 attempt 从 `checkpointed` 重新置为 `leased` 并清除中断时的 `endedAt`；后续 start 进入 `running`，不会产生“运行中 attempt 带历史结束时间”的矛盾状态。
 
 ## Assignment States
 
