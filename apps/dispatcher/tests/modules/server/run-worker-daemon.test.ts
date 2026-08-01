@@ -271,8 +271,19 @@ describe("worker daemon cycle", () => {
     );
     expect(progressEvents.length).toBeGreaterThanOrEqual(2);
     expect(
-      progressEvents.map((event: { payload?: { data?: { stage?: string } } }) => event.payload?.data?.stage),
+      progressEvents.map((event: { payload?: { stage?: string } }) => event.payload?.stage),
     ).toEqual(expect.arrayContaining(["worktree_prepared", "execution_completed"]));
+    expect(progressEvents.every((event: {
+      attemptId?: string;
+      workerId?: string;
+      traceId?: string;
+      payload?: { progressId?: string };
+    }) => Boolean(
+      event.attemptId
+      && event.workerId === "codex-mac-mini"
+      && event.traceId
+      && event.payload?.progressId,
+    ))).toBe(true);
 
     const materializedAssignmentDir = path.dirname(summary.outputDir);
     expect(fs.existsSync(path.join(materializedAssignmentDir, "assignment.json"))).toBe(true);

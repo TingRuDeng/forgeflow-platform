@@ -87,6 +87,13 @@ export interface WorkerProtocolEnvelope {
   idempotencyKey?: string;
 }
 
+export interface WorkerProgressPayload extends WorkerProtocolEnvelope {
+  taskId: string;
+  progressId: string;
+  message: string;
+  stage?: string;
+}
+
 export interface DispatcherRequestOptions {
   signal?: AbortSignal;
 }
@@ -97,6 +104,7 @@ export interface DispatcherClient {
   getAssignedTask: (workerId: string, options?: DispatcherRequestOptions) => Promise<TaskPayload | null>;
   claimTask: (workerId: string, payload?: { at?: string }, options?: DispatcherRequestOptions) => Promise<TaskPayload | null>;
   startTask: (workerId: string, payload: WorkerProtocolEnvelope & { taskId: string; at: string }, options?: DispatcherRequestOptions) => Promise<unknown>;
+  reportProgress: (workerId: string, payload: WorkerProgressPayload, options?: DispatcherRequestOptions) => Promise<unknown>;
   submitResult: (workerId: string, payload: WorkerProtocolEnvelope & { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }, options?: DispatcherRequestOptions) => Promise<unknown>;
   reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }, options?: DispatcherRequestOptions) => Promise<unknown>;
 }

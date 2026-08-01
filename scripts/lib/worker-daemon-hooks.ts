@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { formatLocalTimestamp } from "./time.js";
 import {
   logger,
@@ -7,6 +9,21 @@ import {
 import { recordTaskMetric } from "./metrics.js";
 
 interface WorkerDaemonHookClient {
+  reportProgress?: (
+    workerId: string,
+    payload: {
+      taskId: string;
+      attemptId?: string;
+      leaseToken?: string;
+      protocolVersion?: string;
+      traceId?: string;
+      idempotencyKey?: string;
+      progressId: string;
+      message: string;
+      stage?: string;
+    },
+    options?: { signal?: AbortSignal },
+  ) => Promise<unknown>;
   reportEvent?: (
     workerId: string,
     payload: { type: string; taskId?: string; payload?: unknown; at?: string },
@@ -34,11 +51,44 @@ export async function reportWorkerEventBestEffort(
   workerId: string,
   event: { type: string; taskId?: string; payload?: unknown; at?: string },
   signal?: AbortSignal,
+  envelope: {
+    attemptId?: string;
+    leaseToken?: string;
+    protocolVersion?: string;
+    traceId?: string;
+    idempotencyKey?: string;
+  } = {},
 ): Promise<void> {
-  if (signal?.aborted || typeof client.reportEvent !== "function") {
+  if (signal?.aborted) {
     return;
   }
   try {
+    if (event.type === "progress_reported") {
+      if (typeof client.reportProgress !== "function" || !event.taskId) {
+        return;
+      }
+      const payload = event.payload && typeof event.payload === "object"
+        ? event.payload as { progressId?: unknown; message?: unknown; stage?: unknown }
+        : {};
+      const progressId = typeof payload.progressId === "string" ? payload.progressId.trim() : "";
+      const message = typeof payload.message === "string" ? payload.message.trim() : "";
+      if (!message) {
+        return;
+      }
+      await client.reportProgress(workerId, {
+        taskId: event.taskId,
+        ...envelope,
+        progressId: progressId || randomUUID(),
+        message,
+        ...(typeof payload.stage === "string" && payload.stage.trim()
+          ? { stage: payload.stage.trim() }
+          : {}),
+      }, ...(signal ? [{ signal }] : []));
+      return;
+    }
+    if (typeof client.reportEvent !== "function") {
+      return;
+    }
     await client.reportEvent(workerId, {
       type: event.type,
       taskId: event.taskId,

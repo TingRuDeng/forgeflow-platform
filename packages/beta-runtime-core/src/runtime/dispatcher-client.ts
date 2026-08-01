@@ -150,6 +150,12 @@ function buildDispatcherClient(
       body: payload,
       signal: options?.signal,
     }),
+    reportProgress: (workerId, payload, options) => call({
+      method: "POST",
+      pathname: `/api/workers/${encodeURIComponent(workerId)}/progress`,
+      body: payload,
+      signal: options?.signal,
+    }),
     submitResult: (workerId, payload, options) => call({
       method: "POST",
       pathname: `/api/workers/${encodeURIComponent(workerId)}/result`,

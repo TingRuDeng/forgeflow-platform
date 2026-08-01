@@ -22,6 +22,9 @@ export class RuntimeStateRevisionConflictError extends Error {
 export interface RuntimeAuditEventInput {
   eventId: string;
   taskId: string;
+  attemptId?: string;
+  workerId?: string;
+  traceId?: string;
   type: string;
   at: string;
   summary?: string | null;
@@ -86,6 +89,9 @@ export async function ensurePrimaryRuntimeStateTables(client: PgClientLike): Pro
       audit_sequence BIGSERIAL PRIMARY KEY,
       event_id TEXT NOT NULL UNIQUE,
       task_id TEXT NOT NULL,
+      attempt_id TEXT,
+      worker_id TEXT,
+      trace_id TEXT,
       event_type TEXT NOT NULL,
       event_at TEXT NOT NULL,
       summary TEXT,
@@ -97,6 +103,13 @@ export async function ensurePrimaryRuntimeStateTables(client: PgClientLike): Pro
 
     ALTER TABLE dispatcher_runtime_state
       ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 1;
+
+    ALTER TABLE dispatcher_runtime_audit_events
+      ADD COLUMN IF NOT EXISTS attempt_id TEXT;
+    ALTER TABLE dispatcher_runtime_audit_events
+      ADD COLUMN IF NOT EXISTS worker_id TEXT;
+    ALTER TABLE dispatcher_runtime_audit_events
+      ADD COLUMN IF NOT EXISTS trace_id TEXT;
   `);
 }
 
@@ -152,9 +165,9 @@ export async function savePrimaryRuntimeStateSnapshot(
       }
       await client.query(`
         INSERT INTO dispatcher_runtime_audit_events (
-          event_id, task_id, event_type, event_at, summary, payload_json
+          event_id, task_id, attempt_id, worker_id, trace_id, event_type, event_at, summary, payload_json
         )
-        SELECT $1, $2, $3, $4, $5, $6::jsonb
+        SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb
         WHERE NOT EXISTS (
           SELECT 1
           FROM dispatcher_runtime_audit_events
@@ -164,6 +177,9 @@ export async function savePrimaryRuntimeStateSnapshot(
       `, [
         event.eventId,
         event.taskId,
+        event.attemptId ?? null,
+        event.workerId ?? null,
+        event.traceId ?? null,
         event.type,
         event.at,
         event.summary ?? null,
@@ -226,14 +242,14 @@ export async function listRuntimeAuditEvents(
   `);
   const result = beforeSequence
     ? await client.query(`
-        SELECT audit_sequence, event_id, task_id, event_type, event_at, summary, payload_json
+        SELECT audit_sequence, event_id, task_id, attempt_id, worker_id, trace_id, event_type, event_at, summary, payload_json
         FROM dispatcher_runtime_audit_events
         WHERE audit_sequence < $1
         ORDER BY audit_sequence DESC
         LIMIT $2
       `, [beforeSequence, limit + 1])
     : await client.query(`
-        SELECT audit_sequence, event_id, task_id, event_type, event_at, summary, payload_json
+        SELECT audit_sequence, event_id, task_id, attempt_id, worker_id, trace_id, event_type, event_at, summary, payload_json
         FROM dispatcher_runtime_audit_events
         ORDER BY audit_sequence DESC
         LIMIT $1
@@ -243,6 +259,9 @@ export async function listRuntimeAuditEvents(
     eventId: String(row.event_id),
     auditSequence: Number(row.audit_sequence),
     taskId: String(row.task_id),
+    attemptId: row.attempt_id ? String(row.attempt_id) : undefined,
+    workerId: row.worker_id ? String(row.worker_id) : undefined,
+    traceId: row.trace_id ? String(row.trace_id) : undefined,
     type: String(row.event_type),
     at: String(row.event_at),
     summary: row.summary ?? null,

@@ -199,13 +199,13 @@ Desired direction:
 - `packages/worker-protocol` 提供 Worker Protocol v1、TaskAttempt 和 RuntimeEvent schema；ArtifactBundle 直接重导出 `packages/result-contracts` 的 canonical schema，不再维护第二份定义
 - `packages/task-schema` 已接纳当前 dispatcher runtime 使用的 `trae` pool、Task/Worker 扩展字段和 AssignmentPayload 形态
 - `packages/worker-protocol` 已提供当前 runtime 事件名到 vNext RuntimeEvent taxonomy 的 normalize helper
-- `packages/worker-protocol` 已提供 start/result payload helper，统一第三方 worker adapter 需要回写的 envelope 字段
+- `packages/worker-protocol` 已提供 start/progress/result payload helper，统一第三方 worker adapter 需要回写的 envelope 字段
 - dispatcher runtime state 已有 `taskAttempts[]`，SQLite `task_attempts` projection 会保存 synthetic attempt
-- dispatcher start/result mutation 已强制完整 v1 envelope，并会拒绝缺少 active attempt、缺字段或携带历史终态 `attemptId` 的 stale result
-- start/result admission 现在会在 reconcile 前直接 fence 已到期 attempt；result 还要求同一 worker 持有有效 assignment lease
+- dispatcher start/progress/result mutation 已强制完整 v1 envelope，并会拒绝缺少 active attempt、缺字段或携带历史终态 `attemptId` 的 stale mutation
+- start/progress/result admission 现在会在 reconcile 前直接 fence 已到期 attempt；progress/result 还要求同一 worker 持有有效 assignment lease
 - `succeeded` / `failed` result 的精确网络重放现在幂等返回原状态；同一 key 若改变 canonical result、PR metadata 或 ArtifactBundle 会明确冲突
-- 通用 dispatcher worker start/result 会校验 `protocolVersion`、`traceId` 和 `idempotencyKey` 与 active attempt 一致
-- Trae 兼容主链的 `fetch-task` / `start-task` / `submit-result` 已回显并校验 `protocolVersion`、`traceId`、`idempotencyKey`、`attemptId` 和 `leaseToken`
+- 通用 dispatcher worker start/progress/result 会校验 `protocolVersion`、`traceId` 和 `idempotencyKey` 与 active attempt 一致；progress 以 `progressId` 区分精确重放与冲突重放，通用 telemetry 路径不再接受 progress 类型
+- Trae 兼容主链的 `fetch-task` / `start-task` / `report-progress` / `submit-result` 已回显并校验 `protocolVersion`、`traceId`、`idempotencyKey`、`attemptId` 和 `leaseToken`
 - dispatcher runtime state 已有 `artifactBundles[]`，SQLite `artifact_bundles` projection 会保存 ArtifactBundle 摘要、refs、结构化 trajectory 和可选 retainedContent 正文片段
 - reconcile 支持 `maxTaskAttempts` retry policy，默认仍是 2 次 attempt
 - task-level `terminationPolicy.maxAttempts`、`attemptLeaseTimeoutMs`、`heartbeatTimeoutMs`、`assignmentTimeoutMs` 已接入 retry / lease / offline / assignment 回收主链

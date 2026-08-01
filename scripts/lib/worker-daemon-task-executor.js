@@ -34,7 +34,7 @@ export async function executeClaimedTask(input) {
         runtimeScriptPath: path.join(input.repoRoot, "scripts/run-worker-assignment.js"),
         runtimeScriptCwd: input.repoRoot,
         executionTimeoutMs,
-        reportEvent: (event) => reportWorkerEventBestEffort(input.client, input.workerId, event, input.signal),
+        reportEvent: (event) => reportWorkerEventBestEffort(input.client, input.workerId, event, input.signal, buildWorkerProtocolEnvelope(input.payload)),
         onCleanupError: (cleanupError) => logCleanupError(taskId, cleanupError),
         ...retryPolicy,
         callbacks: buildManagedTaskCallbacks(input),

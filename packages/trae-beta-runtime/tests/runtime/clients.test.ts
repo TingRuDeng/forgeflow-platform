@@ -371,6 +371,60 @@ describe("runtime/clients", () => {
     });
   });
 
+  it("reports progress through the fenced worker endpoint using the fetched attempt envelope", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "ok",
+        task: {
+          task_id: "task-progress",
+          attempt_id: "attempt-progress",
+          lease_token: "lease-progress",
+          protocol_version: "2026-05-v1",
+          trace_id: "trace-progress",
+          idempotency_key: "worker-v1:task-progress:attempt-progress",
+        },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "progress_recorded" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await dispatcher.fetchTask("trae-progress", "/tmp/repo");
+    await dispatcher.reportProgress("task-progress", "Running tests", "trae-progress");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const [url, init] = fetchImpl.mock.calls[1] as unknown as [string, { body: string }];
+    expect(url).toBe("http://127.0.0.1:8787/api/workers/trae-progress/progress");
+    expect(JSON.parse(init.body)).toMatchObject({
+      taskId: "task-progress",
+      attemptId: "attempt-progress",
+      leaseToken: "lease-progress",
+      protocolVersion: "2026-05-v1",
+      traceId: "trace-progress",
+      idempotencyKey: "worker-v1:task-progress:attempt-progress",
+      progressId: expect.any(String),
+      message: "Running tests",
+    });
+  });
+
+  it("rejects progress when fetchTask has not supplied an attempt envelope", async () => {
+    const fetchImpl = vi.fn();
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await expect(
+      dispatcher.reportProgress("task-missing", "Running tests", "trae-progress"),
+    ).rejects.toThrow("worker protocol v1 envelope unavailable for task: task-missing");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("sends submitResult without evidence for backward compatibility", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       status: 200,

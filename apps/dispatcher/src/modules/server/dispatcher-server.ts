@@ -41,6 +41,7 @@ import {
   redriveTask,
   recordReviewDecision,
   recordWorkerEvent,
+  recordWorkerProgress,
   recordWorkerResult,
   registerWorker,
   resumeTaskFromInput,
@@ -82,7 +83,7 @@ const TRAE_WORKER_PATHS = new Set([
   "/api/trae/submit-result",
   "/api/trae/heartbeat",
 ]);
-const SCOPED_WORKER_ROUTE_PATTERN = /^\/api\/workers\/([^/]+)\/(?:heartbeat|offline|assigned-task|claim-task|start-task|result|events)$/;
+const SCOPED_WORKER_ROUTE_PATTERN = /^\/api\/workers\/([^/]+)\/(?:heartbeat|offline|assigned-task|claim-task|start-task|progress|result|events)$/;
 
 type AuthMode = "legacy" | "token" | "open";
 type HeaderMap = Record<string, string>;
@@ -512,6 +513,7 @@ function classifyWorkerResultError(error: unknown): number {
     || message.startsWith("protocol version mismatch:")
     || message.startsWith("trace id mismatch:")
     || message.startsWith("idempotency key mismatch:")
+    || message.startsWith("progress idempotency conflict for task:")
     || message.includes("mismatch for ")
   ) {
     return 409;
@@ -525,6 +527,11 @@ function classifyWorkerResultError(error: unknown): number {
     || message === "worker start body must be a JSON object"
     || message === "worker start taskId is required"
     || message === "worker start at must be a string when provided"
+    || message === "worker progress body must be a JSON object"
+    || message === "worker progress taskId is required"
+    || message === "worker progress progressId is required"
+    || message === "worker progress message is required"
+    || message === "worker progress stage must be a string when provided"
     || message === "worker attemptId must be a string when provided"
     || message === "worker leaseToken must be a string when provided"
     || message === "worker result body must be a JSON object"
@@ -555,6 +562,7 @@ function classifyWorkerEventError(error: unknown): number {
   if (
     message === "worker event body must be a JSON object"
     || message === "worker event type is required"
+    || message === "worker progress events must use the attempt-scoped progress endpoint"
     || message === "worker event taskId must be a string"
     || message === "worker event at must be a string"
   ) {
@@ -641,6 +649,34 @@ function validateWorkerStartBody(body: unknown): Record<string, any> {
   return {
     taskId,
     at: body.at,
+    ...readWorkerLeaseFields(body),
+  };
+}
+
+function validateWorkerProgressBody(body: unknown): Record<string, any> {
+  if (!isPlainObject(body)) {
+    throw new Error("worker progress body must be a JSON object");
+  }
+  const taskId = typeof body.taskId === "string" ? body.taskId.trim() : "";
+  const progressId = typeof body.progressId === "string" ? body.progressId.trim() : "";
+  const message = typeof body.message === "string" ? body.message.trim() : "";
+  if (!taskId) {
+    throw new Error("worker progress taskId is required");
+  }
+  if (!progressId) {
+    throw new Error("worker progress progressId is required");
+  }
+  if (!message) {
+    throw new Error("worker progress message is required");
+  }
+  if (body.stage !== undefined && typeof body.stage !== "string") {
+    throw new Error("worker progress stage must be a string when provided");
+  }
+  return {
+    taskId,
+    progressId,
+    message,
+    stage: typeof body.stage === "string" ? body.stage.trim() || undefined : undefined,
     ...readWorkerLeaseFields(body),
   };
 }
@@ -887,6 +923,9 @@ function validateWorkerEventBody(body: unknown): { type: string; taskId: string 
   const type = typeof body.type === "string" ? body.type.trim() : "";
   if (!type) {
     throw new Error("worker event type is required");
+  }
+  if (type === "progress_reported" || type === "attempt_progress") {
+    throw new Error("worker progress events must use the attempt-scoped progress endpoint");
   }
   if (body.taskId !== undefined && body.taskId !== null && typeof body.taskId !== "string") {
     throw new Error("worker event taskId must be a string");
@@ -1607,6 +1646,39 @@ export async function handleDispatcherHttpRequest(input: DispatcherRequestInput)
         return createJsonResponse(200, {
           status: "started",
           tasks: result.state.tasks,
+        });
+      } catch (error: any) {
+        rethrowStateLockTimeout(error);
+        return createJsonResponse(classifyWorkerResultError(error), {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const progressMatch = method === "POST"
+      ? pathname.match(/^\/api\/workers\/([^/]+)\/progress$/)
+      : null;
+    if (progressMatch) {
+      try {
+        const validatedBody = validateWorkerProgressBody(body);
+        const result = await withStateAsync(stateDir, (state) => ({
+          state: recordWorkerProgress(state, {
+            workerId: decodeURIComponent(progressMatch[1]),
+            taskId: validatedBody.taskId,
+            attemptId: validatedBody.attemptId,
+            leaseToken: validatedBody.leaseToken,
+            protocolVersion: validatedBody.protocolVersion,
+            traceId: validatedBody.traceId,
+            idempotencyKey: validatedBody.idempotencyKey,
+            progressId: validatedBody.progressId,
+            message: validatedBody.message,
+            stage: validatedBody.stage,
+            receivedAt,
+          }),
+        }));
+        return createJsonResponse(200, {
+          status: "progress_recorded",
+          events: result.state.events.slice(-5),
         });
       } catch (error: any) {
         rethrowStateLockTimeout(error);

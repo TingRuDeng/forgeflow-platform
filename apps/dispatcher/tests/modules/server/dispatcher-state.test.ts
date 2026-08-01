@@ -5,7 +5,11 @@ import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { createDispatch, createEmptyRuntimeState } from "../../../src/modules/server/runtime-state.js";
-import { applyTraeReportProgress } from "../../../src/modules/server/runtime-dispatcher-server.js";
+import {
+  applyTraeReportProgress,
+  applyTraeStartTask,
+  findTraeTaskForWorker,
+} from "../../../src/modules/server/runtime-dispatcher-server.js";
 
 const repoRoot = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
@@ -319,35 +323,74 @@ describe("dispatcher runtime state", () => {
   });
 
   it("retains only the latest 500 events in mutable runtime-dispatcher-server appends", () => {
-    const seedState = createEmptyRuntimeState();
+    const dispatch = createDispatch(createEmptyRuntimeState(), {
+      repo: "TingRuDeng/ForgeFlow",
+      defaultBranch: "main",
+      requestedBy: "test",
+      tasks: [{
+        id: "task-501",
+        title: "retention progress",
+        pool: "trae",
+        branchName: "ai/trae/task-501",
+        verification: { mode: "run" },
+      }],
+      packages: [{
+        taskId: "task-501",
+        assignment: {
+          taskId: "task-501",
+          workerId: null,
+          pool: "trae",
+          status: "pending",
+          branchName: "ai/trae/task-501",
+          repo: "TingRuDeng/ForgeFlow",
+          defaultBranch: "main",
+        },
+      }],
+      createdAt: "2026-03-30T11:00:00.000Z",
+    });
+    const taskId = dispatch.taskIds[0]!;
+    const seedState = dispatch.state;
+    findTraeTaskForWorker(seedState, "trae-1", "/repo");
+    const envelope = activeWorkerEnvelope(seedState, taskId);
+    const started = applyTraeStartTask(seedState, "trae-1", taskId, envelope);
+    expect(started.ok).toBe(true);
     const seededEvents = Array.from({ length: 500 }, (_, index) => ({
       taskId: `task-${index + 1}`,
       type: "seeded",
       at: "2026-03-30T11:00:00.000Z",
       payload: { index: index + 1 },
     }));
-    const state = {
-      ...seedState,
-      events: seededEvents,
-    };
+    seedState.events = seededEvents;
+    seedState.eventSequence = 0;
 
-    applyTraeReportProgress(state, "task-501", "still running", "trae-1");
+    const progress = applyTraeReportProgress(seedState, {
+      taskId,
+      workerId: "trae-1",
+      ...envelope,
+      progressId: "progress-retention",
+      message: "still running",
+    });
+    expect(progress.ok).toBe(true);
 
-    expect(state.events).toHaveLength(500);
-    expect(state.events[0]).toMatchObject({
+    expect(seedState.events).toHaveLength(500);
+    expect(seedState.events[0]).toMatchObject({
       taskId: "task-2",
       type: "seeded",
     });
-    expect(state.events[499]).toMatchObject({
+    expect(seedState.events[499]).toMatchObject({
       eventId: "event-501",
-      taskId: "task-501",
+      taskId,
+      attemptId: envelope.attemptId,
+      workerId: "trae-1",
+      traceId: envelope.traceId,
       type: "progress_reported",
       payload: {
+        progressId: "progress-retention",
         message: "still running",
-        worker_id: "trae-1",
+        idempotencyKey: envelope.idempotencyKey,
       },
     });
-    expect(state.eventSequence).toBe(501);
+    expect(seedState.eventSequence).toBe(501);
   });
 
   it("marks stale workers as offline in dashboard snapshots", async () => {

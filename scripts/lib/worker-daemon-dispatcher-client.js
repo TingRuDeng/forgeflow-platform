@@ -48,6 +48,9 @@ function createLazyDispatcherClient(resolveClient) {
         async startTask(workerId, payload, options) {
             return (await resolveClient()).startTask(workerId, payload, options);
         },
+        async reportProgress(workerId, payload, options) {
+            return (await resolveClient()).reportProgress(workerId, payload, options);
+        },
         async submitResult(workerId, payload, options) {
             return (await resolveClient()).submitResult(workerId, payload, options);
         },

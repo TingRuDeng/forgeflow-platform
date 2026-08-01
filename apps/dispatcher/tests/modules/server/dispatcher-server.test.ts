@@ -1722,6 +1722,61 @@ describe("dispatcher server", () => {
     });
     expect(startResponse.status).toBe(200);
 
+    const progressBody = {
+      taskId,
+      attemptId: attempt.attemptId,
+      leaseToken: attempt.leaseToken,
+      protocolVersion: attempt.protocolVersion,
+      traceId: attempt.traceId,
+      idempotencyKey: attempt.idempotencyKey,
+      progressId: "progress-http-v1",
+      message: "Running verification",
+      stage: "verification",
+    };
+    const progressResponse = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-v1-envelope-http/progress",
+      body: progressBody,
+    });
+    expect(progressResponse.status).toBe(200);
+    expect(progressResponse.json.status).toBe("progress_recorded");
+    expect(progressResponse.json.events.at(-1)).toMatchObject({
+      taskId,
+      attemptId: attempt.attemptId,
+      workerId: "codex-v1-envelope-http",
+      traceId: attempt.traceId,
+      type: "progress_reported",
+      payload: {
+        progressId: "progress-http-v1",
+        message: "Running verification",
+        stage: "verification",
+        idempotencyKey: attempt.idempotencyKey,
+      },
+    });
+
+    const staleProgress = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-v1-envelope-http/progress",
+      body: { ...progressBody, leaseToken: "stale-token" },
+    });
+    expect(staleProgress.status).toBe(409);
+    expect(staleProgress.json.error).toBe(`lease token mismatch: ${taskId}`);
+
+    const progressBypass = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/workers/codex-v1-envelope-http/events",
+      body: {
+        type: "progress_reported",
+        taskId,
+        payload: { message: "bypass" },
+      },
+    });
+    expect(progressBypass.status).toBe(400);
+    expect(progressBypass.json.error).toMatch(/attempt-scoped progress endpoint/i);
+
     const staleResult = await mod.handleDispatcherHttpRequest({
       stateDir,
       method: "POST",
@@ -2553,15 +2608,89 @@ describe("dispatcher server", () => {
     expect(response.json.task.continue_from_task_id).toBe("dispatch-1:task-1");
   });
 
-  it("report_progress writes progress event", async () => {
+  it("report_progress enforces the active attempt envelope and exact replay", async () => {
     const stateDir = makeTempDir();
+    const repoDir = path.join(stateDir, "repo");
+    fs.mkdirSync(repoDir, { recursive: true });
     const mod = await import(serverModulePath);
 
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/heartbeat",
+      body: { worker_id: "trae-progress" },
+    });
+    await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/dispatches",
+      body: {
+        repo: "test/repo",
+        defaultBranch: "main",
+        requestedBy: "test",
+        tasks: [{
+          id: "task-progress",
+          title: "Progress task",
+          pool: "trae",
+          allowedPaths: ["src/**"],
+          acceptance: ["pnpm test"],
+          dependsOn: [],
+          branchName: "ai/trae/task-progress",
+        }],
+        packages: [{
+          taskId: "task-progress",
+          assignment: {
+            taskId: "task-progress",
+            workerId: "trae-progress",
+            pool: "trae",
+            status: "assigned",
+            branchName: "ai/trae/task-progress",
+            allowedPaths: ["src/**"],
+            repo: "test/repo",
+            defaultBranch: "main",
+          },
+        }],
+      },
+    });
+    const fetched = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/fetch-task",
+      body: { worker_id: "trae-progress", repo_dir: repoDir },
+    });
+    const task = fetched.json.task;
+    const envelope = {
+      attempt_id: task.attempt_id,
+      lease_token: task.lease_token,
+      protocol_version: task.protocol_version,
+      trace_id: task.trace_id,
+      idempotency_key: task.idempotency_key,
+    };
+    const started = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/start-task",
+      body: {
+        worker_id: "trae-progress",
+        task_id: task.task_id,
+        ...envelope,
+      },
+    });
+    expect(started.status).toBe(200);
+
+    const progressBody = {
+      worker_id: "trae-progress",
+      task_id: task.task_id,
+      progress_id: "progress-trae-v1",
+      message: "Working on it...",
+      stage: "execution",
+      ...envelope,
+    };
     const response = await mod.handleDispatcherHttpRequest({
       stateDir,
       method: "POST",
       pathname: "/api/trae/report-progress",
-      body: { task_id: "task-1", message: "Working on it..." },
+      body: progressBody,
     });
     expect(response.status).toBe(200);
     expect(response.json.ok).toBe(true);
@@ -2571,11 +2700,61 @@ describe("dispatcher server", () => {
       method: "GET",
       pathname: "/api/dashboard/snapshot",
     });
-    const progressEvent = snapshot.json.events.find(
-      (e: { type: string }) => e.type === "progress_reported",
+    const progressEvents = snapshot.json.events.filter(
+      (event: { type: string; taskId: string }) =>
+        event.type === "progress_reported" && event.taskId === task.task_id,
     );
-    expect(progressEvent).toBeDefined();
-    expect(progressEvent.payload.message).toBe("Working on it...");
+    expect(progressEvents).toHaveLength(1);
+    expect(progressEvents[0]).toMatchObject({
+      attemptId: task.attempt_id,
+      workerId: "trae-progress",
+      traceId: task.trace_id,
+      payload: {
+        progressId: "progress-trae-v1",
+        message: "Working on it...",
+        stage: "execution",
+      },
+    });
+
+    const replay = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/report-progress",
+      body: progressBody,
+    });
+    expect(replay.status).toBe(200);
+    const afterReplay = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "GET",
+      pathname: "/api/dashboard/snapshot",
+    });
+    expect(afterReplay.json.events.filter(
+      (event: { type: string; taskId: string }) =>
+        event.type === "progress_reported" && event.taskId === task.task_id,
+    )).toHaveLength(1);
+
+    const conflict = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/report-progress",
+      body: { ...progressBody, message: "Different payload" },
+    });
+    expect(conflict.status).toBe(409);
+    expect(conflict.json.error).toMatch(/progress idempotency conflict/i);
+
+    const incomplete = await mod.handleDispatcherHttpRequest({
+      stateDir,
+      method: "POST",
+      pathname: "/api/trae/report-progress",
+      body: {
+        worker_id: "trae-progress",
+        task_id: task.task_id,
+        progress_id: "progress-incomplete",
+        message: "Missing envelope",
+      },
+    });
+    expect(incomplete.status).toBe(400);
+    expect(incomplete.json.error).toMatch(/worker protocol v1 envelope incomplete/i);
   });
 
   it("keeps targetWorkerId on dispatch creation and only lets the target trae worker claim it", async () => {

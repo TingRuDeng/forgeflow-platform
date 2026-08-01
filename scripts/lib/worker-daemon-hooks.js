@@ -1,14 +1,41 @@
+import { randomUUID } from "node:crypto";
 import { formatLocalTimestamp } from "./time.js";
 import { logger, logTaskCompleted, logTaskFailed, } from "./logger.js";
 import { recordTaskMetric } from "./metrics.js";
 function nowIso() {
     return formatLocalTimestamp();
 }
-export async function reportWorkerEventBestEffort(client, workerId, event, signal) {
-    if (signal?.aborted || typeof client.reportEvent !== "function") {
+export async function reportWorkerEventBestEffort(client, workerId, event, signal, envelope = {}) {
+    if (signal?.aborted) {
         return;
     }
     try {
+        if (event.type === "progress_reported") {
+            if (typeof client.reportProgress !== "function" || !event.taskId) {
+                return;
+            }
+            const payload = event.payload && typeof event.payload === "object"
+                ? event.payload
+                : {};
+            const progressId = typeof payload.progressId === "string" ? payload.progressId.trim() : "";
+            const message = typeof payload.message === "string" ? payload.message.trim() : "";
+            if (!message) {
+                return;
+            }
+            await client.reportProgress(workerId, {
+                taskId: event.taskId,
+                ...envelope,
+                progressId: progressId || randomUUID(),
+                message,
+                ...(typeof payload.stage === "string" && payload.stage.trim()
+                    ? { stage: payload.stage.trim() }
+                    : {}),
+            }, ...(signal ? [{ signal }] : []));
+            return;
+        }
+        if (typeof client.reportEvent !== "function") {
+            return;
+        }
         await client.reportEvent(workerId, {
             type: event.type,
             taskId: event.taskId,

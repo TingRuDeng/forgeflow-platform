@@ -12,6 +12,7 @@ import { startDispatcherServer } from "./lib/dispatcher-server.js";
 const { DatabaseSync } = await import("node:sqlite");
 
 const LIVE_EVENT_COUNT = 16;
+const LIVE_DR_WRITE_EVENT_TYPE = "live_dr_write_probe";
 const ACKNOWLEDGED_EVENT_COUNT_BEFORE_BACKUP = 4;
 const CHILD_START_TIMEOUT_MS = 30_000;
 const MAX_LOCAL_RECOVERY_DURATION_MS = 30_000;
@@ -207,7 +208,7 @@ async function startLiveWrites(baseUrl) {
     "POST",
     "/api/workers/codex-live-dr/events",
     {
-      type: "progress_reported",
+      type: LIVE_DR_WRITE_EVENT_TYPE,
       taskId,
       at: `2026-06-08T00:00:${String(index).padStart(2, "0")}.000Z`,
       payload: { sequence: index + 1 },
@@ -282,7 +283,7 @@ function assertRestoredState(restored, taskId) {
 function assertAcknowledgedEventsRestored(restored, acknowledgedEventCount) {
   const restoredSequences = new Set(
     restored.restoredState.events
-      .filter((event) => event.type === "progress_reported")
+      .filter((event) => event.type === LIVE_DR_WRITE_EVENT_TYPE)
       .map((event) => Number(event.payload?.data?.sequence)),
   );
   for (let sequence = 1; sequence <= acknowledgedEventCount; sequence += 1) {

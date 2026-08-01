@@ -473,6 +473,11 @@ describe("runtime-state-sqlite", () => {
       ...createTestState(),
       events: Array.from({ length: 500 }, (_, index) => ({
         taskId: `task-${index + 1}`,
+        ...(index === 0 ? {
+          attemptId: "task-1:attempt-1",
+          workerId: "test-worker-1",
+          traceId: "trace-task-1",
+        } : {}),
         type: "test_event",
         at: `2026-04-01T10:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`,
         payload: { index: index + 1 },
@@ -524,7 +529,73 @@ describe("runtime-state-sqlite", () => {
       "event-4",
       "event-5",
     ]);
+    expect(oldestPage.events[0]).toMatchObject({
+      attemptId: "task-1:attempt-1",
+      workerId: "test-worker-1",
+      traceId: "trace-task-1",
+    });
     expect(oldestPage.hasMore).toBe(false);
+  });
+
+  it("reads pre-correlation audit and projection schemas without requiring a write migration", () => {
+    const stateDir = makeTempDir();
+    const state: RuntimeState = {
+      ...createTestState(),
+      events: createTestState().events.map((event) => ({
+        ...event,
+        attemptId: "dispatch-1:task-1:attempt-1",
+        workerId: "test-worker-1",
+        traceId: "trace-dispatch-1-task-1",
+      })),
+    };
+    saveRuntimeState(stateDir, state);
+
+    const db = new DatabaseSync(path.join(stateDir, "runtime-state.db"));
+    try {
+      for (const tableName of ["runtime_events", "runtime_audit_events"]) {
+        db.exec(`ALTER TABLE ${tableName} DROP COLUMN attempt_id;`);
+        db.exec(`ALTER TABLE ${tableName} DROP COLUMN worker_id;`);
+        db.exec(`ALTER TABLE ${tableName} DROP COLUMN trace_id;`);
+      }
+    } finally {
+      db.close();
+    }
+
+    expect(readRuntimeAuditEvents(stateDir, { limit: 10 }).events[0]).toMatchObject({
+      taskId: "dispatch-1:task-1",
+      attemptId: undefined,
+      workerId: undefined,
+      traceId: undefined,
+    });
+    expect(sqliteStore.readStructuredRuntimeState(stateDir).events[0]).toMatchObject({
+      taskId: "dispatch-1:task-1",
+      attemptId: undefined,
+      workerId: undefined,
+      traceId: undefined,
+    });
+  });
+
+  it("backfills the retained runtime window when a legacy database first creates the audit table", () => {
+    const stateDir = makeTempDir();
+    saveRuntimeState(stateDir, createTestState());
+
+    const db = new DatabaseSync(path.join(stateDir, "runtime-state.db"));
+    try {
+      db.exec("DROP TABLE runtime_audit_events;");
+    } finally {
+      db.close();
+    }
+
+    const legacyPage = readRuntimeAuditEvents(stateDir, { limit: 10 });
+    expect(legacyPage.scope).toBe("runtime_window");
+    expect(legacyPage.events).toHaveLength(1);
+
+    saveRuntimeState(stateDir, loadRuntimeState(stateDir));
+
+    const migratedPage = readRuntimeAuditEvents(stateDir, { limit: 10 });
+    expect(migratedPage.scope).toBe("durable_audit");
+    expect(migratedPage.events).toHaveLength(1);
+    expect(migratedPage.events[0].eventId).toBe(legacyPage.events[0].eventId);
   });
 
   it("writes task attempts to the structured sqlite projection", () => {

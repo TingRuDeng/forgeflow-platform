@@ -3,6 +3,7 @@ import type {
   WorkerRegistration,
   HeartbeatPayload,
   StartTaskPayload,
+  ProgressTaskPayload,
   SubmitResultPayload,
   AssignedTaskResponse,
   DispatcherRequestOptions,
@@ -53,6 +54,7 @@ export interface DispatcherHttpClient extends DispatcherWorkerClient {
   getAssignedTask(workerId: string, options?: DispatcherRequestOptions): Promise<AssignedTaskResponse>;
   claimTask(workerId: string, payload?: { at?: string }, options?: DispatcherRequestOptions): Promise<AssignedTaskResponse>;
   startTask(workerId: string, payload: StartTaskPayload, options?: DispatcherRequestOptions): Promise<unknown>;
+  reportProgress(workerId: string, payload: ProgressTaskPayload, options?: DispatcherRequestOptions): Promise<unknown>;
   submitResult(workerId: string, payload: SubmitResultPayload, options?: DispatcherRequestOptions): Promise<unknown>;
 }
 
@@ -62,6 +64,7 @@ export interface DispatcherStateDirClient {
   getAssignedTask(workerId: string, options?: DispatcherRequestOptions): Promise<unknown>;
   claimTask(workerId: string, payload?: { at?: string }, options?: DispatcherRequestOptions): Promise<unknown>;
   startTask(workerId: string, payload: StartTaskPayload, options?: DispatcherRequestOptions): Promise<unknown>;
+  reportProgress(workerId: string, payload: ProgressTaskPayload, options?: DispatcherRequestOptions): Promise<unknown>;
   submitResult(workerId: string, payload: SubmitResultPayload, options?: DispatcherRequestOptions): Promise<unknown>;
   reportEvent(workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }, options?: DispatcherRequestOptions): Promise<unknown>;
 }
@@ -213,6 +216,15 @@ export function createDispatcherHttpClient(
       ) as Promise<unknown>;
     },
 
+    reportProgress(workerId: string, payload: ProgressTaskPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
+      return call(
+        "POST",
+        `/api/workers/${encodeURIComponent(workerId)}/progress`,
+        payload,
+        { signal: requestOptions?.signal },
+      ) as Promise<unknown>;
+    },
+
     submitResult(workerId: string, payload: SubmitResultPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
       return call(
         "POST",
@@ -299,6 +311,17 @@ export function createDispatcherStateDirClientFactory(
           stateDir,
           method: "POST",
           pathname: `/api/workers/${encodeURIComponent(workerId)}/start-task`,
+          body: payload,
+          internalCall: true,
+        }));
+      },
+
+      async reportProgress(workerId: string, payload: ProgressTaskPayload, requestOptions?: DispatcherRequestOptions): Promise<unknown> {
+        throwIfAborted(requestOptions?.signal, "dispatcher state-dir request aborted");
+        return readStateDirResponseJson(await handleRequest({
+          stateDir,
+          method: "POST",
+          pathname: `/api/workers/${encodeURIComponent(workerId)}/progress`,
           body: payload,
           internalCall: true,
         }));

@@ -83,6 +83,7 @@ export interface DispatcherClient {
   getAssignedTask: (workerId: string, options?: { signal?: AbortSignal }) => Promise<TaskPayload | null>;
   claimTask: (workerId: string, payload?: { at?: string }, options?: { signal?: AbortSignal }) => Promise<TaskPayload | null>;
   startTask: (workerId: string, payload: ReturnType<typeof buildWorkerProtocolEnvelope> & { taskId: string; at: string }, options?: { signal?: AbortSignal }) => Promise<unknown>;
+  reportProgress: (workerId: string, payload: ReturnType<typeof buildWorkerProtocolEnvelope> & { taskId: string; progressId: string; message: string; stage?: string }, options?: { signal?: AbortSignal }) => Promise<unknown>;
   submitResult: (workerId: string, payload: ReturnType<typeof buildWorkerProtocolEnvelope> & { result: WorkerResult; changedFiles: string[]; pullRequest: PullRequestInfo | null }, options?: { signal?: AbortSignal }) => Promise<unknown>;
   reportEvent?: (workerId: string, payload: { type: string; taskId?: string; payload?: unknown; at?: string }, options?: { signal?: AbortSignal }) => Promise<unknown>;
 }
