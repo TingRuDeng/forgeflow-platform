@@ -29,6 +29,7 @@ export interface CliDeps {
   runRedrive: typeof runRedrive;
   runUpdate: typeof runUpdate;
   runArtifactGet: typeof runArtifactGet;
+  readStdin: () => string;
   log: (message: string) => void;
 }
 
@@ -111,7 +112,7 @@ Usage:
   forgeflow-review-orchestrator redrive --dispatcher-url http://127.0.0.1:8787 --task-id dispatch-1:task-1
   forgeflow-review-orchestrator update
   forgeflow-review-orchestrator update --help
-  forgeflow-review-orchestrator init --token <token> --url <dispatcher-url>
+  forgeflow-review-orchestrator init --token-stdin --url <dispatcher-url>
   forgeflow-review-orchestrator init
 `);
 }
@@ -125,6 +126,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
     runRedrive,
     runUpdate,
     runArtifactGet,
+    readStdin: () => fs.readFileSync(0, "utf8"),
     log: (message) => console.log(message),
     ...partialDeps,
   };
@@ -143,12 +145,11 @@ Description:
 
 Options:
   -h, --help              Show this help message
-  --token <token>         Authentication token for the dispatcher (string or number)
+  --token-stdin           Read the dispatcher authentication token from stdin
   --url <dispatcher-url>  URL of the dispatcher service
 
 Examples:
-  forgeflow-review-orchestrator init --token 123456 --url http://127.0.0.1:8787
-  forgeflow-review-orchestrator init --token "my-secret-token"
+  printf '%s' "$DISPATCHER_API_TOKEN" | forgeflow-review-orchestrator init --token-stdin --url http://127.0.0.1:8787
   forgeflow-review-orchestrator init
 `);
     return null;
@@ -180,11 +181,19 @@ Examples:
   }
 
   if (parsed.command === "init") {
-    const { loadConfig, saveConfig } = await import("./config.js");
-    const token = typeof options.token === "string" || typeof options.token === "number" 
-      ? String(options.token) 
-      : undefined;
+    const { loadConfig, saveConfig, secureConfigPermissions } = await import("./config.js");
+    if (options.token !== undefined) {
+      throw new Error("--token is not supported because process arguments may be exposed; pipe the token through --token-stdin");
+    }
+    if (options.tokenStdin !== undefined && options.tokenStdin !== true) {
+      throw new Error("--token-stdin does not accept a value");
+    }
+    const token = options.tokenStdin === true ? deps.readStdin().trim() : undefined;
+    if (options.tokenStdin === true && !token) {
+      throw new Error("--token-stdin requires a non-empty token on stdin");
+    }
     const url = typeof options.url === "string" ? options.url : undefined;
+    secureConfigPermissions();
     const config = loadConfig();
     if (token) {
       config.dispatcherToken = token;
@@ -198,7 +207,7 @@ Examples:
       const savedToken = config.dispatcherToken ? "(set)" : "(not set)";
       const savedUrl = config.dispatcherUrl || "(not set)";
       deps.log(`Current config: dispatcher-url=${savedUrl} dispatcher-token=${savedToken}`);
-      deps.log("Usage: forgeflow-review-orchestrator init --token <token> --url <dispatcher-url>");
+      deps.log("Usage: forgeflow-review-orchestrator init --token-stdin --url <dispatcher-url>");
       return null;
     }
     saveConfig(config);

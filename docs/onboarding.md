@@ -192,6 +192,8 @@ forgeflow-gemini-beta start worker
 
 远程 `codex` / `gemini` runtime 通过 `POST /api/workers/:workerId/claim-task` 领取任务，并在 start/result 回写时携带 dispatcher 返回的 v1 envelope。远程机器应配置自己的 `DISPATCHER_WORKER_TOKEN`；旧的 `DISPATCHER_API_TOKEN` 仅作为迁移回退，不应继续分发到 worker 主机。只有显式切到 `open` 或满足 `legacy` loopback 条件时才可匿名访问。
 
+两类 provider 配置不保存 token，argv 凭据参数会被拒绝；认证保持 env-only。由于配置可控制 repo 与 provider binary，Unix 下默认目录 / 文件仍强制为 `0700` / `0600`，采用同目录原子替换，并拒绝配置文件及用户可控目录链中的 symlink、过宽权限和可被其他用户写入的父目录。重新执行各自的 `init` 可修复旧权限而不改变现有配置。
+
 每个 assignment 子进程默认最多运行 30 分钟；如需调整，设置正整数毫秒值 `WORKER_DAEMON_EXECUTION_TIMEOUT_MS`。worker 收到 `SIGINT` / `SIGTERM` 后会取消 dispatcher HTTP 请求和结果重试等待，并终止完整子进程树。
 
 Codex / Gemini 默认使用 `trusted-host`。生产 worker 如需容器边界，应由操作者显式设置 `FORGEFLOW_EXECUTION_PROFILE=isolated-container` 和固定的 `FORGEFLOW_EXECUTION_CONTAINER_IMAGE`；镜像必须包含 provider CLI 与 verification 工具链，preflight 失败不会回退宿主机。配置与安全边界见 `contracts/execution-profile-v1.md`。
@@ -247,7 +249,8 @@ node scripts/run-dispatcher-server.js \
 - `DISPATCHER_API_TOKEN` 是控制层 token，可访问全部 API
 - `DISPATCHER_WORKER_TOKENS` 是 `workerId -> token` JSON 映射；值必须唯一、无首尾空白且不能与 `DISPATCHER_API_TOKEN` 相同。worker token 只能注册自己并访问自己的 worker 路由，跨 worker 或 dashboard/control API 返回 `403`
 - worker runtime 优先读取 `DISPATCHER_WORKER_TOKEN`，没有设置时才兼容回退到 `DISPATCHER_API_TOKEN`
-- `forgeflow-dispatcher init` 与源码侧 config CLI 在 Unix 上会把凭据配置创建或修正为 `0600`；服务端拒绝 group / other 可读的配置文件
+- 发布包只允许用 `--token-stdin` 接收显式 token，拒绝 argv `--token`；`forgeflow-dispatcher init` 在 Unix 上会把默认配置目录 / 文件创建或修正为 `0700` / `0600`，并使用同目录安全临时文件原子替换
+- 源码 server 不再提供另一套配置写入 CLI；优先使用环境变量。若读取 `~/.forgeflow-dispatcher.json` 或 `FORGEFLOW_DISPATCHER_CONFIG_PATH` 指定的配置，文件必须为普通文件且权限为 `0600`，用户可控目录链不得包含 symlink，父目录也不得被 group / other 写入；内容只从完成身份与 mode 校验的同一文件句柄读取
 - POST 路径收到非法 JSON body 时返回 `400` + `{ "error": "invalid_json_body" }`
 - dispatcher 当前会在状态目录下维护 `.runtime-state.lock`；锁竞争超时返回 `503`，调用方应重试。锁 metadata 会保护存活 PID，释放时核对 inode / owner token；相关环境变量为 `DISPATCHER_STATE_LOCK_TIMEOUT_MS`、`DISPATCHER_STATE_LOCK_RETRY_MS`、`DISPATCHER_STATE_LOCK_STALE_MS`
 - 阶段二新增只读 `GET /api/metrics`，适合脚本直接获取 `queueDepth/reviewBacklog/assignment lag/retryRatePct`
@@ -349,6 +352,7 @@ npm install -g @tingrudeng/trae-beta-runtime@beta --registry=https://registry.np
 另外：
 
 - runtime CLI 固定读取 `~/.forgeflow-trae-beta/config.json`；如果需要切换业务仓，先重新执行 `forgeflow-trae-beta init --overwrite`
+- 配置可能包含 dispatcher token；Unix 下默认目录与文件权限分别为 `0700` / `0600`，权限过宽时 runtime 会拒绝读取。旧版本配置可重新执行 `forgeflow-trae-beta init` 原地修复，已保存 token 不会丢失
 - `restart launch` / `restart all` 在 macOS clean relaunch 时会先等待旧 CDP 端口释放，再拉起新 Trae 实例
 - `stop worker` / `restart worker` / `stop all` / `restart all` 会 best-effort 先把对应 worker 标记为 dispatcher `offline`，避免 dashboard 在 heartbeat 租约窗口内继续显示在线
 
@@ -379,6 +383,7 @@ curl -s -H "Authorization: Bearer ${DISPATCHER_API_TOKEN}" \
 - Trae runtime 只有在远端分支 HEAD 与最终回执里的 commit SHA 完全一致时，才会上报 `review_ready`
 - 如果 push 已报告成功但远端 ref 仍在传播，runtime 会先做短暂重试；重试耗尽后按 failed 处理，不会直接把产物送进 review
 - terminal result 回写默认最多尝试 3 次、间隔 2 秒，可用 `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` / `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS` 调整；结果未获 dispatcher 确认时不会把 worker 降为 idle 或释放当前 Trae session，会保留 worktree 并在当前执行退栈时释放本机 owner，且会停止任务轮询并以非零状态退出，避免重复执行
+- progress 回写默认对网络/超时、`408`、`425`、`429` 和 `5xx` 总计尝试 3 次、间隔 1 秒，并在同一逻辑更新内固定复用 `progressId`；普通 `4xx` 不重试。可用 `WORKER_PROGRESS_MAX_ATTEMPTS` / `WORKER_PROGRESS_RETRY_DELAY_MS` 调整，进程取消会中止可取消的请求或重试等待
 - generic worker claim 已收口为显式 POST：`GET /api/workers/:workerId/assigned-task` 只读，真正 claim 走 `POST /api/workers/:workerId/claim-task`
 - dispatcher 会对 worker result 做 canonicalization：`workerId/pool/repo/defaultBranch/branchName/mode` 由 dispatcher 重建，不接受 worker 覆盖
 - 自动创建 PR 只允许开 draft，而且必须同时满足：验收命令通过、push 成功且无 `push_error`、远端 SHA 已验证一致、变更仍在允许范围内

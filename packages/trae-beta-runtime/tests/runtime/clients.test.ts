@@ -8,9 +8,12 @@ import {
 
 const originalDispatcherApiToken = process.env.DISPATCHER_API_TOKEN;
 const originalDispatcherWorkerToken = process.env.DISPATCHER_WORKER_TOKEN;
+const originalProgressMaxAttempts = process.env.WORKER_PROGRESS_MAX_ATTEMPTS;
+const originalProgressRetryDelayMs = process.env.WORKER_PROGRESS_RETRY_DELAY_MS;
 
 describe("runtime/clients", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     if (originalDispatcherApiToken === undefined) {
       delete process.env.DISPATCHER_API_TOKEN;
@@ -21,6 +24,16 @@ describe("runtime/clients", () => {
       delete process.env.DISPATCHER_WORKER_TOKEN;
     } else {
       process.env.DISPATCHER_WORKER_TOKEN = originalDispatcherWorkerToken;
+    }
+    if (originalProgressMaxAttempts === undefined) {
+      delete process.env.WORKER_PROGRESS_MAX_ATTEMPTS;
+    } else {
+      process.env.WORKER_PROGRESS_MAX_ATTEMPTS = originalProgressMaxAttempts;
+    }
+    if (originalProgressRetryDelayMs === undefined) {
+      delete process.env.WORKER_PROGRESS_RETRY_DELAY_MS;
+    } else {
+      process.env.WORKER_PROGRESS_RETRY_DELAY_MS = originalProgressRetryDelayMs;
     }
   });
 
@@ -49,6 +62,39 @@ describe("runtime/clients", () => {
         }),
       }),
     );
+  });
+
+  it("fails before sending instead of falling back from a whitespace worker token", async () => {
+    process.env.DISPATCHER_API_TOKEN = "operator-token";
+    process.env.DISPATCHER_WORKER_TOKEN = "   ";
+    const fetchImpl = vi.fn();
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await expect(dispatcher.register({
+      workerId: "trae-worker",
+      pool: "trae",
+      repoDir: "/tmp/repo",
+    })).rejects.toThrow(/DISPATCHER_WORKER_TOKEN.*non-empty/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects an explicit whitespace dispatcher token before sending", async () => {
+    delete process.env.DISPATCHER_API_TOKEN;
+    delete process.env.DISPATCHER_WORKER_TOKEN;
+    const fetchImpl = vi.fn();
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      dispatcherToken: "   ",
+      fetchImpl: fetchImpl as never,
+    });
+
+    await expect(dispatcher.register({
+      workerId: "trae-worker",
+      pool: "trae",
+      repoDir: "/tmp/repo",
+    })).rejects.toThrow(/Trae dispatcherToken option.*non-empty/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("labels dispatcher fetchTask transport failures with the request source", async () => {
@@ -270,6 +316,38 @@ describe("runtime/clients", () => {
     expect(init.signal?.aborted).toBe(true);
   });
 
+  it("propagates caller cancellation into dispatcher startTask", async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(async (_input, init) => {
+      const signal = init?.signal as AbortSignal | undefined;
+      await new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+        controller.abort();
+      });
+      return new Response("{}");
+    });
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await expect(dispatcher.startTask(
+      "trae-cancel",
+      "task-start-cancel",
+      {
+        attemptId: "attempt-start-cancel",
+        leaseToken: "lease-start-cancel",
+        protocolVersion: "2026-05-v1",
+        traceId: "trace-start-cancel",
+        idempotencyKey: "worker-v1:task-start-cancel:attempt-start-cancel",
+      },
+      { signal: controller.signal },
+    )).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("sends evidence in submitResult request", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       status: 200,
@@ -411,6 +489,213 @@ describe("runtime/clients", () => {
       progressId: expect.any(String),
       message: "Running tests",
     });
+  });
+
+  it("retries Trae progress with one stable generated progressId", async () => {
+    process.env.WORKER_PROGRESS_MAX_ATTEMPTS = "3";
+    process.env.WORKER_PROGRESS_RETRY_DELAY_MS = "0";
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "ok",
+        task: {
+          task_id: "task-progress-retry",
+          attempt_id: "attempt-progress-retry",
+          lease_token: "lease-progress-retry",
+          protocol_version: "2026-05-v1",
+          trace_id: "trace-progress-retry",
+          idempotency_key: "worker-v1:task-progress-retry:attempt-progress-retry",
+        },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"error":"temporarily unavailable"}', { status: 503 }))
+      .mockResolvedValueOnce(new Response('{"status":"progress_recorded"}', { status: 200 }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await dispatcher.fetchTask("trae-progress", "/tmp/repo");
+    await dispatcher.reportProgress("task-progress-retry", "Running tests", "trae-progress");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    const firstAttempt = JSON.parse((fetchImpl.mock.calls[1] as unknown as [string, { body: string }])[1].body);
+    const secondAttempt = JSON.parse((fetchImpl.mock.calls[2] as unknown as [string, { body: string }])[1].body);
+    expect(secondAttempt).toEqual(firstAttempt);
+    expect(firstAttempt.progressId).toEqual(expect.any(String));
+  });
+
+  it("does not retry a Trae progress lease conflict", async () => {
+    process.env.WORKER_PROGRESS_RETRY_DELAY_MS = "0";
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "ok",
+        task: {
+          task_id: "task-progress-conflict",
+          attempt_id: "attempt-progress-conflict",
+          lease_token: "lease-progress-conflict",
+          protocol_version: "2026-05-v1",
+          trace_id: "trace-progress-conflict",
+          idempotency_key: "worker-v1:task-progress-conflict:attempt-progress-conflict",
+        },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("null", { status: 409 }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await dispatcher.fetchTask("trae-progress", "/tmp/repo");
+    await expect(dispatcher.reportProgress(
+      "task-progress-conflict",
+      "Running tests",
+      "trae-progress",
+    )).rejects.toMatchObject({ status: 409 });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a Trae progress response with invalid JSON", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "ok",
+        task: {
+          task_id: "task-progress-invalid-json",
+          attempt_id: "attempt-progress-invalid-json",
+          lease_token: "lease-progress-invalid-json",
+          protocol_version: "2026-05-v1",
+          trace_id: "trace-progress-invalid-json",
+          idempotency_key: "worker-v1:task-progress-invalid-json:attempt-progress-invalid-json",
+        },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("not-json", { status: 200 }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await dispatcher.fetchTask("trae-progress", "/tmp/repo");
+    await expect(dispatcher.reportProgress(
+      "task-progress-invalid-json",
+      "Running tests",
+      "trae-progress",
+    )).rejects.toMatchObject({ name: "DispatcherResponseError", retryable: false });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels Trae progress while waiting to retry", async () => {
+    process.env.WORKER_PROGRESS_RETRY_DELAY_MS = "60000";
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "ok",
+        task: {
+          task_id: "task-progress-abort",
+          attempt_id: "attempt-progress-abort",
+          lease_token: "lease-progress-abort",
+          protocol_version: "2026-05-v1",
+          trace_id: "trace-progress-abort",
+          idempotency_key: "worker-v1:task-progress-abort:attempt-progress-abort",
+        },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"error":"temporarily unavailable"}', { status: 503 }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+    const controller = new AbortController();
+
+    await dispatcher.fetchTask("trae-progress", "/tmp/repo");
+    const pending = dispatcher.reportProgress(
+      "task-progress-abort",
+      "Running tests",
+      "trae-progress",
+      { signal: controller.signal },
+    );
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2));
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries Trae heartbeat with one stable payload", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response('{"error":"temporarily unavailable"}', { status: 503 }))
+      .mockResolvedValueOnce(new Response('{"status":"ok"}', { status: 200 }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    const pending = dispatcher.heartbeat("trae-heartbeat");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(pending).resolves.toEqual({ status: "ok" });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const firstBody = (fetchImpl.mock.calls[0] as unknown as [string, { body: string }])[1].body;
+    const secondBody = (fetchImpl.mock.calls[1] as unknown as [string, { body: string }])[1].body;
+    expect(secondBody).toBe(firstBody);
+    expect(JSON.parse(firstBody)).toEqual({ worker_id: "trae-heartbeat" });
+  });
+
+  it("stops Trae heartbeat after exactly four transient attempts", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn(async () => new Response(
+      '{"error":"temporarily unavailable"}',
+      { status: 503 },
+    ));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    const pending = dispatcher.heartbeat("trae-heartbeat");
+    const rejection = expect(pending).rejects.toMatchObject({ status: 503 });
+    await vi.advanceTimersByTimeAsync(3_000);
+    await rejection;
+
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([401, 409])("does not retry Trae heartbeat HTTP %s", async (status) => {
+    const fetchImpl = vi.fn(async () => new Response("null", { status }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await expect(dispatcher.heartbeat("trae-heartbeat")).rejects.toMatchObject({ status });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("does not retry an invalid Trae heartbeat response", async () => {
+    const fetchImpl = vi.fn(async () => new Response("not-json", { status: 200 }));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+
+    await expect(dispatcher.heartbeat("trae-heartbeat")).rejects.toMatchObject({
+      name: "DispatcherResponseError",
+      retryable: false,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("cancels Trae heartbeat while waiting to retry", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn(async () => new Response(
+      '{"error":"temporarily unavailable"}',
+      { status: 503 },
+    ));
+    const dispatcher = createDispatcherClient("http://127.0.0.1:8787", {
+      fetchImpl: fetchImpl as never,
+    });
+    const controller = new AbortController();
+
+    const pending = dispatcher.heartbeat("trae-heartbeat", { signal: controller.signal });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("rejects progress when fetchTask has not supplied an attempt envelope", async () => {

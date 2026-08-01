@@ -5,6 +5,7 @@ import {
   normalizeTraeBetaConfig,
   readTraeBetaConfig,
   resolveTraeBetaConfigPaths,
+  secureTraeBetaConfigPermissions,
   writeTraeBetaConfig,
 } from "./config.js";
 
@@ -18,6 +19,7 @@ export interface TraeBetaInitResult {
 
 export function initTraeBetaConfig(options: TraeBetaInitOptions = {}): TraeBetaInitResult {
   const paths = resolveTraeBetaConfigPaths(options);
+  secureTraeBetaConfigPermissions({ configPath: paths.configPath });
   const existing = readTraeBetaConfig({ configPath: paths.configPath });
 
   if (existing && !options.overwrite) {
@@ -34,6 +36,7 @@ export function initTraeBetaConfig(options: TraeBetaInitOptions = {}): TraeBetaI
           ...existing,
           projectPath: options.projectPath ?? existing.projectPath,
           dispatcherUrl: options.dispatcherUrl ?? existing.dispatcherUrl,
+          dispatcherToken: options.dispatcherToken ?? existing.dispatcherToken,
           automationUrl: options.automationUrl ?? existing.automationUrl,
           workerId: options.workerId ?? existing.workerId,
           traeBin: options.traeBin ?? existing.traeBin,

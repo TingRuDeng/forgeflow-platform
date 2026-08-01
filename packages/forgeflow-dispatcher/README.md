@@ -44,7 +44,7 @@ Default values:
 - `authMode=token`
 
 `init` generates and saves a token by default when `authMode=token`.
-On Unix, config writers create or repair this file with mode `0600`; the runtime rejects credential config that is readable by group or others.
+The secure config entrypoints support Unix-like platforms (macOS / Linux) only and fail closed elsewhere. The default config directory and file are owner-only (`0700` / `0600`). Writes use a private temporary file in the same directory and atomic replacement. Reads reject symbolic links in the config file or user-controlled directory path, insecure permissions, and directory ancestors that another user can replace; file contents are read from the same descriptor whose identity and permissions were validated. Rerun `init` to repair permissions created by an older package version without dropping the saved token.
 
 ## Commands
 
@@ -76,9 +76,12 @@ Supported auth modes:
 Examples:
 
 ```bash
-forgeflow-dispatcher init --auth-mode token --token your-secret-token
+printf '%s' "$DISPATCHER_API_TOKEN" \
+  | forgeflow-dispatcher init --auth-mode token --token-stdin
 forgeflow-dispatcher init --auth-mode open
 ```
+
+The legacy `--token` argument is rejected so credentials do not enter process arguments or shell history. `init --token-stdin` persists the token; `start --token-stdin` applies it only to that foreground process.
 
 ## Limits
 

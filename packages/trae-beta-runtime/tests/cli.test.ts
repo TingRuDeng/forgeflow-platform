@@ -159,12 +159,46 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining("projectPath: /tmp/project"));
   });
 
+  it("reads an init token from stdin without preloading the persisted config", async () => {
+    const readConfig = vi.fn(() => {
+      throw new Error("init must not preload config");
+    });
+    const initConfig = vi.fn(() => ({
+      created: true,
+      configPath: "/tmp/config.json",
+      config: exampleConfig,
+    }));
+
+    await runCli(["init", "--token-stdin"], {
+      readConfig,
+      readStdin: vi.fn(() => "stdin-token\n"),
+      initConfig,
+      log: vi.fn(),
+    });
+
+    expect(readConfig).not.toHaveBeenCalled();
+    expect(initConfig).toHaveBeenCalledWith(expect.objectContaining({
+      dispatcherToken: "stdin-token",
+    }));
+  });
+
+  it("rejects dispatcher tokens passed through argv", async () => {
+    await expect(runCli(["init", "--token", "argv-token"], {
+      readConfig: vi.fn(() => null),
+      initConfig: vi.fn(),
+      log: vi.fn(),
+    })).rejects.toThrow(/--token-stdin/);
+  });
+
   it("runs init and prints JSON output with --json flag", async () => {
     const log = vi.fn();
     const initConfig = vi.fn(() => ({
       created: true,
       configPath: "/tmp/config.json",
-      config: exampleConfig,
+      config: {
+        ...exampleConfig,
+        dispatcherToken: "must-not-be-logged",
+      },
     }));
 
     await runCli(["init", "--worker-id", "trae-remote", "--json"], {
@@ -185,6 +219,8 @@ describe("@tingrudeng/trae-beta-runtime cli", () => {
       workerId: "trae-remote",
     }));
     expect(log).toHaveBeenCalledWith(expect.stringContaining("\"created\": true"));
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("must-not-be-logged"));
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("dispatcherToken"));
   });
 
   it("uses config defaults when starting the worker with human-readable output", async () => {

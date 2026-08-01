@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -6,6 +7,7 @@ import {
   buildDefaultConfig,
   loadConfig,
   saveConfig,
+  secureConfigPermissions,
   type DispatcherAuthMode,
   type DispatcherRuntimeConfig,
   type PersistenceBackend,
@@ -21,6 +23,10 @@ type ParsedArgs = {
   command: Command;
   options: Record<string, string | boolean>;
 };
+
+export interface CliDeps {
+  readStdin: () => string;
+}
 
 function parseCliArgs(argv: string[]): ParsedArgs {
   const [command, ...rest] = argv;
@@ -56,8 +62,8 @@ function parseCliArgs(argv: string[]): ParsedArgs {
 function printHelp() {
   console.log(`
 Usage:
-  forgeflow-dispatcher init [--host 127.0.0.1] [--port 8787] [--state-dir ~/.forgeflow-dispatcher/state] [--persistence-backend sqlite|json] [--auth-mode token|legacy|open] [--token <token>]
-  forgeflow-dispatcher start [--host <host>] [--port <port>] [--state-dir <dir>] [--persistence-backend sqlite|json] [--auth-mode token|legacy|open] [--token <token>]
+  forgeflow-dispatcher init [--host 127.0.0.1] [--port 8787] [--state-dir ~/.forgeflow-dispatcher/state] [--persistence-backend sqlite|json] [--auth-mode token|legacy|open] [--token-stdin]
+  forgeflow-dispatcher start [--host <host>] [--port <port>] [--state-dir <dir>] [--persistence-backend sqlite|json] [--auth-mode token|legacy|open] [--token-stdin]
   forgeflow-dispatcher doctor
   forgeflow-dispatcher status
   forgeflow-dispatcher backup [--backup-dir <dir>]
@@ -66,7 +72,10 @@ Usage:
 `);
 }
 
-function resolveConfig(options: Record<string, string | boolean>): DispatcherRuntimeConfig {
+function resolveConfig(
+  options: Record<string, string | boolean>,
+  stdinToken?: string,
+): DispatcherRuntimeConfig {
   const config = loadConfig();
   const next: DispatcherRuntimeConfig = { ...config };
 
@@ -85,17 +94,18 @@ function resolveConfig(options: Record<string, string | boolean>): DispatcherRun
   if (typeof options.authMode === "string") {
     next.authMode = options.authMode as DispatcherAuthMode;
   }
-  if (typeof options.token === "string") {
-    next.apiToken = options.token;
+  if (stdinToken) {
+    next.apiToken = stdinToken;
   }
 
   return next;
 }
 
-async function runInit(options: Record<string, string | boolean>) {
+async function runInit(options: Record<string, string | boolean>, stdinToken?: string) {
+  secureConfigPermissions();
   const next = {
     ...buildDefaultConfig(),
-    ...resolveConfig(options),
+    ...resolveConfig(options, stdinToken),
   };
   const configPath = saveConfig(next);
   console.log(JSON.stringify({
@@ -134,7 +144,11 @@ async function runRestore(options: Record<string, string | boolean>) {
   console.log(JSON.stringify(result, null, 2));
 }
 
-export async function runCli(argv: string[]) {
+export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {}) {
+  const deps: CliDeps = {
+    readStdin: () => fs.readFileSync(0, "utf8"),
+    ...partialDeps,
+  };
   const parsed = parseCliArgs(argv);
   if (parsed.options.help === true) {
     printHelp();
@@ -146,8 +160,22 @@ export async function runCli(argv: string[]) {
     return;
   }
 
+  if (parsed.options.token !== undefined) {
+    throw new Error("--token is not supported because process arguments may be exposed; pipe the token through --token-stdin");
+  }
+  if (parsed.options.tokenStdin !== undefined && parsed.options.tokenStdin !== true) {
+    throw new Error("--token-stdin does not accept a value");
+  }
+  if (parsed.options.tokenStdin === true && parsed.command !== "init" && parsed.command !== "start") {
+    throw new Error("--token-stdin is only supported by init and start");
+  }
+  const stdinToken = parsed.options.tokenStdin === true ? deps.readStdin().trim() : undefined;
+  if (parsed.options.tokenStdin === true && !stdinToken) {
+    throw new Error("--token-stdin requires a non-empty token on stdin");
+  }
+
   if (parsed.command === "init") {
-    await runInit(parsed.options);
+    await runInit(parsed.options, stdinToken);
     return;
   }
 
@@ -172,7 +200,7 @@ export async function runCli(argv: string[]) {
   }
 
   if (parsed.command === "start") {
-    await startDispatcher(resolveConfig(parsed.options));
+    await startDispatcher(resolveConfig(parsed.options, stdinToken));
   }
 }
 

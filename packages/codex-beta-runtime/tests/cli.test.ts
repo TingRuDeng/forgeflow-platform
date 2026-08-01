@@ -31,4 +31,11 @@ describe("codex beta runtime cli", () => {
     expect(() => parseCliArgs(["start", "gateway"]))
       .toThrow("start subcommand must be worker");
   });
+
+  it("rejects dispatcher credentials in argv", () => {
+    expect(() => parseCliArgs(["init", "--token", "argv-token"]))
+      .toThrow(/DISPATCHER_WORKER_TOKEN/);
+    expect(() => parseCliArgs(["init", "--token-stdin"]))
+      .toThrow(/environment-only/);
+  });
 });

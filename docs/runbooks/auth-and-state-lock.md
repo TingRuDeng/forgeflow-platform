@@ -34,8 +34,10 @@ test -n "${DISPATCHER_WORKER_TOKENS}" && echo "worker token map set" || echo "wo
 - 控制层保留 `DISPATCHER_API_TOKEN`；远程 worker 使用各自的 `DISPATCHER_WORKER_TOKEN`
 - dispatcher 通过 `DISPATCHER_WORKER_TOKENS='{"worker-id":"worker-token"}'` 校验 worker scope
 - worker token 必须逐 worker 唯一、无首尾空白，并且不能与 `DISPATCHER_API_TOKEN` 相同；配置冲突会拒绝加载，避免 worker token 退化为控制层凭据
+- `DISPATCHER_API_TOKEN` 只要出现在环境中就必须是无首尾空白的非空字符串；空环境变量不会回退到配置文件 token，避免部署注入错误被静默掩盖
 - worker token 不能访问 dashboard、dispatch/review 管理接口或其他 worker 路由
-- `forgeflow-dispatcher init` 与源码侧 config CLI 在 Unix 上会把配置文件创建或修正为 `0600`；如果手工迁移配置，保持只有 owner 可读写，否则服务端会拒绝加载
+- 发布包只允许用 `--token-stdin` 接收显式 token，拒绝 argv `--token`；`forgeflow-dispatcher init` 会把默认配置目录 / 文件创建或修正为 `0700` / `0600`，并采用同目录安全临时文件原子替换
+- 源码 server 不再提供另一套配置写入 CLI；优先使用环境变量。若读取 `~/.forgeflow-dispatcher.json` 或 `FORGEFLOW_DISPATCHER_CONFIG_PATH` 指定的配置，手工迁移后执行 `chmod 600 <config-file>`，并确保用户可控目录链不含 symlink、任一祖先都不可被其他用户替换。runtime 只从完成身份与权限校验的同一文件句柄读取；安全配置门禁仅支持 Unix-like 平台（macOS / Linux），其他平台会拒绝运行
 
 ## 3. 锁文件检查
 

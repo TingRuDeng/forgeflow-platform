@@ -14,6 +14,7 @@ const workerDaemonTaskExecutorSourcePath = path.join(repoRoot, "scripts/lib/work
 const runWorkerDaemonSourcePath = path.join(repoRoot, "scripts/run-worker-daemon.ts");
 const runWorkerAssignmentSourcePath = path.join(repoRoot, "scripts/run-worker-assignment.ts");
 const runTraeAutomationWorkerSourcePath = path.join(repoRoot, "scripts/run-trae-automation-worker.ts");
+const runTraeMcpWorkerSourcePath = path.join(repoRoot, "scripts/run-trae-mcp-worker-server.ts");
 const runtimeBootstrapSourcePath = path.join(repoRoot, "scripts/lib/runtime-bootstrap.ts");
 
 describe("worker daemon thin adapter", () => {
@@ -52,6 +53,50 @@ describe("worker daemon thin adapter", () => {
     expect(runtimeWorkerDaemonSource).toContain("resolveManagedWorkerTaskRetryPolicy");
     expect(managedTaskSource).toContain("DEFAULT_SUBMIT_RESULT_MAX_RETRIES");
     expect(managedTaskSource).toContain("DEFAULT_SUBMIT_RESULT_RETRY_DELAY_MS");
+  });
+
+  it("keeps dispatcher retry policy in beta-runtime-core", () => {
+    const dispatcherRetrySource = fs.readFileSync(
+      path.join(repoRoot, "packages/beta-runtime-core/src/runtime/dispatcher-request-retry.ts"),
+      "utf8",
+    );
+    const runtimeDispatcherClientSource = fs.readFileSync(
+      path.join(repoRoot, "packages/beta-runtime-core/src/runtime/dispatcher-client.ts"),
+      "utf8",
+    );
+    const dispatcherGlueClientSource = fs.readFileSync(
+      path.join(repoRoot, "apps/dispatcher/src/modules/server/runtime-glue-dispatcher-client.ts"),
+      "utf8",
+    );
+    const progressDeliverySource = fs.readFileSync(
+      path.join(repoRoot, "packages/beta-runtime-core/src/runtime/progress-delivery.ts"),
+      "utf8",
+    );
+    const heartbeatDeliverySource = fs.readFileSync(
+      path.join(repoRoot, "packages/beta-runtime-core/src/runtime/heartbeat-delivery.ts"),
+      "utf8",
+    );
+    const traeWorkerSource = fs.readFileSync(
+      path.join(repoRoot, "scripts/lib/trae-automation-worker.ts"),
+      "utf8",
+    );
+    const traeMcpSource = fs.readFileSync(runTraeMcpWorkerSourcePath, "utf8");
+
+    expect(progressDeliverySource).toContain("retryProgressDelivery");
+    expect(progressDeliverySource).toContain("retryDispatcherRequest");
+    expect(heartbeatDeliverySource).toContain("retryHeartbeatDelivery");
+    expect(heartbeatDeliverySource).toContain("retryDispatcherRequest");
+    expect(dispatcherRetrySource).toContain("isRetryableDispatcherRequestError");
+    expect(runtimeDispatcherClientSource).toContain("retryHeartbeatDelivery");
+    expect(dispatcherGlueClientSource).toContain("retryHeartbeatDelivery");
+    expect(runtimeDispatcherClientSource).not.toContain("HEARTBEAT_MAX_ATTEMPTS");
+    expect(dispatcherGlueClientSource).not.toContain("HEARTBEAT_MAX_ATTEMPTS");
+    expect(runtimeDispatcherClientSource).not.toContain("function callWithRetry");
+    expect(dispatcherGlueClientSource).not.toContain("function callWithRetry");
+    expect(traeWorkerSource).toContain("importDispatcherDeliveryRuntime");
+    expect(traeMcpSource).toContain("importDispatcherDeliveryRuntime");
+    expect(traeWorkerSource).not.toContain("function isRetryableDispatcherRequestError");
+    expect(traeMcpSource).not.toContain("function isRetryableDispatcherRequestError");
   });
 
   it("keeps dist bootstrap logic inside the explicit runtime bootstrap adapter", () => {

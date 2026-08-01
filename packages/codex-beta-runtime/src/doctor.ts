@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 
 import {
   createDefaultCodexBetaConfig,
+  inspectCodexBetaConfigPermissions,
   readCodexBetaConfig,
   resolveCodexBetaConfigPaths,
 } from "./config.js";
@@ -98,7 +99,10 @@ export function runCodexBetaDoctor(options: {
   config?: Partial<CodexBetaConfig>;
 } = {}): CodexBetaDoctorResult {
   const paths = resolveCodexBetaConfigPaths({ configPath: options.configPath });
-  const loaded = readCodexBetaConfig({ configPath: paths.configPath });
+  const configPermissions = inspectCodexBetaConfigPermissions({ configPath: paths.configPath });
+  const loaded = configPermissions.ok
+    ? readCodexBetaConfig({ configPath: paths.configPath })
+    : null;
   const config = createDefaultCodexBetaConfig(
     {
       ...(loaded || {}),
@@ -130,10 +134,21 @@ export function runCodexBetaDoctor(options: {
 
   checks.push({
     name: "config-file",
-    ok: Boolean(loaded),
-    message: loaded ? "config file exists" : "config file is missing",
+    ok: configPermissions.fileExists,
+    message: configPermissions.fileExists ? "config file exists" : "config file is missing",
     details: {
       configPath: paths.configPath,
+    },
+  });
+
+  checks.push({
+    name: "config-permissions",
+    ok: configPermissions.ok,
+    message: configPermissions.message,
+    details: {
+      configFileMode: configPermissions.fileMode,
+      configDirMode: configPermissions.directoryMode,
+      requiresPrivateConfigDir: configPermissions.requiresPrivateDirectory,
     },
   });
 

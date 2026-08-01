@@ -35,10 +35,8 @@ forgeflow-review-orchestrator dispatch ...
 ### Option 2: Init command (recommended for local development)
 ```bash
 # First time setup - save your credentials
-forgeflow-review-orchestrator init --token your-secret-token --url http://127.0.0.1:8787
-
-# Token can be string or number
-forgeflow-review-orchestrator init --token 123456 --url http://127.0.0.1:8787
+printf '%s' "$DISPATCHER_API_TOKEN" \
+  | forgeflow-review-orchestrator init --token-stdin --url http://127.0.0.1:8787
 
 # View help
 forgeflow-review-orchestrator init --help
@@ -52,6 +50,7 @@ forgeflow-review-orchestrator watch --task-id dispatch-1:task-1
 ```
 
 Config is saved to `~/.forgeflow-review-orchestrator.json`.
+The legacy `--token` argument is rejected so credentials do not enter process arguments or shell history. A defined environment or file token must be non-empty and contain no surrounding whitespace; invalid environment input fails instead of falling back to the file. Secure config supports Unix-like platforms (macOS / Linux) only and fails closed elsewhere. Writes use an owner-only temporary file and atomic replacement; the config file is `0600`, and replaceable directory ancestors or symlinks are rejected. Reads use the same descriptor whose identity and permissions were validated. Rerun `forgeflow-review-orchestrator init` to repair permissions created by an older package version without dropping the saved token.
 
 The CLI automatically includes `Authorization: Bearer <token>` in all dispatcher HTTP requests.
 

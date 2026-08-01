@@ -95,12 +95,14 @@ export function createJsonHttpClient(baseUrl: string, options: JsonHttpClientOpt
     const url = `${base}${pathname}`;
     const method = (init.method || "GET").toUpperCase();
 
-    const authToken = typeof process !== "undefined" ? process.env.DISPATCHER_API_TOKEN : undefined;
-    const configToken = typeof process !== "undefined" && !authToken ? (await import("./config.js")).getDispatcherToken() : undefined;
+    const dispatcherToken = typeof process !== "undefined"
+      ? (await import("./config.js")).getDispatcherToken()
+      : undefined;
     const headers: Record<string, string> = {};
     if (init.body) headers["content-type"] = "application/json";
-    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
-    else if (configToken) headers["Authorization"] = `Bearer ${configToken}`;
+    if (dispatcherToken !== undefined) {
+      headers["Authorization"] = `Bearer ${dispatcherToken}`;
+    }
     const controller = new AbortController();
     let timeoutId!: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<never>((_resolve, reject) => {

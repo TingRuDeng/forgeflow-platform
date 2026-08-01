@@ -29,6 +29,26 @@
       "types": "./dist/runtime/task-worktree.d.ts",
       "default": "./dist/runtime/task-worktree.js"
     },
+    "./runtime/dispatcher-auth.js": {
+      "types": "./dist/runtime/dispatcher-auth.d.ts",
+      "default": "./dist/runtime/dispatcher-auth.js"
+    },
+    "./runtime/dispatcher-request-retry.js": {
+      "types": "./dist/runtime/dispatcher-request-retry.d.ts",
+      "default": "./dist/runtime/dispatcher-request-retry.js"
+    },
+    "./runtime/heartbeat-delivery.js": {
+      "types": "./dist/runtime/heartbeat-delivery.d.ts",
+      "default": "./dist/runtime/heartbeat-delivery.js"
+    },
+    "./runtime/progress-delivery.js": {
+      "types": "./dist/runtime/progress-delivery.d.ts",
+      "default": "./dist/runtime/progress-delivery.js"
+    },
+    "./runtime/secure-config-file.js": {
+      "types": "./dist/runtime/secure-config-file.d.ts",
+      "default": "./dist/runtime/secure-config-file.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

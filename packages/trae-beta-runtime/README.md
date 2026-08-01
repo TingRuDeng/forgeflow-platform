@@ -130,11 +130,14 @@ forgeflow-trae-beta stop worker
 Runtime behavior notes:
 
 - `forgeflow-trae-beta` always uses the saved config in `~/.forgeflow-trae-beta/config.json`; running the command from a different current working directory does not change the target project automatically
+- the saved config may contain a dispatcher token. Pass it through `--token-stdin`; the legacy `--token` argument is rejected so credentials do not enter process arguments or shell history. Secure config supports Unix-like platforms (macOS / Linux) only and fails closed elsewhere. Writes use an owner-only temporary file and atomic replacement; the default config directory is `0700`, the file is `0600`, and replaceable directory ancestors are rejected. Reads reject config or directory-path symlinks and use the same descriptor whose identity and permissions were validated. Rerun `forgeflow-trae-beta init` to repair permissions created by an older package version without dropping the saved token
 - if you need to switch the managed business repo, rerun `forgeflow-trae-beta init --overwrite --project-path /abs/path/to/repo`
 - the recommended control-plane helper now binds dispatcher to `127.0.0.1` by default; if your Trae runtime talks to a remote control plane, set `--dispatcher-url` explicitly instead of assuming a non-loopback default bind
 - `stop worker` / `restart worker` / `stop all` / `restart all` now best-effort mark the configured worker `offline` in dispatcher before stopping the local process, so the dashboard does not stay falsely online during the heartbeat lease window
 - `restart launch` / `restart all` now wait for the old CDP debugger port to drain during clean macOS relaunch before spawning the new Trae app instance
 - terminal result delivery retries up to 3 attempts with a 2-second default delay; override with `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` and `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS`. When delivery remains unacknowledged, the runtime keeps the current session and worktree, releases the local worktree owner as the current execution unwinds, stops polling, and exits non-zero instead of executing the assignment again.
+- progress delivery reuses one generated `progressId` and payload across retries. Network/timeouts and HTTP `408`, `425`, `429`, or `5xx` retry up to 3 total attempts with a 1-second default delay; ordinary `4xx` fail immediately. Override with `WORKER_PROGRESS_MAX_ATTEMPTS` and `WORKER_PROGRESS_RETRY_DELAY_MS`; worker cancellation aborts the request or retry wait.
+- heartbeat delivery reuses one payload and the shared transient-error classifier for up to 4 total attempts with a 1-second delay; ordinary `4xx` and invalid success responses fail immediately. Scheduled heartbeats are single-flight, and stopping or changing heartbeat mode aborts the active request or retry wait.
 
 If `forgeflow-trae-beta update` fails because a mirrored registry has not synced the latest shared dependency yet, rerun the upgrade with:
 
@@ -198,10 +201,8 @@ export DISPATCHER_WORKER_TOKEN="worker-specific-token"
 
 ### Option 2: Init command (recommended for local setup)
 ```bash
-forgeflow-trae-beta init --token your-secret-token --dispatcher-url http://127.0.0.1:8787
-
-# Token can be string or number
-forgeflow-trae-beta init --token 123456 --dispatcher-url http://127.0.0.1:8787
+printf '%s' "$DISPATCHER_WORKER_TOKEN" \
+  | forgeflow-trae-beta init --token-stdin --dispatcher-url http://127.0.0.1:8787
 
 # View help
 forgeflow-trae-beta init --help
@@ -209,7 +210,7 @@ forgeflow-trae-beta init --help
 
 The token is automatically included in all dispatcher HTTP requests as `Authorization: Bearer <token>`.
 
-Priority: `DISPATCHER_WORKER_TOKEN` env var > legacy `DISPATCHER_API_TOKEN` env var > config file > no auth. The dispatcher-side mapping is configured through `DISPATCHER_WORKER_TOKENS`; do not distribute the control-plane token to worker hosts.
+Priority: `DISPATCHER_WORKER_TOKEN` env var > legacy `DISPATCHER_API_TOKEN` env var > config file > no auth. Fallback only occurs when the higher-priority source is undefined; an empty or whitespace-padded token fails before any request. The dispatcher-side mapping is configured through `DISPATCHER_WORKER_TOKENS`; do not distribute the control-plane token to worker hosts.
 
 ## Config
 

@@ -4,16 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "config:set": "node scripts/config-cli.mjs",
-    "config:show": "node scripts/config-cli.mjs --show",
+    "dev": "pnpm --filter @tingrudeng/beta-runtime-core build && vite",
+    "build": "pnpm --filter @tingrudeng/beta-runtime-core build && tsc -b && vite build",
+    "config:set": "pnpm --filter @tingrudeng/beta-runtime-core build && node scripts/config-cli.mjs",
+    "config:show": "pnpm --filter @tingrudeng/beta-runtime-core build && node scripts/config-cli.mjs --show",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run",
-    "test:run": "vitest run",
-    "typecheck": "tsc -b",
-    "test:coverage": "vitest run --coverage"
+    "test": "pnpm --filter @tingrudeng/beta-runtime-core build && vitest run",
+    "test:run": "pnpm --filter @tingrudeng/beta-runtime-core build && vitest run",
+    "typecheck": "pnpm --filter @tingrudeng/beta-runtime-core build && tsc -b",
+    "test:coverage": "pnpm --filter @tingrudeng/beta-runtime-core build && vitest run --coverage"
   },
   "dependencies": {
     "@uiw/react-json-view": "2.0.0-alpha.41",
@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@tingrudeng/beta-runtime-core": "workspace:*",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

@@ -5,3 +5,8 @@ export * from "./runtime/run-worker-assignment-cli.js";
 export * from "./runtime/provider-worker-cli.js";
 export * from "./runtime/execution-profile.js";
 export * from "./runtime/worker-env.js";
+export * from "./runtime/dispatcher-auth.js";
+export * from "./runtime/dispatcher-request-retry.js";
+export * from "./runtime/heartbeat-delivery.js";
+export * from "./runtime/progress-delivery.js";
+export * from "./runtime/secure-config-file.js";

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { prepareTaskWorktreeWithOwnership, releaseTaskWorktreeOwnership, removeTaskWorktreeLifecycle, safeTaskDirName, } from "./task-worktree.js";
 import { checkArtifactReviewability } from "./trae-automation-artifact-checks.js";
+import { importDispatcherDeliveryRuntime, } from "./runtime-bootstrap.js";
 const DEFAULT_DISPATCHER_URL = "http://127.0.0.1:8787";
 const DEFAULT_AUTOMATION_URL = "http://127.0.0.1:8790";
 const DEFAULT_POLL_INTERVAL_MS = Number(process.env.TRAE_AUTOMATION_POLL_INTERVAL_MS || 5000);
@@ -21,6 +22,31 @@ const MAX_HARD_CHAT_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_SESSION_POLL_INTERVAL_MS = Number(process.env.TRAE_AUTOMATION_SESSION_POLL_INTERVAL_MS || 10000);
 const DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS = Number(process.env.TRAE_AUTOMATION_REMOTE_SHA_RETRY_ATTEMPTS || 3);
 const DEFAULT_REMOTE_SHA_RETRY_MS = Number(process.env.TRAE_AUTOMATION_REMOTE_SHA_RETRY_MS || 10000);
+let dispatcherDeliveryRuntimePromise = null;
+function loadDispatcherDeliveryRuntime() {
+    dispatcherDeliveryRuntimePromise ??= importDispatcherDeliveryRuntime();
+    return dispatcherDeliveryRuntimePromise;
+}
+function attachHttpStatus(error, status) {
+    return Object.assign(error, { status });
+}
+function attachRetryable(error, retryable) {
+    return Object.assign(error, { retryable });
+}
+function readHttpErrorMessage(body, rawText, fallback) {
+    if (body && typeof body === "object") {
+        for (const key of ["message", "error"]) {
+            const value = body[key];
+            if (typeof value === "string" && value.trim()) {
+                return value;
+            }
+        }
+    }
+    if (body === null && rawText.trim() === "null") {
+        return fallback;
+    }
+    return rawText || fallback;
+}
 export function createJsonHttpClient(baseUrl, options = {}) {
     const fetchImpl = options.fetchImpl || globalThis.fetch;
     if (typeof fetchImpl !== "function") {
@@ -30,7 +56,18 @@ export function createJsonHttpClient(baseUrl, options = {}) {
     async function request(path, init = {}) {
         const controller = new AbortController();
         const timeoutMs = Number(init.timeoutMs || 10000);
-        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        let timedOut = false;
+        const abortFromCaller = () => controller.abort(init.signal?.reason);
+        if (init.signal?.aborted) {
+            abortFromCaller();
+        }
+        else {
+            init.signal?.addEventListener("abort", abortFromCaller, { once: true });
+        }
+        const timeoutId = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, timeoutMs);
         try {
             const response = await fetchImpl(`${base}${path}`, {
                 method: init.method || "GET",
@@ -40,18 +77,40 @@ export function createJsonHttpClient(baseUrl, options = {}) {
             });
             clearTimeout(timeoutId);
             const text = await response.text();
-            const json = text ? JSON.parse(text) : {};
+            let json = {};
+            if (text) {
+                try {
+                    json = JSON.parse(text);
+                }
+                catch (error) {
+                    if (response.ok) {
+                        const message = error instanceof Error ? error.message : String(error);
+                        throw attachRetryable(new Error(`response was not valid JSON: ${path} - ${message}`), false);
+                    }
+                }
+            }
             if (!response.ok) {
-                throw new Error(json.message || json.error || `HTTP ${response.status}`);
+                throw attachHttpStatus(new Error(readHttpErrorMessage(json, text, `HTTP ${response.status}`)), response.status);
             }
             return json;
         }
         catch (error) {
-            clearTimeout(timeoutId);
             if (error instanceof Error && error.name === "AbortError") {
-                throw new Error(`request timeout: ${path}`);
+                if (!timedOut && init.signal?.aborted) {
+                    const aborted = new Error(`request aborted: ${path}`);
+                    aborted.name = "AbortError";
+                    throw aborted;
+                }
+                throw attachRetryable(new Error(`request timeout: ${path}`), true);
             }
-            throw error instanceof Error ? error : new Error(String(error));
+            if (error instanceof Error && ("status" in error || "retryable" in error)) {
+                throw error;
+            }
+            throw attachRetryable(error instanceof Error ? error : new Error(String(error)), true);
+        }
+        finally {
+            clearTimeout(timeoutId);
+            init.signal?.removeEventListener("abort", abortFromCaller);
         }
     }
     return { request };
@@ -100,33 +159,42 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
                 timeoutMs: requestTimeoutMs,
             });
         },
-        async fetchTask(workerId, repoDir) {
+        async fetchTask(workerId, repoDir, requestOptions = {}) {
             const response = await http.request("/api/trae/fetch-task", {
                 method: "POST",
                 body: { worker_id: workerId, repo_dir: repoDir },
                 timeoutMs: requestTimeoutMs,
+                signal: requestOptions.signal,
             });
             captureAttemptLease(response);
             return response;
         },
-        async startTask(workerId, taskId) {
+        async startTask(workerId, taskId, requestOptions = {}) {
             return http.request("/api/trae/start-task", {
                 method: "POST",
                 body: { worker_id: workerId, task_id: taskId, ...requireAttemptLease(taskId) },
                 timeoutMs: requestTimeoutMs,
+                signal: requestOptions.signal,
             });
         },
-        async reportProgress(taskId, message, workerId) {
-            return http.request("/api/trae/report-progress", {
-                method: "POST",
-                body: {
-                    task_id: taskId,
-                    worker_id: workerId,
-                    ...requireAttemptLease(taskId),
-                    progress_id: randomUUID(),
-                    message,
-                },
-                timeoutMs: requestTimeoutMs,
+        async reportProgress(taskId, message, workerId, requestOptions = {}) {
+            const runtime = await loadDispatcherDeliveryRuntime();
+            const body = runtime.snapshotProgressPayload({
+                task_id: taskId,
+                worker_id: workerId,
+                ...requireAttemptLease(taskId),
+                progress_id: randomUUID(),
+                message,
+            });
+            return runtime.retryProgressDelivery({
+                ...runtime.resolveProgressDeliveryPolicy(),
+                signal: requestOptions.signal,
+                send: () => http.request("/api/trae/report-progress", {
+                    method: "POST",
+                    body,
+                    timeoutMs: requestTimeoutMs,
+                    signal: requestOptions.signal,
+                }),
             });
         },
         async submitResult(input) {
@@ -151,11 +219,17 @@ export function createDispatcherClient(baseUrl = DEFAULT_DISPATCHER_URL, options
                 timeoutMs: requestTimeoutMs,
             });
         },
-        async heartbeat(workerId) {
-            return http.request("/api/trae/heartbeat", {
-                method: "POST",
-                body: { worker_id: workerId },
-                timeoutMs: requestTimeoutMs,
+        async heartbeat(workerId, requestOptions = {}) {
+            const runtime = await loadDispatcherDeliveryRuntime();
+            const body = runtime.snapshotHeartbeatPayload({ worker_id: workerId });
+            return runtime.retryHeartbeatDelivery({
+                signal: requestOptions.signal,
+                send: () => http.request("/api/trae/heartbeat", {
+                    method: "POST",
+                    body,
+                    timeoutMs: requestTimeoutMs,
+                    signal: requestOptions.signal,
+                }),
             });
         },
     };
@@ -620,6 +694,7 @@ export function parseFinalReport(text) {
 function createHeartbeatController(dispatcherClient, workerId, logger, options = {}) {
     const timers = {
         interval: null,
+        activeRequest: null,
         mode: "idle",
     };
     const setIntervalImpl = options.setIntervalImpl || setInterval;
@@ -628,14 +703,27 @@ function createHeartbeatController(dispatcherClient, workerId, logger, options =
         if (timers.interval) {
             clearIntervalImpl(timers.interval);
         }
+        timers.activeRequest?.abort();
         timers.mode = mode;
         const intervalMs = mode === "high" ? HIGH_HEARTBEAT_INTERVAL_MS : IDLE_HEARTBEAT_INTERVAL_MS;
         timers.interval = setIntervalImpl(async () => {
+            if (timers.activeRequest) {
+                return;
+            }
+            const controller = new AbortController();
+            timers.activeRequest = controller;
             try {
-                await dispatcherClient.heartbeat(workerId);
+                await dispatcherClient.heartbeat(workerId, { signal: controller.signal });
             }
             catch (error) {
-                logger?.warn?.(`[trae-automation-worker] heartbeat failed: ${error.message}`);
+                if (!controller.signal.aborted) {
+                    logger?.warn?.(`[trae-automation-worker] heartbeat failed: ${error.message}`);
+                }
+            }
+            finally {
+                if (timers.activeRequest === controller) {
+                    timers.activeRequest = null;
+                }
             }
         }, intervalMs);
     }
@@ -649,6 +737,8 @@ function createHeartbeatController(dispatcherClient, workerId, logger, options =
             clearIntervalImpl(timers.interval);
             timers.interval = null;
         }
+        timers.activeRequest?.abort();
+        timers.activeRequest = null;
     }
     return { start, promoteToIdle, stop };
 }
@@ -668,6 +758,11 @@ export function createTraeAutomationWorkerRuntime(options) {
     if (!dispatcherClient || !automationClient || !workerId || !repoDir) {
         throw new Error("dispatcherClient, automationClient, workerId, and repoDir are required");
     }
+    function reportProgress(taskId, message, signal) {
+        return signal
+            ? dispatcherClient.reportProgress(taskId, message, workerId, { signal })
+            : dispatcherClient.reportProgress(taskId, message, workerId);
+    }
     async function cleanupTaskWorktree(task) {
         if (process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT !== "1" || !task.worktree_dir) {
             return;
@@ -680,7 +775,7 @@ export function createTraeAutomationWorkerRuntime(options) {
                 ownership: worktreeOwnerships.get(task.task_id),
             });
             try {
-                await dispatcherClient.reportProgress(task.task_id, `Worktree cleanup ${cleanup.action}`, workerId);
+                await reportProgress(task.task_id, `Worktree cleanup ${cleanup.action}`);
             }
             catch {
                 // Cleanup reporting must not replace the acknowledged task result.
@@ -690,7 +785,7 @@ export function createTraeAutomationWorkerRuntime(options) {
             const message = error instanceof Error ? error.message : String(error);
             logger.warn?.(`[trae-automation-worker] failed to clean worktree for ${task.task_id}: ${message}`);
             try {
-                await dispatcherClient.reportProgress(task.task_id, `Worktree cleanup failed: ${message}`, workerId);
+                await reportProgress(task.task_id, `Worktree cleanup failed: ${message}`);
             }
             catch {
                 // Cleanup reporting is best-effort after terminal result acknowledgement.
@@ -710,14 +805,14 @@ export function createTraeAutomationWorkerRuntime(options) {
             const message = error instanceof Error ? error.message : String(error);
             logger.warn?.(`[trae-automation-worker] failed to release worktree ownership for ${taskId}: ${message}`);
             try {
-                await dispatcherClient.reportProgress(taskId, `Worktree ownership release failed: ${message}`, workerId);
+                await reportProgress(taskId, `Worktree ownership release failed: ${message}`);
             }
             catch {
                 // Ownership release reporting is best-effort after task completion.
             }
         }
     }
-    async function submitParsedResult(task, parsed) {
+    async function submitParsedResult(task, parsed, signal) {
         const successRequested = parsed.result === "成功";
         const successAllowed = hasCodeChangeEvidence(parsed);
         let status = successRequested && successAllowed ? "review_ready" : "failed";
@@ -751,7 +846,7 @@ export function createTraeAutomationWorkerRuntime(options) {
                         status = "failed";
                         break;
                     }
-                    await dispatcherClient.reportProgress(task.task_id, `Push reported, waiting for remote SHA verification (${attempt}/${DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS}): ${remoteReason}`, workerId);
+                    await reportProgress(task.task_id, `Push reported, waiting for remote SHA verification (${attempt}/${DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS}): ${remoteReason}`, signal);
                     await sleepImpl(DEFAULT_REMOTE_SHA_RETRY_MS);
                 }
                 if (status === "review_ready" && artifactCheck && (!artifactCheck.reviewable || !artifactCheck.evidence.remoteVerified)) {
@@ -837,8 +932,10 @@ export function createTraeAutomationWorkerRuntime(options) {
                 discovery: deriveRegisterDiscoveryHints(repoDir) || undefined,
             });
         },
-        async runOnce() {
-            const fetched = await dispatcherClient.fetchTask(workerId, repoDir);
+        async runOnce(signal) {
+            const fetched = signal
+                ? await dispatcherClient.fetchTask(workerId, repoDir, { signal })
+                : await dispatcherClient.fetchTask(workerId, repoDir);
             if (!fetched || fetched.status === "no_task") {
                 return { status: "no_task" };
             }
@@ -849,20 +946,25 @@ export function createTraeAutomationWorkerRuntime(options) {
                     throw new Error(`worktree ownership was not retained for ${task.task_id}`);
                 }
                 worktreeOwnerships.set(task.task_id, workspace.ownership);
-                await dispatcherClient.startTask(workerId, task.task_id);
+                if (signal) {
+                    await dispatcherClient.startTask(workerId, task.task_id, { signal });
+                }
+                else {
+                    await dispatcherClient.startTask(workerId, task.task_id);
+                }
                 heartbeat.start("high");
-                await dispatcherClient.reportProgress(task.task_id, "Trae automation worker started task", workerId);
+                await reportProgress(task.task_id, "Trae automation worker started task", signal);
                 const prompt = buildAutomationPrompt(task);
                 const discovery = deriveTaskDiscoveryHints(task, repoDir);
                 let sessionId = null;
                 const startedAt = Date.now();
                 try {
-                    await dispatcherClient.reportProgress(task.task_id, "Trae automation gateway is preparing session", workerId);
+                    await reportProgress(task.task_id, "Trae automation gateway is preparing session", signal);
                     const prepareResult = await automationClient.prepareSession({
                         chatMode: task.chatMode || task.chat_mode || "new_chat",
                     });
                     sessionId = prepareResult?.data?.sessionId || prepareResult?.sessionId || null;
-                    await dispatcherClient.reportProgress(task.task_id, "Trae automation gateway is sending prompt", workerId);
+                    await reportProgress(task.task_id, "Trae automation gateway is sending prompt", signal);
                     const softTimeoutMs = Math.min(DEFAULT_SOFT_CHAT_TIMEOUT_MS, DEFAULT_HARD_CHAT_TIMEOUT_MS);
                     const chatTimeoutMs = softTimeoutMs + DEFAULT_CHAT_REQUEST_TIMEOUT_BUFFER_MS;
                     try {
@@ -882,7 +984,7 @@ export function createTraeAutomationWorkerRuntime(options) {
                             || r?.data?.result?.response?.text
                             || "";
                         const parsed = parseFinalReport(finalText);
-                        const finalStatus = await submitParsedResult(task, parsed);
+                        const finalStatus = await submitParsedResult(task, parsed, signal);
                         return {
                             status: finalStatus,
                             taskId: task.task_id,
@@ -894,14 +996,14 @@ export function createTraeAutomationWorkerRuntime(options) {
                             throw chatError;
                         }
                         if (!sessionId) {
-                            await dispatcherClient.reportProgress(task.task_id, "Chat timeout but session id is missing; cannot poll session status", workerId);
+                            await reportProgress(task.task_id, "Chat timeout but session id is missing; cannot poll session status", signal);
                             throw createMissingSessionIdRecoveryError(chatError);
                         }
                         const elapsed = Date.now() - startedAt;
                         if (elapsed >= DEFAULT_HARD_CHAT_TIMEOUT_MS) {
                             throw chatError;
                         }
-                        await dispatcherClient.reportProgress(task.task_id, "Chat timeout, checking session status", workerId);
+                        await reportProgress(task.task_id, "Chat timeout, checking session status", signal);
                         const sessionStatus = await pollSessionStatus(sessionId, DEFAULT_HARD_CHAT_TIMEOUT_MS - elapsed, DEFAULT_SESSION_POLL_INTERVAL_MS);
                         if (sessionStatus.status === "completed") {
                             const replayResponse = await automationClient.sendChat({
@@ -920,7 +1022,7 @@ export function createTraeAutomationWorkerRuntime(options) {
                                 || r?.data?.result?.response?.text
                                 || "";
                             const parsed = parseFinalReport(finalText);
-                            const finalStatus = await submitParsedResult(task, parsed);
+                            const finalStatus = await submitParsedResult(task, parsed, signal);
                             return {
                                 status: finalStatus,
                                 taskId: task.task_id,
@@ -951,7 +1053,7 @@ export function createTraeAutomationWorkerRuntime(options) {
                                         prNumber: null,
                                         prUrl: null,
                                     },
-                                });
+                                }, signal);
                                 return {
                                     status: "review_ready",
                                     taskId: task.task_id,
@@ -980,7 +1082,7 @@ export function createTraeAutomationWorkerRuntime(options) {
                                 prNumber: null,
                                 prUrl: null,
                             },
-                        });
+                        }, signal);
                         return {
                             status: "review_ready",
                             taskId: task.task_id,
@@ -1003,7 +1105,10 @@ export function createTraeAutomationWorkerRuntime(options) {
             let consecutiveErrors = 0;
             while (!signal?.aborted) {
                 try {
-                    const result = await this.runOnce();
+                    const nativeSignal = signal && "addEventListener" in signal
+                        ? signal
+                        : undefined;
+                    const result = await this.runOnce(nativeSignal);
                     consecutiveErrors = 0;
                     if (result.status === "no_task") {
                         await sleepImpl(pollIntervalMs);

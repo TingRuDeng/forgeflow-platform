@@ -1,10 +1,25 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
+import {
+  importDispatcherDeliveryRuntime,
+  type DispatcherDeliveryRuntimeModule,
+} from "./lib/runtime-bootstrap.js";
 
 const DEFAULT_DISPATCHER_URL = "http://127.0.0.1:8787";
 const HIGH_HEARTBEAT_INTERVAL_MS = 10_000;
 const IDLE_HEARTBEAT_INTERVAL_MS = 10_000;
+
+let dispatcherDeliveryRuntimePromise: Promise<DispatcherDeliveryRuntimeModule> | null = null;
+
+function attachRetryable(error: Error, retryable: boolean): Error {
+  return Object.assign(error, { retryable });
+}
+
+function loadDispatcherDeliveryRuntime(): Promise<DispatcherDeliveryRuntimeModule> {
+  dispatcherDeliveryRuntimePromise ??= importDispatcherDeliveryRuntime({ quiet: true });
+  return dispatcherDeliveryRuntimePromise;
+}
 
 const TOOLS = [
   {
@@ -98,6 +113,7 @@ const TOOLS = [
 ];
 
 let heartbeatInterval: NodeJS.Timeout | null = null;
+let heartbeatRequestController: AbortController | null = null;
 let currentWorkerId: string | null = null;
 let currentTaskId: string | null = null;
 let currentHeartbeatMode = "idle";
@@ -139,7 +155,7 @@ interface HttpClient {
   startTask(workerId: string, taskId: string): Promise<any>;
   reportProgress(taskId: string, message: string): Promise<any>;
   submitResult(input: any): Promise<any>;
-  heartbeat(workerId: string): Promise<any>;
+  heartbeat(workerId: string, requestOptions?: { signal?: AbortSignal }): Promise<any>;
 }
 
 function createHttpClient(baseUrl: string): HttpClient {
@@ -181,39 +197,83 @@ function createHttpClient(baseUrl: string): HttpClient {
     return attemptLease;
   }
 
-  async function request(path: string, body: any): Promise<any> {
+  async function request(
+    path: string,
+    body: any,
+    requestOptions: { signal?: AbortSignal } = {},
+  ): Promise<any> {
     const url = `${base}${path}`;
+    if (requestOptions.signal?.aborted) {
+      const aborted = new Error(`Request aborted: ${path}`);
+      aborted.name = "AbortError";
+      throw aborted;
+    }
+    const { getDispatcherAuthHeader } = await loadDispatcherDeliveryRuntime();
+    const authHeader = getDispatcherAuthHeader();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    let timedOut = false;
+    const abortFromCaller = () => controller.abort(requestOptions.signal?.reason);
+    requestOptions.signal?.addEventListener("abort", abortFromCaller, { once: true });
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 10000);
 
     try {
-      const dispatcherToken = process.env.DISPATCHER_WORKER_TOKEN || process.env.DISPATCHER_API_TOKEN;
       const response = await fetch(url, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          ...(dispatcherToken ? { Authorization: `Bearer ${dispatcherToken}` } : {}),
+          ...authHeader,
         },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
-      clearTimeout(timeoutId);
-
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(`HTTP ${response.status}: ${text || response.statusText}`);
+        throw Object.assign(
+          new Error(`HTTP ${response.status}: ${text || response.statusText}`),
+          { status: response.status },
+        );
       }
 
-      return await response.json();
+      try {
+        return await response.json();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw attachRetryable(
+          new Error(`Dispatcher response was not valid JSON: ${path} - ${message}`),
+          false,
+        );
+      }
     } catch (error) {
-      clearTimeout(timeoutId);
       if (error instanceof Error) {
         if (error.name === "AbortError") {
-          throw new Error(`Request timeout: ${path}`);
+          if (!timedOut && requestOptions.signal?.aborted) {
+            const aborted = new Error(`Request aborted: ${path}`);
+            aborted.name = "AbortError";
+            throw aborted;
+          }
+          throw attachRetryable(new Error(`Request timeout: ${path}`), true);
         }
-        throw new Error(`Dispatcher request failed: ${error.message}`);
+        if ("retryable" in error) {
+          throw error;
+        }
+        const wrapped = new Error(`Dispatcher request failed: ${error.message}`);
+        if ("status" in error) {
+          Object.assign(wrapped, { status: (error as Error & { status?: number }).status });
+        } else {
+          Object.assign(wrapped, { retryable: true });
+        }
+        throw wrapped;
       }
-      throw new Error(`Dispatcher request failed: ${String(error)}`);
+      throw attachRetryable(
+        new Error(`Dispatcher request failed: ${String(error)}`),
+        true,
+      );
+    } finally {
+      clearTimeout(timeoutId);
+      requestOptions.signal?.removeEventListener("abort", abortFromCaller);
     }
   }
 
@@ -242,12 +302,17 @@ function createHttpClient(baseUrl: string): HttpClient {
     },
 
     async reportProgress(taskId: string, message: string): Promise<any> {
-      return request("/api/trae/report-progress", {
+      const runtime = await loadDispatcherDeliveryRuntime();
+      const body = runtime.snapshotProgressPayload({
         task_id: taskId,
         worker_id: currentWorkerId,
         ...requireAttemptLease(taskId),
         progress_id: randomUUID(),
         message,
+      });
+      return runtime.retryProgressDelivery({
+        ...runtime.resolveProgressDeliveryPolicy(),
+        send: () => request("/api/trae/report-progress", body),
       });
     },
 
@@ -269,8 +334,13 @@ function createHttpClient(baseUrl: string): HttpClient {
       });
     },
 
-    async heartbeat(workerId: string): Promise<any> {
-      return request("/api/trae/heartbeat", { worker_id: workerId });
+    async heartbeat(workerId: string, requestOptions = {}): Promise<any> {
+      const runtime = await loadDispatcherDeliveryRuntime();
+      const body = runtime.snapshotHeartbeatPayload({ worker_id: workerId });
+      return runtime.retryHeartbeatDelivery({
+        signal: requestOptions.signal,
+        send: () => request("/api/trae/heartbeat", body, requestOptions),
+      });
     },
   };
 }
@@ -279,16 +349,28 @@ function startHeartbeat(httpClient: HttpClient, workerId: string, mode = "high")
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
   }
+  heartbeatRequestController?.abort();
   currentWorkerId = workerId;
   currentHeartbeatMode = mode;
 
   const intervalMs = mode === "high" ? HIGH_HEARTBEAT_INTERVAL_MS : IDLE_HEARTBEAT_INTERVAL_MS;
 
   heartbeatInterval = setInterval(async () => {
+    if (heartbeatRequestController) {
+      return;
+    }
+    const controller = new AbortController();
+    heartbeatRequestController = controller;
     try {
-      await httpClient.heartbeat(workerId);
+      await httpClient.heartbeat(workerId, { signal: controller.signal });
     } catch (error) {
-      console.error(`[Trae MCP] Heartbeat failed:`, error instanceof Error ? error.message : String(error));
+      if (!controller.signal.aborted) {
+        console.error(`[Trae MCP] Heartbeat failed:`, error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (heartbeatRequestController === controller) {
+        heartbeatRequestController = null;
+      }
     }
   }, intervalMs);
 
@@ -307,6 +389,8 @@ function stopHeartbeat(): void {
     heartbeatInterval = null;
     console.error(`[Trae MCP] Heartbeat stopped`);
   }
+  heartbeatRequestController?.abort();
+  heartbeatRequestController = null;
 }
 
 const JSONRPC_VERSION = "2.0";

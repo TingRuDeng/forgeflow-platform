@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 
 import {
   createDefaultGeminiBetaConfig,
+  inspectGeminiBetaConfigPermissions,
   readGeminiBetaConfig,
   resolveGeminiBetaConfigPaths,
 } from "./config.js";
@@ -98,7 +99,10 @@ export function runGeminiBetaDoctor(options: {
   config?: Partial<GeminiBetaConfig>;
 } = {}): GeminiBetaDoctorResult {
   const paths = resolveGeminiBetaConfigPaths({ configPath: options.configPath });
-  const loaded = readGeminiBetaConfig({ configPath: paths.configPath });
+  const configPermissions = inspectGeminiBetaConfigPermissions({ configPath: paths.configPath });
+  const loaded = configPermissions.ok
+    ? readGeminiBetaConfig({ configPath: paths.configPath })
+    : null;
   const config = createDefaultGeminiBetaConfig(
     {
       ...(loaded || {}),
@@ -130,10 +134,21 @@ export function runGeminiBetaDoctor(options: {
 
   checks.push({
     name: "config-file",
-    ok: Boolean(loaded),
-    message: loaded ? "config file exists" : "config file is missing",
+    ok: configPermissions.fileExists,
+    message: configPermissions.fileExists ? "config file exists" : "config file is missing",
     details: {
       configPath: paths.configPath,
+    },
+  });
+
+  checks.push({
+    name: "config-permissions",
+    ok: configPermissions.ok,
+    message: configPermissions.message,
+    details: {
+      configFileMode: configPermissions.fileMode,
+      configDirMode: configPermissions.directoryMode,
+      requiresPrivateConfigDir: configPermissions.requiresPrivateDirectory,
     },
   });
 

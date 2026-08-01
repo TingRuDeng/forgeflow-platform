@@ -1,10 +1,5 @@
-export function getDispatcherAuthHeader() {
-    const token = process.env.DISPATCHER_WORKER_TOKEN || process.env.DISPATCHER_API_TOKEN;
-    if (!token) {
-        return {};
-    }
-    return { Authorization: `Bearer ${token}` };
-}
+import { getDispatcherAuthHeader, normalizeOptionalDispatcherToken, } from "@tingrudeng/beta-runtime-core/runtime/dispatcher-auth.js";
+export { getDispatcherAuthHeader };
 export function isDispatcherAuthEnabled() {
-    return !!process.env.DISPATCHER_API_TOKEN;
+    return normalizeOptionalDispatcherToken(process.env.DISPATCHER_API_TOKEN, "DISPATCHER_API_TOKEN") !== undefined;
 }

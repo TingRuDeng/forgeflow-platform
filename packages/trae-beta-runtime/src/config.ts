@@ -1,6 +1,14 @@
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+import {
+  inspectSecureConfigFile,
+  readSecureConfigFile,
+  repairSecureConfigFilePermissions,
+  writeSecureConfigFile,
+  type SecureConfigFilePolicy,
+} from "@tingrudeng/beta-runtime-core/runtime/secure-config-file.js";
+import { normalizeOptionalDispatcherToken } from "@tingrudeng/beta-runtime-core/runtime/dispatcher-auth.js";
 
 import type {
   TraeBetaConfig,
@@ -12,6 +20,17 @@ import type {
 export const TRAE_BETA_CONFIG_VERSION = 2 as const;
 export const DEFAULT_TRAE_BETA_CONFIG_DIR_NAME = ".forgeflow-trae-beta";
 export const DEFAULT_TRAE_BETA_CONFIG_FILE_NAME = "config.json";
+
+export interface TraeBetaConfigPermissionStatus {
+  ok: boolean;
+  configExists: boolean;
+  configFileMode: number | null;
+  configDirMode: number | null;
+  configIsSymbolicLink: boolean;
+  configDirIsSymbolicLink: boolean;
+  requiresPrivateConfigDir: boolean;
+  message: string;
+}
 
 function normalizeDirectory(value: string) {
   const trimmed = String(value || "").trim();
@@ -54,6 +73,38 @@ export function resolveTraeBetaConfigPaths(
   };
 }
 
+function getConfigPolicy(): SecureConfigFilePolicy {
+  return {
+    label: "Trae beta config",
+    privateDirectory: resolveTraeBetaConfigPaths().configDir,
+  };
+}
+
+export function inspectTraeBetaConfigPermissions(
+  options: TraeBetaConfigLoadOptions = {},
+): TraeBetaConfigPermissionStatus {
+  const paths = resolveTraeBetaConfigPaths(options);
+  const status = inspectSecureConfigFile(paths.configPath, getConfigPolicy());
+  return {
+    ok: status.ok,
+    configExists: status.fileExists,
+    configFileMode: status.fileMode,
+    configDirMode: status.directoryMode,
+    configIsSymbolicLink: status.fileIsSymbolicLink,
+    configDirIsSymbolicLink: status.directoryIsSymbolicLink,
+    requiresPrivateConfigDir: status.requiresPrivateDirectory,
+    message: status.message,
+  };
+}
+
+export function secureTraeBetaConfigPermissions(
+  options: TraeBetaConfigLoadOptions = {},
+): TraeBetaConfigPaths {
+  const paths = resolveTraeBetaConfigPaths(options);
+  repairSecureConfigFilePermissions(paths.configPath, getConfigPolicy());
+  return paths;
+}
+
 export function createDefaultTraeBetaConfig(
   input: TraeBetaConfigInput = {},
   options: { cwd?: string } = {},
@@ -65,7 +116,10 @@ export function createDefaultTraeBetaConfig(
     version: TRAE_BETA_CONFIG_VERSION,
     projectPath,
     dispatcherUrl: normalizeUrl(input.dispatcherUrl || "", "http://127.0.0.1:8787"),
-    dispatcherToken: input.dispatcherToken,
+    dispatcherToken: normalizeOptionalDispatcherToken(
+      input.dispatcherToken,
+      "Trae config dispatcherToken",
+    ),
     automationUrl: normalizeUrl(input.automationUrl || "", "http://127.0.0.1:8790"),
     workerId: normalizeWorkerId(input.workerId || "", projectPath),
     traeBin: normalizeDirectory(input.traeBin || "/Applications/Trae CN.app"),
@@ -94,14 +148,13 @@ export function normalizeTraeBetaConfig(
 export function readTraeBetaConfig(
   options: TraeBetaConfigLoadOptions = {},
 ): TraeBetaConfig | null {
-  const { configPath } = resolveTraeBetaConfigPaths(options);
-  if (!fs.existsSync(configPath)) {
+  const paths = resolveTraeBetaConfigPaths(options);
+  const raw = readSecureConfigFile(paths.configPath, getConfigPolicy());
+  if (raw === null) {
     return null;
   }
-
-  const raw = fs.readFileSync(configPath, "utf8");
   const parsed = JSON.parse(raw) as Partial<TraeBetaConfig>;
-  return normalizeTraeBetaConfig(parsed, { cwd: path.dirname(configPath) });
+  return normalizeTraeBetaConfig(parsed, { cwd: path.dirname(paths.configPath) });
 }
 
 export function writeTraeBetaConfig(
@@ -109,8 +162,11 @@ export function writeTraeBetaConfig(
   options: TraeBetaConfigLoadOptions = {},
 ): TraeBetaConfigPaths {
   const paths = resolveTraeBetaConfigPaths(options);
-  fs.mkdirSync(paths.configDir, { recursive: true });
-  fs.writeFileSync(paths.configPath, `${JSON.stringify(config, null, 2)}\n`);
+  writeSecureConfigFile(
+    paths.configPath,
+    `${JSON.stringify(config, null, 2)}\n`,
+    getConfigPolicy(),
+  );
   return paths;
 }
 

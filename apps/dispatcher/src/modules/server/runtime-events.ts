@@ -1,4 +1,5 @@
 import type { Event, RuntimeState } from "./runtime-state.js";
+import { compareTimestampAsc } from "../time.js";
 
 export const RUNTIME_EVENTS_RETENTION_LIMIT = 500;
 export const DEFAULT_RUNTIME_AUDIT_EVENT_PAGE_LIMIT = 500;
@@ -110,12 +111,23 @@ export function appendRuntimeEvent(
 }
 
 export function describeRuntimeEventWindow(events: Event[]) {
+  let oldestAt: string | null = null;
+  let newestAt: string | null = null;
+  for (const event of events) {
+    if (oldestAt === null || compareTimestampAsc(event.at, oldestAt) < 0) {
+      oldestAt = event.at;
+    }
+    if (newestAt === null || compareTimestampAsc(event.at, newestAt) > 0) {
+      newestAt = event.at;
+    }
+  }
+
   return {
     scope: "retained_runtime_events" as const,
     retentionLimit: RUNTIME_EVENTS_RETENTION_LIMIT,
     retainedCount: events.length,
-    oldestAt: events[0]?.at ?? null,
-    newestAt: events.at(-1)?.at ?? null,
+    oldestAt,
+    newestAt,
   };
 }
 

@@ -9,6 +9,10 @@ import {
   type TaskWorktreeOwnership,
 } from "./task-worktree.js";
 import { checkArtifactReviewability } from "./trae-automation-artifact-checks.js";
+import {
+  importDispatcherDeliveryRuntime,
+  type DispatcherDeliveryRuntimeModule,
+} from "./runtime-bootstrap.js";
 
 interface WorkerFailure {
   type: string;
@@ -45,8 +49,43 @@ const DEFAULT_SESSION_POLL_INTERVAL_MS = Number(process.env.TRAE_AUTOMATION_SESS
 const DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS = Number(process.env.TRAE_AUTOMATION_REMOTE_SHA_RETRY_ATTEMPTS || 3);
 const DEFAULT_REMOTE_SHA_RETRY_MS = Number(process.env.TRAE_AUTOMATION_REMOTE_SHA_RETRY_MS || 10000);
 
+let dispatcherDeliveryRuntimePromise: Promise<DispatcherDeliveryRuntimeModule> | null = null;
+
+function loadDispatcherDeliveryRuntime(): Promise<DispatcherDeliveryRuntimeModule> {
+  dispatcherDeliveryRuntimePromise ??= importDispatcherDeliveryRuntime();
+  return dispatcherDeliveryRuntimePromise;
+}
+
+function attachHttpStatus(error: Error, status: number): Error {
+  return Object.assign(error, { status });
+}
+
+function attachRetryable(error: Error, retryable: boolean): Error {
+  return Object.assign(error, { retryable });
+}
+
+function readHttpErrorMessage(body: unknown, rawText: string, fallback: string): string {
+  if (body && typeof body === "object") {
+    for (const key of ["message", "error"] as const) {
+      const value = (body as Record<string, unknown>)[key];
+      if (typeof value === "string" && value.trim()) {
+        return value;
+      }
+    }
+  }
+  if (body === null && rawText.trim() === "null") {
+    return fallback;
+  }
+  return rawText || fallback;
+}
+
 export interface JsonHttpClient {
-  request: (path: string, init?: { method?: string; body?: unknown; timeoutMs?: number }) => Promise<unknown>;
+  request: (path: string, init?: {
+    method?: string;
+    body?: unknown;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  }) => Promise<unknown>;
 }
 
 export function createJsonHttpClient(baseUrl: string, options: { fetchImpl?: typeof fetch } = {}): JsonHttpClient {
@@ -56,10 +95,25 @@ export function createJsonHttpClient(baseUrl: string, options: { fetchImpl?: typ
   }
   const base = String(baseUrl || "").replace(/\/$/, "");
 
-  async function request(path: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<unknown> {
+  async function request(path: string, init: {
+    method?: string;
+    body?: unknown;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  } = {}): Promise<unknown> {
     const controller = new AbortController();
     const timeoutMs = Number(init.timeoutMs || 10000);
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    let timedOut = false;
+    const abortFromCaller = () => controller.abort(init.signal?.reason);
+    if (init.signal?.aborted) {
+      abortFromCaller();
+    } else {
+      init.signal?.addEventListener("abort", abortFromCaller, { once: true });
+    }
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
 
     try {
       const response = await fetchImpl(`${base}${path}`, {
@@ -71,17 +125,46 @@ export function createJsonHttpClient(baseUrl: string, options: { fetchImpl?: typ
       clearTimeout(timeoutId);
 
       const text = await response.text();
-      const json = text ? JSON.parse(text) : {};
+      let json: Record<string, unknown> = {};
+      if (text) {
+        try {
+          json = JSON.parse(text) as Record<string, unknown>;
+        } catch (error) {
+          if (response.ok) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw attachRetryable(
+              new Error(`response was not valid JSON: ${path} - ${message}`),
+              false,
+            );
+          }
+        }
+      }
       if (!response.ok) {
-        throw new Error((json as { message?: string; error?: string }).message || (json as { error?: string }).error || `HTTP ${response.status}`);
+        throw attachHttpStatus(
+          new Error(readHttpErrorMessage(json, text, `HTTP ${response.status}`)),
+          response.status,
+        );
       }
       return json;
     } catch (error) {
-      clearTimeout(timeoutId);
       if (error instanceof Error && error.name === "AbortError") {
-        throw new Error(`request timeout: ${path}`);
+        if (!timedOut && init.signal?.aborted) {
+          const aborted = new Error(`request aborted: ${path}`);
+          aborted.name = "AbortError";
+          throw aborted;
+        }
+        throw attachRetryable(new Error(`request timeout: ${path}`), true);
       }
-      throw error instanceof Error ? error : new Error(String(error));
+      if (error instanceof Error && ("status" in error || "retryable" in error)) {
+        throw error;
+      }
+      throw attachRetryable(
+        error instanceof Error ? error : new Error(String(error)),
+        true,
+      );
+    } finally {
+      clearTimeout(timeoutId);
+      init.signal?.removeEventListener("abort", abortFromCaller);
     }
   }
 
@@ -90,9 +173,14 @@ export function createJsonHttpClient(baseUrl: string, options: { fetchImpl?: typ
 
 export interface TraeDispatcherClient {
   register: (worker: { workerId: string; pool: string; repoDir: string; labels: string[] }) => Promise<unknown>;
-  fetchTask: (workerId: string, repoDir: string) => Promise<unknown>;
-  startTask: (workerId: string, taskId: string) => Promise<unknown>;
-  reportProgress: (taskId: string, message: string, workerId: string) => Promise<unknown>;
+  fetchTask: (workerId: string, repoDir: string, requestOptions?: { signal?: AbortSignal }) => Promise<unknown>;
+  startTask: (workerId: string, taskId: string, requestOptions?: { signal?: AbortSignal }) => Promise<unknown>;
+  reportProgress: (
+    taskId: string,
+    message: string,
+    workerId: string,
+    requestOptions?: { signal?: AbortSignal },
+  ) => Promise<unknown>;
   submitResult: (input: {
     taskId: string;
     status: string;
@@ -110,7 +198,7 @@ export interface TraeDispatcherClient {
     };
     evidence?: WorkerEvidence;
   }) => Promise<unknown>;
-  heartbeat: (workerId: string) => Promise<unknown>;
+  heartbeat: (workerId: string, requestOptions?: { signal?: AbortSignal }) => Promise<unknown>;
 }
 
 export function createDispatcherClient(baseUrl: string = DEFAULT_DISPATCHER_URL, options: { fetchImpl?: typeof fetch; requestTimeoutMs?: number | string } = {}): TraeDispatcherClient {
@@ -166,33 +254,42 @@ export function createDispatcherClient(baseUrl: string = DEFAULT_DISPATCHER_URL,
         timeoutMs: requestTimeoutMs,
       });
     },
-    async fetchTask(workerId, repoDir) {
+    async fetchTask(workerId, repoDir, requestOptions = {}) {
       const response = await http.request("/api/trae/fetch-task", {
         method: "POST",
         body: { worker_id: workerId, repo_dir: repoDir },
         timeoutMs: requestTimeoutMs,
+        signal: requestOptions.signal,
       });
       captureAttemptLease(response);
       return response;
     },
-    async startTask(workerId, taskId) {
+    async startTask(workerId, taskId, requestOptions = {}) {
       return http.request("/api/trae/start-task", {
         method: "POST",
         body: { worker_id: workerId, task_id: taskId, ...requireAttemptLease(taskId) },
         timeoutMs: requestTimeoutMs,
+        signal: requestOptions.signal,
       });
     },
-    async reportProgress(taskId, message, workerId) {
-      return http.request("/api/trae/report-progress", {
-        method: "POST",
-        body: {
-          task_id: taskId,
-          worker_id: workerId,
-          ...requireAttemptLease(taskId),
-          progress_id: randomUUID(),
-          message,
-        },
-        timeoutMs: requestTimeoutMs,
+    async reportProgress(taskId, message, workerId, requestOptions = {}) {
+      const runtime = await loadDispatcherDeliveryRuntime();
+      const body = runtime.snapshotProgressPayload({
+        task_id: taskId,
+        worker_id: workerId,
+        ...requireAttemptLease(taskId),
+        progress_id: randomUUID(),
+        message,
+      });
+      return runtime.retryProgressDelivery({
+        ...runtime.resolveProgressDeliveryPolicy(),
+        signal: requestOptions.signal,
+        send: () => http.request("/api/trae/report-progress", {
+          method: "POST",
+          body,
+          timeoutMs: requestTimeoutMs,
+          signal: requestOptions.signal,
+        }),
       });
     },
     async submitResult(input) {
@@ -217,11 +314,17 @@ export function createDispatcherClient(baseUrl: string = DEFAULT_DISPATCHER_URL,
         timeoutMs: requestTimeoutMs,
       });
     },
-    async heartbeat(workerId) {
-      return http.request("/api/trae/heartbeat", {
-        method: "POST",
-        body: { worker_id: workerId },
-        timeoutMs: requestTimeoutMs,
+    async heartbeat(workerId, requestOptions = {}) {
+      const runtime = await loadDispatcherDeliveryRuntime();
+      const body = runtime.snapshotHeartbeatPayload({ worker_id: workerId });
+      return runtime.retryHeartbeatDelivery({
+        signal: requestOptions.signal,
+        send: () => http.request("/api/trae/heartbeat", {
+          method: "POST",
+          body,
+          timeoutMs: requestTimeoutMs,
+          signal: requestOptions.signal,
+        }),
       });
     },
   };
@@ -818,9 +921,11 @@ function createHeartbeatController(dispatcherClient: TraeDispatcherClient, worke
 } {
   const timers: {
     interval: ReturnType<typeof setInterval> | null;
+    activeRequest: AbortController | null;
     mode: string;
   } = {
     interval: null,
+    activeRequest: null,
     mode: "idle",
   };
   const setIntervalImpl = options.setIntervalImpl || setInterval;
@@ -830,13 +935,25 @@ function createHeartbeatController(dispatcherClient: TraeDispatcherClient, worke
     if (timers.interval) {
       clearIntervalImpl(timers.interval);
     }
+    timers.activeRequest?.abort();
     timers.mode = mode;
     const intervalMs = mode === "high" ? HIGH_HEARTBEAT_INTERVAL_MS : IDLE_HEARTBEAT_INTERVAL_MS;
     timers.interval = setIntervalImpl(async () => {
+      if (timers.activeRequest) {
+        return;
+      }
+      const controller = new AbortController();
+      timers.activeRequest = controller;
       try {
-        await dispatcherClient.heartbeat(workerId);
+        await dispatcherClient.heartbeat(workerId, { signal: controller.signal });
       } catch (error) {
-        logger?.warn?.(`[trae-automation-worker] heartbeat failed: ${(error as Error).message}`);
+        if (!controller.signal.aborted) {
+          logger?.warn?.(`[trae-automation-worker] heartbeat failed: ${(error as Error).message}`);
+        }
+      } finally {
+        if (timers.activeRequest === controller) {
+          timers.activeRequest = null;
+        }
       }
     }, intervalMs);
   }
@@ -852,6 +969,8 @@ function createHeartbeatController(dispatcherClient: TraeDispatcherClient, worke
       clearIntervalImpl(timers.interval);
       timers.interval = null;
     }
+    timers.activeRequest?.abort();
+    timers.activeRequest = null;
   }
 
   return { start, promoteToIdle, stop };
@@ -874,7 +993,7 @@ export interface TraeAutomationWorkerRuntimeOptions {
 
 export interface TraeAutomationWorkerRuntime {
   register: () => Promise<unknown>;
-  runOnce: () => Promise<{ status: string; taskId?: string; responseText?: string; error?: string }>;
+  runOnce: (signal?: AbortSignal) => Promise<{ status: string; taskId?: string; responseText?: string; error?: string }>;
   runLoop: (signal?: { aborted?: boolean }) => Promise<void>;
   stop: () => void;
 }
@@ -897,6 +1016,12 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
     throw new Error("dispatcherClient, automationClient, workerId, and repoDir are required");
   }
 
+  function reportProgress(taskId: string, message: string, signal?: AbortSignal) {
+    return signal
+      ? dispatcherClient.reportProgress(taskId, message, workerId, { signal })
+      : dispatcherClient.reportProgress(taskId, message, workerId);
+  }
+
   async function cleanupTaskWorktree(task: Task): Promise<void> {
     if (process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT !== "1" || !task.worktree_dir) {
       return;
@@ -909,10 +1034,9 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
         ownership: worktreeOwnerships.get(task.task_id),
       });
       try {
-        await dispatcherClient.reportProgress(
+        await reportProgress(
           task.task_id,
           `Worktree cleanup ${cleanup.action}`,
-          workerId,
         );
       } catch {
         // Cleanup reporting must not replace the acknowledged task result.
@@ -921,10 +1045,9 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
       const message = error instanceof Error ? error.message : String(error);
       logger.warn?.(`[trae-automation-worker] failed to clean worktree for ${task.task_id}: ${message}`);
       try {
-        await dispatcherClient.reportProgress(
+        await reportProgress(
           task.task_id,
           `Worktree cleanup failed: ${message}`,
-          workerId,
         );
       } catch {
         // Cleanup reporting is best-effort after terminal result acknowledgement.
@@ -944,10 +1067,9 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
       const message = error instanceof Error ? error.message : String(error);
       logger.warn?.(`[trae-automation-worker] failed to release worktree ownership for ${taskId}: ${message}`);
       try {
-        await dispatcherClient.reportProgress(
+        await reportProgress(
           taskId,
           `Worktree ownership release failed: ${message}`,
-          workerId,
         );
       } catch {
         // Ownership release reporting is best-effort after task completion.
@@ -955,7 +1077,11 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
     }
   }
 
-  async function submitParsedResult(task: Task, parsed: ParsedFinalReport): Promise<string> {
+  async function submitParsedResult(
+    task: Task,
+    parsed: ParsedFinalReport,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const successRequested = parsed.result === "成功";
     const successAllowed = hasCodeChangeEvidence(parsed);
     let status = successRequested && successAllowed ? "review_ready" : "failed";
@@ -991,10 +1117,10 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
             break;
           }
 
-          await dispatcherClient.reportProgress(
+          await reportProgress(
             task.task_id,
             `Push reported, waiting for remote SHA verification (${attempt}/${DEFAULT_REMOTE_SHA_RETRY_ATTEMPTS}): ${remoteReason}`,
-            workerId,
+            signal,
           );
           await sleepImpl(DEFAULT_REMOTE_SHA_RETRY_MS);
         }
@@ -1090,8 +1216,10 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
       });
     },
 
-    async runOnce() {
-      const fetched = await dispatcherClient.fetchTask(workerId, repoDir) as { status?: string; task?: Task };
+    async runOnce(signal?: AbortSignal) {
+      const fetched = signal
+        ? await dispatcherClient.fetchTask(workerId, repoDir, { signal }) as { status?: string; task?: Task }
+        : await dispatcherClient.fetchTask(workerId, repoDir) as { status?: string; task?: Task };
       if (!fetched || fetched.status === "no_task") {
         return { status: "no_task" };
       }
@@ -1103,9 +1231,13 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
         throw new Error(`worktree ownership was not retained for ${task.task_id}`);
       }
       worktreeOwnerships.set(task.task_id, workspace.ownership);
-      await dispatcherClient.startTask(workerId, task.task_id);
+      if (signal) {
+        await dispatcherClient.startTask(workerId, task.task_id, { signal });
+      } else {
+        await dispatcherClient.startTask(workerId, task.task_id);
+      }
       heartbeat.start("high");
-      await dispatcherClient.reportProgress(task.task_id, "Trae automation worker started task", workerId);
+      await reportProgress(task.task_id, "Trae automation worker started task", signal);
 
       const prompt = buildAutomationPrompt(task);
       const discovery = deriveTaskDiscoveryHints(task, repoDir);
@@ -1113,13 +1245,13 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
       const startedAt = Date.now();
 
       try {
-        await dispatcherClient.reportProgress(task.task_id, "Trae automation gateway is preparing session", workerId);
+        await reportProgress(task.task_id, "Trae automation gateway is preparing session", signal);
         const prepareResult = await automationClient.prepareSession({
           chatMode: task.chatMode || task.chat_mode || "new_chat",
         });
         sessionId = (prepareResult as { data?: { sessionId?: string }; sessionId?: string })?.data?.sessionId || (prepareResult as { sessionId?: string })?.sessionId || null;
 
-        await dispatcherClient.reportProgress(task.task_id, "Trae automation gateway is sending prompt", workerId);
+        await reportProgress(task.task_id, "Trae automation gateway is sending prompt", signal);
 
         const softTimeoutMs = Math.min(DEFAULT_SOFT_CHAT_TIMEOUT_MS, DEFAULT_HARD_CHAT_TIMEOUT_MS);
         const chatTimeoutMs = softTimeoutMs + DEFAULT_CHAT_REQUEST_TIMEOUT_BUFFER_MS;
@@ -1142,7 +1274,7 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
             || r?.data?.result?.response?.text
             || "";
           const parsed = parseFinalReport(finalText);
-          const finalStatus = await submitParsedResult(task, parsed);
+          const finalStatus = await submitParsedResult(task, parsed, signal);
           return {
             status: finalStatus,
             taskId: task.task_id,
@@ -1154,10 +1286,10 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
           }
 
           if (!sessionId) {
-            await dispatcherClient.reportProgress(
+            await reportProgress(
               task.task_id,
               "Chat timeout but session id is missing; cannot poll session status",
-              workerId
+              signal,
             );
             throw createMissingSessionIdRecoveryError(chatError);
           }
@@ -1167,10 +1299,10 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
             throw chatError;
           }
 
-          await dispatcherClient.reportProgress(
+          await reportProgress(
             task.task_id,
             "Chat timeout, checking session status",
-            workerId
+            signal,
           );
 
           const sessionStatus = await pollSessionStatus(
@@ -1197,7 +1329,7 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
               || r?.data?.result?.response?.text
               || "";
             const parsed = parseFinalReport(finalText);
-            const finalStatus = await submitParsedResult(task, parsed);
+            const finalStatus = await submitParsedResult(task, parsed, signal);
             return {
               status: finalStatus,
               taskId: task.task_id,
@@ -1226,7 +1358,7 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
                   prNumber: null,
                   prUrl: null,
                 },
-              });
+              }, signal);
               return {
                 status: "review_ready",
                 taskId: task.task_id,
@@ -1254,7 +1386,7 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
               prNumber: null,
               prUrl: null,
             },
-          });
+          }, signal);
           return {
             status: "review_ready",
             taskId: task.task_id,
@@ -1277,7 +1409,10 @@ export function createTraeAutomationWorkerRuntime(options: TraeAutomationWorkerR
       let consecutiveErrors = 0;
       while (!signal?.aborted) {
         try {
-          const result = await this.runOnce();
+          const nativeSignal = signal && "addEventListener" in signal
+            ? signal as AbortSignal
+            : undefined;
+          const result = await this.runOnce(nativeSignal);
           consecutiveErrors = 0;
           if (result.status === "no_task") {
             await sleepImpl(pollIntervalMs);

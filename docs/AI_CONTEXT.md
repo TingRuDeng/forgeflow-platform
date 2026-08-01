@@ -52,8 +52,7 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - `docs/STATE_MACHINE.md`：task / assignment / review / continuation 状态语义。
 - `docs/API_ENDPOINTS.md`：dispatcher 与 Trae automation gateway 的 HTTP 面。
 - `docs/DATABASE_SCHEMA.md`：SQLite snapshot、结构化投影、review memory 和 session store。
-- `docs/KNOWN_PITFALLS.md`：已有代码或历史问题支撑的高风险误读点。
-- `docs/TECH_DEBT.md`：已确认仍存在的技术债。
+- `docs/KNOWN_PITFALLS.md`：已有证据支撑的高风险误读点；`docs/TECH_DEBT.md`：已确认仍存在的技术债。
 - `docs/DOC_SYNC_CHECKLIST.md`：收尾时判断是否需要刷新文档。
 
 ## Common Task Reading Paths
@@ -73,7 +72,8 @@ ForgeFlow 是多智能体协作开发的控制平面；`codex`/`gemini`/`trae` w
 - `leases[]` 当前在 task claim 生命周期内强约束 assignment / repo / branch；continuation 或 follow-up 任务还会强约束 session。
 - Codex、Gemini、Trae 的 worktree 操作都复用 `@tingrudeng/beta-runtime-core`，默认 60 秒命令超时并响应取消，复用时强制 reset/clean；同一 Git common-dir 的 ForgeFlow 生命周期使用本机 owner lock，活跃 worker 持锁期间其他共享 helper 的 prepare/reset/remove 会 fail closed。它不覆盖跨主机、独立 clone、直接手工 Git 或真实 Trae session ownership。每个 review 都必须携带 attempt/bundle/commit freshness，Console/CLI 的 `expectedFreshness` 缺失返回 `400`、漂移返回 `409`；新 HITL 请求以 request/attempt identity fence resume，相同 payload 重试幂等，证据漂移、错配、过期或冲突重放被拒绝。resume 后的下一次 claim 复用原 attemptId，将 `checkpointed` 转回 `leased` 并清除历史 `endedAt`。
 - `DISPATCHER_READ_ONLY_MODE=1` 默认冻结 `/api/` 写方法；它覆盖 dispatcher HTTP API 写入，但不覆盖直接文件、外部数据库或绕过 HTTP 的写入。
-- 控制层使用 `DISPATCHER_API_TOKEN`；远程 worker 应使用按 workerId 绑定的 `DISPATCHER_WORKER_TOKEN`。Codex / Gemini 默认是 `trusted-host`；`isolated-container` 必须由 operator 显式启用并 fail closed，Docker `bridge` 不是域名级网络 allowlist。
+- 控制层使用 `DISPATCHER_API_TOKEN`；远程 worker 应使用按 workerId 绑定的 `DISPATCHER_WORKER_TOKEN`。已定义 token 必须是无首尾空白的非空字符串，空环境变量不会回退到本地配置。Codex / Gemini 默认是 `trusted-host`；`isolated-container` 必须由 operator 显式启用并 fail closed，Docker `bridge` 不是域名级网络 allowlist。
+- 发布版 dispatcher、Trae runtime、Console 和 review orchestrator 的本地配置可明文包含 dispatcher token；持久化入口只接受 `--token-stdin`，拒绝 argv token。专用默认目录 / 文件为 `0700` / `0600`，其他 token 文件为 `0600`，并拒绝可由其他用户替换的任一目录祖先。写入使用同目录安全临时文件原子替换，读取拒绝配置文件及用户可控目录链中的 symlink，并从完成身份与权限校验的同一文件句柄读取；这些门禁仅支持 Unix-like 平台（macOS / Linux），其他平台会 fail closed。各自的 `init` / `config:set` 可原地修复旧文件权限。源码 dispatcher 只读 `~/.forgeflow-dispatcher.json` 或 `FORGEFLOW_DISPATCHER_CONFIG_PATH` 指定文件，不再提供重复的写入 CLI；优先通过环境变量注入凭据，手工配置须自行满足相同读取门禁。Codex / Gemini provider 配置不保存 token，认证保持 `DISPATCHER_WORKER_TOKEN` env-only，但配置可控制 repo 和 provider binary，因此同样复用共享安全文件门禁。
 - `/api/metrics` 的事件型计数只覆盖 `metrics.eventWindow` 标出的最近 500 条运行窗口；完整审计应分页读取 `/api/query/events`。
 - Postgres / queue shadow path 是 best-effort shadow；每次同步绑定已持久化 SQLite revision，projection 与 queue 原子推进并拒绝旧 revision 回退。SQLite snapshot 默认仍是真相源。
 - shadow drift 的 `--record-alert` 写入与 dispatcher 共用本机 `.runtime-state.lock` 并在锁内重读最新状态；它不提供跨主机互斥。

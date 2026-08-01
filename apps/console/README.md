@@ -46,9 +46,11 @@ FORGEFLOW_CONSOLE_API_TOKEN=your-secret-token
 dispatcher 使用默认 `token` 认证模式时，Console 必须配置与控制面一致的 token。配置助手入口为：
 
 ```bash
-pnpm --filter console config:set -- --url http://127.0.0.1:8787 --token your-secret-token
+printf '%s' "$FORGEFLOW_CONSOLE_API_TOKEN" | pnpm --filter console config:set -- --url http://127.0.0.1:8787 --token-stdin
 pnpm --filter console config:show
 ```
+
+配置文件可能包含 dispatcher token。不要通过 `--token` 传递凭据；该参数会被拒绝，避免 token 暴露在进程列表或 shell history。`FORGEFLOW_CONSOLE_API_TOKEN` 或文件 token 一旦定义，就必须非空且不得带首尾空白；无效环境变量不会回退文件配置。安全配置入口仅支持 Unix-like 平台（macOS / Linux），其他平台会 fail closed；配置助手通过同目录 `0600` 临时文件原子替换，并拒绝可由其他用户替换的目录祖先。Vite 启动和 `config:show` 会拒绝配置文件及用户可控目录链中的 symlink 或过宽权限，并从完成身份与权限校验的同一文件句柄读取内容。重新执行 `config:set` 会先原地修复旧文件权限并保留未覆盖的配置字段。项目级 `.forgeflow-console.json` 及安全临时文件已加入仓库忽略规则，不应提交。
 
 ### 生产构建
 

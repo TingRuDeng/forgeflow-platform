@@ -42,6 +42,7 @@ export interface CliDeps {
   waitForRemoteDebuggingReady: (input: { remoteDebuggingPort: number }) => Promise<void>;
   waitForAutomationReady: (input: { automationUrl: string }) => Promise<void>;
   waitForDispatcherHealth: (input: { dispatcherUrl: string }) => Promise<void>;
+  readStdin: () => string;
   log: (message: string) => void;
 }
 
@@ -196,7 +197,7 @@ Options:
   -h, --help                     Show this help message
   --project-path <path>          Path to project repository
   --dispatcher-url <url>          Dispatcher server URL
-  --token <token>                Dispatcher authentication token (string or number)
+  --token-stdin                  Read the dispatcher authentication token from stdin
   --automation-url <url>         Automation gateway URL
   --worker-id <id>               Worker identifier
   --trae-bin <path>              Path to Trae binary
@@ -206,7 +207,7 @@ Options:
 
 Examples:
   forgeflow-trae-beta init --project-path /path/to/repo
-  forgeflow-trae-beta init --token 123456 --dispatcher-url http://localhost:3000`;
+  printf '%s' "$DISPATCHER_WORKER_TOKEN" | forgeflow-trae-beta init --token-stdin --dispatcher-url http://localhost:3000`;
 }
 
 function readPackageVersion() {
@@ -351,6 +352,15 @@ function formatInitResultHuman(result: Awaited<ReturnType<typeof initTraeBetaCon
     lines.push(`  remoteDebuggingPort: ${result.config.remoteDebuggingPort ?? "(not set)"}`);
   }
   return lines.join("\n");
+}
+
+function formatInitResultJson(result: Awaited<ReturnType<typeof initTraeBetaConfig>>): string {
+  const config: Record<string, unknown> = { ...result.config };
+  delete config.dispatcherToken;
+  return JSON.stringify({
+    ...result,
+    config,
+  }, null, 2);
 }
 
 function formatStatusResultHuman(result: {
@@ -669,6 +679,7 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
     waitForRemoteDebuggingReady,
     waitForAutomationReady,
     waitForDispatcherHealth,
+    readStdin: () => fs.readFileSync(0, "utf8"),
     log: (message) => console.log(message),
     ...partialDeps,
   };
@@ -701,7 +712,19 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
   }
 
   const configPath = typeof parsed.options.configPath === "string" ? parsed.options.configPath : undefined;
-  const config = deps.readConfig({ configPath });
+  if (parsed.command === "init" && parsed.options.token !== undefined) {
+    throw new Error("--token is not supported because process arguments may be exposed; pipe the token through --token-stdin");
+  }
+  if (parsed.command === "init" && parsed.options.tokenStdin !== undefined && parsed.options.tokenStdin !== true) {
+    throw new Error("--token-stdin does not accept a value");
+  }
+  const stdinToken = parsed.command === "init" && parsed.options.tokenStdin === true
+    ? deps.readStdin().trim()
+    : undefined;
+  if (parsed.command === "init" && parsed.options.tokenStdin === true && !stdinToken) {
+    throw new Error("--token-stdin requires a non-empty token on stdin");
+  }
+  const config = parsed.command === "init" ? null : deps.readConfig({ configPath });
   const jsonOutput = parsed.options.json === true;
   const logProgress = (message: string) => {
     if (!jsonOutput) {
@@ -716,16 +739,14 @@ export async function runCli(argv: string[], partialDeps: Partial<CliDeps> = {})
       overwrite: parsed.options.overwrite === true,
       projectPath: typeof parsed.options.projectPath === "string" ? parsed.options.projectPath : undefined,
       dispatcherUrl: typeof parsed.options.dispatcherUrl === "string" ? parsed.options.dispatcherUrl : undefined,
-      dispatcherToken: typeof parsed.options.token === "string" || typeof parsed.options.token === "number"
-        ? String(parsed.options.token)
-        : undefined,
+      dispatcherToken: stdinToken,
       automationUrl: typeof parsed.options.automationUrl === "string" ? parsed.options.automationUrl : undefined,
       workerId: typeof parsed.options.workerId === "string" ? parsed.options.workerId : undefined,
       traeBin: typeof parsed.options.traeBin === "string" ? parsed.options.traeBin : undefined,
       remoteDebuggingPort: typeof parsed.options.remoteDebuggingPort === "number" ? parsed.options.remoteDebuggingPort : undefined,
     });
     if (jsonOutput) {
-      deps.log(JSON.stringify(result, null, 2));
+      deps.log(formatInitResultJson(result));
     } else {
       deps.log(formatInitResultHuman(result));
     }

@@ -82,6 +82,8 @@ runtime 读写以下配置文件：
 - `geminiBin`
 - `pool`
 
+该文件不会保存 dispatcher token；认证凭据只从 `DISPATCHER_WORKER_TOKEN` 环境变量读取，`--token`、`--token-stdin` 等 argv 凭据参数会被明确拒绝。配置仍可控制 `repoDir` 与 `geminiBin`，因此按可执行配置保护：默认目录 / 文件为 `0700` / `0600`；写入使用同目录安全临时文件原子替换，读取拒绝配置文件及用户可控目录链中的 symlink、过宽权限和可被其他用户替换的目录祖先，并从完成身份与权限校验的同一文件句柄读取。安全配置入口仅支持 Unix-like 平台（macOS / Linux），其他平台会 fail closed。重新执行 `forgeflow-gemini-beta init` 可原地修复旧文件权限。
+
 ## Dispatcher 协议
 
 worker daemon 通过 `POST /api/workers/:workerId/claim-task` 显式领取任务，不再依赖只读的 assigned-task 查询路径。领取成功后，runtime 会把 dispatcher 返回的 `attemptId`、`leaseToken`、`protocolVersion`、`traceId`、`idempotencyKey` 作为 v1 envelope 回写到 start/progress/result mutation；progress 使用独立 fenced endpoint，不再伪装成普通 telemetry event。

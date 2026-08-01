@@ -9,6 +9,7 @@ import {
 
 import {
   createDispatcherHttpClient,
+  createDispatcherStateDirClientFactory,
   runWorkerDaemonCycle,
 } from "../../../src/modules/server/runtime-glue-dispatcher-client.js";
 
@@ -80,6 +81,101 @@ describe("runtime-glue dispatcher-client", () => {
       expect(typeof client.submitResult).toBe("function");
     });
 
+    it("fails before sending when the worker token is whitespace", async () => {
+      const originalToken = process.env.DISPATCHER_WORKER_TOKEN;
+      process.env.DISPATCHER_WORKER_TOKEN = "   ";
+      const mockFetch = vi.fn();
+      const client = createDispatcherHttpClient({
+        dispatcherUrl: "http://localhost:8787",
+        fetchImpl: mockFetch as never,
+      });
+
+      try {
+        await expect(client.heartbeat("worker-heartbeat", {
+          at: "2026-08-01T00:00:00.000Z",
+        })).rejects.toThrow(/DISPATCHER_WORKER_TOKEN.*non-empty/i);
+        expect(mockFetch).not.toHaveBeenCalled();
+      } finally {
+        if (originalToken === undefined) {
+          delete process.env.DISPATCHER_WORKER_TOKEN;
+        } else {
+          process.env.DISPATCHER_WORKER_TOKEN = originalToken;
+        }
+      }
+    });
+
+    it("retries a transient heartbeat failure with the same payload", async () => {
+      vi.useFakeTimers();
+      try {
+        const mockFetch = vi.fn()
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 503,
+            text: () => Promise.resolve('{"error":"temporarily unavailable"}'),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            text: () => Promise.resolve('{"status":"heartbeat_recorded"}'),
+          });
+        const client = createDispatcherHttpClient({
+          dispatcherUrl: "http://localhost:8787",
+          fetchImpl: mockFetch as never,
+        });
+        const payload = { at: "2026-08-01T00:00:00.000Z" };
+
+        const pending = client.heartbeat("worker-heartbeat", payload);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mockFetch).toHaveBeenCalledOnce();
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        await expect(pending).resolves.toEqual({ status: "heartbeat_recorded" });
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+        expect(mockFetch.mock.calls.map(([, init]) => init.body)).toEqual([
+          JSON.stringify(payload),
+          JSON.stringify(payload),
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([401, 409])("does not retry a permanent heartbeat HTTP %s", async (status) => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status,
+        text: () => Promise.resolve('{"error":"permanent heartbeat failure"}'),
+      });
+      const client = createDispatcherHttpClient({
+        dispatcherUrl: "http://localhost:8787",
+        fetchImpl: mockFetch as never,
+      });
+
+      await expect(client.heartbeat("worker-heartbeat", {
+        at: "2026-08-01T00:00:00.000Z",
+      })).rejects.toMatchObject({ status });
+
+      expect(mockFetch).toHaveBeenCalledOnce();
+    });
+
+    it("does not retry a successful heartbeat response with invalid JSON", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve("not-json"),
+      });
+      const client = createDispatcherHttpClient({
+        dispatcherUrl: "http://localhost:8787",
+        fetchImpl: mockFetch as never,
+      });
+
+      await expect(client.heartbeat("worker-heartbeat", {
+        at: "2026-08-01T00:00:00.000Z",
+      })).rejects.toMatchObject({ name: "DispatcherResponseError", retryable: false });
+
+      expect(mockFetch).toHaveBeenCalledOnce();
+    });
+
     it("sends progress to the attempt-scoped worker endpoint", async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
@@ -111,6 +207,85 @@ describe("runtime-glue dispatcher-client", () => {
           body: JSON.stringify(payload),
         }),
       );
+    });
+
+    it("retries transient progress failures with the same payload", async () => {
+      const previousAttempts = process.env.WORKER_PROGRESS_MAX_ATTEMPTS;
+      const previousDelay = process.env.WORKER_PROGRESS_RETRY_DELAY_MS;
+      process.env.WORKER_PROGRESS_MAX_ATTEMPTS = "3";
+      process.env.WORKER_PROGRESS_RETRY_DELAY_MS = "0";
+      try {
+        const mockFetch = vi.fn()
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 503,
+            text: () => Promise.resolve('{"error":"temporarily unavailable"}'),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            text: () => Promise.resolve('{"status":"progress_recorded"}'),
+          });
+        const client = createDispatcherHttpClient({
+          dispatcherUrl: "http://localhost:8787",
+          fetchImpl: mockFetch as never,
+        });
+        const payload = {
+          taskId: "task-progress-retry",
+          attemptId: "attempt-progress-retry",
+          leaseToken: "lease-progress-retry",
+          protocolVersion: "2026-05-v1",
+          traceId: "trace-progress-retry",
+          idempotencyKey: "worker-v1:task-progress-retry:attempt-progress-retry",
+          progressId: "progress-retry-1",
+          message: "Running tests",
+        };
+
+        await client.reportProgress("worker-progress", payload);
+
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+        expect(mockFetch.mock.calls.map(([, init]) => init.body)).toEqual([
+          JSON.stringify(payload),
+          JSON.stringify(payload),
+        ]);
+      } finally {
+        if (previousAttempts === undefined) delete process.env.WORKER_PROGRESS_MAX_ATTEMPTS;
+        else process.env.WORKER_PROGRESS_MAX_ATTEMPTS = previousAttempts;
+        if (previousDelay === undefined) delete process.env.WORKER_PROGRESS_RETRY_DELAY_MS;
+        else process.env.WORKER_PROGRESS_RETRY_DELAY_MS = previousDelay;
+      }
+    });
+
+    it("does not retry a progress protocol conflict", async () => {
+      const previousDelay = process.env.WORKER_PROGRESS_RETRY_DELAY_MS;
+      process.env.WORKER_PROGRESS_RETRY_DELAY_MS = "0";
+      try {
+        const mockFetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          text: () => Promise.resolve("null"),
+        });
+        const client = createDispatcherHttpClient({
+          dispatcherUrl: "http://localhost:8787",
+          fetchImpl: mockFetch as never,
+        });
+
+        await expect(client.reportProgress("worker-progress", {
+          taskId: "task-progress-conflict",
+          attemptId: "attempt-progress-conflict",
+          leaseToken: "lease-progress-conflict",
+          protocolVersion: "2026-05-v1",
+          traceId: "trace-progress-conflict",
+          idempotencyKey: "worker-v1:task-progress-conflict:attempt-progress-conflict",
+          progressId: "progress-conflict-1",
+          message: "Running tests",
+        })).rejects.toMatchObject({ status: 409 });
+
+        expect(mockFetch).toHaveBeenCalledOnce();
+      } finally {
+        if (previousDelay === undefined) delete process.env.WORKER_PROGRESS_RETRY_DELAY_MS;
+        else process.env.WORKER_PROGRESS_RETRY_DELAY_MS = previousDelay;
+      }
     });
 
     it("throws error when request fails with non-ok status", async () => {
@@ -195,6 +370,117 @@ describe("runtime-glue dispatcher-client", () => {
         expect.stringMatching(/^http:\/\/localhost:8787\/api\/workers\/register$/),
         expect.any(Object),
       );
+    });
+  });
+
+  describe("createDispatcherStateDirClientFactory", () => {
+    it("retries a transient state-dir heartbeat failure with the same payload", async () => {
+      vi.useFakeTimers();
+      try {
+        const handleRequest = vi.fn()
+          .mockResolvedValueOnce({ status: 503, json: { error: "state lock timeout" } })
+          .mockResolvedValueOnce({ status: 200, json: { status: "heartbeat_recorded" } });
+        const client = createDispatcherStateDirClientFactory({ handleRequest })("/tmp/state");
+        const payload = { at: "2026-08-01T00:00:00.000Z" };
+
+        const pending = client.heartbeat("worker-state", payload);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(handleRequest).toHaveBeenCalledOnce();
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        await expect(pending).resolves.toEqual({ status: "heartbeat_recorded" });
+        expect(handleRequest).toHaveBeenCalledTimes(2);
+        expect(handleRequest.mock.calls.map(([input]) => input.body)).toEqual([
+          payload,
+          payload,
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([401, 409])("does not retry a permanent state-dir heartbeat HTTP %s", async (status) => {
+      const handleRequest = vi.fn().mockResolvedValue({
+        status,
+        json: { error: "permanent heartbeat failure" },
+      });
+      const client = createDispatcherStateDirClientFactory({ handleRequest })("/tmp/state");
+
+      await expect(client.heartbeat("worker-state", {
+        at: "2026-08-01T00:00:00.000Z",
+      })).rejects.toMatchObject({ status });
+
+      expect(handleRequest).toHaveBeenCalledOnce();
+    });
+
+    it("stops state-dir heartbeat after exactly four transient attempts", async () => {
+      vi.useFakeTimers();
+      try {
+        const handleRequest = vi.fn().mockResolvedValue({
+          status: 503,
+          json: { error: "state lock timeout" },
+        });
+        const client = createDispatcherStateDirClientFactory({ handleRequest })("/tmp/state");
+
+        const pending = client.heartbeat("worker-state", {
+          at: "2026-08-01T00:00:00.000Z",
+        });
+        const settled = pending.catch((error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(3_000);
+
+        await expect(settled).resolves.toMatchObject({ status: 503 });
+        expect(handleRequest).toHaveBeenCalledTimes(4);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("aborts a state-dir heartbeat retry wait", async () => {
+      const handleRequest = vi.fn().mockResolvedValue({
+        status: 503,
+        json: { error: "state lock timeout" },
+      });
+      const client = createDispatcherStateDirClientFactory({ handleRequest })("/tmp/state");
+      const abortController = new AbortController();
+
+      const pending = client.heartbeat("worker-state", {
+        at: "2026-08-01T00:00:00.000Z",
+      }, { signal: abortController.signal });
+      await vi.waitFor(() => expect(handleRequest).toHaveBeenCalledOnce());
+      abortController.abort();
+
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+      expect(handleRequest).toHaveBeenCalledOnce();
+    });
+
+    it("retries transient progress failures with the same payload", async () => {
+      const previousDelay = process.env.WORKER_PROGRESS_RETRY_DELAY_MS;
+      process.env.WORKER_PROGRESS_RETRY_DELAY_MS = "0";
+      try {
+        const handleRequest = vi.fn()
+          .mockResolvedValueOnce({ status: 503, json: { error: "state lock timeout" } })
+          .mockResolvedValueOnce({ status: 200, json: { status: "progress_recorded" } });
+        const client = createDispatcherStateDirClientFactory({ handleRequest })("/tmp/state");
+        const payload = {
+          taskId: "task-state-progress",
+          attemptId: "attempt-state-progress",
+          leaseToken: "lease-state-progress",
+          protocolVersion: "2026-05-v1",
+          traceId: "trace-state-progress",
+          idempotencyKey: "worker-v1:task-state-progress:attempt-state-progress",
+          progressId: "progress-state-1",
+          message: "Running tests",
+        };
+
+        await client.reportProgress("worker-state", payload);
+
+        expect(handleRequest).toHaveBeenCalledTimes(2);
+        expect(handleRequest.mock.calls[0][0].body).toEqual(payload);
+        expect(handleRequest.mock.calls[1][0].body).toEqual(payload);
+      } finally {
+        if (previousDelay === undefined) delete process.env.WORKER_PROGRESS_RETRY_DELAY_MS;
+        else process.env.WORKER_PROGRESS_RETRY_DELAY_MS = previousDelay;
+      }
     });
   });
 });

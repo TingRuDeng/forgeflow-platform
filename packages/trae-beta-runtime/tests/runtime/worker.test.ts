@@ -104,6 +104,57 @@ describe("runtime/worker", () => {
 
   checkArtifactReviewabilityMock.mockReturnValue(reviewableArtifact());
 
+  it("keeps scheduled heartbeat single-flight and cancels it on stop", async () => {
+    const intervalHandlers: Array<() => Promise<void>> = [];
+    const logger = { warn: vi.fn(), log: vi.fn() };
+    const heartbeat = vi.fn((
+      _workerId: string,
+      requestOptions: { signal?: AbortSignal } = {},
+    ) => new Promise((_, reject) => {
+      requestOptions.signal?.addEventListener("abort", () => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      }, { once: true });
+    }));
+    const dispatcherClient = {
+      register: vi.fn(async () => ({})),
+      heartbeat,
+    };
+    const automationClient = {
+      ready: vi.fn(async () => ({ ready: true })),
+    };
+    const { createTraeAutomationWorkerRuntime } = await import("../../src/runtime/worker.js");
+    const runtime = createTraeAutomationWorkerRuntime({
+      dispatcherClient: dispatcherClient as never,
+      automationClient: automationClient as never,
+      workerId: "trae-heartbeat",
+      repoDir: "/tmp/repo",
+      logger,
+      setIntervalImpl: ((handler: () => Promise<void>) => {
+        intervalHandlers.push(handler);
+        return intervalHandlers.length;
+      }) as never,
+      clearIntervalImpl: vi.fn(),
+    });
+
+    await runtime.register();
+    const heartbeatTick = intervalHandlers[0];
+    expect(heartbeatTick).toBeDefined();
+    const firstTick = heartbeatTick!();
+    await vi.waitFor(() => expect(heartbeat).toHaveBeenCalledOnce());
+    await heartbeatTick!();
+
+    expect(heartbeat).toHaveBeenCalledOnce();
+    const signal = heartbeat.mock.calls[0]?.[1]?.signal;
+    expect(signal).toBeDefined();
+    runtime.stop();
+    await firstTick;
+
+    expect(signal!.aborted).toBe(true);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
   it("registers, materializes a worktree, and submits a parsed result", async () => {
     process.env.FORGEFLOW_WORKER_REMOVE_WORKTREE_ON_EXIT = "1";
     checkArtifactReviewabilityMock.mockReturnValue({
