@@ -64,7 +64,7 @@ forgeflow-platform 是多智能体协作开发的控制平面仓库。当前主�
 - Trae runtime 的 `new_chat` 采样现在会优先收窄到最后一个可见聊天根节点，并在基线里检测是否仍持续读到上一个任务的完成回执；发现旧 `任务ID` 污染时会提前失败，而不是继续误读旧会话。
 - Trae runtime 现在只有在远端分支 HEAD 与最终回执里的 commit SHA 完全一致时才会把成功结果提升为 `review_ready`；遇到远端 ref 传播延迟时，会先进入短暂重试窗口，而不是立刻把产物交给 review。terminal result 回写默认最多尝试 3 次、间隔 2 秒，可用 `WORKER_DAEMON_SUBMIT_RESULT_MAX_RETRIES` / `WORKER_DAEMON_SUBMIT_RESULT_RETRY_DELAY_MS` 调整；dispatcher 未确认结果时不会把 worker 降为 idle 或释放当前 Trae session，并会停止任务轮询、以非零状态退出，避免重复执行未确认任务。
 - dispatcher 的状态型 HTTP 路径现在共用一把跨进程文件锁（`.runtime-state.lock`）；锁竞争超时会显式返回 `503`。锁文件记录 PID、owner token 和创建时间，存活进程持有的锁不会仅因超过 stale 阈值被回收，释放时也会核对 inode 与 owner token，避免旧 callback 删除替换锁。
-- dispatcher SQLite snapshot 现在按 revision 追加落盘、保存 `checksum_sha256`，并默认只保留最近 128 个 revision；可用 `DISPATCHER_SQLITE_SNAPSHOT_RETENTION` 在 2 到 10000 之间调整。完整 runtime event 历史仍由 append-only audit 表保存；snapshot 读取默认 fail-closed，只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 时才允许从 JSON 救援导入。
+- dispatcher SQLite snapshot 现在按 revision 追加落盘、保存 `checksum_sha256`，并默认只保留最近 128 个 revision；可用 `DISPATCHER_SQLITE_SNAPSHOT_RETENTION` 在 2 到 10000 之间调整。完整 runtime event 历史仍由 append-only audit 表保存；snapshot 读取默认 fail-closed。只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 时，SQLite 读取失败才允许非破坏性读取 JSON，已有 DB 不会被覆盖；只有 DB 不存在而 JSON 存在时才会执行一次性导入。
 - `dependsOn` 现在进入调度门控：依赖未满足的任务保持 `planned`，依赖满足后由 dispatcher 自动解锁到 `ready` 并写状态事件。
 - generic worker claim 已收口为显式副作用路径：`GET /api/workers/:workerId/assigned-task` 现在只读，真正的 claim / assign 走 `POST /api/workers/:workerId/claim-task`。
 - review decision 现在明确支持 `merge`、`block`、`rework`、`changes_requested`；其中 `rework` 和 `changes_requested` 都会落到 `blocked` 任务态，但保留原始 decision 用于 redrive 和审计。

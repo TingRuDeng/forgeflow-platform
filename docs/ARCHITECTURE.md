@@ -118,6 +118,7 @@ Current mainline persistence is hybrid, with SQLite now active for dispatcher ru
 - Dispatcher JSON fallback and import source: `.forgeflow-dispatcher/runtime-state.json`
   - Only used when `RUNTIME_STATE_BACKEND=json` or `--persistence-backend json` is explicitly selected
   - Also used as one-time import source when SQLite is the default but only a JSON snapshot exists
+  - When an existing SQLite database cannot be read, `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` permits a non-destructive JSON rescue read; it does not replace the database or invoke JSON-to-SQLite import
 - Review memory: `.forgeflow-dispatcher/memory.json`
   - owned by `apps/dispatcher/src/modules/server/review-memory.ts`
   - accessed through the thin wrapper `scripts/lib/review-memory.js`

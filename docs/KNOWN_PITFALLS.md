@@ -49,6 +49,8 @@ ai_summary:
 
 Current mainline runtime state is loaded through `scripts/lib/dispatcher-state.js`, which bootstraps the dispatcher-owned implementation in `apps/dispatcher/dist/modules/server/runtime-state.js`. SQLite remains the default backend (`.forgeflow-dispatcher/runtime-state.db`), and JSON is only an explicit fallback/import path.
 
+Do not treat JSON rescue and first-run import as the same operation. If an existing SQLite database is unreadable, `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` only reads `runtime-state.json` without replacing the database. Automatic JSON-to-SQLite import happens only when `runtime-state.db` is absent; permanent recovery must follow the stopped-writer backup/restore procedure.
+
 If you change dispatcher persistence, update `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts` and its tests. Standalone schema constants were removed because they were not the active runtime path.
 
 Control-layer `--state-dir` mutations must go through the local dispatcher bridge. Do not read and rewrite `runtime-state.json` directly: SQLite is the default truth source, and route-local state transitions omit dispatcher validation, audit events, lease release, and risk gates.

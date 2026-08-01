@@ -103,6 +103,10 @@ export FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1
 
 这是显式救援，不是常态运行配置。
 
+- 已有 `runtime-state.db` 读取失败时，该开关只会从 `runtime-state.json` 非破坏性读取状态，不会替换 DB 或触发 JSON-to-SQLite 导入。
+- 救援读取不会修复 SQLite；对损坏 DB 继续执行 mutation 仍会失败，应保持停写或只读。
+- 只有 DB 不存在且 JSON 存在时才会自动执行一次性导入。如要以 JSON 做永久恢复，必须先停止全部写入者、备份 DB 及 sidecar，再按恢复流程显式处理。
+
 ## 5. 排障顺序
 
 1. 先保留当前 `.db`

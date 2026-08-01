@@ -593,7 +593,9 @@ function loadFromJsonFallback(stateDir: string, reason: unknown): RuntimeState {
   }
 
   const jsonContent = fs.readFileSync(jsonPath, "utf8");
-  return importFromJson(stateDir, jsonContent);
+  return coerceRuntimeState(
+    parseJsonContent(jsonContent, "failed to parse JSON fallback content"),
+  );
 }
 
 function rewriteProjectionTable(

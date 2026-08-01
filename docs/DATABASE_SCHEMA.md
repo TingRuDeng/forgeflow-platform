@@ -54,7 +54,7 @@ Current active persistence sources verified in code:
 - `.forgeflow-dispatcher/runtime-state.db`
   - Main dispatcher runtime state truth source on the default path.
 - `.forgeflow-dispatcher/runtime-state.json`
-  - Explicit JSON fallback and one-time SQLite import source.
+  - Explicit JSON backend, non-destructive rescue-read source, and one-time SQLite import source when the database is absent.
 - `.forgeflow-dispatcher/memory.json`
   - Review-memory lesson store.
 - `~/.forgeflow-trae-beta/sessions/sessions.json`
@@ -467,7 +467,8 @@ This is intentionally not a fully normalized operational schema. The current des
 Recovery semantics:
 
 - runtime-state.db 读取失败时默认 fail-closed
-- 只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 且 `runtime-state.json` 存在时，才允许走 JSON 救援导入
+- 已有 DB 读取失败时，只有显式设置 `FORGEFLOW_ALLOW_STATE_FALLBACK_JSON=1` 且 `runtime-state.json` 存在，才允许非破坏性读取 JSON；该路径不会替换已有 DB，也不会触发 JSON-to-SQLite 导入
+- 只有 `runtime-state.db` 不存在且 JSON 存在时，默认 SQLite backend 才会把 JSON 一次性导入新 DB
 
 Standalone dispatcher SQLite schema constants have been removed. Runtime schema changes must be made in `apps/dispatcher/src/modules/server/runtime-state-sqlite.ts` with matching round-trip tests.
 
