@@ -24,6 +24,7 @@ const tempRoots: string[] = [];
 const originalShadowMode = process.env.DISPATCHER_SHADOW_MODE;
 const originalPostgresUrl = process.env.DISPATCHER_POSTGRES_URL;
 const originalSnapshotRetention = process.env.DISPATCHER_SQLITE_SNAPSHOT_RETENTION;
+const originalStateFallback = process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON;
 const dispatcherRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const runtimeStateSqliteDistUrl = pathToFileURL(
   path.join(dispatcherRoot, "dist/modules/server/runtime-state-sqlite.js"),
@@ -53,6 +54,11 @@ afterEach(() => {
     delete process.env.DISPATCHER_SQLITE_SNAPSHOT_RETENTION;
   } else {
     process.env.DISPATCHER_SQLITE_SNAPSHOT_RETENTION = originalSnapshotRetention;
+  }
+  if (originalStateFallback === undefined) {
+    delete process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON;
+  } else {
+    process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON = originalStateFallback;
   }
 });
 
@@ -1001,16 +1007,17 @@ describe("runtime-state-sqlite", () => {
     }
   });
 
-  it("throws for a corrupted db by default and rescues from JSON only with the explicit env switch", () => {
+  it("throws for a corrupted db by default and reads JSON rescue without replacing the db", () => {
     const stateDir = makeTempDir();
     const dbPath = path.join(stateDir, "runtime-state.db");
     const jsonPath = path.join(stateDir, "runtime-state.json");
+    const corruptedDb = Buffer.from("not a valid sqlite database");
 
-    fs.writeFileSync(dbPath, "not a valid sqlite database");
+    fs.writeFileSync(dbPath, corruptedDb);
+    const originalDbInode = fs.statSync(dbPath).ino;
     const testState = createTestState();
     fs.writeFileSync(jsonPath, JSON.stringify(testState, null, 2));
 
-    const originalEnv = process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON;
     delete process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON;
 
     expect(() => sqliteStore.load(stateDir)).toThrow(/failed to load runtime-state\.db/i);
@@ -1020,11 +1027,33 @@ describe("runtime-state-sqlite", () => {
 
     expect(imported.workers).toHaveLength(1);
     expect(imported.workers[0].id).toBe("test-worker-1");
+    expect(fs.readFileSync(dbPath)).toEqual(corruptedDb);
+    expect(fs.statSync(dbPath).ino).toBe(originalDbInode);
+  });
 
-    if (originalEnv !== undefined) {
-      process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON = originalEnv;
-    } else {
-      delete process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON;
-    }
+  it("reads JSON rescue without replacing a valid db whose snapshot checksum fails", () => {
+    const stateDir = makeTempDir();
+    const dbPath = path.join(stateDir, "runtime-state.db");
+    const jsonPath = path.join(stateDir, "runtime-state.json");
+    const testState = createTestState();
+
+    saveRuntimeState(stateDir, testState);
+    const db = new DatabaseSync(dbPath);
+    db.prepare("UPDATE snapshots SET checksum_sha256 = 'invalid' WHERE revision = 1").run();
+    db.close();
+
+    fs.writeFileSync(jsonPath, JSON.stringify(testState, null, 2));
+    const originalDb = fs.readFileSync(dbPath);
+    const originalDbInode = fs.statSync(dbPath).ino;
+
+    delete process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON;
+    expect(() => sqliteStore.load(stateDir)).toThrow(/checksum mismatch/i);
+
+    process.env.FORGEFLOW_ALLOW_STATE_FALLBACK_JSON = "1";
+    const rescued = sqliteStore.load(stateDir);
+
+    expect(rescued.workers[0].id).toBe("test-worker-1");
+    expect(fs.readFileSync(dbPath)).toEqual(originalDb);
+    expect(fs.statSync(dbPath).ino).toBe(originalDbInode);
   });
 });

@@ -70,6 +70,7 @@ Current situation:
 
 - dispatcher runtime state now defaults to SQLite via `runtime-state-sqlite.ts`
 - JSON fallback still exists for explicit compatibility mode and import bootstrap
+- unreadable existing SQLite databases fail closed by default; the opt-in JSON rescue path is read-only and preserves the database, while automatic JSON-to-SQLite import is limited to the database-absent bootstrap case
 - standalone `apps/dispatcher/src/db/schema.ts` constants have been removed; live SQLite schema ownership is now concentrated in `runtime-state-sqlite.ts`
 - active SQLite reads use WAL-aware read-only connections; immutable mode is limited to a no-WAL/no-SHM compatibility fallback for a fully read-only directory
 
