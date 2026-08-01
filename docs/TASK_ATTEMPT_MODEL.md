@@ -98,6 +98,7 @@ v1 状态集合：
 - claim 创建 attempt 并返回 leaseToken。
 - start/progress/result 都必须携带 attemptId 和 leaseToken。
 - review 必须绑定 attemptId。
+- HITL interrupt 会把 active attempt 置为 `checkpointed` 并记录中断时的 `endedAt`；resume 后再次 claim 复用同一 attempt，转回 `leased` 并清除 `endedAt`，直到再次中断或终态时才重新落结束时间。
 - lease 过期触发的自动 retry 保留同一 Task，并在下一次 claim 时创建新 attempt。
 - `POST /api/tasks/:taskId/redrive` 的人工恢复会创建带 `continueFromTaskId` 的新 Task 和 `-rN` 分支；新 Task 在 claim 时再创建自己的 attempt，原 Task/attempt 不会被覆盖。
 - 过期 attempt 保留历史，不删除审计证据。

@@ -5295,6 +5295,33 @@ describe("dispatcher runtime state (TypeScript)", () => {
     });
     expect(state.assignments[0]).toMatchObject({ status: "pending" });
     expect(state.events.some((event) => event.type === "task_resumed")).toBe(true);
+
+    const resumedClaim = claimAssignedTaskForWorker(state, {
+      workerId: "codex-hitl-test",
+      at: "2026-04-08T10:10:06.000Z",
+    });
+    state = resumedClaim.state;
+
+    expect(state.taskAttempts[0]).toMatchObject({
+      attemptId: waitingForInput?.attemptId,
+      status: "leased",
+      heartbeatAt: "2026-04-08T10:10:06.000Z",
+    });
+    expect(state.taskAttempts[0]?.endedAt).toBeUndefined();
+
+    state = beginTaskForWorker(state, {
+      workerId: "codex-hitl-test",
+      taskId: dispatch.taskIds[0],
+      ...workerEnvelope(state.taskAttempts[0]!),
+      at: "2026-04-08T10:10:07.000Z",
+    });
+
+    expect(state.taskAttempts[0]).toMatchObject({
+      attemptId: waitingForInput?.attemptId,
+      status: "running",
+      heartbeatAt: "2026-04-08T10:10:07.000Z",
+    });
+    expect(state.taskAttempts[0]?.endedAt).toBeUndefined();
   });
 
   it("buildDashboardSnapshot exposes queue depth, review backlog, and assignment lag metrics", () => {
